@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { getFirestore, collection, getDocs } from "firebase/firestore";
-import { app } from "@/src/config/firebaseClient";
+import { app } from "@/config/firebaseClient";
 
 interface Question {
   question: string;
