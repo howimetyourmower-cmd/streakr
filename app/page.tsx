@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { app } from "@/src/config/firebaseClient"; // adjust path if different
+import { app } from "../src/config/firebaseClient"; // adjust path if different
 import Image from "next/image";
 import Link from "next/link";
 
