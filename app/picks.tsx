@@ -1,14 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+
+type Q = { id: number; match: string; question: string; yesPercent: number; noPercent: number };
 
 export default function PicksPage() {
-  const [questions, setQuestions] = useState<
-    { id: number; match: string; question: string; yesPercent: number; noPercent: number }[]
-  >([]);
+  const [questions, setQuestions] = useState<Q[]>([]);
 
-  // Temporary sample data (we’ll swap to Firestore later)
+  // TEMP data to prove the route works — we'll hook to Firestore next.
   useEffect(() => {
     setQuestions([
       { id: 1, match: "Carlton vs Brisbane", question: "Will Charlie Curnow kick a goal in Q1?", yesPercent: 62, noPercent: 38 },
@@ -18,25 +17,7 @@ export default function PicksPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      {/* Header */}
-      <header className="border-b border-zinc-800">
-        <div className="mx-auto max-w-6xl px-4 py-5 flex items-center justify-between">
-          <Link href="/" className="text-xl font-extrabold tracking-tight">
-            <span className="text-zinc-200">STREAK</span>
-            <span className="text-orange-500">r</span>
-            <span className="ml-2 text-xs font-semibold text-orange-400">AFL</span>
-          </Link>
-          <nav className="flex gap-6 text-sm">
-            <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-            <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
-            <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-            <Link href="/faq" className="hover:text-orange-400">How to Play</Link>
-          </nav>
-        </div>
-      </header>
-
-      {/* Title */}
+    <main className="min-h-screen">
       <section className="text-center py-10 border-b border-zinc-800">
         <h1 className="text-4xl md:text-5xl font-extrabold">
           Today’s <span className="text-orange-500">Quarter Questions</span>
@@ -44,7 +25,6 @@ export default function PicksPage() {
         <p className="mt-3 text-zinc-400">Make one pick at a time. Build your streak.</p>
       </section>
 
-      {/* Grid */}
       <section className="mx-auto max-w-6xl px-4 py-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {questions.map((q) => (
           <div key={q.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
@@ -57,7 +37,6 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-4 text-xs text-zinc-500">Stats unlock after you pick</div>
-
             <div className="mt-4 flex justify-between text-[11px] text-zinc-500">
               <span>YES {q.yesPercent}%</span>
               <span>NO {q.noPercent}%</span>
@@ -65,10 +44,6 @@ export default function PicksPage() {
           </div>
         ))}
       </section>
-
-      <footer className="border-t border-zinc-800 text-center py-8 text-sm text-zinc-500">
-        © {new Date().getFullYear()} STREAKr. Your Streak. Your Game. Your Glory.
-      </footer>
     </main>
   );
 }
