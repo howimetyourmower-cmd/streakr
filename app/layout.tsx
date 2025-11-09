@@ -22,6 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="/api/diag-admin" className="hover:text-streakr-orange">Check Backend</a>
             </nav>
           </div>
+<Link href="/picks" className="hover:text-orange-400">Picks</Link>
+
         </header>
         {children}
         <footer className="mt-10 py-8 border-t border-white/10">
