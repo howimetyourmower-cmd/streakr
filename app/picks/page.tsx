@@ -1,30 +1,22 @@
-// app/picks/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { useEffect, useMemo, useState } from "react";
 import { getFirestore, doc, getDoc, Timestamp } from "firebase/firestore";
 import { app } from "../config/firebaseClient";
 
 type Question = {
   quarter: number;
   question: string;
-  status?: "OPEN" | "PENDING" | "FINAL";
-  yesPct?: number;
-  noPct?: number;
-  startTime?: any;
-  venue?: string;
 };
 
 type Game = {
   match: string;
-  startTime?: any;
-  date?: string;
-  time?: string;
-  tz?: string;
-  venue?: string;
+  startTime?: any;   // Firestore Timestamp or ISO/string
+  date?: string;     // optional string date
+  time?: string;     // optional string time
+  tz?: string;       // e.g. "AEDT"
+  venue?: string;    // e.g. "MCG, Melbourne"
   questions: Question[];
 };
 
@@ -33,244 +25,200 @@ type RoundDoc = { games: Game[] };
 const CURRENT_ROUND = 1;
 
 function isFsTimestamp(v: any): v is Timestamp {
-  return v && typeof v.seconds === "number";
+  return v && typeof v.seconds === "number" && typeof v.nanoseconds === "number";
 }
 
-function pretty(v: any): string | null {
-  if (!v) return null;
-  if (isFsTimestamp(v)) {
-    const d = new Date(v.seconds * 1000);
-    return new Intl.DateTimeFormat("en-AU", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZoneName: "short",
-    }).format(d);
-  }
-  if (typeof v === "string") {
-    const t = Date.parse(v);
-    if (!Number.isNaN(t)) {
-      const d = new Date(t);
-      return new Intl.DateTimeFormat("en-AU", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-        timeZoneName: "short",
-      }).format(d);
+function formatStart(start?: any) {
+  // Accept Firestore Timestamp, ISO string, or undefined
+  if (!start) return { date: "TBD", time: "", tz: "", venuePrefix: "" };
+
+  try {
+    if (isFsTimestamp(start)) {
+      const d = start.toDate();
+      return {
+        date: d.toLocaleDateString(undefined, {
+          weekday: "short",
+          day: "2-digit",
+          month: "short",
+        }),
+        time: d.toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        tz: "",
+        venuePrefix: "• ",
+      };
     }
-    return v.replace(" at ", " · ").replace("UTC", "UTC");
+    // string fallback
+    const d = new Date(start);
+    if (!isNaN(d.getTime())) {
+      return {
+        date: d.toLocaleDateString(undefined, {
+          weekday: "short",
+          day: "2-digit",
+          month: "short",
+        }),
+        time: d.toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        tz: "",
+        venuePrefix: "• ",
+      };
+    }
+  } catch {
+    // fall through to TBD
   }
-  return null;
+  return { date: "TBD", time: "", tz: "", venuePrefix: "" };
 }
 
 export default function PicksPage() {
   const [games, setGames] = useState<Game[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userUid, setUserUid] = useState<string | null>(null);
-  const [debugMsg, setDebugMsg] = useState<string>("");
-
-  const router = useRouter();
-  const auth = getAuth(app);
-  const db = getFirestore(app);
+  const [err, setErr] = useState<string | null>(null);
+  const db = useMemo(() => getFirestore(app), []);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, (u) => setUserUid(u ? u.uid : null));
-  }, [auth]);
-
-  useEffect(() => {
-    const tries = [
-      ["rounds", `round-${CURRENT_ROUND}`], // /rounds/round-1
-      ["rounds", `Round-${CURRENT_ROUND}`], // /rounds/Round-1
-      [null, `round-${CURRENT_ROUND}`],     // /round-1
-      [null, `Round-${CURRENT_ROUND}`],     // /Round-1
-    ] as const;
+    let cancelled = false;
 
     (async () => {
-      const tried: string[] = [];
       try {
-        for (const [col, id] of tries) {
-          const path = col ? `${col}/${id}` : id;
-          tried.push(path);
-          const ref = col ? doc(db, col, id) : doc(db, id);
-          const snap = await getDoc(ref);
-          if (snap.exists()) {
-            const data = snap.data() as RoundDoc;
-            setGames(data?.games ?? []);
-            setDebugMsg(
-              `Loaded from: ${path} · projectId: ${app.options.projectId}`
-            );
-            setLoading(false);
-            return;
+        // Expecting Firestore structure: rounds (collection) -> round-1 (document) -> games (array)
+        const ref = doc(db, "rounds", `round-${CURRENT_ROUND}`);
+        const snap = await getDoc(ref);
+
+        if (!snap.exists()) {
+          if (!cancelled) {
+            setErr(`No round data found at "rounds/round-${CURRENT_ROUND}".`);
+            setGames([]);
           }
+          return;
         }
-        setGames([]);
-        setDebugMsg(
-          `Not found. Tried: ${tried.join(
-            " | "
-          )} · projectId: ${app.options.projectId}`
-        );
+
+        const data = snap.data() as Partial<RoundDoc> | undefined;
+        const arr = Array.isArray(data?.games) ? (data!.games as Game[]) : [];
+
+        if (!cancelled) {
+          setGames(arr);
+        }
       } catch (e: any) {
-        setGames([]);
-        setDebugMsg(
-          `Read failed (${app.options.projectId}): ${e?.message ?? e}`
-        );
-        // eslint-disable-next-line no-console
-        console.error(e);
-      } finally {
-        setLoading(false);
+        console.error("Failed to load picks:", e);
+        if (!cancelled) {
+          setErr(
+            e?.message ||
+              "Failed to load picks (client-side exception). Check console."
+          );
+          setGames([]);
+        }
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [db]);
 
-  function onPick(game: Game, q: Question, value: "YES" | "NO") {
-    if (!userUid) {
-      router.push("/auth");
-      return;
-    }
-    // TODO: save the pick
-    console.log("Pick", { game: game.match, quarter: q.quarter, value });
-  }
+  return (
+    <main className="min-h-screen bg-gradient-to-b from-[#0b0f13] to-[#121821] text-white">
+      <div className="mx-auto max-w-5xl px-4 py-10">
+        <h1 className="text-4xl font-extrabold tracking-tight">Make Picks</h1>
 
-  if (loading) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <h1 className="text-4xl font-extrabold tracking-tight mb-6">
-          Make Picks
-        </h1>
-        <p>Loading…</p>
-      </main>
-    );
-  }
+        {err && (
+          <p className="mt-4 text-sm text-red-300">
+            {err}{" "}
+            <span className="block opacity-80">
+              Tip: Ensure Firestore has a{" "}
+              <code className="bg-black/30 px-1 py-0.5 rounded">rounds</code>{" "}
+              collection with a{" "}
+              <code className="bg-black/30 px-1 py-0.5 rounded">
+                round-{CURRENT_ROUND}
+              </code>{" "}
+              document that contains a{" "}
+              <code className="bg-black/30 px-1 py-0.5 rounded">games</code>{" "}
+              array.
+            </span>
+          </p>
+        )}
 
-  if (!games || games.length === 0) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <h1 className="text-4xl font-extrabold tracking-tight mb-2">
-          Make Picks
-        </h1>
-        <p className="mb-2">No questions found for Round {CURRENT_ROUND}.</p>
-        <p className="text-xs text-white/50">{debugMsg}</p>
-        <div className="mt-6 text-sm text-white/60">
-          <Link href="/" className="underline hover:text-white">
+        {!games && !err && <p className="mt-8 text-lg opacity-80">Loading…</p>}
+
+        {games && games.length === 0 && (
+          <p className="mt-8 text-lg opacity-80">
+            No questions found for Round {CURRENT_ROUND}.
+          </p>
+        )}
+
+        {games && games.length > 0 && (
+          <div className="mt-8 space-y-8">
+            {games.map((g, gi) => {
+              const { date, time, tz, venuePrefix } = formatStart(g.startTime);
+              const venue = g.venue ? `${venuePrefix}${g.venue}` : "";
+              return (
+                <section
+                  key={`${g.match}-${gi}`}
+                  className="rounded-2xl border border-white/10 bg-white/5 shadow-lg"
+                >
+                  <div className="p-5 border-b border-white/10">
+                    <h2 className="text-xl font-semibold text-orange-400">
+                      {g.match ?? "Match"}
+                    </h2>
+                    <p className="mt-1 text-sm text-white/70">
+                      {date}
+                      {time ? ` • ${time}` : ""}
+                      {tz ? ` ${tz}` : ""}
+                      {venue ? ` ${venue}` : ""}
+                    </p>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    {(g.questions ?? []).map((q, qi) => (
+                      <div
+                        key={`${gi}-${qi}`}
+                        className="rounded-xl border border-white/10 bg-white/5 p-4"
+                      >
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="inline-flex items-center rounded-md bg-white/10 px-2 py-1 text-xs font-semibold">
+                            Q{q.quarter ?? "?"}
+                          </span>
+
+                          {/* These buttons render even if logged out; hook up auth later */}
+                          <div className="ml-auto flex gap-2">
+                            <button
+                              className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-semibold hover:bg-green-600"
+                              disabled
+                              title="Login required to pick"
+                            >
+                              Yes
+                            </button>
+                            <button
+                              className="rounded-md bg-red-600/90 px-3 py-1.5 text-sm font-semibold hover:bg-red-600"
+                              disabled
+                              title="Login required to pick"
+                            >
+                              No
+                            </button>
+                          </div>
+                        </div>
+
+                        <p className="mt-3 text-base leading-relaxed">
+                          {q.question ?? "Question"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="mt-10">
+          <Link
+            href="/"
+            className="text-sm text-white/70 underline underline-offset-4 hover:text-white"
+          >
             ← Back to Home
           </Link>
         </div>
-      </main>
-    );
-  }
-
-  return (
-    <main className="mx-auto max-w-4xl px-4 py-10">
-      <h1 className="text-4xl font-extrabold tracking-tight mb-2">Make Picks</h1>
-      <p className="text-xs text-white/50 mb-6">{debugMsg}</p>
-
-      <div className="space-y-6">
-        {games.map((game, gi) => {
-          const firstQ = game.questions?.[0];
-          const when =
-            pretty(game.startTime) ?? pretty(firstQ?.startTime) ?? "TBD";
-          const venue = game.venue ?? firstQ?.venue;
-
-          return (
-            <section
-              key={`${game.match}-${gi}`}
-              className="rounded-2xl border border-white/10 bg-white/5 p-4 md:p-6"
-            >
-              <div className="mb-1 text-xl md:text-2xl font-bold text-orange-400 uppercase tracking-wide">
-                {game.match}
-              </div>
-              <div className="mb-4 text-sm text-white/70">
-                {when}
-                {venue ? ` · ${venue}` : ""}
-              </div>
-
-              <div className="space-y-3">
-                {game.questions.map((q, qi) => {
-                  const status = q.status ?? "OPEN";
-                  const yesPct = q.yesPct ?? 0;
-                  const noPct = q.noPct ?? 0;
-
-                  return (
-                    <div
-                      key={`${gi}-${qi}`}
-                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"
-                    >
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-2">
-                          <span className="inline-flex items-center rounded-md bg-white/10 px-2 py-0.5 text-xs font-semibold text-white">
-                            Q{q.quarter}
-                          </span>
-                          <span
-                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${
-                              status === "FINAL"
-                                ? "bg-purple-500/20 text-purple-300"
-                                : status === "PENDING"
-                                ? "bg-yellow-500/20 text-yellow-300"
-                                : "bg-green-500/20 text-green-300"
-                            }`}
-                          >
-                            {status}
-                          </span>
-                        </div>
-
-                        <div className="hidden md:flex items-center gap-2">
-                          <button
-                            onClick={() => onPick(game, q, "YES")}
-                            className="rounded-md bg-green-600 hover:bg-green-500 px-3 py-1.5 text-sm font-semibold text-white"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => onPick(game, q, "NO")}
-                            className="rounded-md bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-sm font-semibold text-white"
-                          >
-                            No
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-base md:text-lg font-semibold leading-snug">
-                        {q.question}
-                      </div>
-
-                      <div className="mt-2 flex items-center justify-between">
-                        <div className="text-xs md:text-sm text-white/70">
-                          Yes {yesPct}% · No {noPct}%
-                        </div>
-                        <div className="md:hidden flex items-center gap-2">
-                          <button
-                            onClick={() => onPick(game, q, "YES")}
-                            className="rounded-md bg-green-600 hover:bg-green-500 px-3 py-1.5 text-xs font-semibold text-white"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            onClick={() => onPick(game, q, "NO")}
-                            className="rounded-md bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white"
-                          >
-                            No
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          );
-        })}
-      </div>
-
-      <div className="mt-10 text-sm text-white/60">
-        <Link href="/" className="underline hover:text-white">
-          ← Back to Home
-        </Link>
       </div>
     </main>
   );
