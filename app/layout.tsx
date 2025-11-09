@@ -2,7 +2,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
-import "./globals.css";
+import "../src/app/globals.css";
 
 export const metadata: Metadata = {
   title: "STREAKr AFL",
