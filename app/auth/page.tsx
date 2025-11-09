@@ -1,6 +1,6 @@
 // if (!auth.currentUser) redirect to /auth
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { app } from "../../config/firebaseClient";
+import { app } from "../config/firebaseClient";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
