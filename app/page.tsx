@@ -199,7 +199,7 @@ export default function HomePage() {
       </section>
 
       {/* SPONSOR (pushed further down) */}
-      <div className="mx-auto mt-20 max-w-6xl px-4">
+      <div className="mx-auto mt-40 max-w-6xl px-4">
         <div className="mb-10 flex h-20 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-white/60">
           Sponsor banner • 970×90
         </div>
