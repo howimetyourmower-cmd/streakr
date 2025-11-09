@@ -9,18 +9,14 @@ import { app } from "../config/firebaseClient";
 type Question = {
   quarter: number;
   question: string;
-  // optional future fields
-  status?: "OPEN" | "PENDING" | "FINAL";
-  yesPct?: number; // for future stats
-  noPct?: number;
 };
 
 type Game = {
-  match: string;         // e.g. "Carlton v Brisbane"
-  date?: string;         // e.g. "Thu Mar 20 2026"
-  time?: string;         // e.g. "7:20 PM AEDT"
-  venue?: string;        // e.g. "MCG"
-  location?: string;     // alt field name if you use it
+  match: string;            // "Carlton v Brisbane"
+  date?: string;            // "2026-03-20"   (YYYY-MM-DD)  optional but recommended
+  time?: string;            // "19:20"        (24h local time as string) optional
+  tz?: string;              // "Australia/Melbourne"        optional
+  venue?: string;           // "MCG"                         optional
   questions: Question[];
 };
 
@@ -28,88 +24,134 @@ type RoundDoc = {
   games: Game[];
 };
 
+const CURRENT_ROUND = 1;
+
+// Simple formatter for "Fri Mar 20 • 7:20 PM AEDT • MCG"
+function formatWhenWhere(game: Game): string {
+  const { date, time, tz, venue } = game || {};
+  if (!date || !time) return venue ? `TBD • ${venue}` : "TBD";
+
+  try {
+    const iso = `${date}T${time}:00`;
+    const dt = new Date(iso);
+    const zone = tz || "Australia/Melbourne";
+    const day = new Intl.DateTimeFormat("en-AU", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: zone,
+    }).format(dt);
+    const t = new Intl.DateTimeFormat("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: zone,
+    }).format(dt);
+    const tzShort = new Intl.DateTimeFormat("en-AU", {
+      timeZoneName: "short",
+      timeZone: zone,
+    })
+      .formatToParts(dt)
+      .find(p => p.type === "timeZoneName")?.value || "";
+    const venuePart = venue ? ` • ${venue}` : "";
+    return `${day} • ${t} ${tzShort}${venuePart}`;
+  } catch {
+    return venue ? `TBD • ${venue}` : "TBD";
+  }
+}
+
 export default function HomePage() {
-  const db = useMemo(() => getFirestore(app), []);
+  const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
-  const [samples, setSamples] = useState<
-    { match: string; meta: string; question: string }[]
-  >([]);
 
-  // TODO: when you add a "currentRound" doc/field, read that instead of hardcoding.
-  const currentRoundId = "round-1";
-
+  // Firestore pull for the current round
   useEffect(() => {
-    (async () => {
-      try {
-        const ref = doc(db, "fixtures", currentRoundId);
-        const snap = await getDoc(ref);
-        const data = snap.exists() ? (snap.data() as RoundDoc) : undefined;
-        const games = data?.games ?? [];
+    const db = getFirestore(app);
+    const ref = doc(db, "fixtures", `round-${CURRENT_ROUND}`);
+    getDoc(ref)
+      .then(snap => {
+        const data = snap.data() as RoundDoc | undefined;
+        setGames(data?.games ?? []);
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
-        // Flatten all questions with their parent match/meta, then take 6.
-        const flattened: { match: string; meta: string; question: string }[] =
-          games.flatMap((g) => {
-            const metaParts = [
-              g.date?.trim(),
-              g.time?.trim(),
-              (g.venue || g.location)?.trim(),
-            ].filter(Boolean);
-            const meta =
-              metaParts.length > 0 ? metaParts.join(" • ") : "TBD";
-
-            return (g.questions ?? []).map((q) => ({
-              match: g.match ?? "Unknown Match",
-              meta,
-              question: q.question ?? "Question unavailable",
-            }));
-          });
-
-        setSamples(flattened.slice(0, 6));
-      } catch (e) {
-        console.error("Failed to load samples:", e);
-        setSamples([]);
-      } finally {
-        setLoading(false);
+  // Build a flat list of sample cards from the first N questions in the round
+  const samples = useMemo(() => {
+    const flat: Array<{ game: Game; q: Question }> = [];
+    for (const g of games) {
+      for (const q of g.questions) {
+        flat.push({ game: g, q });
       }
-    })();
-  }, [db]);
+    }
+    // Take first 6 for the home page sample grid
+    return flat.slice(0, 6);
+  }, [games]);
 
   return (
-    <main className="min-h-screen">
-      {/* HERO */}
-      <section className="relative">
-        <div className="absolute inset-0 -z-10">
-          <Image
-            src="/mcg-hero.jpg"
-            alt="MCG hero background"
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover opacity-80"
-          />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/80" />
-        </div>
+    <main className="min-h-screen bg-[#0b0f13] text-white">
+      {/* Sticky top nav with logo */}
+      <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <Link href="/" className="flex items-center gap-3">
+            <Image
+              src="/streakrlogo.jpg"
+              alt="STREAKr AFL"
+              width={150}
+              height={120}
+              priority
+              className="h-8 w-auto"
+            />
+            <span className="text-xl font-extrabold tracking-wide">
+              STREAK<span className="text-orange-500">r</span> AFL
+            </span>
+          </Link>
 
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 py-20 sm:py-28">
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight">
-            <span className="text-white">One pick. </span>
-            <span className="text-orange-400">One streak. </span>
-            <span className="text-white">Win the round.</span>
+          <nav className="flex items-center gap-6 text-sm">
+            <Link href="/picks" className="hover:text-orange-400">
+              Picks
+            </Link>
+            <Link href="/leaderboard" className="hover:text-orange-400">
+              Leaderboards
+            </Link>
+            <Link href="/rewards" className="hover:text-orange-400">
+              Rewards
+            </Link>
+            <Link href="/faq" className="hover:text-orange-400">
+              How to Play
+            </Link>
+          </nav>
+        </div>
+      </header>
+
+      {/* HERO with background image and CTA */}
+      <section
+        className="relative w-full"
+        style={{
+          backgroundImage: "url('/mcg-hero.jpg')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      >
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-[#0b0f13]" />
+        <div className="relative mx-auto max-w-6xl px-4 pt-16 pb-28">
+          <h1 className="max-w-3xl text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight">
+            One pick. <span className="text-orange-500">One streak.</span> Win the round.
           </h1>
-          <p className="mt-4 max-w-2xl text-base sm:text-lg text-zinc-200">
-            Free-to-play AFL prediction streaks. Build your streak, top the
-            leaderboard, win prizes.
+          <p className="mt-4 max-w-2xl text-white/80">
+            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
           </p>
-          <div className="mt-8 flex gap-3">
+
+          <div className="mt-8 flex gap-4">
             <Link
               href="/picks"
-              className="rounded-xl bg-orange-500 px-4 py-2 font-semibold text-black hover:bg-orange-400 transition"
+              className="rounded-xl bg-orange-500 px-5 py-3 font-semibold hover:bg-orange-600"
             >
               Make your first pick
             </Link>
             <Link
               href="/leaderboard"
-              className="rounded-xl bg-zinc-800 px-4 py-2 font-semibold text-white ring-1 ring-white/10 hover:bg-zinc-700 transition"
+              className="rounded-xl border border-white/20 px-5 py-3 font-semibold hover:border-white/40"
             >
               Leaderboard
             </Link>
@@ -117,78 +159,97 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* TOP AD BANNER */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-8">
-        <div className="w-full h-20 sm:h-24 rounded-2xl bg-zinc-900/60 ring-1 ring-white/10 flex items-center justify-center">
-          <span className="text-zinc-400 text-sm">Ad Banner (970×90 / 728×90)</span>
+      {/* Ad banner (placeholder) */}
+      <div className="mx-auto mt-4 max-w-6xl px-4">
+        <div className="mb-8 flex h-20 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-white/60">
+          Sponsor banner • 970×90
         </div>
-      </section>
+      </div>
 
-      {/* SAMPLES GRID (from current round) */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mt-10 mb-16">
-        <h2 className="text-xl sm:text-2xl font-bold mb-4">Round 1 Questions</h2>
+      {/* Sample picks grid from current round */}
+      <section className="mx-auto max-w-6xl px-4 pb-16">
+        <h2 className="mb-6 text-xl font-semibold">Round {CURRENT_ROUND} Questions</h2>
 
         {loading ? (
-          <div className="text-zinc-400">Loading samples…</div>
+          <div className="text-white/70">Loading sample questions…</div>
         ) : samples.length === 0 ? (
-          <div className="text-zinc-400">No questions available yet.</div>
+          <div className="text-white/70">No questions found yet.</div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {samples.map((s, i) => (
-              <div
-                key={i}
-                className="rounded-2xl bg-gradient-to-b from-zinc-900/60 to-zinc-900/30 ring-1 ring-white/10 p-4"
-              >
-                <p className="text-sm text-orange-400 font-semibold">
-                  {s.match}
-                </p>
-                <p className="text-xs text-zinc-400">{s.meta}</p>
-                <p className="mt-3 font-semibold">{s.question}</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {samples.map((item, idx) => {
+              const game = item.game;
+              const q = item.q;
+              return (
+                <div
+                  key={`${game.match}-${q.quarter}-${idx}`}
+                  className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-sm"
+                >
+                  <div className="mb-1 text-sm font-semibold uppercase tracking-wide text-orange-400">
+                    {game.match}
+                  </div>
+                  <div className="mb-3 text-xs text-white/60">
+                    {formatWhenWhere(game)}
+                  </div>
 
-                <div className="mt-4 flex gap-3">
-                  <Link
-                    href="/picks"
-                    className="rounded-xl bg-orange-500 px-3 py-2 text-sm font-semibold text-black hover:bg-orange-400 transition"
-                  >
-                    Make This Pick
-                  </Link>
-                  <Link
-                    href="/picks"
-                    className="rounded-xl bg-zinc-800 px-3 py-2 text-sm font-semibold text-white ring-1 ring-white/10 hover:bg-zinc-700 transition"
-                  >
-                    See More
-                  </Link>
+                  <div className="mb-4 text-sm">
+                    <span className="mr-2 rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
+                      Q{q.quarter}
+                    </span>
+                    {q.question}
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex gap-2">
+                      <button
+                        className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold hover:bg-green-700"
+                        disabled
+                      >
+                        Yes
+                      </button>
+                      <button
+                        className="rounded-md bg-red-600 px-3 py-1 text-sm font-semibold hover:bg-red-700"
+                        disabled
+                      >
+                        No
+                      </button>
+                    </div>
+                    <Link
+                      href="/picks"
+                      className="rounded-md bg-orange-500 px-3 py-1 text-sm font-semibold hover:bg-orange-600"
+                    >
+                      Make This Pick
+                    </Link>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>
 
-      {/* BOTTOM AD BANNER */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mb-16">
-        <div className="w-full h-32 sm:h-36 rounded-2xl bg-zinc-900/60 ring-1 ring-white/10 flex items-center justify-center">
-          <span className="text-zinc-400 text-sm">
-            Ad Banner (Responsive rectangle)
-          </span>
+      {/* How it works */}
+      <section className="mx-auto max-w-6xl px-4 pb-24">
+        <h3 className="mb-4 text-lg font-semibold">How it works</h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="text-orange-400 font-semibold">1. Pick</div>
+            <p className="text-sm text-white/80">
+              Choose <em>Yes</em> or <em>No</em> on a quarter-by-quarter question.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="text-orange-400 font-semibold">2. Streak</div>
+            <p className="text-sm text-white/80">
+              Each correct pick adds to your streak. Wrong ends it.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+            <div className="text-orange-400 font-semibold">3. Win</div>
+            <p className="text-sm text-white/80">
+              Longest streak of the round tops the leaderboard and wins the prize.
+            </p>
+          </div>
         </div>
-      </section>
-
-      {/* HOW IT WORKS (simple, optional) */}
-      <section className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8 mb-24">
-        <h3 className="text-xl sm:text-2xl font-bold mb-3">How it works</h3>
-        <ol className="list-decimal pl-5 space-y-2 text-zinc-200">
-          <li>Pick <span className="font-semibold">Yes</span> or <span className="font-semibold">No</span> on one question at a time.</li>
-          <li>Each correct pick extends your streak. A wrong pick ends it.</li>
-          <li>Top streak for the round wins the prize pool (ties split evenly).</li>
-          <li>Your streak resets when the next round starts.</li>
-        </ol>
-        <Link
-          href="/faq"
-          className="inline-block mt-4 rounded-xl bg-zinc-800 px-4 py-2 font-semibold text-white ring-1 ring-white/10 hover:bg-zinc-700 transition"
-        >
-          Read the full FAQ
-        </Link>
       </section>
     </main>
   );
