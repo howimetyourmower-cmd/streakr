@@ -1,174 +1,171 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { app } from "../src/config/firebaseClient";
+import { useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { app } from '@/lib/firebaseClient';
 import {
   getFirestore,
   doc,
   getDoc,
   Timestamp,
-} from "firebase/firestore";
+} from 'firebase/firestore';
 
-type Q = {
-  question: string;
+type Question = {
   quarter: number;
-  match: string; // we'll inject this when we flatten
+  question: string;
+  yesCount?: number;
+  noCount?: number;
 };
 
 type Game = {
-  match: string;
-  questions: Q[];
-  startTime?: Timestamp; // if you add this later we can sort by it
+  match: string;                 // "Carlton v Brisbane"
+  venue?: string;
+  startTime?: string | number | Date | Timestamp;
+  questions: Question[];
 };
 
-type FixtureDoc = {
-  round: number;
-  season?: number;
-  games: Game[];
-};
+type RoundDoc = { games: Game[] };
 
-type Card = {
-  id: string;
-  title: string;
-  subtitle: string;
-  cta: string;
-};
+const db = getFirestore(app);
+const ROUND_ID = 'round-1'; // change later when the current round changes
+
+function formatMeta(game: Game): string {
+  const venue = game.venue?.trim();
+  let dt: Date | undefined;
+
+  if (game.startTime instanceof Timestamp) dt = game.startTime.toDate();
+  else if (typeof game.startTime === 'number') dt = new Date(game.startTime);
+  else if (typeof game.startTime === 'string') {
+    const t = new Date(game.startTime);
+    if (!Number.isNaN(t.getTime())) dt = t;
+  } else if (game.startTime instanceof Date) dt = game.startTime;
+
+  if (!dt && !venue) return 'TBD';
+  if (!dt && venue) return `TBD • ${venue}`;
+
+  const weekday = dt!.toLocaleDateString(undefined, { weekday: 'short' });
+  const month = dt!.toLocaleDateString(undefined, { month: 'short' });
+  const day = dt!.getDate();
+  const time = dt!.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${weekday}, ${month} ${day} • ${time}${venue ? ` • ${venue}` : ''}`;
+}
+
+function toPct(yes = 0, no = 0) {
+  const total = yes + no;
+  if (!total) return 'Yes 0% • No 0%';
+  const y = Math.round((yes / total) * 100);
+  return `Yes ${y}% • No ${100 - y}%`;
+}
 
 export default function HomePage() {
-  const [cards, setCards] = useState<Card[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const run = async () => {
+    (async () => {
       try {
-        const db = getFirestore(app);
-        // Round 1 – if you change rounds later, just change this id:
-        const ref = doc(db, "fixtures", "round-1");
+        const ref = doc(db, 'fixtures', ROUND_ID);
         const snap = await getDoc(ref);
-        if (!snap.exists()) {
-          setCards([]);
-          setLoading(false);
-          return;
+        if (snap.exists()) {
+          const data = snap.data() as RoundDoc;
+          setGames(Array.isArray(data.games) ? data.games : []);
+        } else {
+          setGames([]);
         }
-
-        const data = snap.data() as FixtureDoc;
-
-        // Flatten all questions, decorate with match & quarter,
-        // then take only the first 6 for the home grid.
-        const all: Card[] =
-          data.games
-            .flatMap((g) =>
-              (g.questions || []).map((q, idx) => ({
-                id: `${g.match.replaceAll(" ", "_")}-Q${q.quarter}-${idx}`,
-                title: q.question,
-                subtitle: `${g.match} – Q${q.quarter}`,
-                cta: "Make This Pick",
-              }))
-            )
-            // You can sort here if you later add times:
-            // .sort((a,b) => ...)
-            .slice(0, 6); // ← LIMIT TO 6
-
-        setCards(all);
-      } catch (e) {
-        console.error(e);
-        setCards([]);
       } finally {
         setLoading(false);
       }
-    };
-
-    run();
+    })();
   }, []);
 
-  return (
-    <main className="text-white">
-      {/* HERO with MCG background */}
-      <section
-        className="relative w-full"
-        style={{
-          backgroundImage:
-            "linear-gradient(to bottom, rgba(0,0,0,0.35), rgba(0,0,0,0.75)), url('/mcg-hero.jpg')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
-        <div className="mx-auto max-w-6xl px-4 py-32 sm:py-40">
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold">
-            <span className="text-white">One pick.</span>{" "}
-            <span className="text-orange-500">One streak.</span>{" "}
-            <span className="text-white">Win the round.</span>
-          </h1>
-          <p className="mt-4 max-w-xl text-base sm:text-lg text-white/80">
-            Free-to-play AFL prediction streaks. Build your streak, top the
-            leaderboard, win prizes.
-          </p>
+  // Flatten all questions for the round and take the first 6
+  const sample = useMemo(() => {
+    const rows: Array<{ game: Game; q: Question }> = [];
+    games.forEach((g) => g.questions?.forEach((q) => rows.push({ game: g, q })));
+    return rows.slice(0, 6);
+  }, [games]);
 
-          <div className="mt-8 flex gap-3">
-            <Link
-              href="/picks"
-              className="rounded-xl bg-orange-500 px-5 py-3 font-semibold hover:bg-orange-600 transition"
-            >
-              Make your first pick
-            </Link>
-            <Link
-              href="/leaderboard"
-              className="rounded-xl bg-white/10 px-5 py-3 font-semibold hover:bg-white/20 transition"
-            >
-              Leaderboard
-            </Link>
+  return (
+    <main className="relative">
+      {/* HERO with MCG background */}
+      <section className="relative h-[56vh] min-h-[420px] w-full overflow-hidden">
+        <Image
+          src="/mcg-hero.jpg"
+          alt="MCG"
+          fill
+          priority
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-black/85" />
+
+        <div className="relative z-10 mx-auto flex h-full max-w-6xl items-center px-4">
+          <div>
+            <h1 className="text-4xl md:text-6xl font-extrabold">
+              <span className="text-white">One pick.</span>{' '}
+              <span className="text-orange-400">One streak.</span>{' '}
+              <span className="text-white">Win the round.</span>
+            </h1>
+            <p className="mt-4 max-w-2xl text-zinc-300">
+              Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
+            </p>
+
+            <div className="mt-6 flex gap-3">
+              <Link
+                href="/picks"
+                className="rounded-md bg-orange-500 px-4 py-2 font-semibold text-white hover:bg-orange-400"
+              >
+                Make your first pick
+              </Link>
+              <Link
+                href="/leaderboard"
+                className="rounded-md bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/20"
+              >
+                Leaderboard
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ROUND 1 SAMPLE GRID (3×2) */}
+      {/* SAMPLE PICKS (3×2 grid) */}
       <section className="mx-auto max-w-6xl px-4 py-10">
-        <h2 className="mb-6 text-xl font-semibold">Round 1 Questions</h2>
+        <h2 className="mb-4 text-xl font-semibold">Round 1 Questions</h2>
 
         {loading ? (
-          <div className="text-white/70">Loading…</div>
-        ) : cards.length === 0 ? (
-          <div className="text-white/70">
-            No questions found for Round 1 yet.
+          <div className="text-sm text-zinc-400">Loading sample picks…</div>
+        ) : sample.length === 0 ? (
+          <div className="rounded-lg border border-white/10 bg-black/30 p-4 text-zinc-300">
+            No questions found yet.
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {cards.map((c) => (
-              <article
-                key={c.id}
-                className="rounded-2xl bg-white/5 p-5 shadow-md ring-1 ring-white/10"
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {sample.map(({ game, q }, i) => (
+              <div
+                key={`${game.match}-${q.quarter}-${i}`}
+                className="rounded-xl border border-white/10 bg-white/[0.06] p-4"
               >
-                <div className="text-xs uppercase tracking-wide text-white/60 mb-1">
-                  {c.subtitle}
+                <div className="text-[11px] font-semibold tracking-wide text-zinc-400">
+                  {game.match.toUpperCase()} — Q{q.quarter}
                 </div>
-                <h3 className="text-lg font-semibold leading-snug">
-                  {c.title}
-                </h3>
+                <p className="mt-1 text-xs text-zinc-400">{formatMeta(game)}</p>
 
-                {/* Dummy Yes/No buttons – on home they don’t submit, just navigate */}
-                <div className="mt-4 flex gap-2">
-                  <button
-                    className="flex-1 rounded-lg bg-white/10 py-2 text-sm font-medium hover:bg-white/20 transition"
-                    onClick={() => (window.location.href = "/picks")}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    className="flex-1 rounded-lg bg-white/10 py-2 text-sm font-medium hover:bg-white/20 transition"
-                    onClick={() => (window.location.href = "/picks")}
-                  >
-                    No
-                  </button>
+                <div className="mt-3 text-base font-semibold leading-snug">
+                  {q.question}
                 </div>
 
-                <button
-                  className="mt-4 w-full rounded-lg bg-orange-500 py-2.5 text-sm font-semibold hover:bg-orange-600 transition"
-                  onClick={() => (window.location.href = "/picks")}
-                >
-                  {c.cta}
-                </button>
-              </article>
+                <div className="mt-3 flex items-center justify-between">
+                  <div className="text-xs text-zinc-400">
+                    {toPct(q.yesCount ?? 0, q.noCount ?? 0)}
+                  </div>
+                  <Link
+                    href="/picks"
+                    className="rounded-md bg-orange-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-400"
+                  >
+                    Make This Pick
+                  </Link>
+                </div>
+              </div>
             ))}
           </div>
         )}
