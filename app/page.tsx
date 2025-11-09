@@ -1,48 +1,68 @@
+"use client";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <main>
-      <section className="text-center py-14 md:py-20 border-b border-zinc-800 bg-[url('/mcg-hero.jpg')] bg-cover bg-center bg-no-repeat">
-        <div className="backdrop-brightness-75 py-10">
-          <h1 className="text-4xl md:text-5xl font-extrabold">
-            One pick. <span className="text-orange-500">One streak.</span> Win the round.
-          </h1>
-          <p className="mt-3 text-zinc-300">
-            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-          </p>
-          <div className="mt-6 flex items-center justify-center gap-4">
-            <Link
-              href="/picks"
-              className="rounded-xl bg-orange-600 px-5 py-3 text-sm font-semibold hover:bg-orange-500 transition"
-            >
-              Make your first pick
-            </Link>
-            <Link
-              href="/leaderboard"
-              className="rounded-xl border border-zinc-700 px-5 py-3 text-sm font-semibold hover:bg-zinc-900 transition"
-            >
-              Leaderboards
-            </Link>
-          </div>
+    <div className="relative min-h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
+      {/* HERO IMAGE */}
+      <div className="absolute inset-0 -z-10">
+        <Image
+          src="/mcg-hero.jpg"
+          alt="MCG Stadium at night"
+          fill
+          priority
+          className="object-cover object-center opacity-40"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent" />
+      </div>
+
+      {/* HERO CONTENT */}
+      <section className="flex flex-col items-center justify-center text-center py-36 px-4">
+        <h1 className="text-5xl md:text-6xl font-extrabold mb-4">
+          <span className="text-orange-500">One pick.</span>{" "}
+          <span className="text-zinc-100">One streak.</span>{" "}
+          <span className="text-orange-400">Win the round.</span>
+        </h1>
+        <p className="text-lg text-zinc-300 mb-8 max-w-xl">
+          Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <Link
+            href="/picks"
+            className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-xl font-semibold shadow-md transition"
+          >
+            Make your first pick
+          </Link>
+          <Link
+            href="/leaderboard"
+            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-8 py-3 rounded-xl font-semibold border border-zinc-700 transition"
+          >
+            Leaderboard
+          </Link>
         </div>
       </section>
 
-      {/* keep your sample round cards or remove if not needed */}
-      <section className="mx-auto max-w-6xl px-4 py-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {/* placeholder tiles kept from your current home – safe to delete later */}
-        {[1,2,3].map((i)=>(
-          <div key={i} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5">
-            <div className="text-xs uppercase tracking-wide text-zinc-400">ROUND {i}</div>
-            <h3 className="mt-2 text-lg font-semibold text-zinc-100">Sample Question</h3>
-            <div className="mt-4 flex gap-3">
-              <button className="rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300">Yes</button>
-              <button className="rounded-lg bg-zinc-800 px-4 py-2 text-sm text-zinc-300">No</button>
+      {/* STREAK CARDS PLACEHOLDER */}
+      <section className="max-w-6xl mx-auto py-20 px-4 grid md:grid-cols-3 gap-8">
+        {[1, 2, 3].map((round) => (
+          <div
+            key={round}
+            className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6 text-center shadow-lg"
+          >
+            <h3 className="text-orange-400 font-bold mb-2">ROUND {round}</h3>
+            <p className="text-zinc-300 mb-4">Sample Question</p>
+            <div className="flex justify-center gap-4">
+              <button className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-lg text-sm font-medium">
+                Yes
+              </button>
+              <button className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-lg text-sm font-medium">
+                No
+              </button>
             </div>
-            <div className="mt-4 text-xs text-zinc-500">Stats unlock after you pick</div>
           </div>
         ))}
       </section>
-    </main>
+    </div>
   );
 }
