@@ -109,9 +109,9 @@ export default function HomePage() {
         <div className="absolute inset-0 flex items-center">
           <div className="mx-auto w-full max-w-6xl px-6">
             <h1 className="text-5xl sm:text-6xl font-extrabold leading-tight">
-              <span className="text-white">One pick.</span>{" "}
-              <span className="text-orange-500">One streak.</span>{" "}
-              <span className="text-white">Win the round.</span>
+              <span className="text-white">Succeed.</span>{" "}
+              <span className="text-orange-500">Survive.</span>{" "}
+              <span className="text-white">STREAK.</span>
             </h1>
             <p className="mt-4 text-lg text-white/80 max-w-2xl">
               Free-to-play AFL prediction streaks. Build your streak, top the
@@ -137,7 +137,7 @@ export default function HomePage() {
         {/* Sponsor banner — pushed lower so the hero stays fully visible */}
         <div className="mx-auto w-full max-w-6xl px-6">
           <div className="mt-10" />
-          <div className="mx-auto mt-18 rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center">
+          <div className="mx-auto mt-10 rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center">
             <span className="text-white/70">Sponsor banner • 970×90</span>
           </div>
         </div>
