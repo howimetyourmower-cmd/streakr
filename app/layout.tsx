@@ -18,7 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Image
                 src="/streakrlogo.jpg"
                 alt="STREAKr AFL"
-                width={120}
+                width={150}
                 height={120}
                 priority
                 className="h-8 w-auto"
