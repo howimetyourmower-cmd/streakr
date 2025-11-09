@@ -7,14 +7,19 @@ import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { app } from "../config/firebaseClient";
 
 // ---- Types ----
-type Question = { quarter: number; question: string };
+type Question = {
+  quarter: number;
+  question: string;
+  // some rounds store these on the question (fallback)
+  startTime?: any; // Firestore Timestamp or string
+  venue?: string;
+};
 type Game = {
   match: string;
-  // either (date+time+tz) or a freeform startTime (string or Firestore Timestamp)
   date?: string;
   time?: string;
   tz?: string;
-  startTime?: any;
+  startTime?: any; // Firestore Timestamp or string
   venue?: string;
   questions: Question[];
 };
@@ -27,36 +32,33 @@ function isFsTimestamp(v: any): v is { seconds: number } {
   return v && typeof v.seconds === "number";
 }
 
-// convert "March 20, 2026 at 7:20:00PM UTC+11" -> Date
+// Parse strings like "March 20, 2026 at 7:20:00 PM UTC+11" or "...7:20PM UTC+11"
 function parseFreeformStartTime(v: string): Date | null {
-  // Example: March 20, 2026 at 7:20:00PM UTC+11
   const re =
-    /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\s*UTC([+-]\d{1,2})$/;
-  const m = v.trim().match(re);
-  if (!m) return null;
-  const [, monName, dStr, yStr, hStr, minStr, secStr, ampm, tzOffStr] = m;
+    /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\s*UTC([+-]\d{1,2})$/i;
 
+  const m = v.trim().replace(/\s+/g, " ").match(re);
+  if (!m) return null;
+
+  const [, monName, dStr, yStr, hStr, minStr, secStr, ampmRaw, tzOffStr] = m;
   const monthMap: Record<string, number> = {
     january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
     july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
   };
-
   const month = monthMap[monName.toLowerCase()];
   if (month == null) return null;
 
   let hour = parseInt(hStr, 10);
   const minute = parseInt(minStr, 10);
   const second = secStr ? parseInt(secStr, 10) : 0;
-
-  // 12h -> 24h
-  if (ampm.toUpperCase() === "PM" && hour !== 12) hour += 12;
-  if (ampm.toUpperCase() === "AM" && hour === 12) hour = 0;
+  const ampm = ampmRaw.toUpperCase();
+  if (ampm === "PM" && hour !== 12) hour += 12;
+  if (ampm === "AM" && hour === 12) hour = 0;
 
   const day = parseInt(dStr, 10);
   const year = parseInt(yStr, 10);
-  const tz = tzOffStr.startsWith("+") ? tzOffStr : `+${tzOffStr}`; // ensure sign
+  const tz = tzOffStr.startsWith("+") || tzOffStr.startsWith("-") ? tzOffStr : `+${tzOffStr}`;
 
-  // Create ISO string with explicit offset
   const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(
     2,
     "0"
@@ -68,27 +70,34 @@ function parseFreeformStartTime(v: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Pull effective startTime/venue from game OR first question
+function getEffectiveStartTime(game: Game): any {
+  return game.startTime ?? game.questions?.[0]?.startTime;
+}
+function getEffectiveVenue(game: Game): string | undefined {
+  return (game.venue ?? game.questions?.[0]?.venue) || undefined;
+}
+
 function toDate(game: Game): Date | null {
-  // Case 1: date + time + (optional tz)
+  // Case 1: date+time+tz on game
   if (game.date && game.time) {
-    // Treat date as YYYY-MM-DD (or YYYY/MM/DD) and time as HH:mm
-    const tz = game.tz ?? "+11:00"; // safe default for AFL season
+    const tz = game.tz ?? "+11:00";
     const iso = `${game.date}T${game.time}:00${tz.startsWith("+") || tz.startsWith("-") ? "" : "+"}${tz}`;
     const d = new Date(iso);
     if (!isNaN(d.getTime())) return d;
   }
 
-  // Case 2: Firestore Timestamp
-  if (isFsTimestamp(game.startTime)) {
-    return new Date(game.startTime.seconds * 1000);
+  // Case 2: Firestore Timestamp on game or first question
+  const st = getEffectiveStartTime(game);
+  if (isFsTimestamp(st)) {
+    return new Date(st.seconds * 1000);
   }
 
-  // Case 3: Freeform string like "March 20, 2026 at 7:20:00PM UTC+11"
-  if (typeof game.startTime === "string") {
-    const parsed = parseFreeformStartTime(game.startTime);
+  // Case 3: freeform string on game or first question
+  if (typeof st === "string") {
+    const parsed = parseFreeformStartTime(st);
     if (parsed) return parsed;
-    // If we can’t parse, fall back to naïve Date (may be invalid)
-    const d = new Date(game.startTime);
+    const d = new Date(st);
     if (!isNaN(d.getTime())) return d;
   }
 
@@ -96,12 +105,11 @@ function toDate(game: Game): Date | null {
 }
 
 function formatWhenWhere(game: Game): string {
+  const venue = getEffectiveVenue(game);
   const tz = game.tz || "Australia/Melbourne";
   const d = toDate(game);
 
-  if (!d) {
-    return game.venue ? `TBD • ${game.venue}` : "TBD";
-  }
+  if (!d) return venue ? `TBD • ${venue}` : "TBD";
 
   const day = new Intl.DateTimeFormat("en-AU", {
     weekday: "short",
@@ -125,22 +133,18 @@ function formatWhenWhere(game: Game): string {
       .formatToParts(d)
       .find((p) => p.type === "timeZoneName")?.value || "";
 
-  const venue = game.venue ? ` • ${game.venue}` : "";
-  return `${day} • ${time} ${tzName}${venue}`;
+  return `${day} • ${time} ${tzName}${venue ? ` • ${venue}` : ""}`;
 }
 
+// ---- Page ----
 export default function HomePage() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const db = getFirestore(app);
-    const ref = doc(db, "fixtures", `round-${CURRENT_ROUND}`);
-    getDoc(ref)
-      .then((snap) => {
-        const data = snap.data() as RoundDoc | undefined;
-        setGames(data?.games ?? []);
-      })
+    getDoc(doc(db, "fixtures", `round-${CURRENT_ROUND}`))
+      .then((snap) => setGames(((snap.data() as RoundDoc | undefined)?.games) ?? []))
       .finally(() => setLoading(false));
   }, []);
 
@@ -152,18 +156,11 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[#0b0f13] text-white">
-      {/* Top Nav */}
+      {/* NAV */}
       <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-3">
-            <Image
-              src="/streakrlogo.jpg"
-              alt="STREAKr AFL"
-              width={150}
-              height={120}
-              priority
-              className="h-8 w-auto"
-            />
+            <Image src="/streakrlogo.jpg" alt="STREAKr AFL" width={150} height={120} priority className="h-8 w-auto" />
             <span className="text-xl font-extrabold tracking-wide">
               STREAK<span className="text-orange-500">r</span> AFL
             </span>
@@ -177,17 +174,13 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Hero with MCG */}
+      {/* HERO (more bottom space so full image is visible before banner) */}
       <section
         className="relative w-full"
-        style={{
-          backgroundImage: "url('/mcg-hero.jpg')",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
+        style={{ backgroundImage: "url('/mcg-hero.jpg')", backgroundSize: "cover", backgroundPosition: "center" }}
       >
         <div className="absolute inset-0 bg-gradient-to-b from-black/40 to-[#0b0f13]" />
-        <div className="relative mx-auto max-w-6xl px-4 pt-16 pb-28">
+        <div className="relative mx-auto max-w-6xl px-4 pt-16 pb-56">
           <h1 className="max-w-3xl text-4xl sm:text-5xl md:text-6xl font-extrabold leading-tight">
             One pick. <span className="text-orange-500">One streak.</span> Win the round.
           </h1>
@@ -205,14 +198,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Sponsor strip */}
-      <div className="mx-auto mt-4 max-w-6xl px-4">
-        <div className="mb-8 flex h-20 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-white/60">
+      {/* SPONSOR (pushed further down) */}
+      <div className="mx-auto mt-20 max-w-6xl px-4">
+        <div className="mb-10 flex h-20 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-white/60">
           Sponsor banner • 970×90
         </div>
       </div>
 
-      {/* Samples grid */}
+      {/* SAMPLES */}
       <section className="mx-auto max-w-6xl px-4 pb-16">
         <h2 className="mb-6 text-xl font-semibold">Round {CURRENT_ROUND} Questions</h2>
 
@@ -223,10 +216,7 @@ export default function HomePage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {samples.map(({ game, q }, idx) => (
-              <article
-                key={`${game.match}-${q.quarter}-${idx}`}
-                className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-sm"
-              >
+              <article key={`${game.match}-${q.quarter}-${idx}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 shadow-sm">
                 <div className="mb-1 text-sm font-semibold uppercase tracking-wide text-orange-400">
                   {game.match}
                 </div>
@@ -240,12 +230,8 @@ export default function HomePage() {
                     {q.question}
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <button className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold" disabled>
-                      Yes
-                    </button>
-                    <button className="rounded-md bg-red-600 px-3 py-1 text-sm font-semibold" disabled>
-                      No
-                    </button>
+                    <button className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold" disabled>Yes</button>
+                    <button className="rounded-md bg-red-600 px-3 py-1 text-sm font-semibold" disabled>No</button>
                   </div>
                 </div>
               </article>
@@ -254,7 +240,7 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* How it Works */}
+      {/* HOW IT WORKS */}
       <section className="mx-auto max-w-6xl px-4 pb-24">
         <h3 className="mb-4 text-lg font-semibold">How it works</h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
