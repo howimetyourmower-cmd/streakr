@@ -94,7 +94,7 @@ export default function HomePage() {
           backgroundPosition: "center",
         }}
       >
-        <div className="mx-auto max-w-6xl px-4 py-16 sm:py-20">
+        <div className="mx-auto max-w-6xl px-4 py-32 sm:py-40">
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold">
             <span className="text-white">One pick.</span>{" "}
             <span className="text-orange-500">One streak.</span>{" "}
