@@ -1,5 +1,5 @@
 // app/layout.tsx
-import "./globals.css";
+import "../src/app/globals.css";
 import Image from "next/image";
 import Link from "next/link";
 
