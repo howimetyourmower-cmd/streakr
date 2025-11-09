@@ -1,224 +1,113 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { getFirestore, doc, getDoc, Timestamp } from "firebase/firestore";
+import { useState } from "react";
+import { getFirestore, doc, setDoc } from "firebase/firestore";
 import { app } from "../config/firebaseClient";
+import Link from "next/link";
 
-type Question = {
-  quarter: number;
-  question: string;
-};
-
+type Question = { quarter: number; question: string };
 type Game = {
   match: string;
-  startTime?: any;   // Firestore Timestamp or ISO/string
-  date?: string;     // optional string date
-  time?: string;     // optional string time
-  tz?: string;       // e.g. "AEDT"
-  venue?: string;    // e.g. "MCG, Melbourne"
+  startTime?: any;   // Firestore Timestamp or ISO string
+  venue?: string;
   questions: Question[];
 };
-
 type RoundDoc = { games: Game[] };
 
-const CURRENT_ROUND = 1;
+const DEFAULT_JSON: RoundDoc = {
+  games: [
+    {
+      match: "Carlton v Brisbane",
+      // You can keep ISO strings; app formats both. Or paste real Firestore Timestamps after seeding if you prefer.
+      startTime: "2026-03-19T19:50:00+11:00",
+      venue: "MCG, Melbourne",
+      questions: [
+        { quarter: 1, question: "Will Lachie Neale get 7 or more disposals in the 1st quarter?" },
+        { quarter: 2, question: "Will Charlie Curnow kick a goal in the 2nd quarter?" },
+        { quarter: 3, question: "Will Patrick Cripps get 6 or more disposals in the 3rd quarter?" },
+        { quarter: 4, question: "Will Joe Daniher kick a goal in the last quarter?" },
+      ],
+    },
+    {
+      match: "Collingwood v Sydney",
+      startTime: "2026-03-20T19:20:00+11:00",
+      venue: "MCG, Melbourne",
+      questions: [
+        { quarter: 1, question: "Will Nick Daicos get 8 or more disposals in the 1st quarter?" },
+        { quarter: 2, question: "Will Isaac Heeney kick a goal in the 2nd quarter?" },
+        { quarter: 3, question: "Will Jordan De Goey get 6 or more disposals in the 3rd quarter?" },
+        { quarter: 4, question: "Will Errol Gulden kick a goal in the last quarter?" },
+      ],
+    },
+  ],
+};
 
-function isFsTimestamp(v: any): v is Timestamp {
-  return v && typeof v.seconds === "number" && typeof v.nanoseconds === "number";
-}
+export default function SeedPage() {
+  const db = getFirestore(app);
+  const [jsonText, setJsonText] = useState<string>(JSON.stringify(DEFAULT_JSON, null, 2));
+  const [docId, setDocId] = useState<string>("round-1"); // change to round-2 etc as needed
+  const [status, setStatus] = useState<string>("");
 
-function formatStart(start?: any) {
-  // Accept Firestore Timestamp, ISO string, or undefined
-  if (!start) return { date: "TBD", time: "", tz: "", venuePrefix: "" };
+  async function handleSeed() {
+    setStatus("Seeding…");
+    try {
+      const parsed = JSON.parse(jsonText) as RoundDoc;
 
-  try {
-    if (isFsTimestamp(start)) {
-      const d = start.toDate();
-      return {
-        date: d.toLocaleDateString(undefined, {
-          weekday: "short",
-          day: "2-digit",
-          month: "short",
-        }),
-        time: d.toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        tz: "",
-        venuePrefix: "• ",
-      };
-    }
-    // string fallback
-    const d = new Date(start);
-    if (!isNaN(d.getTime())) {
-      return {
-        date: d.toLocaleDateString(undefined, {
-          weekday: "short",
-          day: "2-digit",
-          month: "short",
-        }),
-        time: d.toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        tz: "",
-        venuePrefix: "• ",
-      };
-    }
-  } catch {
-    // fall through to TBD
-  }
-  return { date: "TBD", time: "", tz: "", venuePrefix: "" };
-}
-
-export default function PicksPage() {
-  const [games, setGames] = useState<Game[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const db = useMemo(() => getFirestore(app), []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        // Expecting Firestore structure: rounds (collection) -> round-1 (document) -> games (array)
-        const ref = doc(db, "rounds", `round-${CURRENT_ROUND}`);
-        const snap = await getDoc(ref);
-
-        if (!snap.exists()) {
-          if (!cancelled) {
-            setErr(`No round data found at "rounds/round-${CURRENT_ROUND}".`);
-            setGames([]);
-          }
-          return;
-        }
-
-        const data = snap.data() as Partial<RoundDoc> | undefined;
-        const arr = Array.isArray(data?.games) ? (data!.games as Game[]) : [];
-
-        if (!cancelled) {
-          setGames(arr);
-        }
-      } catch (e: any) {
-        console.error("Failed to load picks:", e);
-        if (!cancelled) {
-          setErr(
-            e?.message ||
-              "Failed to load picks (client-side exception). Check console."
-          );
-          setGames([]);
-        }
+      // Very light validation
+      if (!parsed?.games || !Array.isArray(parsed.games) || parsed.games.length === 0) {
+        throw new Error("JSON must have a 'games' array with at least one game.");
       }
-    })();
+      parsed.games.forEach((g, i) => {
+        if (!g.match) throw new Error(`Game ${i + 1} missing 'match'`);
+        if (!g.questions || !Array.isArray(g.questions) || g.questions.length === 0) {
+          throw new Error(`Game ${i + 1} must include a 'questions' array with items.`);
+        }
+      });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [db]);
+      await setDoc(doc(db, "rounds", docId), parsed, { merge: false });
+      setStatus(`✅ Seeded '${docId}' successfully.`);
+    } catch (err: any) {
+      setStatus(`❌ ${err?.message || String(err)}`);
+    }
+  }
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#0b0f13] to-[#121821] text-white">
-      <div className="mx-auto max-w-5xl px-4 py-10">
-        <h1 className="text-4xl font-extrabold tracking-tight">Make Picks</h1>
+    <main className="min-h-screen bg-gradient-to-b from-[#0b0f13] to-[#0b0f13]/60 text-white">
+      <div className="mx-auto max-w-4xl px-4 py-10">
+        <h1 className="text-3xl font-bold mb-6">Seed Round Data</h1>
 
-        {err && (
-          <p className="mt-4 text-sm text-red-300">
-            {err}{" "}
-            <span className="block opacity-80">
-              Tip: Ensure Firestore has a{" "}
-              <code className="bg-black/30 px-1 py-0.5 rounded">rounds</code>{" "}
-              collection with a{" "}
-              <code className="bg-black/30 px-1 py-0.5 rounded">
-                round-{CURRENT_ROUND}
-              </code>{" "}
-              document that contains a{" "}
-              <code className="bg-black/30 px-1 py-0.5 rounded">games</code>{" "}
-              array.
-            </span>
-          </p>
-        )}
+        <label className="block text-sm mb-2">Document ID (rounds/&nbsp;…)</label>
+        <input
+          value={docId}
+          onChange={(e) => setDocId(e.target.value)}
+          className="w-full rounded-lg bg-[#11161b] border border-white/10 px-3 py-2 mb-4"
+          placeholder="round-1"
+        />
 
-        {!games && !err && <p className="mt-8 text-lg opacity-80">Loading…</p>}
+        <label className="block text-sm mb-2">Round JSON</label>
+        <textarea
+          value={jsonText}
+          onChange={(e) => setJsonText(e.target.value)}
+          className="w-full h-[360px] rounded-lg bg-[#11161b] border border-white/10 px-3 py-2 font-mono text-sm"
+        />
 
-        {games && games.length === 0 && (
-          <p className="mt-8 text-lg opacity-80">
-            No questions found for Round {CURRENT_ROUND}.
-          </p>
-        )}
-
-        {games && games.length > 0 && (
-          <div className="mt-8 space-y-8">
-            {games.map((g, gi) => {
-              const { date, time, tz, venuePrefix } = formatStart(g.startTime);
-              const venue = g.venue ? `${venuePrefix}${g.venue}` : "";
-              return (
-                <section
-                  key={`${g.match}-${gi}`}
-                  className="rounded-2xl border border-white/10 bg-white/5 shadow-lg"
-                >
-                  <div className="p-5 border-b border-white/10">
-                    <h2 className="text-xl font-semibold text-orange-400">
-                      {g.match ?? "Match"}
-                    </h2>
-                    <p className="mt-1 text-sm text-white/70">
-                      {date}
-                      {time ? ` • ${time}` : ""}
-                      {tz ? ` ${tz}` : ""}
-                      {venue ? ` ${venue}` : ""}
-                    </p>
-                  </div>
-
-                  <div className="p-5 space-y-4">
-                    {(g.questions ?? []).map((q, qi) => (
-                      <div
-                        key={`${gi}-${qi}`}
-                        className="rounded-xl border border-white/10 bg-white/5 p-4"
-                      >
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="inline-flex items-center rounded-md bg-white/10 px-2 py-1 text-xs font-semibold">
-                            Q{q.quarter ?? "?"}
-                          </span>
-
-                          {/* These buttons render even if logged out; hook up auth later */}
-                          <div className="ml-auto flex gap-2">
-                            <button
-                              className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-semibold hover:bg-green-600"
-                              disabled
-                              title="Login required to pick"
-                            >
-                              Yes
-                            </button>
-                            <button
-                              className="rounded-md bg-red-600/90 px-3 py-1.5 text-sm font-semibold hover:bg-red-600"
-                              disabled
-                              title="Login required to pick"
-                            >
-                              No
-                            </button>
-                          </div>
-                        </div>
-
-                        <p className="mt-3 text-base leading-relaxed">
-                          {q.question ?? "Question"}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="mt-10">
-          <Link
-            href="/"
-            className="text-sm text-white/70 underline underline-offset-4 hover:text-white"
+        <div className="flex items-center gap-3 mt-5">
+          <button
+            onClick={handleSeed}
+            className="rounded-xl bg-orange-500 hover:bg-orange-600 px-5 py-2 font-semibold"
           >
-            ← Back to Home
+            Seed Now
+          </button>
+          <Link href="/" className="text-white/70 hover:text-white underline">
+            Back to Home
           </Link>
         </div>
+
+        {status && <p className="mt-4 text-sm">{status}</p>}
+
+        <p className="mt-8 text-xs text-white/60">
+          Tip: After seeding, delete this page (<code>/app/seed/page.tsx</code>) so no one else can seed.
+        </p>
       </div>
     </main>
   );
