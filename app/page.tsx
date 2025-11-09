@@ -12,87 +12,59 @@ type Question = {
 };
 
 type Game = {
-  match: string;             // "Carlton v Brisbane"
-  // Option A (preferred):
-  date?: string;             // "2026-03-19"
-  time?: string;             // "19:50" (24h)
-  tz?: string;               // "Australia/Melbourne"
-  // Option B (what you currently have):
-  startTime?: any;           // Firestore Timestamp OR a parseable string
-  // Common:
-  venue?: string;            // "MCG, Melbourne"
+  match: string;
+  date?: string;
+  time?: string;
+  tz?: string;
+  startTime?: any;
+  venue?: string;
   questions: Question[];
 };
 
 type RoundDoc = { games: Game[] };
-
 const CURRENT_ROUND = 1;
 
-// --- Helpers ---------------------------------------------------------------
-
-function isFsTimestamp(v: any): v is { seconds: number; nanoseconds?: number } {
-  return v && typeof v === "object" && typeof v.seconds === "number";
+function isFsTimestamp(v: any): v is { seconds: number } {
+  return v && typeof v.seconds === "number";
 }
 
-function toDateFromStart(game: Game): Date | null {
-  const st = (game as any).startTime;
-  if (!st) return null;
-  if (isFsTimestamp(st)) return new Date(st.seconds * 1000);
-  // String fallback (e.g. "March 19, 2026 at 7:50:00PM UTC+11")
-  const d = new Date(st);
+function toDate(game: Game): Date | null {
+  if (game.date && game.time)
+    return new Date(`${game.date}T${game.time}:00`);
+  const s = game.startTime;
+  if (!s) return null;
+  if (isFsTimestamp(s)) return new Date(s.seconds * 1000);
+  const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
 
-function toDateFromParts(game: Game): Date | null {
-  const { date, time } = game || {};
-  if (!date || !time) return null;
-  const iso = `${date}T${time}:00`;
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-// "Fri Mar 19 • 7:50 PM AEDT • MCG, Melbourne"   or "TBD • MCG, Melbourne"
 function formatWhenWhere(game: Game): string {
-  const zone = game.tz || "Australia/Melbourne";
-  const d =
-    toDateFromParts(game) ||
-    toDateFromStart(game);
-
-  if (!d) {
+  const d = toDate(game);
+  const tz = game.tz || "Australia/Melbourne";
+  if (!d)
     return game.venue ? `TBD • ${game.venue}` : "TBD";
-  }
-
-  try {
-    const day = new Intl.DateTimeFormat("en-AU", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      timeZone: zone,
-    }).format(d);
-
-    const t = new Intl.DateTimeFormat("en-AU", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: zone,
-    }).format(d);
-
-    const tzShort =
-      new Intl.DateTimeFormat("en-AU", {
-        timeZoneName: "short",
-        timeZone: zone,
-      })
-        .formatToParts(d)
-        .find((p) => p.type === "timeZoneName")?.value || "";
-
-    const venuePart = game.venue ? ` • ${game.venue}` : "";
-    return `${day} • ${t} ${tzShort}${venuePart}`;
-  } catch {
-    return game.venue ? `TBD • ${game.venue}` : "TBD";
-  }
+  const day = new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: tz,
+  }).format(d);
+  const time = new Intl.DateTimeFormat("en-AU", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: tz,
+  }).format(d);
+  const tzName =
+    new Intl.DateTimeFormat("en-AU", {
+      timeZoneName: "short",
+      timeZone: tz,
+    })
+      .formatToParts(d)
+      .find((p) => p.type === "timeZoneName")?.value || "";
+  const venuePart = game.venue ? ` • ${game.venue}` : "";
+  return `${day} • ${time} ${tzName}${venuePart}`;
 }
-
-// --------------------------------------------------------------------------
 
 export default function HomePage() {
   const [games, setGames] = useState<Game[]>([]);
@@ -109,7 +81,6 @@ export default function HomePage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // first 6 questions across the round
   const samples = useMemo(() => {
     const flat: Array<{ game: Game; q: Question }> = [];
     for (const g of games) for (const q of g.questions) flat.push({ game: g, q });
@@ -118,7 +89,6 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-[#0b0f13] text-white">
-      {/* NAV */}
       <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <Link href="/" className="flex items-center gap-3">
@@ -143,7 +113,6 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* HERO */}
       <section
         className="relative w-full"
         style={{
@@ -171,14 +140,12 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Banner */}
       <div className="mx-auto mt-4 max-w-6xl px-4">
         <div className="mb-8 flex h-20 w-full items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-white/60">
           Sponsor banner • 970×90
         </div>
       </div>
 
-      {/* SAMPLE GRID */}
       <section className="mx-auto max-w-6xl px-4 pb-16">
         <h2 className="mb-6 text-xl font-semibold">Round {CURRENT_ROUND} Questions</h2>
 
@@ -195,19 +162,17 @@ export default function HomePage() {
                 </div>
                 <div className="mb-3 text-xs text-white/60">{formatWhenWhere(game)}</div>
 
-                <div className="mb-4 text-sm">
-                  <span className="mr-2 rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">Q{q.quarter}</span>
-                  {q.question}
-                </div>
-
                 <div className="flex items-center justify-between">
+                  <div className="text-sm">
+                    <span className="mr-2 rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
+                      Q{q.quarter}
+                    </span>
+                    {q.question}
+                  </div>
                   <div className="flex gap-2">
                     <button className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold" disabled>Yes</button>
                     <button className="rounded-md bg-red-600 px-3 py-1 text-sm font-semibold" disabled>No</button>
                   </div>
-                  <Link href="/picks" className="rounded-md bg-orange-500 px-3 py-1 text-sm font-semibold hover:bg-orange-600">
-                    Make This Pick
-                  </Link>
                 </div>
               </div>
             ))}
@@ -215,7 +180,6 @@ export default function HomePage() {
         )}
       </section>
 
-      {/* HOW IT WORKS */}
       <section className="mx-auto max-w-6xl px-4 pb-24">
         <h3 className="mb-4 text-lg font-semibold">How it works</h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
