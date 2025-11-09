@@ -1,68 +1,52 @@
-"use client";
+// app/page.tsx
 import Image from "next/image";
 import Link from "next/link";
 
 export default function HomePage() {
   return (
-    <div className="relative min-h-screen bg-zinc-950 text-zinc-100 overflow-hidden">
-      {/* HERO IMAGE */}
-      <div className="absolute inset-0 -z-10">
+    <main className="relative">
+      {/* Hero background */}
+      <div className="relative h-[70vh] w-full overflow-hidden">
         <Image
           src="/mcg-hero.jpg"
-          alt="MCG Stadium at night"
+          alt="MCG at night"
           fill
           priority
-          className="object-cover object-center opacity-40"
+          className="object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/80 to-transparent" />
+        {/* Dark overlay for text contrast */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/50 to-[#0b0f13]" />
+
+        {/* Hero content */}
+        <div className="relative z-10 mx-auto flex h-full max-w-6xl flex-col items-center justify-center px-4 text-center">
+          <h1 className="text-4xl font-extrabold sm:text-6xl">
+            <span className="text-white">One pick. </span>
+            <span className="text-orange-400">One streak. </span>
+            <span className="text-white">Win the round.</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-white/80">
+            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
+          </p>
+
+          <div className="mt-8 flex items-center gap-3">
+            <Link
+              href="/picks"
+              className="rounded-xl bg-orange-500 px-5 py-3 font-semibold transition hover:bg-orange-400"
+            >
+              Make your first pick
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="rounded-xl border border-white/20 bg-white/10 px-5 py-3 font-semibold backdrop-blur transition hover:bg-white/20"
+            >
+              Leaderboard
+            </Link>
+          </div>
+        </div>
       </div>
 
-      {/* HERO CONTENT */}
-      <section className="flex flex-col items-center justify-center text-center py-36 px-4">
-        <h1 className="text-5xl md:text-6xl font-extrabold mb-4">
-          <span className="text-orange-500">One pick.</span>{" "}
-          <span className="text-zinc-100">One streak.</span>{" "}
-          <span className="text-orange-400">Win the round.</span>
-        </h1>
-        <p className="text-lg text-zinc-300 mb-8 max-w-xl">
-          Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-        </p>
-        <div className="flex flex-col sm:flex-row gap-4">
-          <Link
-            href="/picks"
-            className="bg-orange-500 hover:bg-orange-600 text-white px-8 py-3 rounded-xl font-semibold shadow-md transition"
-          >
-            Make your first pick
-          </Link>
-          <Link
-            href="/leaderboard"
-            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-8 py-3 rounded-xl font-semibold border border-zinc-700 transition"
-          >
-            Leaderboard
-          </Link>
-        </div>
-      </section>
-
-      {/* STREAK CARDS PLACEHOLDER */}
-      <section className="max-w-6xl mx-auto py-20 px-4 grid md:grid-cols-3 gap-8">
-        {[1, 2, 3].map((round) => (
-          <div
-            key={round}
-            className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-6 text-center shadow-lg"
-          >
-            <h3 className="text-orange-400 font-bold mb-2">ROUND {round}</h3>
-            <p className="text-zinc-300 mb-4">Sample Question</p>
-            <div className="flex justify-center gap-4">
-              <button className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-lg text-sm font-medium">
-                Yes
-              </button>
-              <button className="bg-zinc-700 hover:bg-zinc-600 px-4 py-2 rounded-lg text-sm font-medium">
-                No
-              </button>
-            </div>
-          </div>
-        ))}
-      </section>
-    </div>
+      {/* Optional: space below hero for future content */}
+      <section className="mx-auto max-w-6xl px-4 py-10" />
+    </main>
   );
 }
