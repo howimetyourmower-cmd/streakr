@@ -5,198 +5,205 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
 import { app } from "./config/firebaseClient";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
 
-type Question = { quarter: number; question: string };
-type Game = {
-  match: string;
+type Q = {
+  quarter: number;
+  question: string;
+  // optional per-question fallbacks the DB might have
+  startTime?: string;
   venue?: string;
-  startTime?: any; // Timestamp | string | undefined
-  date?: string;
-  time?: string;
-  tz?: string;
-  questions: Question[];
 };
-type RoundDoc = { games: Game[] };
 
-const CURRENT_ROUND = 1;
+type Game = {
+  match: string; // "Carlton v Brisbane"
+  startTime?: string; // preferred: at game level
+  venue?: string;     // preferred: at game level
+  questions: Q[];
+};
 
-/* ---------- time helpers ---------- */
-function isFsTimestamp(v: any): v is { seconds: number } {
-  return v && typeof v.seconds === "number";
-}
-function parseFreeformStartTime(v: string): Date | null {
-  const re =
-    /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\s*UTC([+-]\d{1,2})$/i;
-  const m = v.trim().replace(/\s+/g, " ").match(re);
-  if (!m) return null;
-  const [, mon, d, y, h, min, sec, ampmRaw, tzOff] = m;
-  const monthMap: Record<string, number> = {
-    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
-    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
-  };
-  const month = monthMap[mon.toLowerCase()];
-  if (month == null) return null;
-  let hour = parseInt(h, 10);
-  const minute = parseInt(min, 10);
-  const second = sec ? parseInt(sec, 10) : 0;
-  const ampm = ampmRaw.toUpperCase();
-  if (ampm === "PM" && hour !== 12) hour += 12;
-  if (ampm === "AM" && hour === 12) hour = 0;
-  const tz = tzOff.startsWith("+") || tzOff.startsWith("-") ? tzOff : `+${tzOff}`;
-  const iso = `${y}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(
-    2,
-    "0"
-  )}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(
-    second
-  ).padStart(2, "0")}${tz}:00`;
-  const dt = new Date(iso);
-  return isNaN(dt.getTime()) ? null : dt;
-}
-function toDate(game: Game): Date | null {
-  if (game.date && game.time) {
-    const tz = game.tz ?? "+11:00";
-    const dt = new Date(`${game.date}T${game.time}:00${tz}`);
-    if (!isNaN(dt.getTime())) return dt;
-  }
-  const st = game.startTime;
-  if (isFsTimestamp(st)) return new Date(st.seconds * 1000);
-  if (typeof st === "string") {
-    const parsed = parseFreeformStartTime(st);
-    if (parsed) return parsed;
-    const dt = new Date(st);
-    if (!isNaN(dt.getTime())) return dt;
-  }
-  return null;
-}
-function formatWhenWhere(game: Game): string {
-  const tz = game.tz || "Australia/Melbourne";
-  const d = toDate(game);
-  const venue = game.venue;
-  if (!d) return venue ? `TBD • ${venue}` : "TBD";
-  const day = new Intl.DateTimeFormat("en-AU", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    timeZone: tz,
-  }).format(d);
-  const time = new Intl.DateTimeFormat("en-AU", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: tz,
-  }).format(d);
-  const tzName =
-    new Intl.DateTimeFormat("en-AU", {
-      timeZoneName: "short",
-      timeZone: tz,
-    })
-      .formatToParts(d)
-      .find((p) => p.type === "timeZoneName")?.value || "";
-  return `${day} • ${time} ${tzName}${venue ? ` • ${venue}` : ""}`;
-}
+type RoundDoc = {
+  games: Game[];
+};
 
-/* ---------- page ---------- */
+const ROUNDS_COLLECTION = "rounds"; // <— if your doc lives at root, change fetchRound() below.
+
 export default function HomePage() {
-  const [round, setRound] = useState<RoundDoc | null>(null);
-  const [loading, setLoading] = useState(true);
+  const db = useMemo(() => getFirestore(app), []);
+  const auth = useMemo(() => getAuth(app), []);
+  const [games, setGames] = useState<Game[]>([]);
+  const [user, setUser] = useState<unknown>(null);
 
   useEffect(() => {
-    (async () => {
-      const db = getFirestore(app);
-      const snap = await getDoc(doc(db, "fixtures", `round-${CURRENT_ROUND}`));
-      setRound((snap.data() as RoundDoc) || { games: [] });
-      setLoading(false);
-    })();
-  }, []);
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, [auth]);
 
-  const sixSamples = useMemo(() => {
-    if (!round?.games?.length) return [];
-    const flat: Array<{ game: Game; q: Question }> = [];
-    for (const g of round.games) for (const q of g.questions) flat.push({ game: g, q });
-    return flat.slice(0, 6);
-  }, [round]);
+  useEffect(() => {
+    async function fetchRound() {
+      // rounds/round-1 (preferred)
+      const ref = doc(db, ROUNDS_COLLECTION, "round-1");
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data() as RoundDoc;
+        setGames(Array.isArray(data.games) ? data.games : []);
+        return;
+      }
+      // Fallback: a single top-level doc called "round-1"
+      const fallbackRef = doc(db, "round-1");
+      const fbSnap = await getDoc(fallbackRef);
+      if (fbSnap.exists()) {
+        const data = fbSnap.data() as RoundDoc;
+        setGames(Array.isArray(data.games) ? data.games : []);
+      }
+    }
+    fetchRound();
+  }, [db]);
+
+  // Build six samples from Round 1 (first two games, Q1 & Q2) as you asked
+  const sixSamples = games
+    .flatMap((g) => g.questions.slice(0, 2).map((q) => ({ game: g, q })))
+    .slice(0, 6);
+
+  const isAuthed = !!user;
 
   return (
-    <main className="min-h-screen bg-[#0b0f13] text-white">
-      {/* HERO — fixed height so the image always shows */}
-      <section className="relative h-[420px] md:h-[520px]">
-        {/* background image */}
-        <Image
-          src="/mcg-hero.jpg"
-          alt="MCG sunset"
-          fill
-          priority
-          className="object-cover opacity-80"
-        />
-        {/* subtle darken/vignette so text pops */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/35 to-[#0b0f13]/90" />
+    <main className="min-h-screen bg-[#0b0f13] text-white antialiased">
+      {/* Header / Logo / Nav */}
+      <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur supports-[backdrop-filter]:bg-[#0b0f13]/60">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <Link href="/" className="flex items-center gap-3">
+            <Image
+              src="/streaklogo.jpg"
+              width={180}
+              height={48}
+              priority
+              alt="STREAKr AFL"
+              className="h-10 w-auto"
+            />
+            <span className="sr-only">STREAKr AFL</span>
+          </Link>
+          <nav className="hidden md:flex items-center gap-6 text-sm">
+            <Link href="/picks" className="hover:text-orange-400">Picks</Link>
+            <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
+            <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
+            <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
+          </nav>
+        </div>
+      </header>
 
-        {/* hero content */}
-        <div className="relative z-10 mx-auto flex h-full max-w-6xl items-end px-4 pb-10">
-          <div>
-            <h1 className="mb-3 text-5xl font-extrabold leading-tight md:text-6xl">
-              One pick. <span className="text-orange-500">One streak.</span> Win the round.
-            </h1>
-            <p className="mb-6 max-w-2xl text-white/85">
-              Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-            </p>
-            <div className="flex gap-3">
-              <Link
-                href="/picks"
-                className="rounded-xl bg-orange-500 px-5 py-3 font-semibold hover:bg-orange-600"
-              >
-                Make your first pick
-              </Link>
-              <Link
-                href="/leaderboard"
-                className="rounded-xl bg-white/10 px-5 py-3 font-semibold hover:bg-white/20"
-              >
-                Leaderboard
-              </Link>
-            </div>
+      {/* Hero with MCG image */}
+      <section className="relative overflow-hidden">
+        <div className="absolute inset-0 -z-10">
+          <Image
+            src="/mcg-hero.jpg"
+            alt="MCG under lights"
+            fill
+            sizes="100vw"
+            className="object-cover"
+            priority
+          />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0f13]/40 to-[#0b0f13]"></div>
+        </div>
+
+        <div className="mx-auto max-w-6xl px-4 pt-16 pb-24">
+          <h1 className="text-4xl md:text-6xl font-extrabold leading-tight">
+            <span className="text-white">One pick.</span>{" "}
+            <span className="text-orange-500">One streak.</span>{" "}
+            <span className="text-white">Win the round.</span>
+          </h1>
+          <p className="mt-4 max-w-2xl text-white/80">
+            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
+          </p>
+          <div className="mt-8 flex gap-3">
+            <Link
+              href="/picks"
+              className="rounded-xl bg-orange-500 px-5 py-3 font-semibold hover:bg-orange-400"
+            >
+              Make your first pick
+            </Link>
+            <Link
+              href="/leaderboard"
+              className="rounded-xl bg-white/10 px-5 py-3 font-semibold hover:bg-white/20"
+            >
+              Leaderboard
+            </Link>
+          </div>
+        </div>
+
+        {/* Spacer so full hero is visible before the banner */}
+        <div className="h-16"></div>
+
+        {/* Sponsor banner placeholder */}
+        <div className="mx-auto max-w-6xl px-4 pb-10">
+          <div className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-center">
+            <span className="text-white/70">Sponsor banner • 970×90</span>
           </div>
         </div>
       </section>
 
-      {/* Sponsor banner */}
-      <div className="mx-auto mb-10 mt-8 max-w-6xl px-4">
-        <div className="flex h-[90px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-sm text-white/60">
-          Sponsor banner • 970×90
-        </div>
-      </div>
-
-      {/* Round 1 sample questions (6) */}
+      {/* Round 1 Samples (3×2) */}
       <section className="mx-auto max-w-6xl px-4 pb-20">
-        <h2 className="mb-4 text-2xl font-extrabold">Round {CURRENT_ROUND} Questions</h2>
+        <h2 className="mb-6 text-2xl font-bold">Round 1 Questions</h2>
 
-        {loading ? (
-          <div className="text-white/70">Loading…</div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sixSamples.map(({ game, q }, idx) => (
-              <article key={idx} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="mb-1 text-sm font-bold uppercase tracking-wide text-orange-400">
-                  {game.match}
+        <div className="grid gap-6 md:grid-cols-3">
+          {sixSamples.map((item, idx) => {
+            const g = item.game;
+            const q = item.q;
+
+            // Prefer game-level time/venue; fall back to question-level if needed
+            const startTime = g.startTime || q.startTime || "TBD";
+            const venue = g.venue || q.venue || "";
+            const sub = [startTime !== "TBD" ? startTime : "TBD", venue].filter(Boolean).join(" • ");
+
+            return (
+              <div
+                key={idx}
+                className="rounded-2xl border border-white/10 bg-[#12161c] p-4 shadow-lg"
+              >
+                <div className="mb-2 text-sm font-semibold tracking-wide text-orange-400">
+                  {g.match?.toUpperCase() || "MATCH"}
                 </div>
-                <div className="mb-3 text-xs text-white/60">{formatWhenWhere(game)}</div>
-                <div className="mb-3 text-white/90">
-                  <span className="mr-2 inline-block rounded-md bg-white/10 px-2 py-0.5 text-[11px] text-white/70">
+                <div className="mb-3 text-xs uppercase tracking-wide text-white/60">{sub}</div>
+
+                <div className="mb-3 flex items-center gap-2 text-sm">
+                  <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] font-bold">
                     Q{q.quarter}
                   </span>
-                  {q.question}
+                  <span className="text-base font-semibold">{q.question}</span>
                 </div>
-                <div className="flex gap-2">
-                  <button className="rounded-md bg-green-600 px-3 py-1 text-sm font-semibold hover:bg-green-700">
+
+                <div className="mt-3 flex items-center gap-3">
+                  {/* Auth gate: if not logged in, send to /auth */}
+                  <button
+                    className="rounded-xl bg-green-600 px-3 py-2 font-semibold hover:bg-green-500"
+                    onClick={() => {
+                      if (!isAuthed) {
+                        window.location.href = "/auth";
+                      } else {
+                        window.location.href = "/picks";
+                      }
+                    }}
+                  >
                     Yes
                   </button>
-                  <button className="rounded-md bg-red-600 px-3 py-1 text-sm font-semibold hover:bg-red-700">
+                  <button
+                    className="rounded-xl bg-red-600 px-3 py-2 font-semibold hover:bg-red-500"
+                    onClick={() => {
+                      if (!isAuthed) {
+                        window.location.href = "/auth";
+                      } else {
+                        window.location.href = "/picks";
+                      }
+                    }}
+                  >
                     No
                   </button>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
+              </div>
+            );
+          })}
+        </div>
       </section>
     </main>
   );
