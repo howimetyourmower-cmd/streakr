@@ -1,49 +1,74 @@
-"use client";
+'use client';
 
-import { useEffect, useMemo, useState } from "react";
-import { getFirestore, collection, getDocs } from "firebase/firestore";
-import { app } from "@/config/firebaseClient";
+import { useEffect, useState } from 'react';
+import Image from 'next/image';
+import {
+  getFirestore,
+  doc,
+  getDoc,
+  Timestamp,
+} from 'firebase/firestore';
+import { app } from '@/lib/firebaseClient';
+
+type Question = {
+  quarter: number;
+  question: string;
+  status?: 'OPEN' | 'PENDING' | 'FINAL';
+  yesCount?: number;
+  noCount?: number;
+  commentsCount?: number;
+};
+
+type Game = {
+  match: string;                 // e.g., "Carlton v Brisbane"
+  venue?: string;                // e.g., "MCG"
+  startTime?: string | number | Date | Timestamp; // Firestore Timestamp or ISO
+  questions: Question[];
+};
+
+type RoundDoc = {
+  games: Game[];
+};
 
 const db = getFirestore(app);
 
-type Status = "OPEN" | "PENDING" | "FINAL";
+/** Format "Fri, Mar 21 • 7:20 PM • MCG" or "TBD" */
+function formatMeta(game: Game): string {
+  const venue = game.venue?.trim();
+  let dt: Date | undefined;
 
-interface Question {
-  question: string;
-  quarter?: number;
-  yesVotes?: number;
-  noVotes?: number;
-  comments?: number;
-  status?: Status;
+  if (game.startTime instanceof Timestamp) {
+    dt = game.startTime.toDate();
+  } else if (typeof game.startTime === 'number') {
+    dt = new Date(game.startTime);
+  } else if (typeof game.startTime === 'string') {
+    const tryDt = new Date(game.startTime);
+    if (!Number.isNaN(tryDt.getTime())) dt = tryDt;
+  } else if (game.startTime instanceof Date) {
+    dt = game.startTime;
+  }
+
+  if (!dt && !venue) return 'TBD';
+  if (!dt && venue) return `TBD • ${venue}`;
+
+  const weekday = dt!.toLocaleDateString(undefined, { weekday: 'short' });
+  const month = dt!.toLocaleDateString(undefined, { month: 'short' });
+  const day = dt!.getDate();
+  const time = dt!.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  return `${weekday}, ${month} ${day} • ${time}${venue ? ` • ${venue}` : ''}`;
 }
 
-interface Game {
-  match: string;          // "Carlton v Brisbane"
-  date?: string;          // "Thu, Mar 20 · 7:20 PM AEDT"
-  venue?: string;         // "MCG, Melbourne"
-  questions?: Question[];
-}
-
-function pct(yes = 0, no = 0) {
-  const total = yes + no;
+/** Percent helper */
+function toPerc(yes = 0, no = 0): { yesPct: number; noPct: number } {
+  const total = (yes || 0) + (no || 0);
   if (!total) return { yesPct: 0, noPct: 0 };
   return {
     yesPct: Math.round((yes / total) * 100),
-    noPct: Math.round((no / total) * 100),
+    noPct: 100 - Math.round((yes / total) * 100),
   };
-}
-
-function StatusBadge({ status = "OPEN" as Status }) {
-  const styles: Record<Status, string> = {
-    OPEN: "bg-emerald-600/20 text-emerald-300 border-emerald-600/40",
-    PENDING: "bg-yellow-600/20 text-yellow-300 border-yellow-600/40",
-    FINAL: "bg-sky-600/20 text-sky-300 border-sky-600/40",
-  };
-  return (
-    <span className={`text-xs px-2.5 py-1 rounded-full border ${styles[status]}`}>
-      {status}
-    </span>
-  );
 }
 
 export default function PicksPage() {
@@ -53,114 +78,151 @@ export default function PicksPage() {
   useEffect(() => {
     (async () => {
       try {
-        // Load all docs under "fixtures" and combine their games arrays
-        const snap = await getDocs(collection(db, "fixtures"));
-        const round: Game[] = [];
-        snap.forEach((doc) => {
-          const data = doc.data() as { games?: Game[] };
-          if (Array.isArray(data?.games)) round.push(...data.games);
-        });
-        setGames(round);
+        // Current round: change 'round-1' as needed later
+        const ref = doc(db, 'fixtures', 'round-1');
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          const data = snap.data() as RoundDoc;
+          setGames(Array.isArray(data.games) ? data.games : []);
+        } else {
+          setGames([]);
+        }
       } catch (e) {
-        console.error("Error loading fixtures:", e);
+        console.error('Failed to load picks:', e);
+        setGames([]);
       } finally {
         setLoading(false);
       }
     })();
   }, []);
 
-  const body = useMemo(() => {
-    if (loading) return <p className="text-white/70">Loading…</p>;
-    if (!games.length) return <p className="text-white/70">No games found.</p>;
+  return (
+    <main className="mx-auto max-w-5xl px-4 pb-16">
+      <h1 className="text-3xl font-bold mb-6">Make Picks</h1>
 
-    return (
-      <ol className="space-y-10">
+      {loading && (
+        <div className="text-sm text-zinc-400">Loading questions…</div>
+      )}
+
+      {!loading && games.length === 0 && (
+        <div className="rounded-lg border border-white/10 bg-black/30 p-4 text-zinc-300">
+          No questions found for this round yet.
+        </div>
+      )}
+
+      <div className="space-y-6">
         {games.map((g, gi) => (
-          <li
-            key={gi}
-            className="rounded-2xl border border-white/10 bg-[#11161C] p-6 shadow-xl"
+          <section
+            key={`${g.match}-${gi}`}
+            className="rounded-xl border border-white/10 bg-white/5 p-4 md:p-5"
           >
-            {/* Game header */}
-            <header className="mb-5">
-              <h2 className="text-2xl font-semibold tracking-tight">{g.match}</h2>
-              <div className="mt-1 text-sm text-white/60">
-                {g.date || "TBD"}
-                {g.venue ? ` • ${g.venue}` : ""}
+            {/* Match header */}
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold">{g.match}</h2>
+                <p className="text-xs md:text-sm text-zinc-400 mt-1">
+                  {formatMeta(g)}
+                </p>
               </div>
-            </header>
+              {/* Small crest placeholder if you want later */}
+              <div className="hidden sm:block">
+                <Image
+                  src="/streakrlogo.jpg"
+                  alt="STREAKr"
+                  width={40}
+                  height={40}
+                  className="opacity-80"
+                />
+              </div>
+            </div>
 
             {/* Questions */}
-            <div className="space-y-4">
+            <div className="mt-3 space-y-3">
               {g.questions?.map((q, qi) => {
-                const yes = q.yesVotes ?? 0;
-                const no = q.noVotes ?? 0;
-                const { yesPct, noPct } = pct(yes, no);
-                const comments = q.comments ?? 0;
-                const status: Status = (q.status as Status) || "OPEN";
+                const status = (q.status || 'OPEN').toUpperCase() as
+                  | 'OPEN'
+                  | 'PENDING'
+                  | 'FINAL';
+
+                const { yesPct, noPct } = toPerc(q.yesCount, q.noCount);
 
                 return (
                   <div
-                    key={qi}
-                    className="rounded-xl bg-[#0E1318] border border-white/10 p-4"
+                    key={`${g.match}-${qi}`}
+                    className="
+                      rounded-lg bg-[#1c1c1c]
+                      p-3 md:p-4 mb-1 shadow-md
+                      flex flex-col gap-2
+                    "
                   >
-                    {/* Top row: Q#, Status, Comments */}
-                    <div className="mb-2 flex items-center gap-3 text-xs">
-                      {q.quarter ? (
-                        <span className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-white/70">
-                          Q{q.quarter}
+                    {/* Top row: Q#, status, kebab */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-semibold text-zinc-300 px-2 py-0.5 rounded bg-white/10">
+                          Q{q.quarter ?? '?'}
                         </span>
-                      ) : null}
-                      <StatusBadge status={status} />
-                      <span className="ml-auto text-white/60">
-                        💬 {comments}
-                      </span>
+                        <span
+                          className={[
+                            'text-[11px] font-semibold px-2 py-0.5 rounded',
+                            status === 'OPEN' && 'bg-emerald-500/15 text-emerald-300',
+                            status === 'PENDING' && 'bg-amber-500/15 text-amber-300',
+                            status === 'FINAL' && 'bg-violet-500/15 text-violet-300',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          {status}
+                        </span>
+                      </div>
+
+                      {/* optional actions placeholder */}
+                      <div className="text-zinc-500 text-sm">⋮</div>
                     </div>
 
-                    {/* Question text */}
-                    <div className="font-medium text-white mb-3">
-                      {q.question}
-                    </div>
+                    {/* Question + Actions row */}
+                    <div className="flex items-center gap-3">
+                      <p className="flex-1 text-base md:text-[17px] font-semibold leading-tight">
+                        {q.question}
+                      </p>
 
-                    {/* Action row */}
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="flex gap-2 ml-auto">
-                        <button className="rounded-xl bg-green-600 hover:bg-green-700 px-5 py-2 text-sm font-semibold text-white transition">
+                      {/* Yes / No */}
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="
+                            rounded-md px-3 py-1.5 text-sm font-semibold
+                            bg-emerald-600 hover:bg-emerald-500
+                            text-white transition-colors
+                          "
+                        >
                           Yes
                         </button>
-                        <button className="rounded-xl bg-red-600 hover:bg-red-700 px-5 py-2 text-sm font-semibold text-white transition">
+                        <button
+                          className="
+                            rounded-md px-3 py-1.5 text-sm font-semibold
+                            bg-rose-600 hover:bg-rose-500
+                            text-white transition-colors
+                          "
+                        >
                           No
                         </button>
                       </div>
                     </div>
 
-                    {/* Percent bars */}
-                    <div className="mt-3">
-                      <div className="flex justify-between text-xs text-white/70 mb-1">
-                        <span>Yes {yesPct}%</span>
-                        <span>No {noPct}%</span>
+                    {/* Percent + comments */}
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="text-xs text-zinc-400">
+                        Yes {yesPct}% • No {noPct}%
                       </div>
-                      <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-green-600"
-                          style={{ width: `${yesPct}%` }}
-                        />
+                      <div className="text-xs text-zinc-400">
+                        💬 {q.commentsCount ?? 0}
                       </div>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </li>
+          </section>
         ))}
-      </ol>
-    );
-  }, [games, loading]);
-
-  return (
-    <main className="min-h-screen bg-[#0b0f13] text-white px-6 py-12">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-8">Make Picks</h1>
-        {body}
       </div>
     </main>
   );
