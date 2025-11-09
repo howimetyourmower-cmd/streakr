@@ -1,4 +1,4 @@
-import "./globals.css";
+import "../src/app/globals.css";
 import Link from "next/link";
 
 export const metadata = {
