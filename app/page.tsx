@@ -137,7 +137,7 @@ export default function HomePage() {
         {/* Sponsor banner — pushed lower so the hero stays fully visible */}
         <div className="mx-auto w-full max-w-6xl px-6">
           <div className="mt-10" />
-          <div className="mx-auto mt-10 rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center">
+          <div className="mx-auto mt-18 rounded-xl border border-white/10 bg-white/5 px-4 py-6 text-center">
             <span className="text-white/70">Sponsor banner • 970×90</span>
           </div>
         </div>
