@@ -1,17 +1,26 @@
+// app/components/AuthOrLink.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
 
 type Props = {
+  /** Where to send the user if they ARE logged in */
   hrefWhenAuthed: string;
+  /** Where to send the user if they are NOT logged in */
   hrefWhenUnauthed: string;
+  className?: string;
   children: React.ReactNode;
 };
 
-export default function AuthOrLink({ hrefWhenAuthed, hrefWhenUnauthed, children }: Props) {
+export default function AuthOrLink({
+  hrefWhenAuthed,
+  hrefWhenUnauthed,
+  className,
+  children,
+}: Props) {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
@@ -22,7 +31,7 @@ export default function AuthOrLink({ hrefWhenAuthed, hrefWhenUnauthed, children 
   const href = user ? hrefWhenAuthed : hrefWhenUnauthed;
 
   return (
-    <Link href={href} className="hover:underline">
+    <Link href={href} className={className}>
       {children}
     </Link>
   );
