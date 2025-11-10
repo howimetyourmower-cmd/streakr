@@ -1,3 +1,4 @@
+// app/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -25,17 +26,13 @@ export default function HomePage() {
     (async () => {
       try {
         const snap = await getDocs(collection(db, "games"));
-        const data = snap.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<Game, "id">),
-        })) as Game[];
-
-        // only show games with status "open"
-        const openOnly = data.filter((g) => (g.status ?? "open") === "open");
-        setGames(openOnly);
-      } catch (err: any) {
-        console.error(err);
-        setError("Failed to load games");
+        const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Game, "id">) })) as Game[];
+        // Show only OPEN selections on the home page
+        const open = all.filter((g) => (g.status ?? "open") === "open");
+        setGames(open);
+      } catch (e: any) {
+        console.error(e);
+        setError("Failed to load games.");
       } finally {
         setLoading(false);
       }
@@ -60,7 +57,7 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen bg-black text-white">
-      {/* Hero Section */}
+      {/* Hero */}
       <section className="relative w-full">
         <div className="relative h-[42vh] md:h-[56vh] w-full">
           <Image
@@ -75,9 +72,7 @@ export default function HomePage() {
             <h1 className="text-4xl md:text-5xl font-extrabold">
               STREAK<span className="text-orange-500">r</span>
             </h1>
-            <p className="mt-2 text-zinc-300">
-              Real Streakr&apos;s don&apos;t get caught.
-            </p>
+            <p className="mt-2 text-zinc-300">Real Streakr&apos;s don&apos;t get caught.</p>
             <div className="mt-4 flex gap-3">
               <Link
                 href="/auth"
@@ -96,29 +91,29 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Open Selections */}
+      {/* Open Selections – 3x2 grid (6 max) visible to guests */}
       <section className="px-6 py-8">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="flex items-end justify-between mb-4">
             <h2 className="text-2xl md:text-3xl font-bold">Open Selections</h2>
-            <Link
-              href="/leaderboard"
-              className="text-sm text-zinc-400 hover:text-orange-400"
-            >
-              View Leaderboard →
-            </Link>
+            <div className="flex gap-4 text-sm">
+              <Link href="/picks" className="text-zinc-400 hover:text-orange-400">
+                All Picks →
+              </Link>
+              <Link href="/leaderboard" className="text-zinc-400 hover:text-orange-400">
+                Leaderboard →
+              </Link>
+            </div>
           </div>
 
           {games.length === 0 ? (
-            <p className="text-zinc-400">
-              No open selections right now. Check back soon.
-            </p>
+            <p className="text-zinc-400">No open selections right now. Check back soon.</p>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2">
-              {games.map((g) => (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {games.slice(0, 6).map((g) => (
                 <article
                   key={g.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 hover:border-orange-500 transition"
+                  className="bg-zinc-900/70 border border-zinc-800 rounded-2xl p-4 hover:border-orange-500 transition"
                 >
                   <header className="mb-2">
                     <h3 className="text-lg font-semibold">{g.match}</h3>
@@ -135,13 +130,14 @@ export default function HomePage() {
                       </li>
                     ))}
                     {(g.questions?.length ?? 0) > 3 && (
-                      <li className="text-zinc-500">
-                        + {(g.questions!.length - 3)} more…
-                      </li>
+                      <li className="text-zinc-500">+ {(g.questions!.length - 3)} more…</li>
                     )}
                   </ul>
 
-                  <footer className="mt-3">
+                  <footer className="mt-3 flex items-center justify-between">
+                    <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
+                      {(g.status ?? "open").toUpperCase()}
+                    </span>
                     <Link
                       href={`/picks?game=${encodeURIComponent(g.id)}`}
                       className="inline-block text-sm text-orange-400 hover:underline"
