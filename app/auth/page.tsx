@@ -19,7 +19,7 @@ import {
   User,
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebaseClient";
+import { auth, clientDb as db } from "@/lib/firebaseClient";
 
 // --- Types ---
 type TeamOption =
