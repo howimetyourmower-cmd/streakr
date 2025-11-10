@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "./config/firebaseClient";
+import { auth, db } from "@/lib/firebase client";
 
 type Question = { quarter: number; question: string };
 type Game = {
