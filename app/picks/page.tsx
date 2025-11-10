@@ -4,23 +4,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import {
-  collection,
-  getDocs,
-  doc,
-  getDoc,
-  updateDoc,
-  increment,
-} from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, increment } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseClient";
 
 type Question = {
   quarter: number;
   question: string;
   status?: "open" | "pending" | "final" | "void";
-  yesPct?: number; // optional – if you store it
-  noPct?: number;  // optional – if you store it
-  commentsCount?: number; // optional – if you store it
+  yesPct?: number;
+  noPct?: number;
+  commentsCount?: number;
 };
 
 type Game = {
@@ -35,7 +28,7 @@ type Game = {
 
 function fmt(t?: string) {
   if (!t) return "TBA";
-  return t; // keep simple; you can swap to luxon/dayjs later
+  return t;
 }
 
 export default function PicksPage() {
@@ -43,24 +36,19 @@ export default function PicksPage() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Auth (only to enable buttons; guests still see content)
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
-  // Load games
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDocs(collection(db, "games"));
-        const data = snap.docs.map((d) => ({
-          id: d.id,
-          questions: [],
-          ...(d.data() as Omit<Game, "id">),
-        })) as Game[];
-
-        // only show open selections as per your spec
+        const data = snap.docs.map((d) => {
+          const gameData = d.data() as Omit<Game, "id">;
+          return { id: d.id, ...gameData };
+        }) as Game[];
         const open = data.filter((g) => (g.status ?? "open") === "open");
         setGames(open);
       } finally {
@@ -69,10 +57,8 @@ export default function PicksPage() {
     })();
   }, []);
 
-  // Example write handler (NO-OP if guest). You can wire this to your picks collection later.
   async function handlePick(gameId: string, qIndex: number, choice: "yes" | "no") {
-    if (!user) return; // guests can’t make picks
-    // Placeholder: bump a count field on the game doc (adjust to your schema)
+    if (!user) return;
     const ref = doc(db, "games", gameId);
     try {
       await updateDoc(ref, {
@@ -145,7 +131,6 @@ export default function PicksPage() {
                   </span>
                 </div>
 
-                {/* Questions grid – compact tiles */}
                 <div className="grid gap-3 md:grid-cols-2">
                   {g.questions?.map((q, i) => (
                     <article
@@ -163,15 +148,6 @@ export default function PicksPage() {
 
                       <p className="text-sm text-zinc-200">{q.question}</p>
 
-                      {/* Percentages row (shown only if you store them) */}
-                      {(typeof q.yesPct === "number" || typeof q.noPct === "number") && (
-                        <div className="mt-2 flex items-center gap-4 text-xs text-zinc-400">
-                          {typeof q.yesPct === "number" && <span>Yes: {q.yesPct}%</span>}
-                          {typeof q.noPct === "number" && <span>No: {q.noPct}%</span>}
-                        </div>
-                      )}
-
-                      {/* Actions */}
                       <div className="mt-3 flex items-center justify-between">
                         <div className="flex gap-2">
                           <button
@@ -201,12 +177,10 @@ export default function PicksPage() {
                         </div>
 
                         <Link
-                          href={`/discussion?game=${encodeURIComponent(
-                            g.id
-                          )}&q=${i}`}
+                          href={`/discussion?game=${encodeURIComponent(g.id)}&q=${i}`}
                           className="text-xs text-zinc-400 hover:text-orange-400"
                         >
-                          Discuss{typeof q.commentsCount === "number" ? ` (${q.commentsCount})` : ""}
+                          Discuss
                         </Link>
                       </div>
                     </article>
