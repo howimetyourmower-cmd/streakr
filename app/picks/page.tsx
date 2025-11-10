@@ -91,7 +91,7 @@ function pct(yes?: number, no?: number): { yes: number; no: number } {
 // -------------------- Page --------------------
 export default function PicksPage() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<ReturnType<typeof auth.currentUser>>(null);
   const [loading, setLoading] = useState(true);
   const [round, setRound] = useState<RoundDoc | null>(null);
 
