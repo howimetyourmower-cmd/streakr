@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getFirestore, collection, getDocs, query, orderBy, limit } from "firebase/firestore";
-import { app } from "../config/firebaseClient"; // <- your path is app/config/firebaseClient.ts
+import { auth, db } from "@/lib/firebaseClient";
+
 
 type Row = {
   id: string;
