@@ -36,24 +36,3 @@ export default function AuthOrLink({
     </Link>
   );
 }
-
-
-  // Logged in -> either run handler or navigate to a provided href
-  if (hrefWhenAuthed) {
-    return (
-      <Link href={hrefWhenAuthed} className={className}>
-        {children}
-      </Link>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      className={className}
-      onClick={onAuthedClick}
-    >
-      {children}
-    </button>
-  );
-}
