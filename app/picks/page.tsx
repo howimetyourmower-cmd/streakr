@@ -1,109 +1,218 @@
 // app/picks/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { collection, getDocs } from "firebase/firestore";
 import { onAuthStateChanged, type User } from "firebase/auth";
+import {
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  updateDoc,
+  increment,
+} from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseClient";
 
 type Question = {
   quarter: number;
   question: string;
+  status?: "open" | "pending" | "final" | "void";
+  yesPct?: number; // optional – if you store it
+  noPct?: number;  // optional – if you store it
+  commentsCount?: number; // optional – if you store it
 };
 
 type Game = {
   id: string;
   match: string;
   startTime?: string;
-  questions?: Question[];
+  tz?: string;
+  venue?: string;
+  status?: "open" | "pending" | "final";
+  questions: Question[];
 };
 
+function fmt(t?: string) {
+  if (!t) return "TBA";
+  return t; // keep simple; you can swap to luxon/dayjs later
+}
+
 export default function PicksPage() {
-  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Watch auth state
+  // Auth (only to enable buttons; guests still see content)
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
+    const unsub = onAuthStateChanged(auth, setUser);
     return () => unsub();
   }, []);
 
-  // Load games from Firestore
+  // Load games
   useEffect(() => {
-    async function fetchGames() {
+    (async () => {
       try {
-        const snapshot = await getDocs(collection(db, "games"));
-        const data: Game[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Omit<Game, "id">),
-        }));
-        setGames(data);
-      } catch (error) {
-        console.error("Error loading picks:", error);
+        const snap = await getDocs(collection(db, "games"));
+        const data = snap.docs.map((d) => ({
+          id: d.id,
+          questions: [],
+          ...(d.data() as Omit<Game, "id">),
+        })) as Game[];
+
+        // only show open selections as per your spec
+        const open = data.filter((g) => (g.status ?? "open") === "open");
+        setGames(open);
       } finally {
         setLoading(false);
       }
-    }
-
-    fetchGames();
+    })();
   }, []);
+
+  // Example write handler (NO-OP if guest). You can wire this to your picks collection later.
+  async function handlePick(gameId: string, qIndex: number, choice: "yes" | "no") {
+    if (!user) return; // guests can’t make picks
+    // Placeholder: bump a count field on the game doc (adjust to your schema)
+    const ref = doc(db, "games", gameId);
+    try {
+      await updateDoc(ref, {
+        [`questions.${qIndex}.${choice}Votes`]: increment(1),
+      });
+    } catch (e) {
+      console.warn("Pick write not configured yet:", e);
+    }
+  }
+
+  const signedOutBanner = useMemo(
+    () =>
+      !user ? (
+        <div className="mb-4 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 text-sm text-zinc-300">
+          You’re viewing as a guest. <b>Sign in</b> to make picks and build your streak.{" "}
+          <Link href="/auth" className="text-orange-400 hover:underline">
+            Go to sign in →
+          </Link>
+        </div>
+      ) : null,
+    [user]
+  );
 
   if (loading) {
     return (
-      <main className="flex items-center justify-center h-screen bg-black text-white">
-        <p>Loading picks...</p>
-      </main>
-    );
-  }
-
-  if (!user) {
-    return (
-      <main className="flex flex-col items-center justify-center h-screen bg-black text-white">
-        <p className="mb-4 text-zinc-400">You must be signed in to view picks.</p>
-        <Link href="/auth" className="text-orange-500 hover:underline">
-          Go to sign in →
-        </Link>
+      <main className="grid place-items-center min-h-screen bg-black text-white">
+        <p>Loading picks…</p>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-extrabold text-orange-500 mb-6">🔥 Streakr Picks</h1>
+    <main className="min-h-screen bg-black text-white px-6 py-6">
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="mb-6 flex items-center justify-between">
+          <h1 className="text-3xl font-extrabold">
+            🔥 Streakr <span className="text-orange-500">Picks</span>
+          </h1>
+          <nav className="text-sm">
+            <Link href="/" className="text-zinc-400 hover:text-white mr-4">
+              Home
+            </Link>
+            <Link href="/leaderboard" className="text-zinc-400 hover:text-white">
+              Leaderboards
+            </Link>
+          </nav>
+        </header>
+
+        {signedOutBanner}
 
         {games.length === 0 ? (
-          <p className="text-zinc-400 text-center">No games available right now.</p>
+          <p className="text-zinc-400">No open selections right now.</p>
         ) : (
           <div className="space-y-6">
-            {games.map((game) => (
-              <div
-                key={game.id}
-                className="bg-zinc-900 border border-zinc-700 rounded-2xl p-4 hover:border-orange-500 transition"
+            {games.map((g) => (
+              <section
+                key={g.id}
+                className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4"
               >
-                <h2 className="text-xl font-semibold mb-1">{game.match}</h2>
-                <p className="text-zinc-400 text-sm mb-2">
-                  {game.startTime ? `Start: ${game.startTime}` : "Start time TBA"}
-                </p>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-xl font-semibold">{g.match}</h2>
+                    <p className="text-sm text-zinc-400">
+                      {fmt(g.startTime)}
+                      {g.venue ? ` • ${g.venue}` : ""}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
+                    {(g.status ?? "open").toUpperCase()}
+                  </span>
+                </div>
 
-                {game.questions?.length ? (
-                  <ul className="space-y-1">
-                    {game.questions.map((q, i) => (
-                      <li key={i} className="text-sm text-zinc-300">
-                        Q{q.quarter}: {q.question}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="text-zinc-500 text-sm">No questions available yet.</p>
-                )}
-              </div>
+                {/* Questions grid – compact tiles */}
+                <div className="grid gap-3 md:grid-cols-2">
+                  {g.questions?.map((q, i) => (
+                    <article
+                      key={i}
+                      className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-3"
+                    >
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+                          Q{q.quarter}
+                        </span>
+                        <span className="text-xs text-zinc-400">
+                          {(q.status ?? "open").toUpperCase()}
+                        </span>
+                      </div>
+
+                      <p className="text-sm text-zinc-200">{q.question}</p>
+
+                      {/* Percentages row (shown only if you store them) */}
+                      {(typeof q.yesPct === "number" || typeof q.noPct === "number") && (
+                        <div className="mt-2 flex items-center gap-4 text-xs text-zinc-400">
+                          {typeof q.yesPct === "number" && <span>Yes: {q.yesPct}%</span>}
+                          {typeof q.noPct === "number" && <span>No: {q.noPct}%</span>}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="mt-3 flex items-center justify-between">
+                        <div className="flex gap-2">
+                          <button
+                            disabled={!user || (q.status ?? "open") !== "open"}
+                            onClick={() => handlePick(g.id, i, "yes")}
+                            className={[
+                              "rounded-lg px-3 py-1.5 text-sm font-semibold transition",
+                              user && (q.status ?? "open") === "open"
+                                ? "bg-orange-500 text-black hover:bg-orange-600"
+                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed",
+                            ].join(" ")}
+                          >
+                            Yes
+                          </button>
+                          <button
+                            disabled={!user || (q.status ?? "open") !== "open"}
+                            onClick={() => handlePick(g.id, i, "no")}
+                            className={[
+                              "rounded-lg px-3 py-1.5 text-sm font-semibold transition",
+                              user && (q.status ?? "open") === "open"
+                                ? "bg-zinc-700 text-white hover:bg-zinc-600"
+                                : "bg-zinc-800 text-zinc-500 cursor-not-allowed",
+                            ].join(" ")}
+                          >
+                            No
+                          </button>
+                        </div>
+
+                        <Link
+                          href={`/discussion?game=${encodeURIComponent(
+                            g.id
+                          )}&q=${i}`}
+                          className="text-xs text-zinc-400 hover:text-orange-400"
+                        >
+                          Discuss{typeof q.commentsCount === "number" ? ` (${q.commentsCount})` : ""}
+                        </Link>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}
