@@ -4,139 +4,157 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { useRouter } from "next/navigation";
 import { app } from "./config/firebaseClient";
 
-// -------- Types --------
+// ===== Types =====
 type Question = {
   quarter: number;
   question: string;
-  yesPct?: number;
-  noPct?: number;
-  comments?: number;
-  status?: "OPEN" | "PENDING" | "FINAL";
+  // future: status, pctYes, pctNo, commentsCount, etc.
 };
 
 type Game = {
   match: string;
-  startTime?: any; // Firestore Timestamp | ISO string
-  date?: string;
-  time?: string;
-  tz?: string;
-  venue?: string;
+  startTime?: any;   // Firestore Timestamp | string
+  date?: string;     // optional, not required if startTime present
+  time?: string;     // optional, not required if startTime present
+  tz?: string;       // e.g., "AEDT"
+  venue?: string;    // e.g., "MCG, Melbourne"
   questions: Question[];
 };
 
 type RoundDoc = { games: Game[] };
 
-const CURRENT_ROUND = 1;
+// ===== Config =====
+const CURRENT_ROUND_ID = "round-1"; // change later for Opening Round / Finals
 
-// -------- Helpers --------
-function isFsTimestamp(v: any): v is { seconds: number } {
+function isFSTimestamp(v: any): v is { seconds: number } {
   return v && typeof v.seconds === "number";
 }
 
-function kickoffMs(g: Game): number {
-  if (isFsTimestamp(g.startTime)) return g.startTime.seconds * 1000;
-  if (typeof g.startTime === "string") {
-    const d = new Date(g.startTime);
-    return isNaN(d.getTime()) ? Number.MAX_SAFE_INTEGER : d.getTime();
+function toDateMaybe(v: any): Date | null {
+  try {
+    if (!v) return null;
+    if (isFSTimestamp(v)) return new Date(v.seconds * 1000);
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
   }
-  return Number.MAX_SAFE_INTEGER;
 }
 
-function whenText(g: Game): string {
-  if (isFsTimestamp(g.startTime)) {
-    const dt = new Date(g.startTime.seconds * 1000);
-    const date = dt.toLocaleDateString("en-AU", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
-    const time = dt.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: true });
-    return `${date}, ${time} AEDT • ${g.venue ?? "TBD"}`;
+function formatStart(game: Game): { line: string; isFuture: boolean } {
+  // Priority: startTime -> (date+time+tz) -> "TBD"
+  const d = toDateMaybe(game.startTime);
+  if (d) {
+    const opts: Intl.DateTimeFormatOptions = {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    };
+    const line =
+      `${d.toLocaleDateString(undefined, opts)} · ` +
+      (game.tz ? `${game.tz} · ` : "") +
+      (game.venue ?? "TBD");
+    return { line, isFuture: d.getTime() > Date.now() };
   }
-  if (g.date && g.time) return `${g.date}, ${g.time}${g.tz ? ` ${g.tz}` : ""} • ${g.venue ?? "TBD"}`;
-  if (typeof g.startTime === "string") return `${g.startTime}${g.venue ? ` • ${g.venue}` : ""}`;
-  return `TBD${g.venue ? ` • ${g.venue}` : ""}`;
+
+  // Fall back to date/time strings if provided
+  if (game.date || game.time || game.venue || game.tz) {
+    const parts = [
+      game.date?.trim(),
+      game.time?.trim(),
+      game.tz?.trim(),
+      game.venue?.trim(),
+    ].filter(Boolean);
+    const line = parts.length ? parts.join(" · ") : "TBD";
+    // If we only have strings, assume OPEN (future) so it lists on homepage
+    return { line, isFuture: true };
+  }
+
+  return { line: "TBD", isFuture: true };
 }
 
 export default function HomePage() {
   const db = useMemo(() => getFirestore(app), []);
-  const auth = useMemo(() => getAuth(app), []);
-  const router = useRouter();
-
-  const [user, setUser] = useState<null | { uid: string }>(null);
-  const [round, setRound] = useState<RoundDoc | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u ? { uid: u.uid } : null));
-    return () => unsub();
-  }, [auth]);
+  const [games, setGames] = useState<Game[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const id = CURRENT_ROUND === 1 ? "round-1" : `round-${CURRENT_ROUND}`;
-        const ref = doc(db, "rounds", id);
+        const ref = doc(db, "rounds", CURRENT_ROUND_ID);
         const snap = await getDoc(ref);
-        setRound(snap.exists() ? (snap.data() as RoundDoc) : { games: [] });
+        if (!snap.exists()) {
+          setGames([]);
+          return;
+        }
+        const data = snap.data() as RoundDoc;
+        setGames(Array.isArray(data.games) ? data.games : []);
       } catch (e: any) {
-        console.error(e);
-        setErr(e?.message || "Failed to load data");
-        setRound({ games: [] });
-      } finally {
-        setLoading(false);
+        setError(e?.message || "Failed to load");
+        setGames([]);
       }
     })();
   }, [db]);
 
-  // -------- Only OPEN questions --------
-  const sixOpen = useMemo(() => {
-    if (!round?.games?.length) return [];
-    const pool = round.games.flatMap((g) => {
-      const t = kickoffMs(g);
-      return g.questions
-        .filter((q) => (q.status ?? "OPEN") === "OPEN") // only OPEN
-        .map((q) => ({ game: g, q, t }));
+  const openSix = useMemo(() => {
+    if (!games) return [];
+    // Mark future/open by start time; if no parsable time we treat as open.
+    const withMeta = games.map((g) => {
+      const { isFuture, line } = formatStart(g);
+      return { ...g, __startLine: line, __isOpen: isFuture };
     });
-    pool.sort((a, b) => (a.t - b.t) || (a.q.quarter - b.q.quarter));
-    return pool.slice(0, 6);
-  }, [round]);
-
-  const handlePickClick = () => router.push("/picks");
+    const openGames = withMeta.filter((g) => g.__isOpen);
+    // Sort by start time ascending when possible
+    openGames.sort((a, b) => {
+      const da = toDateMaybe(a.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const dbb = toDateMaybe(b.startTime)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return da - dbb;
+    });
+    return openGames.slice(0, 6);
+  }, [games]);
 
   return (
-    <main className="min-h-screen">
+    <main className="min-h-screen w-full text-white">
       {/* HERO */}
-      <section className="relative w-full overflow-hidden">
-        <div className="relative h-[44vh] md:h-[52vh] w-full">
+      <section className="relative w-full">
+        <div className="relative w-full h-[360px] md:h-[460px] lg:h-[520px]">
+          {/* Keep full image visible: object-contain (no cropping) */}
           <Image
             src="/mcg-hero.jpg"
-            alt="MCG at dusk"
+            alt="MCG twilight hero"
             fill
             priority
-            sizes="100vw"
-            className="object-cover"
+            style={{ objectFit: "contain", objectPosition: "center bottom" }}
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/35 to-black/65" />
-          <div className="relative z-10 max-w-6xl mx-auto px-4 md:px-6 h-full flex flex-col justify-center gap-4">
-            <h1 className="text-4xl md:text-6xl font-extrabold text-white leading-tight max-w-3xl">
-              <span className="text-white">Real Streakr’s</span>{" "}
-              <span className="text-orange-500">don’t get Caught.</span>
+          {/* Subtle top gradient for text readability */}
+          <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/40 to-transparent pointer-events-none" />
+        </div>
+
+        {/* Headline & CTA overlay (floating over hero bottom) */}
+        <div className="absolute inset-0 flex items-end">
+          <div className="container mx-auto px-4 pb-6">
+            <h1 className="text-4xl md:text-6xl font-extrabold leading-[1.05]">
+              <span className="text-white">Real Streakr’s </span>
+              <span className="text-orange-500">don’t get caught.</span>
             </h1>
-            <p className="text-white/80 max-w-2xl">
+            <p className="mt-3 text-sm md:text-base text-white/80 max-w-2xl">
               Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
             </p>
-            <div className="flex gap-3">
-              <button
-                onClick={() => router.push("/picks")}
-                className="px-4 py-2 rounded-xl bg-orange-500 text-black font-semibold hover:opacity-90 transition"
+
+            <div className="mt-5 flex gap-3">
+              <Link
+                href="/picks"
+                className="rounded-2xl px-5 py-3 bg-orange-500/90 hover:bg-orange-500 transition font-semibold"
               >
                 Make your first pick
-              </button>
+              </Link>
               <Link
                 href="/leaderboards"
-                className="px-4 py-2 rounded-xl bg-white/10 text-white hover:bg-white/15 transition"
+                className="rounded-2xl px-5 py-3 bg-white/15 hover:bg-white/25 transition font-semibold"
               >
                 Leaderboard
               </Link>
@@ -145,77 +163,84 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* SPONSOR BANNER */}
-      <div className="max-w-6xl mx-auto px-4 md:px-6">
-        <div className="mt-6 mb-8 rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-white/70">
-          Sponsor banner • 970×90
+      {/* Sponsor banner (moved below the image so whole MCG is visible) */}
+      <section className="container mx-auto px-4 mt-6">
+        <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm px-4 py-6 text-center">
+          <div className="text-white/70">Sponsor banner • 970×90</div>
         </div>
-      </div>
+      </section>
 
-      {/* SIX OPEN SELECTIONS */}
-      <section className="max-w-6xl mx-auto px-4 md:px-6 pb-12">
-        <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-4">Round {CURRENT_ROUND} Open Picks</h2>
+      {/* Open picks grid */}
+      <section className="container mx-auto px-4 mt-10 mb-16">
+        <h2 className="text-2xl md:text-3xl font-bold">Round 1 Open Picks</h2>
 
-        {loading && <div className="text-white/80">Loading…</div>}
-        {!loading && err && (
-          <div className="text-red-400 bg-red-950/30 border border-red-900/40 rounded-xl p-4 mb-6">{err}</div>
+        {error && (
+          <p className="mt-3 text-red-300 text-sm">
+            {error}
+          </p>
         )}
 
-        {!loading && sixOpen.length === 0 && (
-          <div className="text-white/70">No open questions right now. Check back soon!</div>
+        {!games && (
+          <p className="mt-6 text-white/70">Loading…</p>
         )}
 
-        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {sixOpen.map(({ game, q }, idx) => {
-            const yes = typeof q.yesPct === "number" ? q.yesPct : 0;
-            const no = typeof q.noPct === "number" ? q.noPct : 0;
-            const comments = typeof q.comments === "number" ? q.comments : 0;
+        {games && openSix.length === 0 && (
+          <p className="mt-6 text-white/70">No open picks right now. Check back soon.</p>
+        )}
+
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {openSix.map((game, gi) => {
+            const startLine = (game as any).__startLine as string;
+            const firstQ = game.questions?.[0];
+            const qLabel = firstQ ? `Q${firstQ.quarter}` : "Q1";
+            const qText = firstQ?.question ?? "Selection available";
 
             return (
-              <article
-                key={`${game.match}-Q${q.quarter}-${idx}`}
-                className="rounded-2xl border border-white/10 bg-white/5 p-4 hover:bg-white/[0.07] transition"
+              <div
+                key={`${game.match}-${gi}`}
+                className="rounded-2xl border border-white/10 bg-white/5 p-4"
               >
-                <header className="mb-3">
-                  <h3 className="text-orange-400 font-extrabold tracking-wide uppercase">{game.match}</h3>
-                  <p className="text-white/70 text-sm">{whenText(game)}</p>
-                </header>
-
-                <div className="text-xs text-white/70 flex items-center gap-2 mb-1">
-                  <span className="px-2 py-0.5 rounded-md bg-white/10 font-bold">Q{q.quarter}</span>
-                  <span className="px-2 py-0.5 rounded-md bg-emerald-600/30 text-emerald-300 font-bold">
-                    {q.status ?? "OPEN"}
-                  </span>
-                  <span className="px-2 py-0.5 rounded-md bg-white/10">💬 {comments}</span>
+                <div className="text-xs tracking-widest font-semibold text-orange-400">
+                  {game.match?.toUpperCase() || "TBD"}
                 </div>
+                <div className="mt-1 text-white/70 text-sm">{startLine}</div>
 
-                <p className="text-white font-semibold leading-snug mb-3">{q.question}</p>
-
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={handlePickClick}
-                      className="px-3 py-1.5 rounded-lg font-semibold text-black bg-[#ff7a00] hover:opacity-90 transition"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={handlePickClick}
-                      className="px-3 py-1.5 rounded-lg font-semibold text-white bg-[#6f3aff] hover:opacity-90 transition"
-                    >
-                      No
-                    </button>
-                    <span className="text-xs text-white/70 ml-2 whitespace-nowrap">Yes {yes}% • No {no}%</span>
+                <div className="mt-4 rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center gap-2 text-xs text-white/80">
+                    <span className="rounded-md bg-white/15 px-2 py-1">{qLabel}</span>
+                    <span className="rounded-md bg-green-600/25 px-2 py-1">OPEN</span>
                   </div>
 
-                  <Link
-                    href="/picks"
-                    className="px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/15 transition text-sm"
-                  >
-                    See Other Picks
-                  </Link>
+                  <p className="mt-3 text-base md:text-lg">{qText}</p>
+
+                  {/* Actions */}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex gap-2">
+                      <button
+                        className="rounded-lg px-4 py-2 font-semibold bg-orange-500 hover:bg-orange-600 transition"
+                        disabled
+                        title="Sign up to pick (home preview)"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        className="rounded-lg px-4 py-2 font-semibold bg-purple-600 hover:bg-purple-700 transition"
+                        disabled
+                        title="Sign up to pick (home preview)"
+                      >
+                        No
+                      </button>
+                    </div>
+
+                    <Link
+                      href="/picks"
+                      className="rounded-lg px-4 py-2 font-semibold bg-white/10 hover:bg-white/20 transition"
+                    >
+                      See other picks
+                    </Link>
+                  </div>
                 </div>
-              </article>
+              </div>
             );
           })}
         </div>
