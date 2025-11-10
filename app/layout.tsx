@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 
 export const metadata: Metadata = {
-  title: "STREAKr AFL",
+  title: "STREAKr",
   description: "Build your streak. Win the round.",
 };
 
