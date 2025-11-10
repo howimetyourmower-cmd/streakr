@@ -1,77 +1,52 @@
-import * as functions from "firebase-functions";
+// Import Firebase Admin and Cloud Functions SDKs
 import * as admin from "firebase-admin";
-admin.initializeApp();
-const db = admin.firestore();
+import * as functions from "firebase-functions";
 
-admin.initializeApp();
+// Initialize the Firebase Admin SDK once
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
+// Create a Firestore database reference
 const db = admin.firestore();
 
 /**
- * Recalculate streak for a single user incrementally when a pick is settled.
- * Trigger: when a pick moves to FINAL or VOID, or its result changes.
+ * Example Cloud Function:
+ * When called, this function adds an admin user to the /admins collection.
+ * You can modify or add more admin-only utilities here.
  */
-export const onPickSettled = functions.firestore
-  .document("picks/{pickId}")
-  .onWrite(async (change, context) => {
-    const after = change.after.exists ? change.after.data() as any : null;
-    const before = change.before.exists ? change.before.data() as any : null;
-
-    // Only react when becoming FINAL/VOID or result changed.
-    const becameFinal =
-      after && (after.status === "FINAL" || after.status === "VOID") &&
-      (!before || before.status !== after.status || before.result !== after.result);
-
-    if (!becameFinal) return;
-
-    const uid: string = after.uid;
-    const lbRef = db.collection("leaderboard").doc(uid);
-    const userRef = db.collection("users").doc(uid);
-
-    // Get (or derive) display fields
-    const userSnap = await userRef.get();
-    const user = userSnap.exists ? userSnap.data()! : {};
-    const displayName = user.displayName ?? "Player";
-    const team = user.team ?? null;
-    const avatarUrl = user.avatarUrl ?? null;
-
-    // Read current aggregate (with defaults)
-    const lbSnap = await lbRef.get();
-    const agg = lbSnap.exists
-      ? (lbSnap.data() as any)
-      : { currentStreak: 0, longestStreak: 0, totalWins: 0 };
-
-    let { currentStreak, longestStreak, totalWins } = agg;
-
-    // VOID does not change streaks
-    if (after.status === "VOID" || after.result === "VOID") {
-      // just touch updatedAt & ensure display fields are set
-      await lbRef.set(
-        { displayName, team, avatarUrl, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
-        { merge: true }
-      );
-      return;
-    }
-
-    const isCorrect = after.selection === after.result;
-
-    if (isCorrect) {
-      currentStreak += 1;
-      longestStreak = Math.max(longestStreak, currentStreak);
-      totalWins = (totalWins ?? 0) + 1;
-    } else {
-      currentStreak = 0; // streak broken
-    }
-
-    await lbRef.set(
-      {
-        displayName,
-        team,
-        avatarUrl,
-        currentStreak,
-        longestStreak,
-        totalWins,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
+export const addAdmin = functions.https.onCall(async (data, context) => {
+  // Ensure only authenticated users can call this
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Only authenticated users can add admins."
     );
+  }
+
+  const uid = data.uid;
+  if (!uid) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "A user UID must be provided."
+    );
+  }
+
+  await db.collection("admins").doc(uid).set({
+    role: "admin",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+
+  return { success: true, message: `User ${uid} has been made an admin.` };
+});
+
+/**
+ * Example Cloud Function to log new user creation (optional).
+ */
+export const onUserCreate = functions.auth.user().onCreate(async (user) => {
+  console.log("New user signed up:", user.uid, user.email);
+  await db.collection("users").doc(user.uid).set({
+    email: user.email,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+});
