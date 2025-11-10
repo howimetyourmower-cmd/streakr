@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { app } from "@/config/firebaseClient"; // ✅ keep this import name
+import { app } from "@/lib/firebaseClient"; // ✅ keep this import name
 const db = getFirestore(app);
 
 // ----- Types -----
