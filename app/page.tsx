@@ -57,7 +57,7 @@ function formatStart(g: Game): { line: string; isFuture: boolean } {
 
 // ---------- Page ----------
 export default function HomePage() {
-  const db = useMemo(() => getFirestore(app), []);
+  const db = useMemo(() => db, []);
   const [games, setGames] = useState<Game[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
