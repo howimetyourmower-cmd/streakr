@@ -1,43 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebaseClient";
+import { db } from "@/lib/firebaseClient";
 
+// ---------- Types ----------
 type Question = {
   quarter: number;
   question: string;
-  // future: status: "OPEN" | "PENDING" | "FINAL";
-  // future: yesPct?: number; noPct?: number;
 };
 
 type Game = {
   match: string;
-  startTime?: any;   // Firestore Timestamp or ISO string
+  startTime?: any;     // Firestore Timestamp or string
   venue?: string;
   questions: Question[];
 };
 
-type RoundDoc = { games: Game[] };
+type RoundDoc = {
+  games: Game[];
+};
 
-function toDate(v: any): Date | null {
-  if (!v) return null;
-  // Firestore Timestamp
-  if (typeof v === "object" && typeof v.seconds === "number") {
-    return new Date(v.seconds * 1000);
-  }
-  // ISO string
-  if (typeof v === "string") {
-    const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-
-function formatStart(d: Date | null): string {
-  if (!d) return "TBD";
+// ---------- Helpers ----------
+function formatFromDate(d: Date): string {
   return d.toLocaleString("en-AU", {
     weekday: "short",
     day: "numeric",
@@ -49,190 +35,215 @@ function formatStart(d: Date | null): string {
   });
 }
 
-function deriveStatus(start: Date | null): "OPEN" | "PENDING" {
-  if (!start) return "OPEN";
-  const now = Date.now();
-  return now < start.getTime() ? "OPEN" : "PENDING";
+/** Accepts Timestamp | ISO string | human string | undefined. Returns label to render. */
+function startLabel(raw: any): string {
+  if (!raw) return "TBD";
+
+  // Firestore Timestamp {seconds, nanoseconds}
+  if (typeof raw === "object" && typeof raw.seconds === "number") {
+    const d = new Date(raw.seconds * 1000);
+    return formatFromDate(d);
+  }
+
+  // String forms
+  if (typeof raw === "string") {
+    // Try ISO parse first
+    const iso = new Date(raw);
+    if (!isNaN(iso.getTime())) {
+      return formatFromDate(iso);
+    }
+    // Not ISO → show the original text (manual/human)
+    return raw;
+  }
+
+  return "TBD";
 }
 
+/** Status for display (OPEN if now < start, else PENDING) */
+function deriveStatusFromRaw(raw: any): "OPEN" | "PENDING" {
+  let d: Date | null = null;
+  if (raw && typeof raw === "object" && typeof raw.seconds === "number") {
+    d = new Date(raw.seconds * 1000);
+  } else if (typeof raw === "string") {
+    const t = new Date(raw);
+    if (!isNaN(t.getTime())) d = t;
+  }
+  if (!d) return "OPEN";
+  return Date.now() < d.getTime() ? "OPEN" : "PENDING";
+}
+
+// ---------- Page ----------
+const CURRENT_ROUND_DOC_ID = "round-1"; // update when changing rounds
+
 export default function PicksPage() {
-  const router = useRouter();
-  const [games, setGames] = useState<Game[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [round, setRound] = useState<RoundDoc | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        // Load Round 1 (adjust when you introduce Opening Round / finals)
-        const ref = doc(db, "rounds", "round-1");
+        const ref = doc(db, "rounds", CURRENT_ROUND_DOC_ID);
         const snap = await getDoc(ref);
         if (!snap.exists()) {
-          setGames([]);
+          if (!cancelled) {
+            setError(`No questions found for ${CURRENT_ROUND_DOC_ID.replace("round-","Round ")}`);
+            setLoading(false);
+          }
           return;
         }
         const data = snap.data() as RoundDoc;
-        setGames(data.games ?? []);
+        if (!cancelled) {
+          setRound(data);
+          setLoading(false);
+        }
       } catch (e: any) {
-        setErr(e?.message ?? "Failed to load picks.");
-        setGames([]);
+        if (!cancelled) {
+          setError(e?.message || "Failed to load picks.");
+          setLoading(false);
+        }
       }
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const rows = useMemo(() => {
-    if (!games) return [];
-    const r: Array<{
+    if (!round?.games?.length) return [];
+
+    // Flatten games → rows
+    const out: Array<{
       startText: string;
-      match: string;
-      qNum: string;
-      question: string;
       status: "OPEN" | "PENDING";
-      venue: string;
-      game: Game;
-      q: Question;
+      match: string;
+      venue?: string;
+      qnum: number;
+      qtext: string;
     }> = [];
-    for (const g of games) {
-      const d = toDate(g.startTime);
-      const startText = `${formatStart(d)}`;
-      const status = deriveStatus(d);
-      const venue = g.venue ?? "";
-      for (const q of g.questions ?? []) {
-        r.push({
-          startText,
-          match: g.match,
-          qNum: `Q${q.quarter}`,
-          question: q.question,
+
+    for (const g of round.games) {
+      const label = startLabel(g.startTime);
+      const status = deriveStatusFromRaw(g.startTime);
+      for (const q of g.questions || []) {
+        out.push({
+          startText: label,
           status,
-          venue,
-          game: g,
-          q,
+          match: g.match,
+          venue: g.venue,
+          qnum: q.quarter,
+          qtext: q.question,
         });
       }
     }
-    return r;
-  }, [games]);
 
-  const onPick = (choice: "YES" | "NO", rowIdx: number) => {
-    const user = auth.currentUser;
-    if (!user) {
-      router.push("/auth"); // gate actual pick to signed-in users
-      return;
-    }
-    // TODO: write the pick to Firestore here (users/<uid>/picks/{round-1,...})
-    console.log("Pick", choice, rows[rowIdx]);
-  };
+    // Optional: sort by start time text (keeps current order if manual strings)
+    return out;
+  }, [round]);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
-      <h1 className="text-4xl font-extrabold tracking-tight mb-6">Make Picks</h1>
+    <div className="max-w-6xl mx-auto px-4 pb-24">
+      <h1 className="text-4xl font-extrabold mt-8 mb-6">Make Picks</h1>
 
-      {err && (
-        <div className="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200">
-          {err}
+      {loading && (
+        <div className="text-sm text-gray-300">Loading…</div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200">
+          {error}
         </div>
       )}
 
-      {!games && (
-        <div className="text-gray-300">Loading…</div>
+      {!loading && !error && rows.length === 0 && (
+        <div className="text-gray-300">No questions found for this round.</div>
       )}
 
-      {games && rows.length === 0 && !err && (
-        <div className="text-gray-300">No questions found for Round 1.</div>
-      )}
-
-      {rows.length > 0 && (
-        <div className="w-full overflow-x-auto rounded-xl border border-white/10 bg-gradient-to-b from-[#1B2330] to-[#161C24]">
+      {!loading && !error && rows.length > 0 && (
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#111825]">
           {/* Header */}
-          <div className="grid grid-cols-[160px_1fr_64px_minmax(240px,1.5fr)_120px_120px_140px] items-center gap-4 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-300 border-b border-white/10">
-            <div>Start</div>
-            <div>Match • Venue</div>
-            <div>Q#</div>
-            <div>Question</div>
-            <div>Status</div>
-            <div>Yes / No %</div>
-            <div className="text-right">Pick</div>
+          <div className="grid grid-cols-12 gap-2 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-300/90 bg-white/5">
+            <div className="col-span-2">Start</div>
+            <div className="col-span-4">Match • Venue</div>
+            <div className="col-span-1">Q#</div>
+            <div className="col-span-5">Question</div>
           </div>
 
           {/* Rows */}
-          <ul className="divide-y divide-white/10">
-            {rows.map((r, idx) => (
-              <li
-                key={idx}
-                className="grid grid-cols-[160px_1fr_64px_minmax(240px,1.5fr)_120px_120px_140px] items-center gap-4 px-4 py-3"
+          <div className="divide-y divide-white/5">
+            {rows.map((r, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-12 gap-2 px-4 py-4 items-center hover:bg-white/[0.03] transition-colors"
               >
-                {/* Start */}
-                <div className="text-sm text-gray-300 whitespace-nowrap">
-                  {r.startText}
-                </div>
-
-                {/* Match + Venue */}
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-orange-300 truncate">
-                    {r.match.toUpperCase()}
-                  </div>
-                  <div className="text-xs text-gray-400 truncate">{r.venue}</div>
-                </div>
-
-                {/* Q# */}
-                <div>
-                  <span className="inline-flex items-center rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-white">
-                    {r.qNum}
-                  </span>
-                </div>
-
-                {/* Question */}
-                <div className="min-w-0">
-                  <p className="text-sm text-gray-100 leading-tight line-clamp-2">
-                    {r.question}
-                  </p>
-                </div>
-
-                {/* Status */}
-                <div>
+                {/* Start + status */}
+                <div className="col-span-2 flex items-center gap-2">
+                  <span className="text-sm text-gray-200">{r.startText}</span>
                   <span
-                    className={
-                      "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold " +
-                      (r.status === "OPEN"
-                        ? "bg-green-500/15 text-green-300"
-                        : "bg-yellow-500/15 text-yellow-300")
-                    }
+                    className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                      r.status === "OPEN"
+                        ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                        : "bg-yellow-500/15 text-yellow-200 border-yellow-500/30"
+                    }`}
                   >
                     {r.status}
                   </span>
                 </div>
 
-                {/* Yes / No % (placeholder until we track votes) */}
-                <div className="text-sm text-gray-300">
-                  Yes 0% • No 0%
+                {/* Match • Venue */}
+                <div className="col-span-4">
+                  <div className="text-sm font-semibold text-orange-300">
+                    {r.match.toUpperCase()}
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {r.venue || "–"}
+                  </div>
                 </div>
 
-                {/* Pick buttons */}
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => onPick("YES", idx)}
-                    className="rounded-md bg-orange-500/90 hover:bg-orange-500 text-white px-3 py-1.5 text-sm font-semibold shadow-sm"
-                  >
-                    Yes
-                  </button>
-                  <button
-                    onClick={() => onPick("NO", idx)}
-                    className="rounded-md bg-purple-600/90 hover:bg-purple-600 text-white px-3 py-1.5 text-sm font-semibold shadow-sm"
-                  >
-                    No
-                  </button>
+                {/* Quarter badge */}
+                <div className="col-span-1">
+                  <span className="inline-flex items-center justify-center w-9 h-7 rounded-md bg-white/10 text-white/90 text-xs font-semibold">
+                    Q{r.qnum}
+                  </span>
                 </div>
-              </li>
+
+                {/* Question + actions */}
+                <div className="col-span-5">
+                  <div className="text-sm text-gray-100 mb-2">{r.qtext}</div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md bg-orange-500/90 hover:bg-orange-500 text-white"
+                      disabled
+                      title="Login required to pick"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      className="px-3 py-1.5 text-xs font-semibold rounded-md bg-purple-500/90 hover:bg-purple-500 text-white"
+                      disabled
+                      title="Login required to pick"
+                    >
+                      No
+                    </button>
+
+                    <Link
+                      href="/login"
+                      className="ml-3 text-xs text-gray-300 hover:text-white underline underline-offset-4"
+                    >
+                      Log in to make picks →
+                    </Link>
+                  </div>
+
+                  {/* Percentages placeholder */}
+                  <div className="mt-1 text-[11px] text-gray-400">
+                    Yes 0% • No 0%
+                  </div>
+                </div>
+              </div>
             ))}
-          </ul>
+          </div>
         </div>
       )}
-
-      {/* Back to home */}
-      <div className="mt-6">
-        <Link href="/" className="text-sm text-gray-400 hover:text-gray-200">
-          ← Back to Home
-        </Link>
-      </div>
     </div>
   );
 }
