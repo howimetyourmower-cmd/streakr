@@ -13,7 +13,7 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "firebase": "10.13.2",
-    "dayjs": "^1.11.10"
+    "dayjs": "^1.11.10",
     "firebase-functions": "^5.0.0",
     "firebase-admin": "^12.0.0"
   },
@@ -27,11 +27,5 @@
     "autoprefixer": "^10.4.19",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.4"
-  },
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
   }
 }
