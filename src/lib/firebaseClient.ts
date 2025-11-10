@@ -11,9 +11,8 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
 };
 
-// ✅ Only initialize once
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
-// ✅ Export instances (only one per app)
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export default app;
