@@ -15,7 +15,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
             <Link href="/" className="flex items-center gap-3">
-              <Image src="/streakrlogo.jpg" alt="STREAKr AFL" width={200} height={200} className="h-14 w-auto" />
+              <Image src="/streakrlogo.jpg" alt="STREAKr" width={200} height={200} className="h-14 w-auto" />
               <span className="text-xl font-extrabold tracking-wide">
                 STREAK<span className="text-orange-500">r</span> AFL
               </span>
