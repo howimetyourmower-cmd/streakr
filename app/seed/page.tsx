@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { getFirestore, doc, setDoc } from "firebase/firestore";
-import { app } from "../config/firebaseClient";
+import { auth, db } from "@/lib/firebaseClient";
 import Link from "next/link";
 
 type Question = { quarter: number; question: string };
