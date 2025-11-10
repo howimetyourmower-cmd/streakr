@@ -1,156 +1,166 @@
-// app/page.tsx
+// app/picks/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
-import { collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 
-type Question = { quarter: number; question: string };
-type Game = {
-  id: string;
-  match: string;
-  startTime?: string;
-  status?: "open" | "pending" | "final";
-  venue?: string;
-  questions?: Question[];
+type Question = {
+  quarter: number;
+  question: string;
 };
 
-export default function HomePage() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [loading, setLoading] = useState(true);
+type Game = {
+  match: string;
+  // startTime may be a Firestore Timestamp or a string (we support both)
+  startTime?: Timestamp | string;
+  venue?: string;
+  questions: Question[];
+};
+
+type RoundDoc = { games: Game[] };
+
+function isFSTimestamp(v: any): v is Timestamp {
+  return v && typeof v.seconds === "number" && typeof v.nanoseconds === "number";
+}
+
+function formatStart(start?: Timestamp | string) {
+  if (!start) return "TBD";
+  try {
+    const d = isFSTimestamp(start)
+      ? start.toDate()
+      : new Date(String(start)); // handles ISO strings or “Thu, 19 Mar 2026, 7:20 PM AEDT”
+    if (isNaN(d.getTime())) return "TBD";
+    // Show like: Thu, 19 Mar • 7:20 pm
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return "TBD";
+  }
+}
+
+export default function PicksPage() {
+  const [games, setGames] = useState<Game[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, "games"));
-        const all = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Game, "id">) })) as Game[];
-        // Show only OPEN selections on the home page
-        const open = all.filter((g) => (g.status ?? "open") === "open");
-        setGames(open);
+        // IMPORTANT: rounds / round-1
+        const ref = doc(db, "rounds", "round-1");
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          setGames([]);
+          return;
+        }
+        const data = snap.data() as RoundDoc;
+        setGames(Array.isArray(data.games) ? data.games : []);
       } catch (e: any) {
         console.error(e);
-        setError("Failed to load games.");
-      } finally {
-        setLoading(false);
+        setError(e?.message ?? "Failed to load picks.");
+        setGames([]);
       }
     })();
   }, []);
 
-  if (loading) {
-    return (
-      <main className="h-screen flex items-center justify-center bg-black text-white">
-        <p>Loading…</p>
-      </main>
-    );
-  }
-
-  if (error) {
-    return (
-      <main className="h-screen flex items-center justify-center bg-black text-red-400">
-        <p>{error}</p>
-      </main>
-    );
-  }
-
-  return (
-    <main className="min-h-screen bg-black text-white">
-      {/* Hero */}
-      <section className="relative w-full">
-        <div className="relative h-[42vh] md:h-[56vh] w-full">
-          <Image
-            src="/mcg-hero.jpg"
-            alt="MCG hero"
-            fill
-            priority
-            className="object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/40" />
-          <div className="absolute bottom-6 left-6 right-6">
-            <h1 className="text-4xl md:text-5xl font-extrabold">
-              STREAK<span className="text-orange-500">r</span>
-            </h1>
-            <p className="mt-2 text-zinc-300">Real Streakr&apos;s don&apos;t get caught.</p>
-            <div className="mt-4 flex gap-3">
-              <Link
-                href="/auth"
-                className="bg-orange-500 text-black px-4 py-2 rounded-xl font-semibold hover:bg-orange-600 transition"
-              >
-                Sign up / Log in
-              </Link>
-              <Link
-                href="/picks"
-                className="border border-zinc-700 px-4 py-2 rounded-xl hover:border-orange-500 transition"
-              >
-                View Picks
-              </Link>
-            </div>
-          </div>
+  const content = useMemo(() => {
+    if (!games) {
+      return (
+        <div className="text-sm text-zinc-400">Loading…</div>
+      );
+    }
+    if (games.length === 0) {
+      return (
+        <div className="text-sm text-zinc-400">
+          No questions found for Round 1.
         </div>
-      </section>
+      );
+    }
 
-      {/* Open Selections – 3x2 grid (6 max) visible to guests */}
-      <section className="px-6 py-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-end justify-between mb-4">
-            <h2 className="text-2xl md:text-3xl font-bold">Open Selections</h2>
-            <div className="flex gap-4 text-sm">
-              <Link href="/picks" className="text-zinc-400 hover:text-orange-400">
-                All Picks →
-              </Link>
-              <Link href="/leaderboard" className="text-zinc-400 hover:text-orange-400">
-                Leaderboard →
-              </Link>
+    return (
+      <div className="space-y-8">
+        {games.map((g, gi) => (
+          <div key={gi} className="rounded-2xl border border-zinc-800/60 bg-zinc-900/40 p-5">
+            <div className="mb-1 text-orange-400 font-semibold tracking-wide uppercase">
+              {g.match}
             </div>
-          </div>
+            <div className="mb-4 text-xs text-zinc-400">
+              {formatStart(g.startTime)} {g.venue ? `• ${g.venue}` : ""}
+            </div>
 
-          {games.length === 0 ? (
-            <p className="text-zinc-400">No open selections right now. Check back soon.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {games.slice(0, 6).map((g) => (
-                <article
-                  key={g.id}
-                  className="bg-zinc-900/70 border border-zinc-800 rounded-2xl p-4 hover:border-orange-500 transition"
+            <div className="space-y-4">
+              {g.questions?.map((q, qi) => (
+                <div
+                  key={qi}
+                  className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4"
                 >
-                  <header className="mb-2">
-                    <h3 className="text-lg font-semibold">{g.match}</h3>
-                    <p className="text-sm text-zinc-400">
-                      {g.startTime ? `Start: ${g.startTime}` : "Start time TBA"}
-                      {g.venue ? ` • ${g.venue}` : ""}
-                    </p>
-                  </header>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <span className="px-2 py-0.5 text-[11px] rounded-md bg-zinc-800 text-zinc-300">
+                        Q{q.quarter}
+                      </span>
+                      <p className="text-zinc-100">{q.question}</p>
+                    </div>
 
-                  <ul className="text-sm text-zinc-300 space-y-1">
-                    {(g.questions ?? []).slice(0, 3).map((q, i) => (
-                      <li key={i}>
-                        Q{q.quarter}: {q.question}
-                      </li>
-                    ))}
-                    {(g.questions?.length ?? 0) > 3 && (
-                      <li className="text-zinc-500">+ {(g.questions!.length - 3)} more…</li>
-                    )}
-                  </ul>
+                    {/* Yes / No – colored per your palette */}
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        className="px-3 py-1.5 text-sm rounded-md bg-orange-500 hover:bg-orange-600 text-white"
+                        // onClick={...} – wire to auth-gated pick later
+                      >
+                        Yes
+                      </button>
+                      <button
+                        className="px-3 py-1.5 text-sm rounded-md bg-violet-600 hover:bg-violet-700 text-white"
+                      >
+                        No
+                      </button>
+                    </div>
+                  </div>
 
-                  <footer className="mt-3 flex items-center justify-between">
-                    <span className="rounded-full border border-zinc-700 px-3 py-1 text-xs text-zinc-300">
-                      {(g.status ?? "open").toUpperCase()}
-                    </span>
-                    <Link
-                      href={`/picks?game=${encodeURIComponent(g.id)}`}
-                      className="inline-block text-sm text-orange-400 hover:underline"
-                    >
-                      Make your pick →
-                    </Link>
-                  </footer>
-                </article>
+                  {/* Optional: small footer row for % and comments (placeholder for now) */}
+                  <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-400">
+                    <div>Yes 0% • No 0%</div>
+                    <div className="flex items-center gap-1">
+                      <span>💬</span>
+                      <span>0</span>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
-          )}
+          </div>
+        ))}
+      </div>
+    );
+  }, [games]);
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 py-10">
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-3xl font-extrabold text-white">Make Picks</h1>
+        <Link
+          href="/"
+          className="text-sm text-zinc-300 hover:text-white underline underline-offset-4"
+        >
+          ← Back to Home
+        </Link>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
+          {error}
         </div>
-      </section>
+      )}
+
+      {content}
     </main>
   );
 }
