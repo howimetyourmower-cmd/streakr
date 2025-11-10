@@ -94,7 +94,7 @@ export default function HomePage() {
             src="/mcg-hero.jpg"
             alt="MCG at twilight"
             width={2400}
-            height={900}
+            height={600}
             priority
             // Show full image, keep aspect, span width. Height adjusts by image ratio.
             className="w-full h-auto"
