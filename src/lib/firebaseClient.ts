@@ -13,7 +13,9 @@ const firebaseConfig = {
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
+// ✅ Named exports used across the app
 export const auth = getAuth(app);
-// 👇 rename to avoid *any* project-wide collisions
-export const clientDb = getFirestore(app);
+export const db = getFirestore(app);
+
+// (optional) default export if you need the app instance
 export default app;
