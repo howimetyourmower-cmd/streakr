@@ -86,7 +86,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-[#0b1220] text-white">
       {/* HERO */}
-      <section className="relative w-full h-[65vh] overflow-hidden">
+      <section className="relative w-full h-[85vh] md:h-[90vh] overflow-hidden">
         <Image
           src="/mcg-hero.jpg"
           alt="MCG at twilight"
