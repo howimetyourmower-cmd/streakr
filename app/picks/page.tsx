@@ -1,189 +1,238 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { app } from "@/lib/firebaseClient"; // ✅ keep this import name
-const db = getFirestore(app);
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebaseClient";
 
-// ----- Types -----
 type Question = {
   quarter: number;
   question: string;
+  // future: status: "OPEN" | "PENDING" | "FINAL";
+  // future: yesPct?: number; noPct?: number;
 };
 
 type Game = {
   match: string;
-  startTime?: any;   // Firestore Timestamp or string
+  startTime?: any;   // Firestore Timestamp or ISO string
   venue?: string;
   questions: Question[];
 };
 
 type RoundDoc = { games: Game[] };
 
-// ----- Utils -----
-const tz = "Australia/Melbourne";
-
-function isFSTimestamp(v: any): v is { seconds: number } {
-  return v && typeof v.seconds === "number";
-}
-
 function toDate(v: any): Date | null {
   if (!v) return null;
-  if (isFSTimestamp(v)) return new Date(v.seconds * 1000);
+  // Firestore Timestamp
+  if (typeof v === "object" && typeof v.seconds === "number") {
+    return new Date(v.seconds * 1000);
+  }
+  // ISO string
   if (typeof v === "string") {
-    // Try ISO first
-    const iso = Date.parse(v);
-    if (!Number.isNaN(iso)) return new Date(iso);
-    // Try “Thursday, 19 March 2026, 7.20pm” style
-    // Replace “.” in minutes and normalize “pm/am”
-    const normalized = v.replace(/(\d)\.(\d\d)/, "$1:$2").replace(/\s*(am|pm)\b/i, " $1");
-    const try2 = Date.parse(normalized);
-    if (!Number.isNaN(try2)) return new Date(try2);
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
   }
   return null;
 }
 
-function fmtStart(dt: Date | null) {
-  if (!dt) return "TBD";
-  const d = new Intl.DateTimeFormat("en-AU", {
+function formatStart(d: Date | null): string {
+  if (!d) return "TBD";
+  return d.toLocaleString("en-AU", {
     weekday: "short",
-    day: "2-digit",
+    day: "numeric",
     month: "short",
-    timeZone: tz,
-  }).format(dt);
-  const t = new Intl.DateTimeFormat("en-AU", {
     hour: "numeric",
     minute: "2-digit",
-    hour12: true,
-    timeZone: tz,
-  }).format(dt);
-  // Quick zone label
-  const zone = dt
-    .toLocaleTimeString("en-AU", { timeZoneName: "short", timeZone: tz })
-    .split(" ")
-    .pop();
-  return `${d} • ${t} ${zone}`;
+    hour12: false,
+    timeZoneName: "short",
+  });
 }
 
-function metaLine(game: Game) {
-  const dt = toDate(game.startTime);
-  const left = fmtStart(dt);
-  const venue = game.venue ? ` • ${game.venue}` : "";
-  return `${left}${venue}`;
+function deriveStatus(start: Date | null): "OPEN" | "PENDING" {
+  if (!start) return "OPEN";
+  const now = Date.now();
+  return now < start.getTime() ? "OPEN" : "PENDING";
 }
 
-// ----- Page -----
-export default function HomePage() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function PicksPage() {
+  const router = useRouter();
+  const [games, setGames] = useState<Game[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "rounds", "round-1"));
-        if (snap.exists()) {
-          const data = snap.data() as RoundDoc;
-          setGames(data.games ?? []);
-        } else {
+        // Load Round 1 (adjust when you introduce Opening Round / finals)
+        const ref = doc(db, "rounds", "round-1");
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
           setGames([]);
+          return;
         }
-      } finally {
-        setLoading(false);
+        const data = snap.data() as RoundDoc;
+        setGames(data.games ?? []);
+      } catch (e: any) {
+        setErr(e?.message ?? "Failed to load picks.");
+        setGames([]);
       }
     })();
   }, []);
 
-  // Only show OPEN (we keep your rule from earlier: show all for now; filter later if status lives on a question)
-  const six = useMemo(() => games.slice(0, 6), [games]);
+  const rows = useMemo(() => {
+    if (!games) return [];
+    const r: Array<{
+      startText: string;
+      match: string;
+      qNum: string;
+      question: string;
+      status: "OPEN" | "PENDING";
+      venue: string;
+      game: Game;
+      q: Question;
+    }> = [];
+    for (const g of games) {
+      const d = toDate(g.startTime);
+      const startText = `${formatStart(d)}`;
+      const status = deriveStatus(d);
+      const venue = g.venue ?? "";
+      for (const q of g.questions ?? []) {
+        r.push({
+          startText,
+          match: g.match,
+          qNum: `Q${q.quarter}`,
+          question: q.question,
+          status,
+          venue,
+          game: g,
+          q,
+        });
+      }
+    }
+    return r;
+  }, [games]);
+
+  const onPick = (choice: "YES" | "NO", rowIdx: number) => {
+    const user = auth.currentUser;
+    if (!user) {
+      router.push("/auth"); // gate actual pick to signed-in users
+      return;
+    }
+    // TODO: write the pick to Firestore here (users/<uid>/picks/{round-1,...})
+    console.log("Pick", choice, rows[rowIdx]);
+  };
 
   return (
-    <main className="min-h-screen">
-      {/* Hero */}
-      <section className="relative w-full overflow-hidden">
-        <div className="relative h-[48vh] sm:h-[56vh] lg:h-[60vh]">
-          <Image
-            src="/mcg-hero.jpg"
-            alt="MCG at dusk"
-            fill
-            priority
-            className="object-cover object-bottom"
-          />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-black/20 to-transparent" />
-          <div className="absolute bottom-8 left-6 sm:left-10">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold">
-              <span className="text-white">Real</span>{" "}
-              <span className="text-orange-400">Streakr&apos;s</span>{" "}
-              <span className="text-white">don&apos;t get caught.</span>
-            </h1>
-            <p className="mt-3 text-white/85 max-w-2xl">
-              Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-            </p>
-            <div className="mt-4 flex gap-3">
-              <Link href="/auth" className="rounded-xl px-4 py-2 bg-orange-500 text-black font-semibold">
-                Sign up / Log in
-              </Link>
-              <Link href="/picks" className="rounded-xl px-4 py-2 bg-white/15 text-white backdrop-blur">
-                View Picks
-              </Link>
-            </div>
+    <div className="max-w-6xl mx-auto px-4 py-10">
+      <h1 className="text-4xl font-extrabold tracking-tight mb-6">Make Picks</h1>
+
+      {err && (
+        <div className="mb-6 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200">
+          {err}
+        </div>
+      )}
+
+      {!games && (
+        <div className="text-gray-300">Loading…</div>
+      )}
+
+      {games && rows.length === 0 && !err && (
+        <div className="text-gray-300">No questions found for Round 1.</div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="w-full overflow-x-auto rounded-xl border border-white/10 bg-gradient-to-b from-[#1B2330] to-[#161C24]">
+          {/* Header */}
+          <div className="grid grid-cols-[160px_1fr_64px_minmax(240px,1.5fr)_120px_120px_140px] items-center gap-4 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-gray-300 border-b border-white/10">
+            <div>Start</div>
+            <div>Match • Venue</div>
+            <div>Q#</div>
+            <div>Question</div>
+            <div>Status</div>
+            <div>Yes / No %</div>
+            <div className="text-right">Pick</div>
           </div>
-        </div>
-      </section>
 
-      {/* Sponsor strip */}
-      <div className="mx-auto max-w-6xl px-4">
-        <div className="mt-8 rounded-2xl bg-white/5 border border-white/10 h-20 grid place-items-center">
-          <span className="text-white/60">Sponsor banner • 970×90</span>
-        </div>
-      </div>
-
-      {/* Open picks */}
-      <section className="mx-auto max-w-6xl px-4 py-10">
-        <h2 className="text-2xl sm:text-3xl font-extrabold mb-6">Round 1 Open Picks</h2>
-
-        {loading ? (
-          <div className="text-white/70">Loading…</div>
-        ) : six.length === 0 ? (
-          <div className="text-white/70">No open selections right now. Check back soon.</div>
-        ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {six.map((g, i) => (
-              <div key={i} className="rounded-3xl border border-white/10 bg-white/[.03] p-5">
-                <div className="text-sm text-orange-400 font-extrabold tracking-wide">
-                  {g.match?.toUpperCase()}
+          {/* Rows */}
+          <ul className="divide-y divide-white/10">
+            {rows.map((r, idx) => (
+              <li
+                key={idx}
+                className="grid grid-cols-[160px_1fr_64px_minmax(240px,1.5fr)_120px_120px_140px] items-center gap-4 px-4 py-3"
+              >
+                {/* Start */}
+                <div className="text-sm text-gray-300 whitespace-nowrap">
+                  {r.startText}
                 </div>
-                <div className="text-xs text-white/70 mt-1">{metaLine(g)}</div>
 
-                {/* First question preview */}
-                {g.questions?.[0] && (
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/[.02] p-4">
-                    <div className="text-xs text-white/70 mb-1">Q{g.questions[0].quarter}</div>
-                    <div className="text-white font-medium">{g.questions[0].question}</div>
-
-                    <div className="mt-3 flex items-center justify-between">
-                      <div className="flex gap-2">
-                        <button className="px-3 py-1 rounded-md bg-orange-500 text-black text-sm font-semibold">
-                          Yes
-                        </button>
-                        <button className="px-3 py-1 rounded-md bg-purple-500 text-white text-sm font-semibold">
-                          No
-                        </button>
-                      </div>
-                      <Link href="/picks" className="text-sm text-white/80 hover:text-white">
-                        See other picks →
-                      </Link>
-                    </div>
-
-                    <div className="mt-2 text-xs text-white/60">Yes 0% • No 0%</div>
+                {/* Match + Venue */}
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-orange-300 truncate">
+                    {r.match.toUpperCase()}
                   </div>
-                )}
-              </div>
+                  <div className="text-xs text-gray-400 truncate">{r.venue}</div>
+                </div>
+
+                {/* Q# */}
+                <div>
+                  <span className="inline-flex items-center rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-white">
+                    {r.qNum}
+                  </span>
+                </div>
+
+                {/* Question */}
+                <div className="min-w-0">
+                  <p className="text-sm text-gray-100 leading-tight line-clamp-2">
+                    {r.question}
+                  </p>
+                </div>
+
+                {/* Status */}
+                <div>
+                  <span
+                    className={
+                      "inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold " +
+                      (r.status === "OPEN"
+                        ? "bg-green-500/15 text-green-300"
+                        : "bg-yellow-500/15 text-yellow-300")
+                    }
+                  >
+                    {r.status}
+                  </span>
+                </div>
+
+                {/* Yes / No % (placeholder until we track votes) */}
+                <div className="text-sm text-gray-300">
+                  Yes 0% • No 0%
+                </div>
+
+                {/* Pick buttons */}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => onPick("YES", idx)}
+                    className="rounded-md bg-orange-500/90 hover:bg-orange-500 text-white px-3 py-1.5 text-sm font-semibold shadow-sm"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => onPick("NO", idx)}
+                    className="rounded-md bg-purple-600/90 hover:bg-purple-600 text-white px-3 py-1.5 text-sm font-semibold shadow-sm"
+                  >
+                    No
+                  </button>
+                </div>
+              </li>
             ))}
-          </div>
-        )}
-      </section>
-    </main>
+          </ul>
+        </div>
+      )}
+
+      {/* Back to home */}
+      <div className="mt-6">
+        <Link href="/" className="text-sm text-gray-400 hover:text-gray-200">
+          ← Back to Home
+        </Link>
+      </div>
+    </div>
   );
 }
