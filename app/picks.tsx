@@ -1,193 +1,213 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { getAuth, onAuthStateChanged } from "firebase/auth";
 import { app } from "../config/firebaseClient";
+import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { useRouter } from "next/navigation";
 
+// ---------- Types ----------
 type Question = {
   quarter: number;
   question: string;
-  // optional future: status, yes/no %
+  // optional stats if/when you save them
+  yesPct?: number;
+  noPct?: number;
+  comments?: number;
+  status?: "OPEN" | "PENDING" | "FINAL";
 };
+
 type Game = {
   match: string;
-  startTime?: any;
+  startTime?: any; // Firestore Timestamp | string
   date?: string;
   time?: string;
   tz?: string;
   venue?: string;
   questions: Question[];
 };
+
 type RoundDoc = { games: Game[] };
 
 const CURRENT_ROUND = 1;
 
+// ---------- Helpers ----------
 function isFsTimestamp(v: any): v is { seconds: number } {
   return v && typeof v.seconds === "number";
 }
 
-function parseFreeformStartTime(v: string): Date | null {
-  const re =
-    /^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})\s+at\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)\s*UTC([+-]\d{1,2})$/i;
-  const m = v.trim().replace(/\s+/g, " ").match(re);
-  if (!m) return null;
-  const [, monName, dStr, yStr, hStr, minStr, secStr, ampmRaw, tzOffStr] = m;
-  const monthMap: Record<string, number> = {
-    january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
-    july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
-  };
-  const month = monthMap[monName.toLowerCase()];
-  if (month == null) return null;
-  let hour = parseInt(hStr, 10);
-  const minute = parseInt(minStr, 10);
-  const second = secStr ? parseInt(secStr, 10) : 0;
-  const ampm = ampmRaw.toUpperCase();
-  if (ampm === "PM" && hour !== 12) hour += 12;
-  if (ampm === "AM" && hour === 12) hour = 0;
-  const day = parseInt(dStr, 10);
-  const year = parseInt(yStr, 10);
-  const tz = tzOffStr.startsWith("+") || tzOffStr.startsWith("-") ? tzOffStr : `+${tzOffStr}`;
-  const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(
-    2,
-    "0"
-  )}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(
-    second
-  ).padStart(2, "0")}${tz}:00`;
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function toDate(game: Game): Date | null {
+function formatWhen(game: Game) {
+  if (isFsTimestamp(game.startTime)) {
+    const dt = new Date(game.startTime.seconds * 1000);
+    const date = dt.toLocaleDateString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+    });
+    const time = dt.toLocaleTimeString("en-AU", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    const tz = "AEDT";
+    return `${date} · ${time} ${tz} · ${game.venue ?? "TBD"}`;
+  }
   if (game.date && game.time) {
-    const tz = game.tz ?? "+11:00";
-    const d = new Date(`${game.date}T${game.time}:00${tz}`);
-    if (!isNaN(d.getTime())) return d;
+    return `${game.date} · ${game.time}${game.tz ? ` ${game.tz}` : ""} · ${game.venue ?? "TBD"}`;
   }
-  const st = game.startTime;
-  if (isFsTimestamp(st)) return new Date(st.seconds * 1000);
-  if (typeof st === "string") {
-    const parsed = parseFreeformStartTime(st);
-    if (parsed) return parsed;
-    const d = new Date(st);
-    if (!isNaN(d.getTime())) return d;
+  if (typeof game.startTime === "string") {
+    return `${game.startTime}${game.venue ? ` · ${game.venue}` : ""}`;
   }
-  return null;
-}
-
-function formatWhenWhere(game: Game): string {
-  const tz = game.tz || "Australia/Melbourne";
-  const d = toDate(game);
-  const venue = game.venue;
-  if (!d) return venue ? `TBD • ${venue}` : "TBD";
-  const day = new Intl.DateTimeFormat("en-AU", {
-    weekday: "short", day: "2-digit", month: "short", timeZone: tz,
-  }).format(d);
-  const time = new Intl.DateTimeFormat("en-AU", {
-    hour: "numeric", minute: "2-digit", hour12: true, timeZone: tz,
-  }).format(d);
-  const tzName = new Intl.DateTimeFormat("en-AU", {
-    timeZoneName: "short", timeZone: tz,
-  })
-    .formatToParts(d)
-    .find((p) => p.type === "timeZoneName")?.value || "";
-  return `${day} • ${time} ${tzName}${venue ? ` • ${venue}` : ""}`;
+  return `TBD${game.venue ? ` · ${game.venue}` : ""}`;
 }
 
 export default function PicksPage() {
-  const [games, setGames] = useState<Game[]>([]);
+  const router = useRouter();
+  const db = useMemo(() => getFirestore(app), []);
+  const auth = useMemo(() => getAuth(app), []);
+  const [user, setUser] = useState<null | { uid: string }>(null);
+  const [round, setRound] = useState<RoundDoc | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authed, setAuthed] = useState<boolean>(false);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const auth = getAuth(app);
-    const unsub = onAuthStateChanged(auth, (u) => setAuthed(!!u));
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u ? { uid: u.uid } : null));
     return () => unsub();
-  }, []);
+  }, [auth]);
 
   useEffect(() => {
-    const db = getFirestore(app);
-    getDoc(doc(db, "fixtures", `round-${CURRENT_ROUND}`))
-      .then((snap) => setGames(((snap.data() as RoundDoc | undefined)?.games) ?? []))
-      .finally(() => setLoading(false));
-  }, []);
+    (async () => {
+      try {
+        const id = CURRENT_ROUND === 1 ? "round-1" : `round-${CURRENT_ROUND}`;
+        const ref = doc(db, "rounds", id);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          setRound({ games: [] });
+        } else {
+          setRound(snap.data() as RoundDoc);
+        }
+      } catch (e: any) {
+        console.error(e);
+        setErr(e?.message || "Failed to load picks.");
+        setRound({ games: [] });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [db]);
+
+  const handlePickClick = (game: Game, q: Question, pick: "YES" | "NO") => {
+    if (!user) {
+      // not logged in — bounce to auth
+      router.push("/auth?next=/picks");
+      return;
+    }
+    // TODO: save pick to Firestore here when backend is ready.
+    console.log("MAKE PICK", { game: game.match, quarter: q.quarter, pick });
+  };
 
   return (
-    <main className="min-h-screen bg-[#0b0f13] px-4 py-8 text-white">
-      <div className="mx-auto max-w-4xl">
-        <h1 className="mb-6 text-4xl font-extrabold">Make Picks</h1>
+    <main className="max-w-5xl mx-auto px-4 py-8">
+      <h1 className="text-4xl font-extrabold text-white mb-6">Make Picks</h1>
 
-        {!authed && (
-          <div className="mb-6 rounded-2xl border border-yellow-500/30 bg-yellow-500/10 p-4 text-yellow-200">
-            You must be logged in to make picks.{" "}
-            <Link href="/auth" className="text-orange-400 underline">Log in or sign up</Link>.
-          </div>
-        )}
+      {loading && <div className="text-white/80">Loading…</div>}
+      {!loading && err && (
+        <div className="text-red-400 bg-red-950/30 border border-red-900/40 rounded-xl p-4 mb-6">
+          {err}
+        </div>
+      )}
 
-        {loading ? (
-          <div className="text-white/70">Loading…</div>
-        ) : (
-          <div className="space-y-6">
-            {games.map((game, gi) => (
-              <section key={`${game.match}-${gi}`} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                <div className="mb-1 text-lg font-bold uppercase tracking-wide text-orange-400">
-                  {game.match}
-                </div>
-                <div className="mb-4 text-sm text-white/60">{formatWhenWhere(game)}</div>
+      {!loading && round?.games?.length === 0 && (
+        <div className="text-white/80">No questions found for Round {CURRENT_ROUND}.</div>
+      )}
 
-                {/* One-column compact cards */}
-                <div className="space-y-3">
-                  {game.questions.map((q, qi) => (
-                    <article
-                      key={`${gi}-${qi}`}
-                      className="rounded-xl border border-white/10 bg-white/[0.04] p-4"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <span className="mr-2 inline-block rounded-md bg-white/10 px-2 py-0.5 text-xs text-white/70">
-                            Q{q.quarter}
-                          </span>
-                          <span className="text-white/90">{q.question}</span>
-                        </div>
+      <div className="space-y-6">
+        {round?.games?.map((game) => (
+          <section
+            key={game.match}
+            className="rounded-2xl border border-white/10 bg-white/5 p-4 md:p-5"
+          >
+            <header className="mb-3">
+              <h2 className="text-orange-400 font-extrabold tracking-wide uppercase">
+                {game.match}
+              </h2>
+              <p className="text-white/70 text-sm">{formatWhen(game)}</p>
+            </header>
 
-                        <div className="shrink-0">
-                          <div className="flex gap-2">
-                            <button
-                              disabled={!authed}
-                              className={`rounded-md px-3 py-1 text-sm font-semibold ${
-                                authed
-                                  ? "bg-green-600 hover:bg-green-700"
-                                  : "bg-green-900/40 opacity-60"
-                              }`}
-                            >
-                              Yes
-                            </button>
-                            <button
-                              disabled={!authed}
-                              className={`rounded-md px-3 py-1 text-sm font-semibold ${
-                                authed
-                                  ? "bg-red-600 hover:bg-red-700"
-                                  : "bg-red-900/40 opacity-60"
-                              }`}
-                            >
-                              No
-                            </button>
-                          </div>
-                          {!authed && (
-                            <div className="mt-1 text-right text-[11px] text-white/50">
-                              Log in to pick
-                            </div>
-                          )}
-                        </div>
+            <div className="space-y-3">
+              {game.questions.map((q, idx) => {
+                const yes = typeof q.yesPct === "number" ? q.yesPct : 0;
+                const no = typeof q.noPct === "number" ? q.noPct : 0;
+                const comments = typeof q.comments === "number" ? q.comments : 0;
+                const status = q.status ?? "OPEN";
+                return (
+                  <article
+                    key={`${game.match}-${idx}`}
+                    className="rounded-xl border border-white/10 bg-black/20 px-3 py-3"
+                  >
+                    {/* Top row — Q#, status, comments */}
+                    <div className="flex items-center gap-2 text-xs text-white/80 mb-1.5">
+                      <span className="px-2 py-0.5 rounded-md bg-white/10 font-bold">
+                        Q{q.quarter}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-md font-bold ${
+                          status === "OPEN"
+                            ? "bg-emerald-600/30 text-emerald-300"
+                            : status === "PENDING"
+                            ? "bg-amber-600/30 text-amber-300"
+                            : "bg-blue-600/30 text-blue-300"
+                        }`}
+                      >
+                        {status}
+                      </span>
+                      <span className="ml-auto px-2 py-0.5 rounded-md bg-white/10">
+                        💬 {comments}
+                      </span>
+                    </div>
+
+                    {/* Question text */}
+                    <p className="text-white font-semibold leading-snug">{q.question}</p>
+
+                    {/* Bottom row — Yes/No, percentages, “See Other Picks” */}
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handlePickClick(game, q, "YES")}
+                          className="px-3 py-1.5 rounded-lg font-semibold text-black bg-[#ff7a00] hover:opacity-90 transition"
+                          aria-label="Yes"
+                          title={user ? "Pick Yes" : "Login to make picks"}
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => handlePickClick(game, q, "NO")}
+                          className="px-3 py-1.5 rounded-lg font-semibold text-white bg-[#6f3aff] hover:opacity-90 transition"
+                          aria-label="No"
+                          title={user ? "Pick No" : "Login to make picks"}
+                        >
+                          No
+                        </button>
+
+                        <span className="text-xs text-white/70 ml-2">
+                          Yes {yes}% • No {no}%
+                        </span>
                       </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
+
+                      <Link
+                        href="/picks"
+                        className="px-3 py-1.5 rounded-lg bg-white/10 text-white hover:bg-white/15 transition text-sm"
+                      >
+                        See Other Picks
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
+        ))}
       </div>
     </main>
   );
