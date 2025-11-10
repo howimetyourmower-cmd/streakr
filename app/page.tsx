@@ -4,7 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getFirestore, doc, getDoc } from "firebase/firestore";
-import { app } from "./config/firebaseClient";
+import { auth, db } from "../../lib/firebaseClient";
+
 
 // ---------- Types ----------
 type Question = { quarter: number; question: string };
