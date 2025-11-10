@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase client";
+import { auth, db } from "@/lib/firebaseClient"; // ✅ updated import
 
 type Question = { quarter: number; question: string };
 type Game = {
@@ -195,7 +195,9 @@ export default function HomePage() {
                       See other picks →
                     </Link>
                   </div>
-                  <div className="mt-3 text-xs text-white/50">Yes 0% • No 0%</div>
+                  <div className="mt-3 text-xs text-white/50">
+                    Yes 0% • No 0%
+                  </div>
                 </div>
               </article>
             );
