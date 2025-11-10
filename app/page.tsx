@@ -98,7 +98,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen">
       {/* Hero (full-bleed, shorter height, shows bottom posts) */}
-      <section className="relative w-full h-[56vh] md:h-[60vh] overflow-hidden">
+      <section className="relative w-full h-[70vh] md:h-[80vh] overflow-hidden">
         <div className="relative h-[48vh] sm:h-[56vh] lg:h-[64vh]">
           <Image
             src="/mcg-hero.jpg"
