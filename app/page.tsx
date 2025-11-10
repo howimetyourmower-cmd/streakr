@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebaseClient";
+import { db } from "./config/firebaseClient";
 
 type Question = { quarter: number; question: string };
 type Game = {
@@ -17,7 +17,6 @@ type RoundDoc = { games: Game[] };
 
 const CURRENT_ROUND_ID = "round-1";
 
-/** Format Firestore Timestamp or ISO string; else "TBD" */
 function fmtStart(startTime?: any): string {
   if (!startTime) return "TBD";
   if (startTime?.seconds && typeof startTime.seconds === "number") {
@@ -47,7 +46,6 @@ function fmtStart(startTime?: any): string {
   return "TBD";
 }
 
-/** Flatten to first six questions for the home grid */
 function firstSix(games: Game[]): Array<{ game: Game; q: Question }> {
   const out: Array<{ game: Game; q: Question }> = [];
   for (const g of games) {
@@ -87,61 +85,52 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-[#0b1220] text-white">
-      {/* HERO: full-width, show entire image (no cropping) */}
-      <section className="relative w-full">
-        <div className="relative w-full">
-          <Image
-            src="/mcg-hero.jpg"
-            alt="MCG at twilight"
-            width={2400}
-            height={600}
-            priority
-            // Show full image, keep aspect, span width. Height adjusts by image ratio.
-            className="w-full h-auto"
-          />
-          {/* readable overlay content, pinned near bottom */}
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-[#0b1220]/90" />
-          <div className="absolute left-0 right-0 bottom-0">
-            <div className="mx-auto w-full max-w-6xl px-4 pb-6 md:pb-8">
-              <h1
-                className="pointer-events-auto font-extrabold text-4xl md:text-6xl lg:text-7xl whitespace-nowrap overflow-hidden text-ellipsis"
-                title="Real Streakr’s don’t get caught."
+      {/* HERO */}
+      <section className="relative w-full h-[65vh] overflow-hidden">
+        <Image
+          src="/mcg-hero.jpg"
+          alt="MCG at twilight"
+          fill
+          priority
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-[#0b1220]/90" />
+        <div className="absolute bottom-0 left-0 right-0">
+          <div className="mx-auto w-full max-w-6xl px-4 pb-8 md:pb-10">
+            <h1 className="font-extrabold text-3xl sm:text-4xl md:text-5xl lg:text-6xl whitespace-nowrap overflow-hidden text-ellipsis">
+              <span className="text-white">Real Streakr&apos;s</span>{" "}
+              <span className="text-orange-400">don&apos;t get caught.</span>
+            </h1>
+            <p className="mt-2 text-sm md:text-base text-white/85 max-w-2xl">
+              Free-to-play AFL prediction streaks. Build your streak, top the
+              leaderboard, win prizes.
+            </p>
+            <div className="mt-4 flex gap-3">
+              <Link
+                href="/auth"
+                className="rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 font-semibold transition"
               >
-                <span className="text-white">Real Streakr&apos;s</span>{" "}
-                <span className="text-orange-400">don&apos;t get caught.</span>
-              </h1>
-              <p className="pointer-events-auto mt-2 text-sm md:text-base text-white/85 max-w-2xl">
-                Free-to-play AFL prediction streaks. Build your streak, top the
-                leaderboard, win prizes.
-              </p>
-
-              <div className="pointer-events-auto mt-4 flex gap-3">
-                <Link
-                  href="/auth"
-                  className="rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 font-semibold transition"
-                >
-                  Sign up / Log in
-                </Link>
-                <Link
-                  href="/picks"
-                  className="rounded-xl border border-white/20 hover:border-white/40 px-4 py-2 font-semibold transition"
-                >
-                  View Picks
-                </Link>
-              </div>
+                Sign up / Log in
+              </Link>
+              <Link
+                href="/picks"
+                className="rounded-xl border border-white/20 hover:border-white/40 px-4 py-2 font-semibold transition"
+              >
+                View Picks
+              </Link>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Lower sponsor banner so full hero stays in view */}
+      {/* SPONSOR BANNER */}
       <div className="mx-auto w-full max-w-6xl px-4">
-        <div className="mt-10 md:mt-14 rounded-2xl bg-white/5 border border-white/10 p-6 text-center text-white/80">
+        <div className="mt-12 rounded-2xl bg-white/5 border border-white/10 p-6 text-center text-white/80">
           Sponsor banner • 970×90
         </div>
       </div>
 
-      {/* GRID: 6 equal-height cards */}
+      {/* PICKS GRID */}
       <section className="mx-auto w-full max-w-6xl px-4">
         <h2 className="mt-8 md:mt-10 text-2xl md:text-3xl font-extrabold">
           Round 1 Open Picks
@@ -165,7 +154,6 @@ export default function HomePage() {
                 key={`${i}-${q.quarter}`}
                 className="h-full rounded-2xl border border-white/10 bg-white/5 p-5 shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
               >
-                {/* Top: meta */}
                 <header className="mb-3">
                   <div className="text-orange-400 font-bold tracking-wide whitespace-nowrap overflow-hidden text-ellipsis">
                     {game.match?.toUpperCase()}
@@ -175,9 +163,7 @@ export default function HomePage() {
                   </div>
                 </header>
 
-                {/* Body: fixed-height content box so all cards match */}
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4 min-h-[220px] flex flex-col justify-between">
-                  {/* Q label + question */}
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4 min-h-[200px] flex flex-col justify-between">
                   <div>
                     <span className="inline-flex items-center justify-center text-xs font-bold rounded-md px-2 py-1 bg-white/10 text-white/80 mr-2">
                       Q{q.quarter}
@@ -187,20 +173,17 @@ export default function HomePage() {
                     </p>
                   </div>
 
-                  {/* Actions + link */}
                   <div className="mt-4 flex items-center justify-between">
                     <div className="flex gap-2">
                       <button
                         disabled
                         className="cursor-not-allowed rounded-lg bg-orange-500/90 px-3 py-1.5 text-sm font-semibold text-white"
-                        title="Login to pick"
                       >
                         Yes
                       </button>
                       <button
                         disabled
                         className="cursor-not-allowed rounded-lg bg-purple-600/90 px-3 py-1.5 text-sm font-semibold text-white"
-                        title="Login to pick"
                       >
                         No
                       </button>
@@ -212,15 +195,12 @@ export default function HomePage() {
                       See other picks →
                     </Link>
                   </div>
-
-                  {/* tiny stats row */}
                   <div className="mt-3 text-xs text-white/50">Yes 0% • No 0%</div>
                 </div>
               </article>
             );
           })}
         </div>
-
         <div className="h-12" />
       </section>
     </div>
