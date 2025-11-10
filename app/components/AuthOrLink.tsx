@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { app } from "../config/firebaseClient";
+import { auth, db } from "@lib/firebaseClient";
 import { getAuth, onAuthStateChanged, User } from "firebase/auth";
 
 type Props = {
