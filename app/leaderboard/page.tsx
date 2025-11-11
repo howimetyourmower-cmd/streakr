@@ -2,6 +2,6 @@ export const dynamic = "force-dynamic";
 
 import LeaderboardClient from "./LeaderboardClient";
 
-export default function LeaderboardsPage() {
+export default function LeaderboardPage() {
   return <LeaderboardClient />;
 }
