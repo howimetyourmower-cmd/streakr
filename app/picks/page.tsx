@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = 'force-dynamic';
+export const revalidate = false
+
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { db } from "@/lib/firebaseClient";
