@@ -26,7 +26,7 @@ dayjs.extend(localizedFormat);
 const LOCAL_TZ = "Australia/Melbourne";
 
 function PicksContent() {
-  const [picks, setPicks] = useState([]);
+  const [picks, setPicks] = useState<PickData[]>([]);
 
   useEffect(() => {
     const fetchPicks = async () => {
@@ -34,9 +34,9 @@ function PicksContent() {
         const roundsRef = collection(db, "rounds");
         const q = query(roundsRef, orderBy("match", "asc"));
         const snapshot = await getDocs(q);
-        const data = snapshot.docs.map((doc) => ({
+        const data = PickData[] = snapshot.docs.map((doc) => ({
           id: doc.id,
-          ...doc.data(),
+          ...doc.data() as Omit<PickData, "id">),
         }));
         setPicks(data);
       } catch (error) {
