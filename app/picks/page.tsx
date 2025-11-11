@@ -1,169 +1,135 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { auth, db } from "@/lib/firebaseClient";
-import { doc, getDoc } from "firebase/firestore";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
+import { useEffect, useState, Suspense } from "react";
+import { collection, getDocs } from "firebase/firestore";
+import { db } from "@/lib/firebaseClient";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import tz from "dayjs/plugin/timezone";
-import customParse from "dayjs/plugin/customParseFormat";
 
-dayjs.extend(utc);
-dayjs.extend(tz);
-dayjs.extend(customParse);
-
-const LOCAL_TZ = "Australia/Melbourne";
-
-function formatStartTime(raw: any): string {
-  if (!raw) return "TBD";
-  if (raw?.toDate) return dayjs(raw.toDate()).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
-  if (typeof raw === "string") {
-    let d = dayjs(raw);
-    if (!d.isValid()) d = dayjs.tz(raw, ["ddd, D MMM YYYY, h:mm A", "YYYY-MM-DDTHH:mm:ssZ"], LOCAL_TZ);
-    return d.isValid() ? d.tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z") : "TBD";
-  }
-  if (raw instanceof Date) return dayjs(raw).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
-  return "TBD";
-}
-
-function PicksInner() {
-  const params = useSearchParams();
-  const roundId = params.get("round") || "round-1";
-  const [round, setRound] = useState<any>(null);
+function PicksContent() {
+  const [picks, setPicks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const ref = doc(db, "rounds", roundId);
-    getDoc(ref).then((snap) => {
-      setRound(snap.data());
-      setLoading(false);
-    });
-  }, [roundId]);
+    async function fetchPicks() {
+      try {
+        const roundsRef = collection(db, "rounds");
+        const snapshot = await getDocs(roundsRef);
 
-  const rows = useMemo(() => {
-    if (!round?.games) return [];
-    const list: any[] = [];
-    for (const g of round.games) {
-      const startStr = formatStartTime(g.startTime);
-      const startSort = g.startTime?.toDate ? g.startTime.toDate().getTime() : dayjs(g.startTime).valueOf();
-      for (const q of g.questions) {
-        const yes = q.yesCount ?? 0;
-        const no = q.noCount ?? 0;
-        const total = yes + no;
-        list.push({
-          start: startStr,
-          match: g.match,
-          venue: g.venue,
-          qnum: q.quarter,
-          text: q.question,
-          yesPct: total ? Math.round((yes / total) * 100) : 0,
-          noPct: total ? 100 - Math.round((yes / total) * 100) : 0,
-          status: q.status ?? "open",
-          startSort,
+        const allPicks: any[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          if (data.games) {
+            data.games.forEach((game: any) => {
+              if (game.questions) {
+                game.questions.forEach((question: any) => {
+                  if (question.status === "open") {
+                    allPicks.push({
+                      ...question,
+                      match: game.match,
+                      venue: game.venue,
+                      startTime: game.startTime,
+                    });
+                  }
+                });
+              }
+            });
+          }
         });
+
+        setPicks(allPicks);
+      } catch (error) {
+        console.error("Error loading picks:", error);
+      } finally {
+        setLoading(false);
       }
     }
-    return list.sort((a, b) => a.startSort - b.startSort);
-  }, [round]);
+
+    fetchPicks();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="text-center text-gray-300 mt-10 text-lg">
+        Loading picks...
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen pb-24">
-      <div className="max-w-6xl mx-auto px-4 pt-10">
-        <h1 className="text-4xl font-extrabold tracking-tight text-white mb-6">
-          Make Picks
-        </h1>
+    <div className="min-h-screen bg-gradient-to-b from-gray-900 to-gray-800 text-white p-6">
+      <h1 className="text-3xl font-bold mb-6 text-white">Make Picks</h1>
 
-        <div className="overflow-hidden rounded-2xl border border-white/10 bg-gray-900/40 backdrop-blur">
-          <div className="grid grid-cols-12 gap-4 px-6 py-4 text-xs uppercase tracking-wider text-gray-300/70 border-b border-white/10">
-            <div className="col-span-3">Start</div>
-            <div className="col-span-3">Match · Venue</div>
-            <div className="col-span-1">Q#</div>
-            <div className="col-span-3">Question</div>
-            <div className="col-span-1 text-right">Yes %</div>
-            <div className="col-span-1 text-right">No %</div>
-          </div>
-
-          {loading && <div className="px-6 py-6 text-gray-400">Loading…</div>}
-          {!loading && rows.length === 0 && (
-            <div className="px-6 py-6 text-gray-400">No questions available.</div>
-          )}
-
-          {!loading &&
-            rows.map((r, i) => (
-              <div
-                key={i}
-                className="grid grid-cols-12 gap-4 px-6 py-4 border-t border-white/5 items-center"
-              >
-                <div className="col-span-3 flex items-center gap-3">
-                  <div className="text-sm text-gray-200">{r.start}</div>
-                  <span
-                    className={`text-[10px] px-2 py-1 rounded-full ${
-                      r.status === "open"
-                        ? "bg-emerald-900/50 text-emerald-300 border border-emerald-400/30"
-                        : r.status === "pending"
-                        ? "bg-amber-900/40 text-amber-300 border border-amber-300/30"
-                        : r.status === "final"
-                        ? "bg-sky-900/40 text-sky-300 border border-sky-300/30"
-                        : "bg-red-900/40 text-red-300 border border-red-300/30"
-                    }`}
-                  >
-                    {r.status.toUpperCase()}
-                  </span>
-                </div>
-
-                <div className="col-span-3">
-                  <div className="font-semibold text-orange-300">
-                    {r.match}
-                  </div>
-                  {r.venue && (
-                    <div className="text-xs text-gray-400">{r.venue}</div>
-                  )}
-                </div>
-
-                <div className="col-span-1">
-                  <span className="inline-flex h-6 items-center justify-center rounded-md bg-white/5 px-2 text-xs font-semibold text-gray-200 border border-white/10">
-                    Q{r.qnum}
-                  </span>
-                </div>
-
-                <div className="col-span-3">
-                  <div className="font-semibold text-white">{r.text}</div>
-                  <div className="mt-3 flex items-center gap-2">
-                    <button className="rounded-md px-3 py-1 text-sm font-semibold bg-orange-500/90 hover:bg-orange-500 text-black">
-                      Yes
-                    </button>
-                    <button className="rounded-md px-3 py-1 text-sm font-semibold bg-purple-500/90 hover:bg-purple-500 text-white">
-                      No
-                    </button>
-                    <Link
-                      href={`/picks?round=${roundId}`}
-                      className="ml-3 text-sm text-gray-300 hover:text-white"
+      <div className="overflow-x-auto rounded-2xl shadow-lg bg-gray-900/40">
+        <table className="min-w-full text-left text-gray-200">
+          <thead className="text-sm uppercase bg-gray-800/70">
+            <tr>
+              <th className="px-4 py-3">Start</th>
+              <th className="px-4 py-3">Match · Venue</th>
+              <th className="px-4 py-3">Q#</th>
+              <th className="px-4 py-3">Question</th>
+              <th className="px-4 py-3 text-center">Yes %</th>
+              <th className="px-4 py-3 text-center">No %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {picks.length === 0 ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                  No open selections right now.
+                </td>
+              </tr>
+            ) : (
+              picks.map((pick, index) => (
+                <tr
+                  key={index}
+                  className="border-b border-gray-700 hover:bg-gray-800/60"
+                >
+                  <td className="px-4 py-3 text-sm">
+                    {pick.startTime
+                      ? dayjs(pick.startTime).format("ddd, D MMM · h:mm A")
+                      : "TBD"}
+                    <div
+                      className={`inline-block ml-2 px-2 py-1 rounded-full text-xs ${
+                        pick.status === "open"
+                          ? "bg-green-700 text-white"
+                          : pick.status === "pending"
+                          ? "bg-yellow-600 text-black"
+                          : pick.status === "final"
+                          ? "bg-blue-700 text-white"
+                          : "bg-gray-700 text-gray-200"
+                      }`}
                     >
-                      See other picks →
-                    </Link>
-                  </div>
-                </div>
-
-                <div className="col-span-1 text-right text-emerald-300 font-semibold">
-                  {r.yesPct}%
-                </div>
-                <div className="col-span-1 text-right text-rose-300 font-semibold">
-                  {r.noPct}%
-                </div>
-              </div>
-            ))}
-        </div>
+                      {pick.status ? pick.status.toUpperCase() : "OPEN"}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="text-orange-400 font-semibold">
+                      {pick.match}
+                    </div>
+                    <div className="text-xs text-gray-400">{pick.venue}</div>
+                  </td>
+                  <td className="px-4 py-3 text-sm">{`Q${pick.quarter || "?"}`}</td>
+                  <td className="px-4 py-3 font-semibold">{pick.question}</td>
+                  <td className="px-4 py-3 text-center text-green-400">0%</td>
+                  <td className="px-4 py-3 text-center text-red-400">0%</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
-    </main>
+    </div>
   );
 }
 
 export default function PicksPage() {
   return (
-    <Suspense fallback={<div className="text-gray-400 p-6">Loading picks…</div>}>
-      <PicksInner />
+    <Suspense fallback={<div className="text-center text-white mt-10">Loading...</div>}>
+      <PicksContent />
     </Suspense>
   );
 }
