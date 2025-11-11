@@ -11,12 +11,11 @@ import {
   DocumentData,
 } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
-
 import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
 dayjs.extend(customParseFormat);
 
-// ---------------- Types ----------------
+// ---------- TYPES ----------
 type Question = {
   quarter: number;
   question: string;
@@ -31,7 +30,6 @@ type Game = {
   questions: Question[];
 };
 type RoundDoc = { games: Game[] };
-
 type CardRow = {
   id: string;
   roundId: string;
@@ -45,42 +43,24 @@ type CardRow = {
   status: "open" | "pending" | "final" | "void";
 };
 
-// ---------------- Time helpers ----------------
+// ---------- HELPERS ----------
 const toDate = (v: CardRow["startTime"]): Date | null => {
   if (!v) return null;
-  if (typeof (v as any)?.toDate === "function") {
-    try {
-      return (v as Timestamp).toDate();
-    } catch {}
-  }
+  if (typeof (v as any)?.toDate === "function") return (v as Timestamp).toDate();
   if (v instanceof Date && !isNaN(v.getTime())) return v;
   if (typeof v === "string") {
     const iso = new Date(v);
     if (!isNaN(iso.getTime())) return iso;
-    const formats = [
-      "dddd, D MMMM YYYY, h.mm a",
-      "ddd, D MMM YYYY, h.mm a",
-      "D MMMM YYYY, h.mm a",
-      "D MMM YYYY, h.mm a",
-      "dddd D MMMM YYYY, h.mm a",
-      "dddd, D MMMM YYYY, h.mm a [AEDT]",
-      "ddd, D MMM YYYY, h.mm a [AEDT]",
-    ];
-    for (const fmt of formats) {
-      const p = dayjs(v, fmt, true);
-      if (p.isValid()) return p.toDate();
-    }
   }
   return null;
 };
-
 const formatStart = (v: CardRow["startTime"]) => {
   const d = toDate(v);
   if (!d) return "TBD •";
   return `${dayjs(d).format("ddd, D MMM")} • ${dayjs(d).format("h:mm A")} AEDT`;
 };
 
-// ---------------- Page ----------------
+// ---------- PAGE ----------
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [cards, setCards] = useState<CardRow[]>([]);
@@ -117,18 +97,17 @@ export default function HomePage() {
             });
           });
         });
-
-        const openOnly = all
-          .filter((r) => r.status === "open")
-          .sort((a, b) => {
-            const ta = toDate(a.startTime)?.getTime() ?? 0;
-            const tb = toDate(b.startTime)?.getTime() ?? 0;
-            if (ta !== tb) return ta - tb;
-            return a.quarter - b.quarter;
-          })
-          .slice(0, 6);
-
-        setCards(openOnly);
+        setCards(
+          all
+            .filter((r) => r.status === "open")
+            .sort((a, b) => {
+              const ta = toDate(a.startTime)?.getTime() ?? 0;
+              const tb = toDate(b.startTime)?.getTime() ?? 0;
+              if (ta !== tb) return ta - tb;
+              return a.quarter - b.quarter;
+            })
+            .slice(0, 6)
+        );
       } catch (e) {
         console.error("home fetch rounds error:", e);
       } finally {
@@ -143,17 +122,15 @@ export default function HomePage() {
       window.location.href = "/login";
       return;
     }
-    // TODO: write pick to Firestore
     console.log("pick", { row, choice, uid: user.uid });
   };
 
   return (
     <main className="relative">
-      {/* ---------- HERO (full image visible + seamless blend) ---------- */}
-      <section className="relative w-full overflow-hidden">
-        {/* Backdrop colour to match image edges (seamless) */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0b1b2a] via-[#0b1b2a] to-transparent pointer-events-none" />
-        <div className="relative w-full h-[72vh] md:h-[86vh]">
+      {/* ---------- HERO SECTION ---------- */}
+      <section className="relative w-[calc(100%+120px)] -ml-[60px] overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0b1b2a] via-[#0b1b2a] to-transparent" />
+        <div className="relative w-full h-[80vh] md:h-[90vh]">
           <Image
             src="/mcg-hero.jpg"
             alt="MCG Stadium"
@@ -161,17 +138,13 @@ export default function HomePage() {
             className="object-contain"
             priority
           />
-          {/* readability gradient over image */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
-          {/* Headline + CTAs */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
             <h1 className="text-white text-4xl md:text-6xl font-extrabold mb-4 leading-tight">
-              Real <span className="text-orange-500">Streakr’s</span> don’t get
-              caught.
+              Real <span className="text-orange-500">Streakr’s</span> don’t get caught.
             </h1>
             <p className="text-white/90 max-w-2xl text-lg md:text-xl mb-8">
-              Free-to-play AFL prediction streaks. Build your streak, top the
-              leaderboard, win prizes.
+              Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
             </p>
             <div className="flex gap-4">
               <Link
@@ -189,14 +162,13 @@ export default function HomePage() {
             </div>
           </div>
         </div>
-
-        {/* Sponsor Banner BELOW image */}
+        {/* Sponsor banner */}
         <div className="bg-white/5 border border-white/10 text-center py-4 text-white text-sm">
           Sponsor Banner • 970×90
         </div>
       </section>
 
-      {/* ---------- OPEN SELECTIONS (3×2 grid) ---------- */}
+      {/* ---------- PICKS GRID ---------- */}
       <section className="max-w-6xl mx-auto px-4 md:px-6 mt-10 mb-20">
         <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-6">
           Round 1 Open Picks
@@ -214,9 +186,7 @@ export default function HomePage() {
                 className="rounded-2xl border border-white/10 bg-white/5 p-5 text-white"
               >
                 <div className="mb-2">
-                  <div className="text-orange-400 font-semibold">
-                    {c.match}
-                  </div>
+                  <div className="text-orange-400 font-semibold">{c.match}</div>
                   <div className="text-white/70 text-sm">
                     {formatStart(c.startTime)} • {c.venue}
                   </div>
