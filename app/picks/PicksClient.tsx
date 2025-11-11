@@ -1,26 +1,25 @@
 "use client";
 
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { useEffect, useState, useMemo } from "react";
+import Image from "next/image";
 import { db, auth } from "@/lib/firebaseClient";
-import {
-  collection,
-  getDocs,
-  Timestamp,
-  DocumentData,
-} from "firebase/firestore";
+import { collection, getDocs, Timestamp, DocumentData } from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
-import dayjs from "dayjs";
-import customParseFormat from "dayjs/plugin/customParseFormat";
-dayjs.extend(customParseFormat);
 
-/* ---------- Types ---------- */
-type Question = {
-  quarter: number;
-  question: string;
-  yesPercent?: number;
-  noPercent?: number;
-};
+// Day.js
+import dayjsBase from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
+import utc from "dayjs/plugin/utc";
+import tz from "dayjs/plugin/timezone";
+dayjsBase.extend(customParseFormat);
+dayjsBase.extend(utc);
+dayjsBase.extend(tz);
+const dayjs = dayjsBase;
+const LOCAL_TZ = "Australia/Melbourne";
+
+/* ----------------------------- Types ----------------------------- */
+type Question = { quarter: number; question: string; yesPercent?: number; noPercent?: number };
 type Game = {
   match: string;
   venue?: string;
@@ -29,6 +28,9 @@ type Game = {
   questions: Question[];
 };
 type RoundDoc = { games: Game[] };
+type Fixture = { match: string; venue?: string; startTime?: Timestamp | string | Date | null; status?: string };
+type FixturesDoc = { fixtures?: Fixture[] };
+
 type CardRow = {
   id: string;
   roundId: string;
@@ -42,191 +44,212 @@ type CardRow = {
   status: "open" | "pending" | "final" | "void";
 };
 
-/* ---------- Helpers ---------- */
-const toDate = (raw: any): Date | null => {
+/* ------------------------- Date helpers ------------------------- */
+const normMatch = (s: string) => (s || "").trim().toLowerCase();
+
+function toDate(raw: CardRow["startTime"]): Date | null {
   if (!raw) return null;
-  if (typeof raw?.toDate === "function") return raw.toDate();
+
+  // Firestore Timestamp
+  if (typeof (raw as any)?.toDate === "function") {
+    try { return (raw as Timestamp).toDate(); } catch {}
+  }
+
+  // Native Date
   if (raw instanceof Date && !isNaN(raw.getTime())) return raw;
+
+  // Strings
   if (typeof raw === "string") {
+    // Try ISO
     const iso = new Date(raw);
     if (!isNaN(iso.getTime())) return iso;
+
+    // Strict matches for your seeded style
     const formats = [
-      "ddd, D MMM YYYY, h:mm A",
-      "dddd, D MMMM YYYY, h:mm A",
+      "dddd, D MMMM YYYY, h.mm a [AEDT]",
+      "dddd, D MMMM YYYY, h.mm a",              // ← e.g. "Thursday, 19 March 2026, 7.20pm"
+      "ddd, D MMM YYYY, h.mm a [AEDT]",
       "ddd, D MMM YYYY, h.mm a",
-      "D MMM YYYY, h:mm A",
-      "D MMM YYYY, h.mm a",
+      "ddd, D MMM, h.mm a [AEDT]",
+      "ddd, D MMM, h.mm a",
     ];
     for (const f of formats) {
-      const parsed = dayjs(raw, f, true);
-      if (parsed.isValid()) return parsed.toDate();
+      const d = dayjs(raw, f, true);
+      if (d.isValid()) return d.toDate();
     }
+
+    // Last-resort non-strict parse (handles extra spaces/commas)
+    const loose = dayjs(raw);
+    if (loose.isValid()) return loose.toDate();
   }
+
   return null;
-};
-const formatStart = (v: any) => {
-  const d = toDate(v);
-  return d ? dayjs(d).format("ddd, D MMM • h:mm A AEDT") : "TBD";
-};
-const statusColor = (s: CardRow["status"]) =>
-  s === "open"
-    ? "bg-emerald-900/50 text-emerald-300 ring-emerald-500/30"
-    : s === "final"
-    ? "bg-sky-900/50 text-sky-300 ring-sky-500/30"
-    : s === "pending"
-    ? "bg-amber-900/50 text-amber-300 ring-amber-500/30"
-    : "bg-rose-900/50 text-rose-300 ring-rose-500/30";
+}
 
-/* ---------- Component ---------- */
-export default function PicksPage() {
+function formatStart(raw: CardRow["startTime"]) {
+  const d = toDate(raw);
+  if (!d) return "TBD";
+  const dd = dayjs(d).tz(LOCAL_TZ);
+  // Exactly like: Thu, 19 Mar 7.20pm AEDT
+  return `${dd.format("ddd, D MMM")} ${dd.format("h.mm")}pm`.replace("12.00pm", dd.format("h.mm a")) + " AEDT";
+}
+
+/* ------------------------------ Page ----------------------------- */
+export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
-  const [rows, setRows] = useState<CardRow[]>([]);
+  const [cards, setCards] = useState<CardRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"open" | "final" | "pending" | "void" | "all">(
-    "open"
-  );
+
+  useEffect(() => onAuthStateChanged(auth, setUser), []);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const load = async () => {
+    (async () => {
       try {
-        const snap = await getDocs(collection(db, "rounds"));
-        const list: CardRow[] = [];
-        snap.forEach((doc) => {
+        // rounds
+        const roundsSnap = await getDocs(collection(db, "rounds"));
+        // fixtures (optional)
+        const fixturesSnap = await getDocs(collection(db, "fixtures"));
+        const fixtureMap = new Map<string, Fixture>();
+        fixturesSnap.forEach((doc) => {
+          const fd = doc.data() as FixturesDoc | DocumentData;
+          const arr = Array.isArray(fd?.fixtures) ? fd.fixtures : [];
+          arr.forEach((fx) => { if (fx?.match) fixtureMap.set(normMatch(fx.match), fx); });
+        });
+
+        const all: CardRow[] = [];
+        roundsSnap.forEach((doc) => {
           const roundId = doc.id;
           const data = doc.data() as RoundDoc | DocumentData;
           const games: Game[] = Array.isArray(data?.games) ? data.games : [];
-          games.forEach((g, gi) =>
-            (g.questions || []).forEach((q, qi) =>
-              list.push({
+          games.forEach((g, gi) => {
+            const qs = Array.isArray(g.questions) ? g.questions : [];
+            const fx = fixtureMap.get(normMatch(g.match || ""));
+            const startTime = g.startTime ?? fx?.startTime ?? null;
+            const venue = g.venue ?? fx?.venue ?? "TBD";
+            const status = ((g.status ?? fx?.status ?? "open") as CardRow["status"]).toLowerCase() as CardRow["status"];
+
+            qs.forEach((q, qi) => {
+              all.push({
                 id: `${roundId}-${gi}-${qi}`,
                 roundId,
-                match: g.match ?? "TBD",
-                venue: g.venue ?? "TBD",
-                quarter: q.quarter ?? 1,
+                match: g.match ?? fx?.match ?? "TBD",
+                venue,
+                quarter: Number(q.quarter ?? 1),
                 question: q.question ?? "",
-                yesPercent: q.yesPercent ?? 0,
-                noPercent: q.noPercent ?? 0,
-                startTime: g.startTime ?? null,
-                status: (g.status as any) ?? "open",
-              })
-            )
-          );
+                yesPercent: Number(q.yesPercent ?? 0),
+                noPercent: Number(q.noPercent ?? 0),
+                startTime,
+                status,
+              });
+            });
+          });
         });
-        list.sort((a, b) => {
-          const ta = toDate(a.startTime)?.getTime() ?? 0;
-          const tb = toDate(b.startTime)?.getTime() ?? 0;
-          return ta - tb;
-        });
-        setRows(list);
+
+        const open = all
+          .filter((r) => r.status === "open")
+          .sort((a, b) => {
+            const ta = toDate(a.startTime)?.getTime() ?? 0;
+            const tb = toDate(b.startTime)?.getTime() ?? 0;
+            if (ta !== tb) return ta - tb;
+            return a.quarter - b.quarter;
+          })
+          .slice(0, 6);
+
+        setCards(open);
       } catch (e) {
-        console.error(e);
+        console.error("home fetch error:", e);
       } finally {
         setLoading(false);
       }
-    };
-    load();
+    })();
   }, []);
 
-  const filtered = useMemo(
-    () => (tab === "all" ? rows : rows.filter((r) => r.status === tab)),
-    [rows, tab]
-  );
-
   const handlePick = (row: CardRow, choice: "yes" | "no") => {
-    if (!user) return (window.location.href = "/login");
-    console.log("Pick", choice, row.question);
+    if (!user) { window.location.href = "/login"; return; }
+    window.location.href = "/picks";
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6">
-      <h1 className="text-4xl font-extrabold text-white mb-6">Make Picks</h1>
+    <main className="mx-auto max-w-6xl px-4 pb-16">
+      {/* HERO: full-bleed image */}
+      <section className="relative mt-4 rounded-3xl overflow-hidden">
+        <Image
+          src="/mcg-hero.jpg"
+          alt="MCG under lights"
+          width={1920}
+          height={900}
+          priority
+          className="h-[420px] w-full object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-black/50" />
+        <div className="absolute inset-0 p-8 flex flex-col justify-center">
+          <h1 className="text-white text-4xl md:text-6xl font-extrabold max-w-3xl leading-tight drop-shadow">
+            Real <span className="text-orange-400">Streakr’s</span> don’t get caught.
+          </h1>
+          <p className="mt-3 text-white/90 max-w-2xl">
+            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
+          </p>
+          <div className="mt-5 flex gap-3">
+            <Link href="/login" className="rounded-xl bg-orange-500 px-4 py-2 font-semibold text-white hover:bg-orange-600">
+              Sign up / Log in
+            </Link>
+            <Link href="/picks" className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/20">
+              View Picks
+            </Link>
+          </div>
+        </div>
+      </section>
 
-      {/* Tabs */}
-      <div className="mb-4 flex gap-2 flex-wrap">
-        {["open", "final", "pending", "void", "all"].map((s) => (
-          <button
-            key={s}
-            onClick={() => setTab(s as any)}
-            className={`px-3 py-1.5 rounded-md text-sm font-semibold ring-1 ring-white/10 ${
-              tab === s
-                ? "bg-white/10 text-white"
-                : "bg-slate-800 text-slate-300 hover:bg-slate-700"
-            }`}
-          >
-            {s[0].toUpperCase() + s.slice(1)}
-          </button>
-        ))}
+      {/* SPONSOR BANNER: below image */}
+      <div className="mt-6 mb-2">
+        <div className="mx-auto w-full max-w-[970px] h-[90px] rounded-xl border border-white/15 bg-white/10 backdrop-blur text-white/80 flex items-center justify-center text-sm">
+          Sponsor Banner • 970×90
+        </div>
       </div>
 
+      <h2 className="text-2xl font-bold text-white mt-6 mb-3">Round 1 Open Picks</h2>
+
       {loading ? (
-        <div className="text-slate-400 py-8">Loading...</div>
+        <div className="text-white/80">Loading…</div>
+      ) : cards.length === 0 ? (
+        <div className="text-white/70">No open selections right now.</div>
       ) : (
-        <div className="rounded-xl bg-[#0C1A2A]/70 ring-1 ring-white/10 overflow-hidden">
-          <div className="grid grid-cols-12 text-xs font-semibold uppercase px-4 py-3 border-b border-white/10 text-slate-300">
-            <div className="col-span-3">Start</div>
-            <div className="col-span-4">Match · Venue</div>
-            <div className="col-span-1 text-center">Q#</div>
-            <div className="col-span-3">Question</div>
-            <div className="col-span-1 text-right">%</div>
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {cards.map((c) => (
+            <article key={c.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+              <h3 className="text-sm font-bold text-orange-300 tracking-wide">{c.match}</h3>
+              <p className="text-white/80 text-sm">{formatStart(c.startTime)} • {c.venue}</p>
 
-          {filtered.map((r) => (
-            <div
-              key={r.id}
-              className="grid grid-cols-12 items-start gap-y-2 px-4 py-4 border-b border-white/5"
-            >
-              <div className="col-span-3 flex items-center gap-2">
-                <span className="text-slate-200 text-sm">
-                  {formatStart(r.startTime)}
+              <div className="mt-4">
+                <span className="mr-2 inline-flex h-6 w-10 items-center justify-center rounded-md bg-white/10 text-xs text-white/80">
+                  Q{c.quarter}
                 </span>
-                <span className={`text-[10px] px-2 py-1 rounded-full ring-1 ${statusColor(r.status)}`}>
-                  {r.status.toUpperCase()}
-                </span>
+                <span className="font-semibold text-white">{c.question}</span>
               </div>
 
-              <div className="col-span-4">
-                <div className="font-semibold text-orange-300">{r.match}</div>
-                <div className="text-xs text-slate-400">{r.venue}</div>
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  onClick={() => handlePick(c, "yes")}
+                  className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-600"
+                >
+                  Yes
+                </button>
+                <button
+                  onClick={() => handlePick(c, "no")}
+                  className="rounded-md bg-white/15 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
+                >
+                  No
+                </button>
+                <Link href="/picks" className="ml-auto text-sm text-white/80 hover:text-white underline underline-offset-4">
+                  See other picks →
+                </Link>
               </div>
 
-              <div className="col-span-1 text-center">
-                <span className="text-slate-100 font-semibold text-xs bg-slate-800 px-2 py-1 rounded-md">
-                  Q{r.quarter}
-                </span>
-              </div>
-
-              <div className="col-span-3 text-slate-100">
-                <div className="font-semibold">{r.question}</div>
-                {r.status === "open" && (
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      onClick={() => handlePick(r, "yes")}
-                      className="px-3 py-1 rounded-md bg-amber-500 hover:bg-amber-400 text-black text-sm font-semibold"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      onClick={() => handlePick(r, "no")}
-                      className="px-3 py-1 rounded-md bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold"
-                    >
-                      No
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="col-span-1 text-right font-semibold text-emerald-300">
-                {r.yesPercent ?? 0}%
-              </div>
-            </div>
+              <div className="mt-3 text-sm text-white/70">Yes {c.yesPercent}% · No {c.noPercent}%</div>
+            </article>
           ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }
