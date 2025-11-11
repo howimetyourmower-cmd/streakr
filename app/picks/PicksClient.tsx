@@ -9,199 +9,212 @@ import {
   getDoc,
   getDocs,
   query,
-  where,
+  orderBy,
   Timestamp,
 } from "firebase/firestore";
 
+// ---- Day.js (timezone) ----
 import dayjsBase from "dayjs";
 import utc from "dayjs/plugin/utc";
 import tz from "dayjs/plugin/timezone";
-
 dayjsBase.extend(utc);
 dayjsBase.extend(tz);
 const dayjs = dayjsBase;
 const LOCAL_TZ = "Australia/Melbourne";
 
-// ---------- minimal types (loose to avoid TS build failures) ----------
-type Question = { quarter: number; question: string };
+// ---- Types kept light to avoid TS build headaches ----
+type Question = { quarter?: number; question: string };
 type GameInRound = { match: string; questions: Question[] };
-type RoundDoc = { round: number; games: GameInRound[] };
+type RoundDoc = { games?: GameInRound[] };
 type FixtureDoc = {
-  match?: string;
-  startTime?: Timestamp | string | Date | null;
+  startTime?: string | Date | Timestamp;
   venue?: string;
   status?: "open" | "pending" | "final" | "void";
 };
 
-// ---------- helpers ----------
-function formatStart(raw: Timestamp | string | Date | null | undefined) {
-  if (!raw) return "TBD";
-  // Firestore Timestamp
-  // @ts-ignore
-  if (raw?.toDate) raw = (raw as Timestamp).toDate();
+// ---- Helpers ----
+function toDate(raw: string | Date | Timestamp | undefined): Date | null {
+  if (!raw) return null;
+  if (raw instanceof Timestamp) return raw.toDate();
+  if (raw instanceof Date) return raw;
   if (typeof raw === "string") {
+    // Accept typical ISO from Firestore / manual strings
     const d =
-      dayjs.tz(raw, ["ddd, D MMM YYYY, h:mm A", "YYYY-MM-DDTHH:mm:ssZ"], LOCAL_TZ);
-    return d.isValid() ? d.tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z") : "TBD";
+      dayjs.tz(raw, "YYYY-MM-DDTHH:mm:ssZ", LOCAL_TZ) || dayjs.tz(raw, LOCAL_TZ);
+    return d.isValid() ? d.toDate() : null;
   }
-  if (raw instanceof Date) {
-    return dayjs(raw).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
-  }
-  return "TBD";
+  return null;
 }
 
-function deriveStatus(fix?: FixtureDoc | null) {
-  return (fix?.status ?? "open").toUpperCase();
+function formatStart(raw: string | Date | Timestamp | undefined): string {
+  const d = toDate(raw);
+  if (!d) return "TBD";
+  return dayjs(d).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
 }
 
-function splitMatch(match: string) {
-  // "Richmond vs Carlton" -> ["Richmond", "Carlton"]
-  const parts = match.split(/vs|v/gi).map((s) => s.trim());
-  return parts.length >= 2 ? [parts[0], parts[1]] : [match, ""];
+function deriveStatus(fix?: FixtureDoc): "OPEN" | "PENDING" | "FINAL" | "VOID" {
+  const s = (fix?.status ?? "open").toLowerCase();
+  if (s === "pending") return "PENDING";
+  if (s === "final") return "FINAL";
+  if (s === "void") return "VOID";
+  return "OPEN";
 }
 
-// ---------- main client component ----------
+// ---- Row view model ----
+type Row = {
+  id: string;
+  match: string;
+  venue: string;
+  startLabel: string;
+  qNum: string;
+  question: string;
+  yesPct: number;
+  noPct: number;
+  status: "OPEN" | "PENDING" | "FINAL" | "VOID";
+};
+
 export default function PicksClient() {
-  const [rows, setRows] = useState<
-    {
-      startLabel: string;
-      status: string;
-      match: string;
-      venue: string;
-      qNum: string;
-      question: string;
-      matchLinkHref: string;
-    }[]
-  >([]);
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const load = async () => {
+    const run = async () => {
       try {
-        // 1) Load the round doc: /rounds/round-1  (your structure)
-        const roundRef = doc(collection(db, "rounds"), "round-1");
-        const roundSnap = await getDoc(roundRef);
-        if (!roundSnap.exists()) {
-          setRows([]);
-          return;
-        }
+        // 1) Round data (always available to see)
+        const roundSnap = await getDoc(doc(db, "rounds", "round-1"));
+        const round = (roundSnap.data() as RoundDoc) ?? {};
 
-        const round = roundSnap.data() as RoundDoc;
-        const games: GameInRound[] = round.games || [];
+        // 2) Fixtures (join by match)
+        const fixQ = query(collection(db, "fixtures"), orderBy("match", "asc"));
+        const fixSnap = await getDocs(fixQ);
+        const fixMap = new Map<string, FixtureDoc>();
+        fixSnap.forEach((d) => fixMap.set(String(d.get("match") ?? d.id), (d.data() as FixtureDoc) ?? {}));
 
-        // 2) For each game, try to look up a matching fixture in /fixtures
-        //    We’ll do a simple fetch-all to avoid Firestore query gymnastics
-        const fixturesSnap = await getDocs(collection(db, "fixtures"));
-        const fixtures: FixtureDoc[] = fixturesSnap.docs.map((d) => d.data() as FixtureDoc);
-
-        const builtRows: any[] = [];
-
-        games.forEach((game) => {
-          const [home, away] = splitMatch(game.match);
-          const matchKey = `${home} vs ${away}`.toLowerCase();
-
-          // find fixture by normalized "teamA vs teamB" or exact match field
-          const fix =
-            fixtures.find((f) => (f.match || "").toLowerCase() === matchKey) ||
-            fixtures.find((f) => (f.match || "").toLowerCase() === game.match.toLowerCase()) ||
-            null;
-
-          const startLabel = formatStart(fix?.startTime ?? null);
-          const venue = fix?.venue ?? "—";
+        // 3) Expand to rows
+        const out: Row[] = [];
+        (round.games ?? []).forEach((g) => {
+          const fix = fixMap.get(g.match) ?? {};
+          const venue = fix.venue ?? "";
+          const startLabel = formatStart(fix.startTime);
           const status = deriveStatus(fix);
 
-          (game.questions || []).forEach((q, idx) => {
-            builtRows.push({
-              startLabel,
-              status,
-              match: game.match,
+          (g.questions ?? []).forEach((q, idx) => {
+            out.push({
+              id: `${g.match}::${idx}`,
+              match: g.match,
               venue,
-              qNum: `Q${q.quarter || idx + 1}`,
+              startLabel,
+              qNum: `Q${q.quarter ?? 1}`,
               question: q.question,
-              matchLinkHref: `/picks?match=${encodeURIComponent(game.match)}`,
+              yesPct: 0, // fill in when you wire aggregation
+              noPct: 0,
+              status,
             });
           });
         });
 
-        setRows(builtRows);
+        setRows(out);
       } catch (e) {
         console.error("Error loading picks:", e);
         setRows([]);
+      } finally {
+        setLoading(false);
       }
     };
-
-    load();
+    run();
   }, []);
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-10">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
       <h1 className="text-4xl font-extrabold text-white mb-6">Make Picks</h1>
 
-      <div className="overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10">
-        <div className="grid grid-cols-12 px-6 py-3 text-xs font-semibold tracking-wider text-slate-300 uppercase">
-          <div className="col-span-2">Start</div>
-          <div className="col-span-4">Match · Venue</div>
+      <div className="overflow-hidden rounded-2xl shadow-lg bg-[#0C1A2A]/60 ring-1 ring-white/10">
+        {/* Header row */}
+        <div className="grid grid-cols-12 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-300/90 border-b border-white/10">
+          <div className="col-span-3 sm:col-span-2">Start</div>
+          <div className="col-span-5 sm:col-span-4">Match · Venue</div>
           <div className="col-span-1 text-center">Q#</div>
-          <div className="col-span-5">Question</div>
+          <div className="hidden sm:block col-span-2">Question</div>
+          <div className="col-span-1 text-right">Yes %</div>
+          <div className="col-span-0 sm:col-span-1 text-right pr-2">No %</div>
         </div>
 
-        {rows.length === 0 ? (
-          <div className="px-6 py-6 text-slate-300">No questions found.</div>
+        {loading ? (
+          <div className="px-4 py-8 text-slate-300">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="px-4 py-8 text-slate-300">No questions found.</div>
         ) : (
           <ul className="divide-y divide-white/10">
-            {rows.map((r, i) => (
-              <li
-                key={`${r.match}-${r.qNum}-${i}`}
-                className="grid grid-cols-12 items-center px-6 py-4 hover:bg-white/[0.03]"
-              >
-                <div className="col-span-2 flex items-center gap-3">
-                  <span className="text-slate-200">{r.startLabel}</span>
+            {rows.map((r) => (
+              <li key={r.id} className="grid grid-cols-12 gap-y-2 px-4 py-4 items-center">
+                {/* Start + status pill */}
+                <div className="col-span-3 sm:col-span-2 flex items-center gap-3">
+                  <span className="text-slate-200 text-sm">{r.startLabel}</span>
                   <span
-                    className={`text-[11px] px-2 py-1 rounded-full ${
+                    className={`text-[10px] font-semibold px-2 py-1 rounded-full ${
                       r.status === "OPEN"
-                        ? "bg-emerald-900/60 text-emerald-300"
+                        ? "bg-emerald-900/50 text-emerald-300 ring-1 ring-emerald-500/30"
                         : r.status === "PENDING"
-                        ? "bg-amber-900/60 text-amber-300"
+                        ? "bg-amber-900/40 text-amber-300 ring-1 ring-amber-500/30"
                         : r.status === "FINAL"
-                        ? "bg-indigo-900/60 text-indigo-300"
-                        : "bg-red-900/60 text-red-300"
+                        ? "bg-slate-700 text-slate-200 ring-1 ring-slate-400/30"
+                        : "bg-rose-900/40 text-rose-200 ring-1 ring-rose-500/30"
                     }`}
                   >
                     {r.status}
                   </span>
                 </div>
 
-                <div className="col-span-4">
-                  <Link
-                    href={r.matchLinkHref}
-                    className="text-amber-300 font-semibold hover:underline"
-                  >
-                    {r.match}
-                  </Link>
-                  <div className="text-slate-400 text-sm">{r.venue}</div>
+                {/* Match / Venue */}
+                <div className="col-span-5 sm:col-span-4">
+                  <div className="font-semibold text-orange-300">
+                    <Link href={`/picks?match=${encodeURIComponent(r.match)}`} prefetch={false}>
+                      {r.match}
+                    </Link>
+                  </div>
+                  <div className="text-xs text-slate-400">{r.venue || "TBD"}</div>
                 </div>
 
+                {/* Q# */}
                 <div className="col-span-1 text-center">
-                  <span className="inline-flex items-center justify-center rounded-md bg-white/10 px-2 py-1 text-xs font-bold text-slate-200">
+                  <span className="inline-flex items-center justify-center text-[11px] font-semibold px-2 py-1 rounded-md bg-slate-800 text-slate-200 ring-1 ring-white/10">
                     {r.qNum}
                   </span>
                 </div>
 
-                <div className="col-span-5">
-                  <div className="font-semibold text-white">{r.question}</div>
+                {/* Question */}
+                <div className="hidden sm:block col-span-2">
+                  <div className="font-semibold text-slate-100">{r.question}</div>
+                  <Link
+                    href={`/picks?match=${encodeURIComponent(r.match)}`}
+                    className="text-xs text-slate-400 hover:text-slate-300"
+                    prefetch={false}
+                  >
+                    See other picks →
+                  </Link>
+                </div>
+
+                {/* Yes / No % */}
+                <div className="col-span-1 text-right font-semibold text-emerald-300">{r.yesPct}%</div>
+                <div className="col-span-0 sm:col-span-1 text-right pr-2 font-semibold text-rose-300">
+                  {r.noPct}%
+                </div>
+
+                {/* Mobile question (stacked) */}
+                <div className="sm:hidden col-span-12 mt-2">
+                  <div className="font-semibold text-slate-100">{r.question}</div>
+                  <Link
+                    href={`/picks?match=${encodeURIComponent(r.match)}`}
+                    className="text-xs text-slate-400 hover:text-slate-300"
+                    prefetch={false}
+                  >
+                    See other picks →
+                  </Link>
                 </div>
               </li>
             ))}
           </ul>
         )}
-      </div>
-
-      <div className="mt-6 text-right">
-        <Link
-          href="/picks?view=final"
-          className="text-sm text-slate-300 hover:text-white underline"
-        >
-          View settled (final/void) selections →
-        </Link>
       </div>
     </div>
   );
