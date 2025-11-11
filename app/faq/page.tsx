@@ -8,7 +8,7 @@ export default function FAQPage() {
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
       {/* Title */}
-      <h1 className="text-center text-4xl font-extrabold tracking-tight text-orange-400">
+      <h1 className="text-center text-4xl font-extrabold tracking-tight text-orange-400 mb-6">
         FAQs
       </h1>
 
