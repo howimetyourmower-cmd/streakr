@@ -245,7 +245,7 @@ export default function HomePage() {
       </section>
 
       {/* Sponsor banner under hero */}
-      <section className="max-w-6xl mx-auto px-2 -mt-4 md:-mt-5">
+      <section className="max-w-6xl mx-auto px 2 -mt 0 md:-mt-1">
         <div className="rounded-2xl border border-white/10 bg-gray-900/70 p-6 text-center text-gray-300">
           Sponsor banner • 970×90
         </div>
