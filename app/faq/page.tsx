@@ -1,302 +1,202 @@
-"use client";
+/* app/faq/page.tsx */
+import Link from "next/link";
 
-import { useEffect, useMemo, useState } from "react";
-import { db } from "@/lib/firebaseClient";
-import { collection, doc, getDoc, getDocs, orderBy, query } from "firebase/firestore";
-import Image from "next/image";
-
-type Scope = "overall" | "round";
-type Row = {
-  uid: string;
-  displayName: string;
-  photoURL?: string;
-
-  // totals for the chosen scope (overall or this round)
-  picks: number;
-  wins: number;
-  losses: number;
-
-  currentStreak: number; // W#
-  bestStreak: number;    // W#
-
-  // optional; falls back to "No Pick"
-  currentPickStatus?: string; // "Pick Selected" | "No Pick" | etc.
+export const metadata = {
+  title: "FAQ • STREAKr AFL",
 };
 
-const seasons = Array.from({ length: 6 }, (_, i) => 2026 - i);
-const rounds = Array.from({ length: 23 }, (_, i) => i + 1);
-
-export default function LeaderboardClient() {
-  const [season, setSeason] = useState<number>(2026);
-  const [round, setRound] = useState<number>(1);
-  const [scope, setScope] = useState<Scope>("overall");
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        // Preferred aggregate doc ids:
-        //   overall -> leaderboards/{season}-overall
-        //   round   -> leaderboards/{season}-round-{round}
-        const aggId = scope === "overall" ? `${season}-overall` : `${season}-round-${round}`;
-        const agg = await getDoc(doc(db, "leaderboards", aggId));
-        if (!cancelled && agg.exists()) {
-          setRows(normalize((agg.data() as any)?.standings ?? []));
-          setLoading(false);
-          return;
-        }
-
-        // Fallback flat collections:
-        //   overall -> user_stats_{season}
-        //   round   -> user_stats_{season}_round_{round}
-        const coll =
-          scope === "overall" ? `user_stats_${season}` : `user_stats_${season}_round_${round}`;
-        const snap = await getDocs(query(collection(db, coll), orderBy("wins", "desc")));
-        const list: Row[] = [];
-        snap.forEach((d) => list.push(fallbackRow(d.id, d.data())));
-
-        if (!cancelled) {
-          setRows(list);
-          setLoading(false);
-        }
-      } catch (e) {
-        console.error("leaderboard load error:", e);
-        if (!cancelled) {
-          setRows([]);
-          setLoading(false);
-        }
-      }
-    };
-
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [season, round, scope]);
-
-  // Sort like ESPN: by CURRENT streak, then LONGEST streak, then fewest picks
-  const table = useMemo(() => {
-    return [...rows]
-      .sort((a, b) => {
-        if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
-        if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
-        return a.picks - b.picks;
-      })
-      .map((r, i) => ({
-        rank: i + 1,
-        ...r,
-        record: `${r.picks}-${r.wins}-${r.losses}`,
-        currentPickStatus: r.currentPickStatus || "No Pick",
-      }));
-  }, [rows]);
-
+export default function FAQPage() {
   return (
-    <div className="mx-auto max-w-6xl px-4 pb-24">
+    <main className="mx-auto max-w-5xl px-4 pb-24">
       {/* Title */}
       <div className="pt-8 text-center">
         <h1 className="text-4xl md:text-5xl font-extrabold text-orange-500 tracking-tight">
-          Leaderboards
+          Frequently Asked Questions
         </h1>
       </div>
 
       {/* Sponsor banner */}
-      <div className="mt-6 mb-6">
+      <div className="mt-6 mb-8">
         <div className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 text-center text-white/70 shadow-lg">
           Sponsor Banner • 970×90
         </div>
       </div>
 
-      {/* Controls: Season + Round inline, scope toggles on right */}
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center flex-wrap gap-3">
-          <label className="text-white/70">Season</label>
-          <select
-            value={season}
-            onChange={(e) => setSeason(Number(e.target.value))}
-            className="rounded-lg bg-white/10 text-white px-3 py-2 border border-white/10 focus:outline-none"
-          >
-            {seasons.map((yr) => (
-              <option key={yr} value={yr}>
-                {yr}
-              </option>
-            ))}
-          </select>
+      {/* Content */}
+      <div className="space-y-10 text-white/90">
+        <Section title="What is STREAKr?">
+          <p>
+            STREAKr is a free-to-play AFL prediction game. Make simple{" "}
+            <strong>Yes/No</strong> picks on live questions for each match and
+            build the longest <strong>winning streak</strong>. Longest streaks win prizes.
+          </p>
+        </Section>
 
-          <label className="ml-2 text-white/70">Round</label>
-          <select
-            value={round}
-            onChange={(e) => setRound(Number(e.target.value))}
-            className="rounded-lg bg-white/10 text-white px-3 py-2 border border-white/10 focus:outline-none"
-            disabled={scope === "overall"}
-            title={scope === "overall" ? "Switch to Round to change the round" : ""}
-          >
-            {rounds.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Section title="How do I play?">
+          <ol className="list-decimal ml-5 space-y-2 text-white/80">
+            <li>Go to <Link href="/picks" className="text-orange-400 underline">Make Picks</Link>.</li>
+            <li>Select a question and choose <strong>Yes</strong> or <strong>No</strong>.</li>
+            <li>Your streak increases by +1 for each correct pick and resets to 0 on a loss.</li>
+            <li>You can have only one active pick at a time per question.</li>
+          </ol>
+        </Section>
 
-        <div className="flex gap-2">
-          {(["overall", "round"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setScope(s)}
-              className={
-                "px-4 py-2 rounded-xl border text-sm font-semibold transition " +
-                (scope === s
-                  ? "bg-orange-500 text-black border-orange-400"
-                  : "bg-white/10 text-white/80 border-white/10 hover:bg-white/15")
-              }
+        <Section title="Who can play?">
+          <ul className="list-disc ml-5 space-y-2 text-white/80">
+            <li>Players must be <strong>18+</strong>.</li>
+            <li>One account per person. Duplicate or fraudulent accounts may be removed.</li>
+          </ul>
+        </Section>
+
+        <Section title="What counts as my current streak?">
+          <p className="text-white/80">
+            Your <strong>current streak</strong> is consecutive wins without a loss. If a pick is{" "}
+            <strong>void</strong> (e.g., match abandoned or question invalid), your streak{" "}
+            <strong>does not change</strong>.
+          </p>
+        </Section>
+
+        <Section title="What is my longest streak?">
+          <p className="text-white/80">
+            The best streak you’ve ever achieved this season (or for the selected round on the leaderboard).
+          </p>
+        </Section>
+
+        <Section title="When do picks lock?">
+          <p className="text-white/80">
+            Each question locks at the displayed start time (AEST/AEDT). Once locked, you can’t change the pick.
+          </p>
+        </Section>
+
+        <Section title="How are questions settled?">
+          <ul className="list-disc ml-5 space-y-2 text-white/80">
+            <li>
+              For now, questions are settled manually by our admins after official stats are confirmed.
+            </li>
+            <li>
+              Statuses: <strong>Open</strong> → <strong>Pending</strong> (awaiting result) →{" "}
+              <strong>Final</strong> / <strong>Void</strong>.
+            </li>
+          </ul>
+        </Section>
+
+        <Section title="Leaderboards & prizes">
+          <ul className="list-disc ml-5 space-y-2 text-white/80">
+            <li>
+              <strong>Round leaderboard:</strong> Longest current streak during the round wins the advertised prize.
+              If multiple players tie on longest streak, the tiebreakers are:
+              <ol className="list-decimal ml-6 mt-2 space-y-1">
+                <li>Best current streak (higher wins).</li>
+                <li>Best longest streak (season/round best).</li>
+                <li>Fewest total picks.</li>
+              </ol>
+            </li>
+            <li>
+              Prize pools are split equally among tied winners after tiebreakers, unless otherwise stated.
+            </li>
+            <li>
+              <Link href="/leaderboard" className="text-orange-400 underline">View Leaderboards</Link>
+            </li>
+          </ul>
+        </Section>
+
+        <Section title="What does “Current Pick” mean on Leaderboards?">
+          <p className="text-white/80">
+            Shows whether you currently have a selection in play: <strong>Pick Selected</strong> or <strong>No Pick</strong>.
+          </p>
+        </Section>
+
+        <Section title="Can I restart my streak after a loss?">
+          <p className="text-white/80">
+            Yes—just make another pick. Your streak restarts at 0 after any loss.
+          </p>
+        </Section>
+
+        <Section title="Do percentages on picks matter?">
+          <p className="text-white/80">
+            The Yes/No percentages display how other players are picking. They’re community sentiment, not odds.
+          </p>
+        </Section>
+
+        <Section title="Fair play">
+          <ul className="list-disc ml-5 space-y-2 text-white/80">
+            <li>No scripts, bots, or automation.</li>
+            <li>One account per person.</li>
+            <li>We may review and remove results that breach rules.</li>
+          </ul>
+        </Section>
+
+        <Section title="Notifications">
+          <p className="text-white/80">
+            Email and in-app reminders may be used for lock times, results, and updates (you can toggle preferences in your account when available).
+          </p>
+        </Section>
+
+        <Section title="Data & privacy">
+          <p className="text-white/80">
+            We store your display name, avatar (optional), and gameplay stats. We do not sell personal data.
+          </p>
+        </Section>
+
+        <Section title="Troubleshooting">
+          <ul className="list-disc ml-5 space-y-2 text-white/80">
+            <li>Hard refresh the page (Ctrl/Cmd + Shift + R).</li>
+            <li>Ensure you’re logged in if you can’t make a pick.</li>
+            <li>If a time shows “TBD”, the fixture is missing a valid start time.</li>
+          </ul>
+        </Section>
+
+        <Section title="Contact us">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <form
+              className="grid gap-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                window.location.href = "mailto:support@streakr.afl?subject=STREAKr%20Support%20Request";
+              }}
             >
-              {s === "overall" ? "Overall" : "Round"}
-            </button>
-          ))}
-        </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
+                  placeholder="Your name"
+                />
+                <input
+                  className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
+                  placeholder="Email address"
+                  type="email"
+                />
+              </div>
+              <textarea
+                rows={4}
+                className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
+                placeholder="How can we help?"
+              />
+              <button
+                type="submit"
+                className="inline-flex justify-center rounded-xl bg-orange-500 text-black font-semibold px-4 py-2 hover:bg-orange-400"
+              >
+                Send
+              </button>
+            </form>
+          </div>
+        </Section>
       </div>
-
-      {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5 shadow-lg">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left">
-            <thead>
-              <tr className="text-white/70 text-xs uppercase tracking-wide bg-white/5">
-                <th className="px-4 py-3 w-16">Rank</th>
-                <th className="px-4 py-3">Player</th>
-                <th className="px-4 py-3">Current Streak</th>
-                <th className="px-4 py-3">Longest Streak</th>
-                <th className="px-4 py-3">Current Pick</th>
-                <th className="px-4 py-3">
-                  {scope === "round" ? "Total Round Record" : "Total Record"}
-                </th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-white/10">
-              {loading && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-white/70">
-                    Loading…
-                  </td>
-                </tr>
-              )}
-
-              {!loading && table.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center">
-                    <p className="text-white/80">No leaderboard data yet.</p>
-                    <p className="text-white/50 text-sm mt-1">
-                      Standings update after picks settle. Ties broken by current streak, then best streak, then fewest picks.
-                    </p>
-                  </td>
-                </tr>
-              )}
-
-              {!loading &&
-                table.map((r) => (
-                  <tr key={r.uid} className="hover:bg-white/5">
-                    <td className="px-4 py-3 font-semibold text-white/80">{r.rank}</td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <Avatar name={r.displayName} photoURL={r.photoURL} />
-                        <span className="font-medium text-white">{r.displayName}</span>
-                      </div>
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-lg bg-emerald-500/15 text-emerald-300 px-2 py-1 text-xs font-semibold">
-                        W{r.currentStreak}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-3 text-white/90">W{r.bestStreak}</td>
-
-                    <td className="px-4 py-3">
-                      <span
-                        className={
-                          "inline-flex rounded-lg px-2 py-1 text-xs font-semibold " +
-                          (r.currentPickStatus === "Pick Selected"
-                            ? "bg-orange-500/20 text-orange-300"
-                            : "bg-white/10 text-white/70")
-                        }
-                      >
-                        {r.currentPickStatus}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-3 text-white/80">{r.record}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <p className="mt-4 text-xs text-white/50">
-        Standings update as picks settle. Ties: current streak → best streak → fewest picks.
-      </p>
-    </div>
+    </main>
   );
 }
 
-/* ---------- helpers ---------- */
-function fallbackRow(id: string, v: any): Row {
-  return {
-    uid: id,
-    displayName: String(v?.displayName ?? "Player"),
-    photoURL: v?.photoURL,
-    picks: num(v?.picks),
-    wins: num(v?.wins),
-    losses: num(v?.losses),
-    currentStreak: num(v?.currentStreak),
-    bestStreak: num(v?.bestStreak),
-    currentPickStatus: v?.currentPickStatus || (v?.currentPick ? "Pick Selected" : "No Pick"),
-  };
-}
-
-function normalize(list: any[]): Row[] {
-  return (list ?? []).map((v) => ({
-    uid: String(v.uid ?? v.id ?? Math.random().toString(36).slice(2)),
-    displayName: String(v.displayName ?? "Player"),
-    photoURL: v.photoURL,
-    picks: num(v.picks),
-    wins: num(v.wins),
-    losses: num(v.losses),
-    currentStreak: num(v.currentStreak),
-    bestStreak: num(v.bestStreak),
-    currentPickStatus: v.currentPickStatus || (v.currentPick ? "Pick Selected" : "No Pick"),
-  }));
-}
-
-function num(n: any): number {
-  const v = Number(n);
-  return Number.isFinite(v) ? v : 0;
-}
-
-function Avatar({ name, photoURL }: { name: string; photoURL?: string }) {
-  if (photoURL) {
-    return (
-      <span className="relative inline-block h-8 w-8 overflow-hidden rounded-full bg-white/10">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img alt={name} src={photoURL} className="h-full w-full object-cover" />
-      </span>
-    );
-  }
-  const inits = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((s) => s[0]?.toUpperCase())
-    .slice(0, 2)
-    .join("");
+/* ---------- Small helper for orange-titled sections ---------- */
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="h-8 w-8 rounded-full bg-white/10 text-white/70 text-xs flex items-center justify-center">
-      {inits || "P"}
-    </div>
+    <section>
+      <h2 className="text-xl md:text-2xl font-bold text-orange-500 mb-3">{title}</h2>
+      <div className="space-y-3">{children}</div>
+    </section>
   );
 }
