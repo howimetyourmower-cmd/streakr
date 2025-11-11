@@ -66,7 +66,7 @@ const formatStart = (v: Row["startTime"]) => {
     minute: "2-digit",
     hour12: true,
   }).format(d);
-  return fmt.replace(",", "") + "\nAEDT";
+  return fmt.replace(",", "") + " AEDT";
 };
 
 const STATUS_TABS: Array<Row["status"] | "all"> = [
@@ -141,22 +141,31 @@ export default function PicksClient() {
       window.location.href = "/login";
       return;
     }
-    // TODO: write to Firestore; placeholder:
     console.log("pick", { choice, rowId: row.id, uid: user.uid });
   };
 
   return (
-    <div className="min-h-screen text-white">
-      <h1 className="text-4xl font-extrabold tracking-tight mb-4">Make Picks</h1>
+    <div className="min-h-screen text-white max-w-6xl mx-auto px-3">
+      {/* Title */}
+      <h1 className="text-5xl font-extrabold text-center mb-3 text-orange-500 tracking-tight">
+        Make Picks
+      </h1>
+
+      {/* Sponsor banner */}
+      <div className="flex justify-center mb-6">
+        <div className="bg-white/10 border border-white/10 rounded-xl text-white/60 text-sm py-5 w-[970px] max-w-full text-center">
+          Sponsor Banner · 970×90
+        </div>
+      </div>
 
       {/* Tabs */}
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex gap-2 flex-wrap justify-center">
         {STATUS_TABS.map((s) => (
           <button
             key={s}
             onClick={() => setActive(s)}
-            className={`px-2.5 py-1 rounded-lg text-xs ${
-              active === s ? "bg-white/20" : "bg-white/10 hover:bg-white/15"
+            className={`px-3 py-1.5 rounded-lg text-sm ${
+              active === s ? "bg-orange-500" : "bg-white/10 hover:bg-white/15"
             }`}
           >
             {s[0].toUpperCase() + s.slice(1)}
@@ -164,9 +173,9 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* Header */}
+      {/* Table */}
       <div className="rounded-2xl overflow-hidden ring-1 ring-white/10">
-        <div className="grid grid-cols-[140px_1fr_42px_1.5fr_210px] gap-3 px-4 py-2.5 bg-white/5 text-white/70 text-xs">
+        <div className="grid grid-cols-[130px_1fr_40px_1.5fr_190px] gap-3 px-4 py-2 bg-white/5 text-white/70 text-xs">
           <div>Start</div>
           <div>Match · Venue</div>
           <div>Q#</div>
@@ -182,13 +191,13 @@ export default function PicksClient() {
           view.map((r) => (
             <div
               key={r.id}
-              className="grid grid-cols-[140px_1fr_42px_1.5fr_210px] gap-3 px-4 py-2.5 border-t border-white/10 items-center"
+              className="grid grid-cols-[130px_1fr_40px_1.5fr_190px] gap-3 px-4 py-2.5 border-t border-white/10 items-center"
             >
-              {/* Start time + status (compact, 2 lines) */}
+              {/* Start */}
               <div className="text-[11px] leading-4 whitespace-pre text-white/80">
                 {formatStart(r.startTime)}
                 <div
-                  className={`inline-block ml-2 px-1.5 py-0.5 rounded-md text-[10px] align-middle ${
+                  className={`inline-block ml-1 px-1.5 py-0.5 rounded-md text-[10px] ${
                     r.status === "open"
                       ? "bg-emerald-700/30 text-emerald-300"
                       : r.status === "pending"
@@ -202,7 +211,7 @@ export default function PicksClient() {
                 </div>
               </div>
 
-              {/* Match / venue */}
+              {/* Match */}
               <div className="min-w-0">
                 <div className="font-semibold text-orange-300 text-sm truncate">
                   {r.match}
@@ -210,15 +219,15 @@ export default function PicksClient() {
                 <div className="text-[11px] text-white/60 truncate">{r.venue}</div>
               </div>
 
-              {/* Q# */}
+              {/* Quarter */}
               <div className="text-sm text-white/80">Q{r.quarter}</div>
 
-              {/* Question (2-line clamp) */}
+              {/* Question */}
               <div className="text-sm font-medium text-white line-clamp-2">
                 {r.question}
               </div>
 
-              {/* Action + percents (tight) */}
+              {/* Action */}
               <div className="flex justify-end items-center gap-2">
                 <button
                   className="px-2.5 py-1 rounded-md bg-orange-500 hover:bg-orange-600 text-xs"
@@ -235,12 +244,6 @@ export default function PicksClient() {
                 <span className="text-white/70 text-xs ml-2">
                   {r.yesPercent}% · {r.noPercent}%
                 </span>
-                <Link
-                  href={`/`}
-                  className="text-xs underline text-white/80 hover:text-white ml-2"
-                >
-                  Make a pick →
-                </Link>
               </div>
             </div>
           ))
@@ -249,4 +252,3 @@ export default function PicksClient() {
     </div>
   );
 }
-
