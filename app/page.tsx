@@ -182,8 +182,7 @@ export default function HomePage() {
           priority
         />
         <h1 className="text-4xl md:text-6xl font-extrabold text-white max-w-3xl drop-shadow">
-          Real <span className="text-orange-400">Streakr’s</span> don’t get
-          caught.
+          Real <span className="text-orange-400">Streakr’s</span> don’t get caught!
         </h1>
         <p className="mt-4 text-white/90 max-w-2xl">
           Free-to-play AFL prediction streaks. Build your streak, top the
