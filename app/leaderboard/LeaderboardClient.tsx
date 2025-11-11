@@ -98,7 +98,7 @@ export default function LeaderboardClient() {
     <div className="mx-auto max-w-6xl px-4 pb-24">
       {/* Title */}
       <div className="pt-8 text-center">
-        <h1 className="text-4xl md:text-5xl font-extrabold text-orange-500 tracking-tight">
+        <h1 className="text-4xl font-extrabold tracking-tight text-orange-400 mb-6">
           Leaderboards
         </h1>
       </div>
