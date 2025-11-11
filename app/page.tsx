@@ -211,7 +211,7 @@ export default function HomePage() {
     <main className="min-h-screen">
       {/* HERO */}
       <section className="relative w-full h-[62vh] md:h-[66vh]">
-        {/* background image fills width; object-[center_85%] keeps the grass + goals in view */}
+        {/* background image fills width; object-[center_95%] keeps the grass + goals + sky in view */}
         <Image
           src="/mcg-hero.jpg"
           alt="MCG at twilight"
