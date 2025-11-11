@@ -2,34 +2,33 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-} from "firebase/firestore";
-import Link from "next/link";
+import { collection, doc, getDoc, getDocs, orderBy, query } from "firebase/firestore";
+import Image from "next/image";
 
+type Scope = "overall" | "round";
 type Row = {
   uid: string;
   displayName: string;
   photoURL?: string;
-  points: number;          // total points
-  picks: number;           // total picks made
-  wins: number;            // total wins
-  losses: number;          // total losses
-  currentStreak: number;   // e.g. 5
-  bestStreak: number;      // e.g. 17
+
+  // totals for the chosen scope (overall or this round)
+  picks: number;
+  wins: number;
+  losses: number;
+
+  currentStreak: number; // W#
+  bestStreak: number;    // W#
+
+  // optional; falls back to "No Pick"
+  currentPickStatus?: string; // "Pick Selected" | "No Pick" | etc.
 };
 
-type Scope = "overall" | "round";
-
-const seasons = Array.from({ length: 6 }, (_, i) => 2026 - i); // 2026 → 2021
+const seasons = Array.from({ length: 6 }, (_, i) => 2026 - i);
+const rounds = Array.from({ length: 23 }, (_, i) => i + 1);
 
 export default function LeaderboardClient() {
   const [season, setSeason] = useState<number>(2026);
+  const [round, setRound] = useState<number>(1);
   const [scope, setScope] = useState<Scope>("overall");
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -40,46 +39,28 @@ export default function LeaderboardClient() {
     const load = async () => {
       setLoading(true);
       try {
-        // 1) Try a doc that aggregates a whole table:
-        //    /leaderboards/{season}-{scope}  -> { standings: Row[] }
-        const aggId = `${season}-${scope}`;
-        const aggRef = doc(db, "leaderboards", aggId);
-        const aggSnap = await getDoc(aggRef);
-
-        if (!cancelled && aggSnap.exists()) {
-          const data = aggSnap.data() as any;
-          const standings = (data?.standings ?? []) as Row[];
-          setRows(normalize(standings));
+        // Preferred aggregate doc ids:
+        //   overall -> leaderboards/{season}-overall
+        //   round   -> leaderboards/{season}-round-{round}
+        const aggId = scope === "overall" ? `${season}-overall` : `${season}-round-${round}`;
+        const agg = await getDoc(doc(db, "leaderboards", aggId));
+        if (!cancelled && agg.exists()) {
+          setRows(normalize((agg.data() as any)?.standings ?? []));
           setLoading(false);
           return;
         }
 
-        // 2) Otherwise fall back to a flat collection of user stats, ordered:
-        //    /user_stats_{season}  (fields include scope-agnostic totals)
-        const collName = `user_stats_${season}`;
-        const collRef = collection(db, collName);
-        const q = query(collRef, orderBy("points", "desc"));
-        const snap = await getDocs(q);
-
-        const fallback: Row[] = [];
-        snap.forEach((d) => {
-          const v = d.data() as any;
-          // you can adapt these keys to your final schema
-          fallback.push({
-            uid: d.id,
-            displayName: v.displayName ?? "Player",
-            photoURL: v.photoURL,
-            points: Number(v.points ?? 0),
-            picks: Number(v.picks ?? 0),
-            wins: Number(v.wins ?? 0),
-            losses: Number(v.losses ?? 0),
-            currentStreak: Number(v.currentStreak ?? 0),
-            bestStreak: Number(v.bestStreak ?? 0),
-          });
-        });
+        // Fallback flat collections:
+        //   overall -> user_stats_{season}
+        //   round   -> user_stats_{season}_round_{round}
+        const coll =
+          scope === "overall" ? `user_stats_${season}` : `user_stats_${season}_round_${round}`;
+        const snap = await getDocs(query(collection(db, coll), orderBy("wins", "desc")));
+        const list: Row[] = [];
+        snap.forEach((d) => list.push(fallbackRow(d.id, d.data())));
 
         if (!cancelled) {
-          setRows(normalize(fallback));
+          setRows(list);
           setLoading(false);
         }
       } catch (e) {
@@ -95,36 +76,23 @@ export default function LeaderboardClient() {
     return () => {
       cancelled = true;
     };
-  }, [season, scope]);
+  }, [season, round, scope]);
 
+  // Sort like ESPN: by CURRENT streak, then LONGEST streak, then fewest picks
   const table = useMemo(() => {
-    // Sort by scope preference:
-    //  - overall: points desc, tiebreak = bestStreak desc, picks asc
-    //  - round:   currentStreak desc, tiebreak = bestStreak desc, picks asc
-    const sorted = [...rows].sort((a, b) => {
-      if (scope === "overall") {
-        if (b.points !== a.points) return b.points - a.points;
+    return [...rows]
+      .sort((a, b) => {
+        if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
         if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
         return a.picks - b.picks;
-      } else {
-        if (b.currentStreak !== a.currentStreak)
-          return b.currentStreak - a.currentStreak;
-        if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
-        return a.picks - b.picks;
-      }
-    });
-
-    return sorted.map((r, i) => {
-      const rank = i + 1;
-      const record = `${r.wins}-${r.losses}-${Math.max(
-        0,
-        r.picks - r.wins - r.losses
-      )}`;
-      const winRate =
-        r.picks > 0 ? `${Math.round((r.wins / r.picks) * 100)}%` : "—";
-      return { rank, record, ...r, winRate };
-    });
-  }, [rows, scope]);
+      })
+      .map((r, i) => ({
+        rank: i + 1,
+        ...r,
+        record: `${r.picks}-${r.wins}-${r.losses}`,
+        currentPickStatus: r.currentPickStatus || "No Pick",
+      }));
+  }, [rows]);
 
   return (
     <div className="mx-auto max-w-6xl px-4 pb-24">
@@ -142,9 +110,9 @@ export default function LeaderboardClient() {
         </div>
       </div>
 
-      {/* Controls */}
+      {/* Controls: Season + Round inline, scope toggles on right */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3">
           <label className="text-white/70">Season</label>
           <select
             value={season}
@@ -154,6 +122,21 @@ export default function LeaderboardClient() {
             {seasons.map((yr) => (
               <option key={yr} value={yr}>
                 {yr}
+              </option>
+            ))}
+          </select>
+
+          <label className="ml-2 text-white/70">Round</label>
+          <select
+            value={round}
+            onChange={(e) => setRound(Number(e.target.value))}
+            className="rounded-lg bg-white/10 text-white px-3 py-2 border border-white/10 focus:outline-none"
+            disabled={scope === "overall"}
+            title={scope === "overall" ? "Switch to Round to change the round" : ""}
+          >
+            {rounds.map((r) => (
+              <option key={r} value={r}>
+                {r}
               </option>
             ))}
           </select>
@@ -185,20 +168,19 @@ export default function LeaderboardClient() {
               <tr className="text-white/70 text-xs uppercase tracking-wide bg-white/5">
                 <th className="px-4 py-3 w-16">Rank</th>
                 <th className="px-4 py-3">Player</th>
-                <th className="px-4 py-3">Points</th>
-                <th className="px-4 py-3">Picks</th>
-                <th className="px-4 py-3">Wins</th>
-                <th className="px-4 py-3">Win Rate</th>
-                <th className="px-4 py-3">Streak (Current)</th>
-                <th className="px-4 py-3">Streak (Best)</th>
-                <th className="px-4 py-3">Record</th>
+                <th className="px-4 py-3">Current Streak</th>
+                <th className="px-4 py-3">Longest Streak</th>
+                <th className="px-4 py-3">Current Pick</th>
+                <th className="px-4 py-3">
+                  {scope === "round" ? "Total Round Record" : "Total Record"}
+                </th>
               </tr>
             </thead>
 
             <tbody className="divide-y divide-white/10">
               {loading && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-white/70">
+                  <td colSpan={6} className="px-4 py-8 text-center text-white/70">
                     Loading…
                   </td>
                 </tr>
@@ -206,13 +188,10 @@ export default function LeaderboardClient() {
 
               {!loading && table.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center">
-                    <p className="text-white/80">
-                      No leaderboard data yet.
-                    </p>
+                  <td colSpan={6} className="px-4 py-10 text-center">
+                    <p className="text-white/80">No leaderboard data yet.</p>
                     <p className="text-white/50 text-sm mt-1">
-                      Points and standings update after picks settle. Ties are
-                      broken by best streak, then earliest achieved.
+                      Standings update after picks settle. Ties broken by current streak, then best streak, then fewest picks.
                     </p>
                   </td>
                 </tr>
@@ -221,38 +200,37 @@ export default function LeaderboardClient() {
               {!loading &&
                 table.map((r) => (
                   <tr key={r.uid} className="hover:bg-white/5">
-                    <td className="px-4 py-3 font-semibold text-white/80">
-                      {r.rank}
-                    </td>
+                    <td className="px-4 py-3 font-semibold text-white/80">{r.rank}</td>
+
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center text-xs text-white/70">
-                          {initials(r.displayName)}
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="font-medium text-white">
-                            {r.displayName}
-                          </span>
-                          <Link
-                            href={`/profile/${r.uid}`}
-                            className="text-xs text-white/50 hover:text-white/70"
-                          >
-                            View profile
-                          </Link>
-                        </div>
+                        <Avatar name={r.displayName} photoURL={r.photoURL} />
+                        <span className="font-medium text-white">{r.displayName}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-white">{r.points}</td>
-                    <td className="px-4 py-3 text-white/90">{r.picks}</td>
-                    <td className="px-4 py-3 text-white/90">{r.wins}</td>
-                    <td className="px-4 py-3 text-white/90">{r.winRate}</td>
+
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-lg bg-emerald-500/15 text-emerald-300 px-2 py-1 text-xs font-semibold">
                         W{r.currentStreak}
                       </span>
                     </td>
+
                     <td className="px-4 py-3 text-white/90">W{r.bestStreak}</td>
-                    <td className="px-4 py-3 text-white/70">{r.record}</td>
+
+                    <td className="px-4 py-3">
+                      <span
+                        className={
+                          "inline-flex rounded-lg px-2 py-1 text-xs font-semibold " +
+                          (r.currentPickStatus === "Pick Selected"
+                            ? "bg-orange-500/20 text-orange-300"
+                            : "bg-white/10 text-white/70")
+                        }
+                      >
+                        {r.currentPickStatus}
+                      </span>
+                    </td>
+
+                    <td className="px-4 py-3 text-white/80">{r.record}</td>
                   </tr>
                 ))}
             </tbody>
@@ -260,28 +238,39 @@ export default function LeaderboardClient() {
         </div>
       </div>
 
-      {/* Footer note */}
       <p className="mt-4 text-xs text-white/50">
-        Points & standings update as picks settle. Ties are broken by best
-        streak, then earliest achieved.
+        Standings update as picks settle. Ties: current streak → best streak → fewest picks.
       </p>
     </div>
   );
 }
 
 /* ---------- helpers ---------- */
+function fallbackRow(id: string, v: any): Row {
+  return {
+    uid: id,
+    displayName: String(v?.displayName ?? "Player"),
+    photoURL: v?.photoURL,
+    picks: num(v?.picks),
+    wins: num(v?.wins),
+    losses: num(v?.losses),
+    currentStreak: num(v?.currentStreak),
+    bestStreak: num(v?.bestStreak),
+    currentPickStatus: v?.currentPickStatus || (v?.currentPick ? "Pick Selected" : "No Pick"),
+  };
+}
 
 function normalize(list: any[]): Row[] {
   return (list ?? []).map((v) => ({
-    uid: String(v.uid ?? v.id ?? cryptoRandomId()),
+    uid: String(v.uid ?? v.id ?? Math.random().toString(36).slice(2)),
     displayName: String(v.displayName ?? "Player"),
     photoURL: v.photoURL,
-    points: num(v.points),
     picks: num(v.picks),
     wins: num(v.wins),
     losses: num(v.losses),
     currentStreak: num(v.currentStreak),
     bestStreak: num(v.bestStreak),
+    currentPickStatus: v.currentPickStatus || (v.currentPick ? "Pick Selected" : "No Pick"),
   }));
 }
 
@@ -290,16 +279,24 @@ function num(n: any): number {
   return Number.isFinite(v) ? v : 0;
 }
 
-function initials(name: string): string {
-  const parts = name.split(/\s+/).filter(Boolean);
-  const first = parts[0]?.[0] ?? "";
-  const last = parts[parts.length - 1]?.[0] ?? "";
-  return (first + last).toUpperCase();
-}
-
-function cryptoRandomId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return (crypto as any).randomUUID();
+function Avatar({ name, photoURL }: { name: string; photoURL?: string }) {
+  if (photoURL) {
+    return (
+      <span className="relative inline-block h-8 w-8 overflow-hidden rounded-full bg-white/10">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img alt={name} src={photoURL} className="h-full w-full object-cover" />
+      </span>
+    );
   }
-  return Math.random().toString(36).slice(2);
+  const inits = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((s) => s[0]?.toUpperCase())
+    .slice(0, 2)
+    .join("");
+  return (
+    <div className="h-8 w-8 rounded-full bg-white/10 text-white/70 text-xs flex items-center justify-center">
+      {inits || "P"}
+    </div>
+  );
 }
