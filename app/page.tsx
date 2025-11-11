@@ -210,8 +210,8 @@ export default function HomePage() {
   return (
     <main className="min-h-screen">
       {/* HERO */}
-      <section className="relative w-full h-[62vh] md:h-[68vh]">
-        {/* background image fills width; object-[center_95%] keeps the grass + goals + sky in view */}
+      <section className="relative w-full h-[62vh] md:h-[64vh]">
+        {/* background image fills width; object-[center_90%] keeps the grass + goals + sky in view */}
         <Image
           src="/mcg-hero.jpg"
           alt="MCG at twilight"
@@ -245,7 +245,7 @@ export default function HomePage() {
       </section>
 
       {/* Sponsor banner under hero */}
-      <section className="max-w-6xl mx-auto px-4 -mt-6 md:-mt-8">
+      <section className="max-w-6xl mx-auto px-4 -mt-6 md:-mt-10">
         <div className="rounded-2xl border border-white/10 bg-gray-900/70 p-6 text-center text-gray-300">
           Sponsor banner • 970×90
         </div>
