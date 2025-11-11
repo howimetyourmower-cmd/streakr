@@ -34,7 +34,7 @@ function PicksContent() {
         const roundsRef = collection(db, "rounds");
         const q = query(roundsRef, orderBy("match", "asc"));
         const snapshot = await getDocs(q);
-        const data = PickData[] = snapshot.docs.map((doc) => ({
+        const data: = PickData[] = snapshot.docs.map((doc) => ({
           id: doc.id,
           ...doc.data() as Omit<PickData, "id">),
         }));
