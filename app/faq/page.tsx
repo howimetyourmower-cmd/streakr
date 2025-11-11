@@ -1,202 +1,232 @@
-/* app/faq/page.tsx */
-import Link from "next/link";
+// app/faq/page.tsx
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-export const metadata = {
-  title: "FAQ • STREAKr AFL",
-};
+import Link from "next/link";
 
 export default function FAQPage() {
   return (
-    <main className="mx-auto max-w-5xl px-4 pb-24">
+    <main className="mx-auto max-w-5xl px-4 py-10">
       {/* Title */}
-      <div className="pt-8 text-center">
-        <h1 className="text-4xl md:text-5xl font-extrabold text-orange-500 tracking-tight">
-          Frequently Asked Questions
-        </h1>
-      </div>
+      <h1 className="text-center text-4xl font-extrabold tracking-tight text-orange-400">
+        FAQs
+      </h1>
 
       {/* Sponsor banner */}
-      <div className="mt-6 mb-8">
-        <div className="rounded-2xl bg-white/5 border border-white/10 px-6 py-6 text-center text-white/70 shadow-lg">
-          Sponsor Banner • 970×90
+      <div className="mx-auto mt-6 w-full rounded-2xl bg-white/5 p-6 text-center text-sm text-white/70 ring-1 ring-white/10">
+        Sponsor Banner • 970×90
+      </div>
+
+      {/* Intro */}
+      <p className="mt-8 text-white/80">
+        Welcome to <span className="font-semibold">STREAKr AFL</span>. Build a
+        winning streak by answering bite-sized AFL questions. Picks lock when a
+        game or quarter begins. Results are settled after games finish.
+      </p>
+
+      {/* FAQ groups */}
+      <section className="mt-10 space-y-6">
+        {/* How it works */}
+        <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+          <h2 className="mb-4 text-2xl font-bold text-orange-400">
+            How it works
+          </h2>
+
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              What is a “pick”?
+            </summary>
+            <p className="mt-2 text-white/70">
+              A pick is your answer to a single question (e.g. “Will Hawthorn
+              win by 10+?”). Correct picks extend your streak; an incorrect pick
+              breaks it.
+            </p>
+          </details>
+
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              When do picks close?
+            </summary>
+            <p className="mt-2 text-white/70">
+              Picks close at the scheduled start of the game or the quarter
+              shown in the table. If timing changes, the lock follows the
+              updated official start time.
+            </p>
+          </details>
+
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              What are the statuses (Open, Pending, Final, Void)?
+            </summary>
+            <ul className="mt-2 list-disc pl-5 text-white/70">
+              <li>
+                <span className="font-semibold text-white">Open</span> – you can
+                still make a pick.
+              </li>
+              <li>
+                <span className="font-semibold text-white">Pending</span> – the
+                game/quarter has started; waiting on result.
+              </li>
+              <li>
+                <span className="font-semibold text-white">Final</span> – the
+                result is official and graded.
+              </li>
+              <li>
+                <span className="font-semibold text-white">Void</span> – no
+                action (e.g., abandoned or data error). Streaks neither increase
+                nor break.
+              </li>
+            </ul>
+          </details>
         </div>
-      </div>
 
-      {/* Content */}
-      <div className="space-y-10 text-white/90">
-        <Section title="What is STREAKr?">
-          <p>
-            STREAKr is a free-to-play AFL prediction game. Make simple{" "}
-            <strong>Yes/No</strong> picks on live questions for each match and
-            build the longest <strong>winning streak</strong>. Longest streaks win prizes.
-          </p>
-        </Section>
+        {/* Streaks & prizes */}
+        <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+          <h2 className="mb-4 text-2xl font-bold text-orange-400">
+            Streaks & Prizes
+          </h2>
 
-        <Section title="How do I play?">
-          <ol className="list-decimal ml-5 space-y-2 text-white/80">
-            <li>Go to <Link href="/picks" className="text-orange-400 underline">Make Picks</Link>.</li>
-            <li>Select a question and choose <strong>Yes</strong> or <strong>No</strong>.</li>
-            <li>Your streak increases by +1 for each correct pick and resets to 0 on a loss.</li>
-            <li>You can have only one active pick at a time per question.</li>
-          </ol>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              What is a streak?
+            </summary>
+            <p className="mt-2 text-white/70">
+              Your streak is the number of consecutive correct picks. A wrong
+              pick resets your current streak to zero, but your{" "}
+              <span className="font-semibold">longest streak</span> is saved for
+              the leaderboards.
+            </p>
+          </details>
 
-        <Section title="Who can play?">
-          <ul className="list-disc ml-5 space-y-2 text-white/80">
-            <li>Players must be <strong>18+</strong>.</li>
-            <li>One account per person. Duplicate or fraudulent accounts may be removed.</li>
-          </ul>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              What can I win?
+            </summary>
+            <p className="mt-2 text-white/70">
+              Each round, the player(s) with the longest streak share a{" "}
+              <span className="font-semibold">$1,000 gift card pool</span>. If
+              multiple players tie on length, the best unbroken streak wins. If
+              still tied, prizes are split evenly.
+            </p>
+          </details>
 
-        <Section title="What counts as my current streak?">
-          <p className="text-white/80">
-            Your <strong>current streak</strong> is consecutive wins without a loss. If a pick is{" "}
-            <strong>void</strong> (e.g., match abandoned or question invalid), your streak{" "}
-            <strong>does not change</strong>.
-          </p>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              I lost my streak. Can I restart?
+            </summary>
+            <p className="mt-2 text-white/70">
+              Yes — you can keep making picks. Your current streak restarts at
+              0, and you can build it again within the same round.
+            </p>
+          </details>
+        </div>
 
-        <Section title="What is my longest streak?">
-          <p className="text-white/80">
-            The best streak you’ve ever achieved this season (or for the selected round on the leaderboard).
-          </p>
-        </Section>
+        {/* Accounts & eligibility */}
+        <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+          <h2 className="mb-4 text-2xl font-bold text-orange-400">
+            Accounts & Eligibility
+          </h2>
 
-        <Section title="When do picks lock?">
-          <p className="text-white/80">
-            Each question locks at the displayed start time (AEST/AEDT). Once locked, you can’t change the pick.
-          </p>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              Who can play?
+            </summary>
+            <p className="mt-2 text-white/70">
+              STREAKr is free to play. Players must be{" "}
+              <span className="font-semibold">18+</span> and reside in regions
+              where contests like these are permitted.
+            </p>
+          </details>
 
-        <Section title="How are questions settled?">
-          <ul className="list-disc ml-5 space-y-2 text-white/80">
-            <li>
-              For now, questions are settled manually by our admins after official stats are confirmed.
-            </li>
-            <li>
-              Statuses: <strong>Open</strong> → <strong>Pending</strong> (awaiting result) →{" "}
-              <strong>Final</strong> / <strong>Void</strong>.
-            </li>
-          </ul>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              Do I need an account?
+            </summary>
+            <p className="mt-2 text-white/70">
+              You can browse picks without logging in, but you’ll need an
+              account to submit picks and appear on leaderboards.{" "}
+              <Link href="/login" className="text-orange-400 underline">
+                Sign up / Log in
+              </Link>
+              .
+            </p>
+          </details>
+        </div>
 
-        <Section title="Leaderboards & prizes">
-          <ul className="list-disc ml-5 space-y-2 text-white/80">
-            <li>
-              <strong>Round leaderboard:</strong> Longest current streak during the round wins the advertised prize.
-              If multiple players tie on longest streak, the tiebreakers are:
-              <ol className="list-decimal ml-6 mt-2 space-y-1">
-                <li>Best current streak (higher wins).</li>
-                <li>Best longest streak (season/round best).</li>
-                <li>Fewest total picks.</li>
-              </ol>
-            </li>
-            <li>
-              Prize pools are split equally among tied winners after tiebreakers, unless otherwise stated.
-            </li>
-            <li>
-              <Link href="/leaderboard" className="text-orange-400 underline">View Leaderboards</Link>
-            </li>
-          </ul>
-        </Section>
+        {/* Settlements */}
+        <div className="rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+          <h2 className="mb-4 text-2xl font-bold text-orange-400">
+            Question Settlement
+          </h2>
 
-        <Section title="What does “Current Pick” mean on Leaderboards?">
-          <p className="text-white/80">
-            Shows whether you currently have a selection in play: <strong>Pick Selected</strong> or <strong>No Pick</strong>.
-          </p>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              How are results settled?
+            </summary>
+            <p className="mt-2 text-white/70">
+              We use official match stats and timings. During early testing,
+              grading may be applied manually and later regraded if data is
+              corrected.
+            </p>
+          </details>
 
-        <Section title="Can I restart my streak after a loss?">
-          <p className="text-white/80">
-            Yes—just make another pick. Your streak restarts at 0 after any loss.
-          </p>
-        </Section>
+          <details className="group rounded-lg p-4 hover:bg-white/5">
+            <summary className="cursor-pointer list-none text-lg font-semibold text-white">
+              Can a question be regraded?
+            </summary>
+            <p className="mt-2 text-white/70">
+              Yes. If an official correction changes the outcome, we may
+              regrade. Your streak will be updated accordingly.
+            </p>
+          </details>
+        </div>
+      </section>
 
-        <Section title="Do percentages on picks matter?">
-          <p className="text-white/80">
-            The Yes/No percentages display how other players are picking. They’re community sentiment, not odds.
-          </p>
-        </Section>
-
-        <Section title="Fair play">
-          <ul className="list-disc ml-5 space-y-2 text-white/80">
-            <li>No scripts, bots, or automation.</li>
-            <li>One account per person.</li>
-            <li>We may review and remove results that breach rules.</li>
-          </ul>
-        </Section>
-
-        <Section title="Notifications">
-          <p className="text-white/80">
-            Email and in-app reminders may be used for lock times, results, and updates (you can toggle preferences in your account when available).
-          </p>
-        </Section>
-
-        <Section title="Data & privacy">
-          <p className="text-white/80">
-            We store your display name, avatar (optional), and gameplay stats. We do not sell personal data.
-          </p>
-        </Section>
-
-        <Section title="Troubleshooting">
-          <ul className="list-disc ml-5 space-y-2 text-white/80">
-            <li>Hard refresh the page (Ctrl/Cmd + Shift + R).</li>
-            <li>Ensure you’re logged in if you can’t make a pick.</li>
-            <li>If a time shows “TBD”, the fixture is missing a valid start time.</li>
-          </ul>
-        </Section>
-
-        <Section title="Contact us">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <form
-              className="grid gap-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                window.location.href = "mailto:support@streakr.afl?subject=STREAKr%20Support%20Request";
-              }}
+      {/* Contact box */}
+      <section className="mt-10 rounded-2xl bg-white/5 p-6 ring-1 ring-white/10">
+        <h2 className="mb-4 text-2xl font-bold text-orange-400">Contact us</h2>
+        <p className="mb-4 text-white/70">
+          Questions, feedback, or partnership enquiries? Drop us a line:
+        </p>
+        <form
+          action="https://formspree.io/f/your-id"
+          method="POST"
+          className="grid gap-4 md:grid-cols-2"
+        >
+          <input
+            required
+            name="name"
+            placeholder="Name"
+            className="rounded-xl bg-black/30 p-3 text-white ring-1 ring-white/10 outline-none placeholder-white/40"
+          />
+          <input
+            required
+            type="email"
+            name="email"
+            placeholder="Email"
+            className="rounded-xl bg-black/30 p-3 text-white ring-1 ring-white/10 outline-none placeholder-white/40"
+          />
+          <textarea
+            required
+            name="message"
+            placeholder="Your message"
+            className="md:col-span-2 h-32 rounded-xl bg-black/30 p-3 text-white ring-1 ring-white/10 outline-none placeholder-white/40"
+          />
+          <div className="md:col-span-2">
+            <button
+              type="submit"
+              className="rounded-xl bg-orange-500 px-5 py-3 font-semibold text-black hover:bg-orange-400"
             >
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <input
-                  className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
-                  placeholder="Your name"
-                />
-                <input
-                  className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
-                  placeholder="Email address"
-                  type="email"
-                />
-              </div>
-              <textarea
-                rows={4}
-                className="rounded-lg bg-white/10 text-white placeholder-white/50 px-3 py-2 border border-white/10 focus:outline-none"
-                placeholder="How can we help?"
-              />
-              <button
-                type="submit"
-                className="inline-flex justify-center rounded-xl bg-orange-500 text-black font-semibold px-4 py-2 hover:bg-orange-400"
-              >
-                Send
-              </button>
-            </form>
+              Send
+            </button>
           </div>
-        </Section>
-      </div>
-    </main>
-  );
-}
+        </form>
+      </section>
 
-/* ---------- Small helper for orange-titled sections ---------- */
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h2 className="text-xl md:text-2xl font-bold text-orange-500 mb-3">{title}</h2>
-      <div className="space-y-3">{children}</div>
-    </section>
+      {/* Footer note */}
+      <p className="mt-8 text-center text-xs text-white/40">
+        © {new Date().getFullYear()} STREAKr AFL • Terms apply.
+      </p>
+    </main>
   );
 }
