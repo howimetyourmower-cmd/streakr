@@ -1,25 +1,28 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useState } from "react";
 import { db, auth } from "@/lib/firebaseClient";
-import { collection, getDocs, Timestamp, DocumentData } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  Timestamp,
+  DocumentData,
+} from "firebase/firestore";
 import { onAuthStateChanged, User } from "firebase/auth";
 
-// Day.js
-import dayjsBase from "dayjs";
+import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
-import utc from "dayjs/plugin/utc";
-import tz from "dayjs/plugin/timezone";
-dayjsBase.extend(customParseFormat);
-dayjsBase.extend(utc);
-dayjsBase.extend(tz);
-const dayjs = dayjsBase;
-const LOCAL_TZ = "Australia/Melbourne";
+dayjs.extend(customParseFormat);
 
-/* ----------------------------- Types ----------------------------- */
-type Question = { quarter: number; question: string; yesPercent?: number; noPercent?: number };
+// ---------------- Types ----------------
+type Question = {
+  quarter: number;
+  question: string;
+  yesPercent?: number;
+  noPercent?: number;
+};
 type Game = {
   match: string;
   venue?: string;
@@ -28,8 +31,6 @@ type Game = {
   questions: Question[];
 };
 type RoundDoc = { games: Game[] };
-type Fixture = { match: string; venue?: string; startTime?: Timestamp | string | Date | null; status?: string };
-type FixturesDoc = { fixtures?: Fixture[] };
 
 type CardRow = {
   id: string;
@@ -44,108 +45,80 @@ type CardRow = {
   status: "open" | "pending" | "final" | "void";
 };
 
-/* ------------------------- Date helpers ------------------------- */
-const normMatch = (s: string) => (s || "").trim().toLowerCase();
-
-function toDate(raw: CardRow["startTime"]): Date | null {
-  if (!raw) return null;
-
-  // Firestore Timestamp
-  if (typeof (raw as any)?.toDate === "function") {
-    try { return (raw as Timestamp).toDate(); } catch {}
+// ---------------- Time helpers ----------------
+const toDate = (v: CardRow["startTime"]): Date | null => {
+  if (!v) return null;
+  if (typeof (v as any)?.toDate === "function") {
+    try {
+      return (v as Timestamp).toDate();
+    } catch {}
   }
-
-  // Native Date
-  if (raw instanceof Date && !isNaN(raw.getTime())) return raw;
-
-  // Strings
-  if (typeof raw === "string") {
-    // Try ISO
-    const iso = new Date(raw);
+  if (v instanceof Date && !isNaN(v.getTime())) return v;
+  if (typeof v === "string") {
+    const iso = new Date(v);
     if (!isNaN(iso.getTime())) return iso;
-
-    // Strict matches for your seeded style
     const formats = [
-      "dddd, D MMMM YYYY, h.mm a [AEDT]",
-      "dddd, D MMMM YYYY, h.mm a",              // ← e.g. "Thursday, 19 March 2026, 7.20pm"
-      "ddd, D MMM YYYY, h.mm a [AEDT]",
+      "dddd, D MMMM YYYY, h.mm a",
       "ddd, D MMM YYYY, h.mm a",
-      "ddd, D MMM, h.mm a [AEDT]",
-      "ddd, D MMM, h.mm a",
+      "D MMMM YYYY, h.mm a",
+      "D MMM YYYY, h.mm a",
+      "dddd D MMMM YYYY, h.mm a",
+      "dddd, D MMMM YYYY, h.mm a [AEDT]",
+      "ddd, D MMM YYYY, h.mm a [AEDT]",
     ];
-    for (const f of formats) {
-      const d = dayjs(raw, f, true);
-      if (d.isValid()) return d.toDate();
+    for (const fmt of formats) {
+      const p = dayjs(v, fmt, true);
+      if (p.isValid()) return p.toDate();
     }
-
-    // Last-resort non-strict parse (handles extra spaces/commas)
-    const loose = dayjs(raw);
-    if (loose.isValid()) return loose.toDate();
   }
-
   return null;
-}
+};
 
-function formatStart(raw: CardRow["startTime"]) {
-  const d = toDate(raw);
-  if (!d) return "TBD";
-  const dd = dayjs(d).tz(LOCAL_TZ);
-  // Exactly like: Thu, 19 Mar 7.20pm AEDT
-  return `${dd.format("ddd, D MMM")} ${dd.format("h.mm")}pm`.replace("12.00pm", dd.format("h.mm a")) + " AEDT";
-}
+const formatStart = (v: CardRow["startTime"]) => {
+  const d = toDate(v);
+  if (!d) return "TBD •";
+  return `${dayjs(d).format("ddd, D MMM")} • ${dayjs(d).format("h:mm A")} AEDT`;
+};
 
-/* ------------------------------ Page ----------------------------- */
+// ---------------- Page ----------------
 export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [cards, setCards] = useState<CardRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => onAuthStateChanged(auth, setUser), []);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, setUser);
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
-    (async () => {
+    const load = async () => {
       try {
-        // rounds
-        const roundsSnap = await getDocs(collection(db, "rounds"));
-        // fixtures (optional)
-        const fixturesSnap = await getDocs(collection(db, "fixtures"));
-        const fixtureMap = new Map<string, Fixture>();
-        fixturesSnap.forEach((doc) => {
-          const fd = doc.data() as FixturesDoc | DocumentData;
-          const arr = Array.isArray(fd?.fixtures) ? fd.fixtures : [];
-          arr.forEach((fx) => { if (fx?.match) fixtureMap.set(normMatch(fx.match), fx); });
-        });
-
+        const snap = await getDocs(collection(db, "rounds"));
         const all: CardRow[] = [];
-        roundsSnap.forEach((doc) => {
+        snap.forEach((doc) => {
           const roundId = doc.id;
           const data = doc.data() as RoundDoc | DocumentData;
           const games: Game[] = Array.isArray(data?.games) ? data.games : [];
           games.forEach((g, gi) => {
-            const qs = Array.isArray(g.questions) ? g.questions : [];
-            const fx = fixtureMap.get(normMatch(g.match || ""));
-            const startTime = g.startTime ?? fx?.startTime ?? null;
-            const venue = g.venue ?? fx?.venue ?? "TBD";
-            const status = ((g.status ?? fx?.status ?? "open") as CardRow["status"]).toLowerCase() as CardRow["status"];
-
-            qs.forEach((q, qi) => {
+            (Array.isArray(g.questions) ? g.questions : []).forEach((q, qi) => {
               all.push({
                 id: `${roundId}-${gi}-${qi}`,
                 roundId,
-                match: g.match ?? fx?.match ?? "TBD",
-                venue,
+                match: g.match ?? "TBD",
+                venue: g.venue ?? "TBD",
                 quarter: Number(q.quarter ?? 1),
                 question: q.question ?? "",
                 yesPercent: Number(q.yesPercent ?? 0),
                 noPercent: Number(q.noPercent ?? 0),
-                startTime,
-                status,
+                startTime: g.startTime ?? null,
+                status: (g.status as CardRow["status"]) ?? "open",
               });
             });
           });
         });
 
-        const open = all
+        const openOnly = all
           .filter((r) => r.status === "open")
           .sort((a, b) => {
             const ta = toDate(a.startTime)?.getTime() ?? 0;
@@ -155,101 +128,138 @@ export default function HomePage() {
           })
           .slice(0, 6);
 
-        setCards(open);
+        setCards(openOnly);
       } catch (e) {
-        console.error("home fetch error:", e);
+        console.error("home fetch rounds error:", e);
       } finally {
         setLoading(false);
       }
-    })();
+    };
+    load();
   }, []);
 
   const handlePick = (row: CardRow, choice: "yes" | "no") => {
-    if (!user) { window.location.href = "/login"; return; }
-    window.location.href = "/picks";
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    // TODO: write pick to Firestore
+    console.log("pick", { row, choice, uid: user.uid });
   };
 
   return (
-    <main className="mx-auto max-w-6xl px-4 pb-16">
-      {/* HERO: full-bleed image */}
-      <section className="relative mt-4 rounded-3xl overflow-hidden">
-        <Image
-          src="/mcg-hero.jpg"
-          alt="MCG under lights"
-          width={1920}
-          height={900}
-          priority
-          className="h-[420px] w-full object-cover object-center"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/30 to-black/50" />
-        <div className="absolute inset-0 p-8 flex flex-col justify-center">
-          <h1 className="text-white text-4xl md:text-6xl font-extrabold max-w-3xl leading-tight drop-shadow">
-            Real <span className="text-orange-400">Streakr’s</span> don’t get caught.
-          </h1>
-          <p className="mt-3 text-white/90 max-w-2xl">
-            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-          </p>
-          <div className="mt-5 flex gap-3">
-            <Link href="/login" className="rounded-xl bg-orange-500 px-4 py-2 font-semibold text-white hover:bg-orange-600">
-              Sign up / Log in
-            </Link>
-            <Link href="/picks" className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/20">
-              View Picks
-            </Link>
+    <main className="relative">
+      {/* ---------- HERO (full image visible + seamless blend) ---------- */}
+      <section className="relative w-full overflow-hidden">
+        {/* Backdrop colour to match image edges (seamless) */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0b1b2a] via-[#0b1b2a] to-transparent pointer-events-none" />
+        <div className="relative w-full h-[72vh] md:h-[86vh]">
+          <Image
+            src="/mcg-hero.jpg"
+            alt="MCG Stadium"
+            fill
+            className="object-contain"
+            priority
+          />
+          {/* readability gradient over image */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
+          {/* Headline + CTAs */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
+            <h1 className="text-white text-4xl md:text-6xl font-extrabold mb-4 leading-tight">
+              Real <span className="text-orange-500">Streakr’s</span> don’t get
+              caught.
+            </h1>
+            <p className="text-white/90 max-w-2xl text-lg md:text-xl mb-8">
+              Free-to-play AFL prediction streaks. Build your streak, top the
+              leaderboard, win prizes.
+            </p>
+            <div className="flex gap-4">
+              <Link
+                href="/login"
+                className="bg-orange-500 text-black px-6 py-3 rounded-lg font-semibold hover:bg-orange-400"
+              >
+                Sign up / Log in
+              </Link>
+              <Link
+                href="/picks"
+                className="bg-white/10 border border-white/20 text-white px-6 py-3 rounded-lg font-semibold hover:bg-white/20"
+              >
+                View Picks
+              </Link>
+            </div>
           </div>
+        </div>
+
+        {/* Sponsor Banner BELOW image */}
+        <div className="bg-white/5 border border-white/10 text-center py-4 text-white text-sm">
+          Sponsor Banner • 970×90
         </div>
       </section>
 
-      {/* SPONSOR BANNER: below image */}
-      <div className="mt-6 mb-2">
-        <div className="mx-auto w-full max-w-[970px] h-[90px] rounded-xl border border-white/15 bg-white/10 backdrop-blur text-white/80 flex items-center justify-center text-sm">
-          Sponsor Banner • 970×90
-        </div>
-      </div>
+      {/* ---------- OPEN SELECTIONS (3×2 grid) ---------- */}
+      <section className="max-w-6xl mx-auto px-4 md:px-6 mt-10 mb-20">
+        <h2 className="text-2xl md:text-3xl font-extrabold text-white mb-6">
+          Round 1 Open Picks
+        </h2>
 
-      <h2 className="text-2xl font-bold text-white mt-6 mb-3">Round 1 Open Picks</h2>
+        {loading ? (
+          <div className="text-white/70">Loading…</div>
+        ) : cards.length === 0 ? (
+          <div className="text-white/70">No open selections.</div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {cards.map((c) => (
+              <div
+                key={c.id}
+                className="rounded-2xl border border-white/10 bg-white/5 p-5 text-white"
+              >
+                <div className="mb-2">
+                  <div className="text-orange-400 font-semibold">
+                    {c.match}
+                  </div>
+                  <div className="text-white/70 text-sm">
+                    {formatStart(c.startTime)} • {c.venue}
+                  </div>
+                </div>
 
-      {loading ? (
-        <div className="text-white/80">Loading…</div>
-      ) : cards.length === 0 ? (
-        <div className="text-white/70">No open selections right now.</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {cards.map((c) => (
-            <article key={c.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
-              <h3 className="text-sm font-bold text-orange-300 tracking-wide">{c.match}</h3>
-              <p className="text-white/80 text-sm">{formatStart(c.startTime)} • {c.venue}</p>
+                <div className="flex items-center gap-2 text-sm text-white/80 mt-3 mb-2">
+                  <span className="inline-flex items-center justify-center rounded-md bg-white/10 px-2 py-0.5 text-xs">
+                    Q{c.quarter}
+                  </span>
+                  <span className="font-semibold">{c.question}</span>
+                </div>
 
-              <div className="mt-4">
-                <span className="mr-2 inline-flex h-6 w-10 items-center justify-center rounded-md bg-white/10 text-xs text-white/80">
-                  Q{c.quarter}
-                </span>
-                <span className="font-semibold text-white">{c.question}</span>
+                <div className="flex items-center gap-3 mt-3">
+                  <button
+                    onClick={() => handlePick(c, "yes")}
+                    className="px-3 py-1.5 rounded-md bg-orange-500 text-black font-semibold hover:bg-orange-400"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => handlePick(c, "no")}
+                    className="px-3 py-1.5 rounded-md bg-white/20 text-white font-semibold hover:bg-white/30"
+                  >
+                    No
+                  </button>
+                  <div className="ml-auto text-sm text-white/70">
+                    Yes {c.yesPercent}% · No {c.noPercent}%
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <Link
+                    href={`/picks?match=${encodeURIComponent(c.match)}`}
+                    className="text-white/90 underline underline-offset-4 hover:text-white"
+                  >
+                    See other picks →
+                  </Link>
+                </div>
               </div>
-
-              <div className="mt-4 flex items-center gap-2">
-                <button
-                  onClick={() => handlePick(c, "yes")}
-                  className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-orange-600"
-                >
-                  Yes
-                </button>
-                <button
-                  onClick={() => handlePick(c, "no")}
-                  className="rounded-md bg-white/15 px-3 py-1.5 text-sm font-semibold text-white hover:bg-white/25"
-                >
-                  No
-                </button>
-                <Link href="/picks" className="ml-auto text-sm text-white/80 hover:text-white underline underline-offset-4">
-                  See other picks →
-                </Link>
-              </div>
-
-              <div className="mt-3 text-sm text-white/70">Yes {c.yesPercent}% · No {c.noPercent}%</div>
-            </article>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </section>
     </main>
   );
 }
