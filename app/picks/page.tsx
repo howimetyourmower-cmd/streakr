@@ -17,13 +17,14 @@ import dayjsBase from "dayjs";
 import utc from "dayjs/plugin/utc";
 import tz from "dayjs/plugin/timezone";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
+
 dayjsBase.extend(utc);
 dayjsBase.extend(tz);
 const dayjs = dayjsBase;
 const LOCAL_TZ = "Australia/Melbourne";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
 
 // ---------- TYPES ----------
 type Question = { quarter: number; question: string };
@@ -84,7 +85,7 @@ async function getFixtureByMatch(match: string): Promise<FixtureDoc | null> {
 }
 
 async function getRound(roundId: string): Promise<RoundDoc | null> {
-  const ref = doc(db, "rounds", roundId);
+  const ref = doc(db, "rounds", roundId); // your path: rounds/round-1
   const snap = await getDoc(ref);
   return snap.exists() ? (snap.data() as RoundDoc) : null;
 }
