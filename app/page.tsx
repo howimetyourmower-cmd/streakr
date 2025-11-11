@@ -210,7 +210,7 @@ export default function HomePage() {
   return (
     <main className="min-h-screen">
       {/* HERO */}
-      <section className="relative w-full h-[62vh] md:h-[66vh]">
+      <section className="relative w-full h-[62vh] md:h-[68vh]">
         {/* background image fills width; object-[center_95%] keeps the grass + goals + sky in view */}
         <Image
           src="/mcg-hero.jpg"
