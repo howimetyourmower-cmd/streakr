@@ -1,274 +1,278 @@
+// app/picks/page.tsx
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-
-import { db, auth } from "@/lib/firebaseClient";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { auth, db } from "@/lib/firebaseClient";
 import {
   collection,
-  getDocs,
-  Timestamp,
-  DocumentData,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  where,
 } from "firebase/firestore";
-import { onAuthStateChanged, User } from "firebase/auth";
 
+// ---- dayjs setup (same as home) ----
 import dayjs from "dayjs";
-import customParseFormat from "dayjs/plugin/customParseFormat";
-dayjs.extend(customParseFormat);
+import utc from "dayjs/plugin/utc";
+import tz from "dayjs/plugin/timezone";
+import customParse from "dayjs/plugin/customParseFormat";
+dayjs.extend(utc);
+dayjs.extend(tz);
+dayjs.extend(customParse);
 
-// ---------- Types ----------
+const LOCAL_TZ = "Australia/Melbourne";
+
+/** Robust formatter that handles Firestore Timestamp, ISO strings, or readable strings */
+function formatStartTime(raw: any): string {
+  if (!raw) return "TBD";
+
+  // Firestore Timestamp?
+  if (raw?.toDate && typeof raw.toDate === "function") {
+    return dayjs(raw.toDate()).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
+  }
+
+  // String? Try ISO first
+  if (typeof raw === "string") {
+    let d = dayjs(raw);
+    if (!d.isValid()) {
+      // try a couple of common human formats used during seeding
+      const candidates = [
+        "YYYY-MM-DDTHH:mm:ssZ",
+        "YYYY-MM-DDTHH:mmZ",
+        "ddd, D MMM YYYY, h:mm A",
+        "dddd, D MMMM YYYY, h.mma",
+        "dddd, D MMMM YYYY, h:mm A",
+      ];
+      for (const f of candidates) {
+        d = dayjs.tz(raw, f, LOCAL_TZ);
+        if (d.isValid()) break;
+      }
+    }
+    if (d.isValid()) {
+      return d.tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
+    }
+  }
+
+  // Date instance?
+  if (raw instanceof Date) {
+    return dayjs(raw).tz(LOCAL_TZ).format("ddd, D MMM • h:mm A z");
+  }
+
+  return "TBD";
+}
+
 type Question = {
   quarter: number;
   question: string;
-  yesPercent?: number;
-  noPercent?: number;
+  status?: "open" | "pending" | "final" | "void";
+  yesCount?: number;
+  noCount?: number;
 };
 
 type Game = {
   match: string;
   venue?: string;
-  startTime?: Timestamp | string | Date | null;
-  status?: "open" | "pending" | "final" | "void";
+  startTime?: any; // Timestamp | string | Date
   questions: Question[];
 };
 
-type RoundDoc = { games: Game[] };
-
-type CardRow = {
-  id: string;
-  roundId: string;
-  match: string;
-  venue: string;
-  quarter: number;
-  question: string;
-  yesPercent: number;
-  noPercent: number;
-  startTime: Timestamp | string | Date | null;
-  status: "open" | "pending" | "final" | "void";
+type RoundDoc = {
+  roundLabel?: string; // e.g. "Round 1" or "Opening Round"
+  season?: number;
+  games: Game[];
 };
 
-// ---------- Robust startTime parsing ----------
-const toDate = (v: CardRow["startTime"]): Date | null => {
-  if (!v) return null;
+export default function PicksPage() {
+  const router = useRouter();
+  const params = useSearchParams();
 
-  // Firestore Timestamp
-  if (typeof (v as any)?.toDate === "function") {
-    try {
-      return (v as Timestamp).toDate();
-    } catch {
-      /* ignore */
-    }
-  }
+  // Allow ?round=round-1 or default to round-1
+  const roundId = params.get("round") || "round-1";
 
-  if (v instanceof Date && !isNaN(v.getTime())) return v;
-
-  if (typeof v === "string") {
-    // ISO first
-    const iso = new Date(v);
-    if (!isNaN(iso.getTime())) return iso;
-
-    // Human formats you seeded (with dot minutes and optional commas/AEDT)
-    const formats = [
-      "dddd, D MMMM YYYY, h.mm a",
-      "ddd, D MMM YYYY, h.mm a",
-      "D MMMM YYYY, h.mm a",
-      "D MMM YYYY, h.mm a",
-      "dddd D MMMM YYYY, h.mm a",
-      "dddd, D MMMM YYYY, h.mm a [AEDT]",
-      "ddd, D MMM YYYY, h.mm a [AEDT]",
-    ];
-    for (const fmt of formats) {
-      const p = dayjs(v, fmt, true);
-      if (p.isValid()) return p.toDate();
-    }
-  }
-
-  return null;
-};
-
-const formatStart = (v: CardRow["startTime"]) => {
-  const d = toDate(v);
-  if (!d) return "TBD";
-  return `${dayjs(d).format("ddd, D MMM")} • ${dayjs(d).format("h:mm A")} AEDT`;
-};
-
-// ---------- Component ----------
-export default function HomePage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [cards, setCards] = useState<CardRow[]>([]);
+  const [round, setRound] = useState<RoundDoc | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // live subscribe to this round
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
-    return () => unsub();
-  }, []);
+    setLoading(true);
+    const ref = doc(db, "rounds", roundId);
+    getDoc(ref)
+      .then((snap) => {
+        setRound((snap.data() as RoundDoc) ?? null);
+      })
+      .finally(() => setLoading(false));
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const snap = await getDocs(collection(db, "rounds"));
-        const all: CardRow[] = [];
-        snap.forEach((doc) => {
-          const roundId = doc.id;
-          const data = doc.data() as RoundDoc | DocumentData;
-          const games: Game[] = Array.isArray(data?.games) ? data.games : [];
-          games.forEach((g, gi) => {
-            (Array.isArray(g.questions) ? g.questions : []).forEach((q, qi) => {
-              all.push({
-                id: `${roundId}-${gi}-${qi}`,
-                roundId,
-                match: g.match ?? "TBD",
-                venue: g.venue ?? "TBD",
-                quarter: Number(q.quarter ?? 1),
-                question: q.question ?? "",
-                yesPercent: Number(q.yesPercent ?? 0),
-                noPercent: Number(q.noPercent ?? 0),
-                startTime: g.startTime ?? null,
-                status: (g.status as CardRow["status"]) ?? "open",
-              });
-            });
-          });
+    // If you prefer true realtime updates, use onSnapshot:
+    // const unsub = onSnapshot(ref, (snap) => {
+    //   setRound((snap.data() as RoundDoc) ?? null);
+    //   setLoading(false);
+    // });
+    // return () => unsub();
+  }, [roundId]);
+
+  // Flatten games → rows
+  const rows = useMemo(() => {
+    if (!round?.games) return [];
+
+    const list: Array<{
+      start: string;
+      startSort: number;
+      status: Question["status"];
+      match: string;
+      venue?: string;
+      qnum: number;
+      text: string;
+      yesPct: number;
+      noPct: number;
+    }> = [];
+
+    for (const g of round.games) {
+      const startStr = formatStartTime(g.startTime);
+      const startSort =
+        g.startTime?.toDate?.() instanceof Date
+          ? (g.startTime.toDate() as Date).getTime()
+          : typeof g.startTime === "string"
+          ? dayjs(g.startTime).isValid()
+            ? dayjs(g.startTime).valueOf()
+            : dayjs.tz(g.startTime, LOCAL_TZ).valueOf()
+          : 0;
+
+      for (const q of g.questions) {
+        const yes = q.yesCount ?? 0;
+        const no = q.noCount ?? 0;
+        const total = yes + no;
+        const yesPct = total ? Math.round((yes / total) * 100) : 0;
+        const noPct = total ? 100 - yesPct : 0;
+
+        list.push({
+          start: startStr,
+          startSort,
+          status: q.status ?? "open",
+          match: g.match,
+          venue: g.venue,
+          qnum: q.quarter,
+          text: q.question,
+          yesPct,
+          noPct,
         });
-
-        // Only OPEN selections, soonest first
-        const openOnly = all
-          .filter((r) => r.status === "open")
-          .sort((a, b) => {
-            const ta = toDate(a.startTime)?.getTime() ?? 0;
-            const tb = toDate(b.startTime)?.getTime() ?? 0;
-            if (ta !== tb) return ta - tb;
-            return a.quarter - b.quarter;
-          })
-          .slice(0, 6);
-
-        setCards(openOnly);
-      } catch (e) {
-        console.error("home fetch rounds error:", e);
-      } finally {
-        setLoading(false);
       }
-    };
-    load();
-  }, []);
-
-  const handlePick = (row: CardRow, choice: "yes" | "no") => {
-    if (!user) {
-      window.location.href = "/login";
-      return;
     }
-    // TODO: write to Firestore (/picks). For now:
-    console.log("pick", { row, choice, uid: user.uid });
-  };
 
-  const Card = ({ r }: { r: CardRow }) => (
-    <div className="rounded-2xl border border-white/10 bg-gray-900/70 p-5 shadow-lg backdrop-blur-sm flex flex-col">
-      <div className="text-orange-400 font-semibold tracking-wide uppercase text-sm">
-        {r.match}
-      </div>
-      <div className="text-xs text-gray-400 mb-3">
-        {formatStart(r.startTime)} • {r.venue}
-      </div>
-
-      <div className="rounded-xl border border-white/10 bg-gray-800/50 p-4 flex-1 flex flex-col">
-        <div className="text-[11px] text-gray-300 font-semibold mb-1">Q{r.quarter}</div>
-        <div className="text-white font-bold text-[15px] leading-snug mb-4">
-          {r.question}
-        </div>
-
-        <div className="mt-auto flex items-center justify-between">
-          <div className="flex gap-2">
-            <button
-              onClick={() => handlePick(r, "yes")}
-              className="px-3 py-1.5 rounded-md text-sm font-semibold bg-orange-500 hover:bg-orange-600 text-white"
-            >
-              Yes
-            </button>
-            <button
-              onClick={() => handlePick(r, "no")}
-              className="px-3 py-1.5 rounded-md text-sm font-semibold bg-purple-500 hover:bg-purple-600 text-white"
-            >
-              No
-            </button>
-          </div>
-
-          <Link
-            href="/picks"
-            className="text-sm text-gray-300 hover:text-white"
-          >
-            See other picks →
-          </Link>
-        </div>
-
-        <div className="mt-3 text-xs text-gray-400">
-          Yes {r.yesPercent}% • No {r.noPercent}%
-        </div>
-      </div>
-    </div>
-  );
+    // sort by start time then quarter
+    return list.sort((a, b) =>
+      a.startSort === b.startSort
+        ? a.qnum - b.qnum
+        : a.startSort - b.startSort
+    );
+  }, [round]);
 
   return (
-    <main className="min-h-screen">
-      {/* HERO */}
-      <section className="relative w-full h-[62vh] md:h-[66vh]">
-        {/* background image fills width; object-[center_85%] keeps the grass + goals in view */}
-        <Image
-          src="/mcg-hero.jpg"
-          alt="MCG at twilight"
-          fill
-          priority
-          className="object-cover object-[center_85%]"
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/30 to-black/70" />
-        <div className="relative z-10 max-w-6xl mx-auto px-4 pt-16 md:pt-20">
-          <h1 className="max-w-3xl text-4xl md:text-6xl font-extrabold leading-tight text-white">
-            Real <span className="text-orange-500">Streakr&apos;s</span> don&apos;t get caught.
-          </h1>
-          <p className="mt-3 text-gray-300 max-w-2xl">
-            Free-to-play AFL prediction streaks. Build your streak, top the leaderboard, win prizes.
-          </p>
-          <div className="mt-5 flex gap-3">
-            <Link
-              href="/login"
-              className="rounded-xl bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 font-semibold"
-            >
-              Sign up / Log in
-            </Link>
-            <Link
-              href="/picks"
-              className="rounded-xl bg-gray-800/70 hover:bg-gray-800 text-white px-4 py-2 font-semibold border border-white/10"
-            >
-              View Picks
-            </Link>
+    <main className="min-h-screen pb-24">
+      <div className="max-w-6xl mx-auto px-4 pt-10">
+        <h1 className="text-4xl font-extrabold tracking-tight text-white mb-6">
+          Make Picks
+        </h1>
+
+        <div className="overflow-hidden rounded-2xl border border-white/10 bg-gray-900/40 backdrop-blur">
+          {/* Header row */}
+          <div className="grid grid-cols-12 gap-4 px-6 py-4 text-xs uppercase tracking-wider text-gray-300/70 border-b border-white/10">
+            <div className="col-span-3">Start</div>
+            <div className="col-span-3">Match · Venue</div>
+            <div className="col-span-1">Q#</div>
+            <div className="col-span-3">Question</div>
+            <div className="col-span-1 text-right">Yes %</div>
+            <div className="col-span-1 text-right">No %</div>
           </div>
-        </div>
-      </section>
 
-      {/* Sponsor banner under hero */}
-      <section className="max-w-6xl mx-auto px-4 -mt-6 md:-mt-8">
-        <div className="rounded-2xl border border-white/10 bg-gray-900/70 p-6 text-center text-gray-300">
-          Sponsor banner • 970×90
-        </div>
-      </section>
+          {loading && (
+            <div className="px-6 py-6 text-gray-400">Loading…</div>
+          )}
 
-      {/* OPEN PICKS GRID */}
-      <section className="max-w-6xl mx-auto px-4 py-10">
-        <h2 className="text-2xl md:text-3xl font-bold text-white mb-6">
-          Open Selections
-        </h2>
+          {!loading && rows.length === 0 && (
+            <div className="px-6 py-6 text-gray-400">
+              No questions available.
+            </div>
+          )}
 
-        {loading ? (
-          <div className="text-gray-400">Loading…</div>
-        ) : cards.length === 0 ? (
-          <div className="text-gray-400">No open selections right now. Check back soon.</div>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {cards.map((c) => (
-              <Card key={c.id} r={c} />
+          {!loading &&
+            rows.map((r, i) => (
+              <div
+                key={i}
+                className="grid grid-cols-12 gap-4 px-6 py-4 border-t border-white/5 items-center"
+              >
+                {/* Start + status badge */}
+                <div className="col-span-3 flex items-center gap-3">
+                  <div className="text-sm text-gray-200">{r.start}</div>
+                  <span
+                    className={`text-[10px] px-2 py-1 rounded-full ${
+                      r.status === "open"
+                        ? "bg-emerald-900/50 text-emerald-300 border border-emerald-400/30"
+                        : r.status === "pending"
+                        ? "bg-amber-900/40 text-amber-300 border border-amber-300/30"
+                        : r.status === "final"
+                        ? "bg-sky-900/40 text-sky-300 border border-sky-300/30"
+                        : "bg-red-900/40 text-red-300 border border-red-300/30"
+                    }`}
+                  >
+                    {r.status?.toUpperCase()}
+                  </span>
+                </div>
+
+                {/* Match + venue */}
+                <div className="col-span-3">
+                  <div className="font-semibold text-orange-300">
+                    <Link href={`/picks?round=${roundId}`} className="hover:underline">
+                      {r.match}
+                    </Link>
+                  </div>
+                  {r.venue && (
+                    <div className="text-xs text-gray-400">{r.venue}</div>
+                  )}
+                </div>
+
+                {/* Q# */}
+                <div className="col-span-1">
+                  <span className="inline-flex h-6 items-center justify-center rounded-md bg-white/5 px-2 text-xs font-semibold text-gray-200 border border-white/10">
+                    Q{r.qnum}
+                  </span>
+                </div>
+
+                {/* Question */}
+                <div className="col-span-3">
+                  <div className="font-semibold text-white">
+                    {r.text}
+                  </div>
+                  {/* Actions */}
+                  <div className="mt-3 flex items-center gap-2">
+                    <button className="rounded-md px-3 py-1 text-sm font-semibold bg-orange-500/90 hover:bg-orange-500 text-black">
+                      Yes
+                    </button>
+                    <button className="rounded-md px-3 py-1 text-sm font-semibold bg-purple-500/90 hover:bg-purple-500 text-white">
+                      No
+                    </button>
+                    <Link
+                      href={`/picks?round=${roundId}`}
+                      className="ml-3 text-sm text-gray-300 hover:text-white"
+                    >
+                      See other picks →
+                    </Link>
+                  </div>
+                </div>
+
+                {/* Yes/No % */}
+                <div className="col-span-1 text-right text-emerald-300 font-semibold">
+                  {r.yesPct}%
+                </div>
+                <div className="col-span-1 text-right text-rose-300 font-semibold">
+                  {r.noPct}%
+                </div>
+              </div>
             ))}
-          </div>
-        )}
-      </section>
+        </div>
+      </div>
     </main>
   );
 }
