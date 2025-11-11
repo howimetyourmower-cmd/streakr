@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { db } from "@/lib/firebaseClient";
+import { auth, db } from "@/lib/firebaseClient";
+import { onAuthStateChanged, User } from "firebase/auth";
 import {
   collection,
   getDocs,
@@ -65,7 +66,7 @@ const formatStart = (v: Row["startTime"]) => {
     minute: "2-digit",
     hour12: true,
   }).format(d);
-  return fmt.replace(",", "") + " AEDT";
+  return fmt.replace(",", "") + "\nAEDT";
 };
 
 const STATUS_TABS: Array<Row["status"] | "all"> = [
@@ -80,6 +81,12 @@ export default function PicksClient() {
   const [rows, setRows] = useState<Row[]>([]);
   const [active, setActive] = useState<(typeof STATUS_TABS)[number]>("open");
   const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, setUser);
+    return () => unsub();
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -129,17 +136,26 @@ export default function PicksClient() {
     return list;
   }, [rows, active]);
 
+  const onPick = (row: Row, choice: "yes" | "no") => {
+    if (!user) {
+      window.location.href = "/login";
+      return;
+    }
+    // TODO: write to Firestore; placeholder:
+    console.log("pick", { choice, rowId: row.id, uid: user.uid });
+  };
+
   return (
     <div className="min-h-screen text-white">
-      <h1 className="text-4xl font-extrabold tracking-tight mb-6">Make Picks</h1>
+      <h1 className="text-4xl font-extrabold tracking-tight mb-4">Make Picks</h1>
 
       {/* Tabs */}
-      <div className="mb-5 flex gap-2">
+      <div className="mb-4 flex gap-2">
         {STATUS_TABS.map((s) => (
           <button
             key={s}
             onClick={() => setActive(s)}
-            className={`px-3 py-1.5 rounded-xl text-sm ${
+            className={`px-2.5 py-1 rounded-lg text-xs ${
               active === s ? "bg-white/20" : "bg-white/10 hover:bg-white/15"
             }`}
           >
@@ -148,30 +164,31 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* Table-ish list */}
+      {/* Header */}
       <div className="rounded-2xl overflow-hidden ring-1 ring-white/10">
-        <div className="grid grid-cols-[140px_1fr_50px_1.6fr_120px] gap-4 px-5 py-3 bg-white/5 text-white/70 text-sm">
+        <div className="grid grid-cols-[140px_1fr_42px_1.5fr_210px] gap-3 px-4 py-2.5 bg-white/5 text-white/70 text-xs">
           <div>Start</div>
           <div>Match · Venue</div>
           <div>Q#</div>
           <div>Question</div>
-          <div className="text-right pr-2">Yes % · No %</div>
+          <div className="text-right pr-1">Pick · Yes % · No %</div>
         </div>
 
         {loading ? (
-          <div className="px-5 py-6 text-white/70">Loading…</div>
+          <div className="px-4 py-5 text-white/70 text-sm">Loading…</div>
         ) : view.length === 0 ? (
-          <div className="px-5 py-6 text-white/70">No questions found.</div>
+          <div className="px-4 py-5 text-white/70 text-sm">No questions found.</div>
         ) : (
           view.map((r) => (
             <div
               key={r.id}
-              className="grid grid-cols-[140px_1fr_50px_1.6fr_120px] gap-4 px-5 py-4 border-t border-white/10 items-center"
+              className="grid grid-cols-[140px_1fr_42px_1.5fr_210px] gap-3 px-4 py-2.5 border-t border-white/10 items-center"
             >
-              <div className="flex items-center gap-2">
-                <span className="text-white/80">{formatStart(r.startTime)}</span>
-                <span
-                  className={`px-2 py-0.5 rounded-lg text-xs ${
+              {/* Start time + status (compact, 2 lines) */}
+              <div className="text-[11px] leading-4 whitespace-pre text-white/80">
+                {formatStart(r.startTime)}
+                <div
+                  className={`inline-block ml-2 px-1.5 py-0.5 rounded-md text-[10px] align-middle ${
                     r.status === "open"
                       ? "bg-emerald-700/30 text-emerald-300"
                       : r.status === "pending"
@@ -182,25 +199,45 @@ export default function PicksClient() {
                   }`}
                 >
                   {r.status.toUpperCase()}
-                </span>
+                </div>
               </div>
 
-              <div>
-                <div className="font-semibold text-orange-300">{r.match}</div>
-                <div className="text-xs text-white/60">{r.venue}</div>
+              {/* Match / venue */}
+              <div className="min-w-0">
+                <div className="font-semibold text-orange-300 text-sm truncate">
+                  {r.match}
+                </div>
+                <div className="text-[11px] text-white/60 truncate">{r.venue}</div>
               </div>
 
-              <div className="text-white/80">Q{r.quarter}</div>
+              {/* Q# */}
+              <div className="text-sm text-white/80">Q{r.quarter}</div>
 
-              <div className="text-white font-medium">{r.question}</div>
+              {/* Question (2-line clamp) */}
+              <div className="text-sm font-medium text-white line-clamp-2">
+                {r.question}
+              </div>
 
-              <div className="flex justify-end items-center gap-3">
-                <span className="text-white/70 text-sm">
+              {/* Action + percents (tight) */}
+              <div className="flex justify-end items-center gap-2">
+                <button
+                  className="px-2.5 py-1 rounded-md bg-orange-500 hover:bg-orange-600 text-xs"
+                  onClick={() => onPick(r, "yes")}
+                >
+                  Yes
+                </button>
+                <button
+                  className="px-2.5 py-1 rounded-md bg-white/15 hover:bg-white/25 text-xs"
+                  onClick={() => onPick(r, "no")}
+                >
+                  No
+                </button>
+                <span className="text-white/70 text-xs ml-2">
                   {r.yesPercent}% · {r.noPercent}%
                 </span>
                 <Link
                   href={`/`}
-                  className="text-sm underline text-white/80 hover:text-white"
+                  className="text-xs underline text-white/80 hover:text-white ml-2"
                 >
                   Make a pick →
                 </Link>
@@ -212,3 +249,4 @@ export default function PicksClient() {
     </div>
   );
 }
+
