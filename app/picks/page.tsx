@@ -1,8 +1,18 @@
+// app/picks/page.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { auth, db } from "@/lib/firebaseClient";
+import {
+  Timestamp,
+  doc,
+  getDoc,
+  collection,
+  query,
+  where,
+  limit,
+  getDocs,
+} from "firebase/firestore";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -10,204 +20,241 @@ import timezone from "dayjs/plugin/timezone";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const LOCAL_TZ = "Australia/Melbourne";
-
-// ----- types that match your Firestore shape -----
-type Question = {
-  quarter: number;
+// ---- Types that match your Firestore shape ----
+type RoundQuestion = {
+  quarter?: number;
   question: string;
 };
 
-type Game = {
-  match: string;
-  startTime?: any; // can be string or Firestore timestamp
-  venue?: string;
-  questions?: Question[];
+type RoundGame = {
+  match: string; // e.g., "Richmond vs Carlton"
+  questions: RoundQuestion[];
 };
 
 type RoundDoc = {
-  games?: Game[];
+  round?: number;
+  games: RoundGame[];
 };
 
-// this is what we actually render in the table
-type PickRow = {
-  id: string;
+type FixtureDoc = {
+  match: string;
+  startTime?: Timestamp; // Firestore timestamp
+  venue?: string; // e.g., "MCG, Melbourne"
+  status?: "open" | "pending" | "final" | "void";
+  finalAt?: Timestamp; // optional: when game finished
+};
+
+type Row = {
+  id: string; // match+index
   match: string;
   venue: string;
-  startLabel: string;
-  quarter: number;
+  startLabel: string; // "Thu, 19 Mar • 7:20 PM AEDT" or "TBD"
+  status: "OPEN" | "PENDING" | "FINAL" | "VOID";
+  qLabel: string; // "Q1", "Q2", ...
   question: string;
-  status: "open" | "pending" | "final" | "void";
-  yesPct: number;
-  noPct: number;
 };
 
-function formatStartTime(raw: any): string {
-  if (!raw) return "TBD";
+// ---- Local helpers ----
+const LOCAL_TZ = dayjs.tz.guess();
 
-  // Firestore timestamp { seconds: number }
-  if (raw && typeof raw === "object" && typeof raw.seconds === "number") {
-    const d = dayjs.unix(raw.seconds).tz(LOCAL_TZ);
-    return d.isValid() ? d.format("ddd, D MMM • h:mm A") : "TBD";
-  }
-
-  // ISO/string
-  if (typeof raw === "string") {
-    // try a couple formats, but mainly just let dayjs parse it
-    const d = dayjs.tz(raw, LOCAL_TZ);
-    return d.isValid() ? d.format("ddd, D MMM • h:mm A") : "TBD";
-  }
-
-  return "TBD";
+function formatStart(ts?: Timestamp): string {
+  if (!ts) return "TBD";
+  const d = dayjs(ts.toDate()).tz(LOCAL_TZ);
+  if (!d.isValid()) return "TBD";
+  return d.format("ddd, D MMM • h:mm A z");
 }
 
-export default function PicksPage() {
-  const [rows, setRows] = useState<PickRow[]>([]);
+function deriveStatus(fix?: FixtureDoc): Row["status"] {
+  if (!fix) return "OPEN";
+  if (fix.status === "void") return "VOID";
+  if (fix.status === "final") return "FINAL";
+
+  const now = dayjs();
+  const start = fix.startTime ? dayjs(fix.startTime.toDate()) : null;
+  const finalAt = fix.finalAt ? dayjs(fix.finalAt.toDate()) : null;
+
+  if (finalAt && finalAt.isBefore(now)) return "FINAL";
+  if (start && start.isAfter(now)) return "OPEN";
+  if (start && start.isBefore(now)) return "PENDING";
+  return "OPEN";
+}
+
+async function getFixtureByMatch(match: string): Promise<FixtureDoc | null> {
+  const qref = query(
+    collection(db, "fixtures"),
+    where("match", "==", match),
+    limit(1)
+  );
+  const snap = await getDocs(qref);
+  if (snap.empty) return null;
+  return snap.docs[0].data() as FixtureDoc;
+}
+
+function StatusPill({ status }: { status: Row["status"] }) {
+  const map: Record<Row["status"], string> = {
+    OPEN: "bg-emerald-900/40 text-emerald-200 border-emerald-500/40",
+    PENDING: "bg-amber-900/40 text-amber-200 border-amber-500/40",
+    FINAL: "bg-slate-700/60 text-slate-200 border-slate-400/30",
+    VOID: "bg-rose-900/40 text-rose-200 border-rose-500/40",
+  };
+  return (
+    <span
+      className={`px-2 py-1 rounded-full text-xs font-semibold border ${map[status]}`}
+    >
+      {status}
+    </span>
+  );
+}
+
+function YesNoButtons() {
+  return (
+    <div className="flex gap-2">
+      <button className="px-3 py-1 rounded-md bg-amber-500/90 hover:bg-amber-500 text-black font-semibold">
+        Yes
+      </button>
+      <button className="px-3 py-1 rounded-md bg-indigo-300/80 hover:bg-indigo-300 text-black font-semibold">
+        No
+      </button>
+    </div>
+  );
+}
+
+// ---- Content component (kept separate so we can wrap in Suspense cleanly) ----
+function PicksContent() {
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // if you later add ?round=2 support, swap this to read search params
+  const roundDocId = "round-1";
+
   useEffect(() => {
-    const fetchPicks = async () => {
+    let cancelled = false;
+
+    const load = async () => {
       try {
-        // 1. get all round docs
-        const roundsRef = collection(db, "rounds");
-        const snapshot = await getDocs(roundsRef);
+        setLoading(true);
 
-        const allRows: PickRow[] = [];
+        // 1) Load the round doc
+        const rdRef = doc(db, "rounds", roundDocId);
+        const rdSnap = await getDoc(rdRef);
+        if (!rdSnap.exists()) {
+          if (!cancelled) setRows([]);
+          return;
+        }
 
-        snapshot.forEach((docSnap) => {
-          const roundData = docSnap.data() as RoundDoc;
-          const games = roundData.games || [];
+        const rd = rdSnap.data() as RoundDoc;
+        const games = Array.isArray(rd.games) ? rd.games : [];
 
-          games.forEach((game, gameIndex) => {
-            const startLabel = formatStartTime(game.startTime);
-            const venue = game.venue || "";
+        // 2) For each game, fetch its fixture (time/venue/status)
+        const all: Row[] = [];
+        for (const game of games) {
+          const fix = await getFixtureByMatch(game.match);
+          const startLabel = formatStart(fix?.startTime);
+          const venue = fix?.venue ?? "—";
+          const status = deriveStatus(fix);
 
-            (game.questions || []).forEach((q, questionIndex) => {
-              allRows.push({
-                id: `${docSnap.id}-${gameIndex}-${questionIndex}`,
-                match: game.match,
-                venue,
-                startLabel,
-                quarter: q.quarter,
-                question: q.question,
-                // you said for now just show them all as open
-                status: "open",
-                yesPct: 0,
-                noPct: 0,
-              });
+          // 3) Expand questions as rows
+          (game.questions || []).forEach((q, idx) => {
+            const qLabel = `Q${q.quarter ?? idx + 1}`;
+            all.push({
+              id: `${game.match}__${idx}`,
+              match: game.match,
+              venue,
+              startLabel,
+              status,
+              qLabel,
+              question: q.question,
             });
           });
+        }
+
+        // 4) Sort: by start time label (TBD last), then match, then Q#
+        const sorted = all.sort((a, b) => {
+          const aTBD = a.startLabel === "TBD";
+          const bTBD = b.startLabel === "TBD";
+          if (aTBD && !bTBD) return 1;
+          if (!aTBD && bTBD) return -1;
+          if (a.match !== b.match) return a.match.localeCompare(b.match);
+          return a.qLabel.localeCompare(b.qLabel, undefined, { numeric: true });
         });
 
-        // optional: sort by start time string (TBD goes last)
-        allRows.sort((a, b) => {
-          if (a.startLabel === "TBD" && b.startLabel !== "TBD") return 1;
-          if (b.startLabel === "TBD" && a.startLabel !== "TBD") return -1;
-          return a.startLabel.localeCompare(b.startLabel);
-        });
-
-        setRows(allRows);
-      } catch (err) {
-        console.error("Error fetching picks:", err);
+        if (!cancelled) setRows(sorted);
+      } catch (e) {
+        console.error("Error loading picks:", e);
+        if (!cancelled) setRows([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    fetchPicks();
-  }, []);
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [roundDocId]);
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white px-4 py-10">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">Make Picks</h1>
+    <div className="px-4 sm:px-6 lg:px-8 max-w-6xl mx-auto">
+      <h1 className="text-4xl sm:text-5xl font-extrabold text-white mt-6 mb-6">
+        Make Picks
+      </h1>
 
-        <div className="bg-slate-950/40 border border-slate-800 rounded-2xl overflow-hidden">
-          {/* header row */}
-          <div className="grid grid-cols-[140px,1.2fr,80px,1.6fr,90px,90px] gap-3 px-6 py-3 bg-slate-950/60 text-sm font-semibold text-slate-200">
-            <div>Start</div>
-            <div>Match · Venue</div>
-            <div>Q#</div>
-            <div>Question</div>
-            <div className="text-right">Yes %</div>
-            <div className="text-right">No %</div>
-          </div>
-
-          {loading ? (
-            <div className="px-6 py-6 text-slate-300 text-sm">Loading…</div>
-          ) : rows.length === 0 ? (
-            <div className="px-6 py-6 text-slate-300 text-sm">
-              No questions found.
-            </div>
-          ) : (
-            rows.map((row) => (
-              <div
-                key={row.id}
-                className="grid grid-cols-[140px,1.2fr,80px,1.6fr,90px,90px] gap-3 px-6 py-4 border-t border-slate-800 items-center"
-              >
-                {/* start + status */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-slate-100">
-                    {row.startLabel}
-                  </span>
-                  <span
-                    className={`text-[10px] px-3 py-1 rounded-full uppercase tracking-wide ${
-                      row.status === "open"
-                        ? "bg-emerald-900/50 text-emerald-200 border border-emerald-700/60"
-                        : row.status === "pending"
-                        ? "bg-amber-900/40 text-amber-100 border border-amber-600/60"
-                        : row.status === "final"
-                        ? "bg-slate-700 text-slate-100 border border-slate-500/80"
-                        : "bg-red-900/40 text-red-100 border border-red-700/60"
-                    }`}
-                  >
-                    {row.status}
-                  </span>
-                </div>
-
-                {/* match / venue */}
-                <div>
-                  <div className="text-orange-200 font-semibold">
-                    {row.match}
-                  </div>
-                  <div className="text-xs text-slate-300">{row.venue}</div>
-                </div>
-
-                {/* quarter */}
-                <div>
-                  <span className="inline-block bg-slate-800/70 rounded-lg px-3 py-1 text-xs font-semibold">
-                    Q{row.quarter}
-                  </span>
-                </div>
-
-                {/* question */}
-                <div className="font-semibold text-sm">
-                  {row.question}
-                  <div className="mt-2 flex gap-2">
-                    <button className="bg-orange-500 hover:bg-orange-400 transition text-sm px-4 py-1 rounded-lg text-slate-950 font-semibold">
-                      Yes
-                    </button>
-                    <button className="bg-purple-500 hover:bg-purple-400 transition text-sm px-4 py-1 rounded-lg text-slate-950 font-semibold">
-                      No
-                    </button>
-                    <button className="text-xs text-slate-300 hover:text-white ml-auto">
-                      See other picks →
-                    </button>
-                  </div>
-                </div>
-
-                {/* yes/no % */}
-                <div className="text-right text-emerald-200 font-semibold">
-                  {row.yesPct}%
-                </div>
-                <div className="text-right text-red-200 font-semibold">
-                  {row.noPct}%
-                </div>
-              </div>
-            ))
-          )}
+      <div className="rounded-2xl border border-white/10 bg-slate-900/40 shadow-xl overflow-hidden">
+        <div className="grid grid-cols-12 gap-0 px-4 sm:px-6 py-3 text-xs font-semibold tracking-wide text-slate-300 border-b border-white/10">
+          <div className="col-span-2">Start</div>
+          <div className="col-span-4">Match · Venue</div>
+          <div className="col-span-1">Q#</div>
+          <div className="col-span-5">Question</div>
         </div>
+
+        {loading ? (
+          <div className="p-6 text-slate-300">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="p-6 text-slate-300">No questions found.</div>
+        ) : (
+          <ul className="divide-y divide-white/10">
+            {rows.map((r) => (
+              <li key={r.id} className="grid grid-cols-12 gap-0 px-4 sm:px-6 py-4">
+                {/* Start */}
+                <div className="col-span-2 flex items-center gap-3">
+                  <div className="text-slate-200">{r.startLabel}</div>
+                  <StatusPill status={r.status} />
+                </div>
+
+                {/* Match · Venue */}
+                <div className="col-span-4">
+                  <div className="text-amber-300 font-semibold">
+                    {r.match}
+                  </div>
+                  <div className="text-slate-400 text-sm">{r.venue}</div>
+                </div>
+
+                {/* Q# */}
+                <div className="col-span-1 flex items-center">
+                  <span className="inline-flex items-center justify-center w-8 h-6 rounded-md bg-slate-800 text-slate-200 text-xs font-bold">
+                    {r.qLabel}
+                  </span>
+                </div>
+
+                {/* Question + buttons */}
+                <div className="col-span-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="text-white font-semibold">{r.question}</div>
+                  <YesNoButtons />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
+  );
+}
+
+// ---- Page export wrapped in Suspense (satisfies Next warning) ----
+export default function PicksPage() {
+  return (
+    <Suspense fallback={<div className="text-center text-white mt-10">Loading…</div>}>
+      <PicksContent />
+    </Suspense>
   );
 }
