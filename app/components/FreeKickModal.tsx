@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 // ✅ must match the actual file name
-import "app/global.css";
+import "./global.css";
 
 // ✅ use relative paths (no "@/")
 import Toast from "./components/Toast";
