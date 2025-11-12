@@ -1,69 +1,88 @@
-// app/components/FreeKickModal.tsx
-"use client";
+/* app/globals.css */
 
-import { useEffect } from "react";
+/* Tailwind layers (if you’re using Tailwind) */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-type Props = {
-  open: boolean;
-  onUse: () => void;
-  onDismiss: () => void;
-  title?: string;
-  message?: string;
-};
+/* ---- Your global styles ---- */
 
-export default function FreeKickModal({
-  open,
-  onUse,
-  onDismiss,
-  title = "Use your FREE KICK?",
-  message = "Your streak has just lost… but it doesn’t have to end here. Use your Free Kick to revive your streak and keep playing.",
-}: Props) {
-  // prevent background scroll when open
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  if (!open) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-[1000] grid place-items-center bg-black/60 p-4"
-      aria-modal="true"
-      role="dialog"
-    >
-      <div className="w-full max-w-md rounded-2xl bg-[#111827] shadow-2xl ring-1 ring-white/10">
-        <div className="border-b border-white/10 p-5">
-          <h2 className="text-xl font-bold text-orange-400">{title}</h2>
-        </div>
-
-        <div className="space-y-3 p-5 text-sm text-white/90">
-          <p>{message}</p>
-          <ul className="list-inside list-disc text-white/70">
-            <li>Free Kick revives your current streak (no loss recorded).</li>
-            <li>One Free Kick per user unless more are granted.</li>
-          </ul>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 border-t border-white/10 p-5">
-          <button
-            onClick={onDismiss}
-            className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
-          >
-            Let it End
-          </button>
-          <button
-            onClick={onUse}
-            className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400"
-          >
-            Use Free Kick
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+:root {
+  --bg: #0b0f13;
+  --text: #ffffff;
+  --muted: #9aa3af;
+  --card: #10151c;
+  --card-border: rgba(255,255,255,0.07);
+  --brand: #fe6f27; /* orange */
+  --brand-600: #e65f1f;
+  --chip-open-bg: rgba(16,185,129,0.14);
+  --chip-open-text: #10b981;
 }
+
+html, body {
+  height: 100%;
+}
+
+body {
+  background: radial-gradient(1200px 800px at 50% -10%, #162033 0%, var(--bg) 45%, var(--bg) 100%);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.btn-primary { background: var(--brand); }
+.btn-primary:hover { background: var(--brand-600); }
+
+.btn-ghost {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.12);
+}
+
+/* Cards / tables */
+.card {
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+}
+
+/* Status chip (OPEN) */
+.chip-open {
+  background: var(--chip-open-bg);
+  color: var(--chip-open-text);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+/* Sponsor banner placeholder */
+.sponsor-banner {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px;
+  height: 90px;
+}
+
+/* Utility tweaks */
+.text-muted { color: var(--muted); }
