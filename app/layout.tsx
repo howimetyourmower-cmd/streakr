@@ -26,8 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Image
                 src="/streakrlogo.jpg"
                 alt="STREAKr"
-                width={46}
-                height={46}
+                width={66}
+                height={66}
                 priority
                 className="rounded"
               />
