@@ -21,13 +21,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-[#0b0f13] text-white antialiased">
         {/* Header */}
         <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
             <Link href="/" className="flex items-center gap-2">
               <Image
                 src="/streakrlogo.jpg"
                 alt="STREAKr"
-                width={36}
-                height={36}
+                width={46}
+                height={46}
                 priority
                 className="rounded"
               />
