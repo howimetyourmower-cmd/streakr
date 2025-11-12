@@ -1,82 +1,55 @@
-import "./globals.css";
-import React from "react";
-import Toast from "@/app/components/Toast";
-import FreeKickWatcher from "@/app/components/FreeKickWatcher";
-import Link from "next/link";
+// app/layout.tsx
+import type { Metadata } from "next";
 import Image from "next/image";
+import Link from "next/link";
 
-export const metadata = {
+// ✅ must match the actual file name
+import "./globals.css";
+
+// ✅ use relative paths (no "@/")
+import Toast from "./components/Toast";
+import FreeKickWatcher from "./components/FreeKickWatcher";
+
+export const metadata: Metadata = {
   title: "STREAKr",
-  description: "Real Streakr’s don’t get caught!",
+  description: "Free-to-play AFL prediction streaks",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-[#0b0f13] text-white antialiased">
-        {/* HEADER */}
-        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur-sm border-b border-gray-800">
+        {/* Header */}
+        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            {/* Left Section - Logo */}
-            <Link href="/" className="flex items-center space-x-2">
+            <Link href="/" className="flex items-center gap-2">
+              {/* uses /public/streakrlogo.jpg */}
               <Image
                 src="/streakrlogo.jpg"
-                alt="STREAKr Logo"
-                width={45}
-                height={45}
-                className="rounded-md"
+                alt="STREAKr"
+                width={32}
+                height={32}
+                priority
               />
-              <span className="text-2xl font-bold text-white">
-                STREAK<span className="text-orange-500">r</span>
-              </span>
+              <span className="text-xl font-semibold tracking-wide">STREAK<span className="text-orange-400">r</span></span>
             </Link>
 
-            {/* Right Section - Nav */}
-            <nav className="space-x-6 text-sm font-medium">
-              <Link
-                href="/picks"
-                className="hover:text-orange-500 transition-colors"
-              >
-                Picks
-              </Link>
-              <Link
-                href="/leaderboard"
-                className="hover:text-orange-500 transition-colors"
-              >
-                Leaderboards
-              </Link>
-              <Link
-                href="/rewards"
-                className="hover:text-orange-500 transition-colors"
-              >
-                Rewards
-              </Link>
-              <Link
-                href="/faq"
-                className="hover:text-orange-500 transition-colors"
-              >
-                FAQ
-              </Link>
-              <Link
-                href="/login"
-                className="hover:text-orange-500 transition-colors"
-              >
+            <nav className="flex items-center gap-6 text-sm">
+              <Link href="/picks" className="hover:text-orange-400">Picks</Link>
+              <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
+              <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
+              <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
+              <Link href="/auth" className="rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/15">
                 Login / Sign Up
               </Link>
             </nav>
           </div>
         </header>
 
-        {/* MAIN CONTENT */}
-        <main className="min-h-screen px-4 sm:px-6 lg:px-8 pt-6">
-          {children}
-        </main>
+        {/* Page content */}
+        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
 
-        {/* COMPONENTS */}
+        {/* Portals / global UI helpers */}
         <Toast />
         <FreeKickWatcher />
       </body>
