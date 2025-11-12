@@ -1,4 +1,4 @@
-import "./global.css";
+
 import React from "react";
 import Toast from "@/app/components/Toast";
 import FreeKickWatcher from "@/app/components/FreeKickWatcher";
