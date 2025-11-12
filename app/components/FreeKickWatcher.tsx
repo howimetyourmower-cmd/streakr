@@ -7,8 +7,8 @@ import Link from "next/link";
 import "./globals.css";
 
 // ✅ use relative paths (no "@/")
-import Toast from "./components/Toast";
-import FreeKickWatcher from "./components/FreeKickWatcher";
+import Toast from "app/components/Toast";
+import FreeKickWatcher from "app/components/FreeKickWatcher";
 
 export const metadata: Metadata = {
   title: "STREAKr",
