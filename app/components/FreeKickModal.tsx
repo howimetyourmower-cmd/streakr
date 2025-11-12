@@ -1,58 +1,69 @@
-// app/layout.tsx
-import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
+// app/components/FreeKickModal.tsx
+"use client";
 
-// ✅ must match the actual file name
-import "./global.css";
+import { useEffect } from "react";
 
-// ✅ use relative paths (no "@/")
-import Toast from "./components/Toast";
-import FreeKickWatcher from "./components/FreeKickWatcher";
-
-export const metadata: Metadata = {
-  title: "STREAKr",
-  description: "Free-to-play AFL prediction streaks",
+type Props = {
+  open: boolean;
+  onUse: () => void;
+  onDismiss: () => void;
+  title?: string;
+  message?: string;
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function FreeKickModal({
+  open,
+  onUse,
+  onDismiss,
+  title = "Use your FREE KICK?",
+  message = "Your streak has just lost… but it doesn’t have to end here. Use your Free Kick to revive your streak and keep playing.",
+}: Props) {
+  // prevent background scroll when open
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  if (!open) return null;
+
   return (
-    <html lang="en">
-      <body className="bg-[#0b0f13] text-white antialiased">
-        {/* Header */}
-        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="flex items-center gap-2">
-              {/* uses /public/streakrlogo.jpg */}
-              <Image
-                src="/streakrlogo.jpg"
-                alt="STREAKr"
-                width={32}
-                height={32}
-                priority
-              />
-              <span className="text-xl font-semibold tracking-wide">STREAK<span className="text-orange-400">r</span></span>
-            </Link>
+    <div
+      className="fixed inset-0 z-[1000] grid place-items-center bg-black/60 p-4"
+      aria-modal="true"
+      role="dialog"
+    >
+      <div className="w-full max-w-md rounded-2xl bg-[#111827] shadow-2xl ring-1 ring-white/10">
+        <div className="border-b border-white/10 p-5">
+          <h2 className="text-xl font-bold text-orange-400">{title}</h2>
+        </div>
 
-            <nav className="flex items-center gap-6 text-sm">
-              <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-              <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
-              <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-              <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
-              <Link href="/auth" className="rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/15">
-                Login / Sign Up
-              </Link>
-            </nav>
-          </div>
-        </header>
+        <div className="space-y-3 p-5 text-sm text-white/90">
+          <p>{message}</p>
+          <ul className="list-inside list-disc text-white/70">
+            <li>Free Kick revives your current streak (no loss recorded).</li>
+            <li>One Free Kick per user unless more are granted.</li>
+          </ul>
+        </div>
 
-        {/* Page content */}
-        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-
-        {/* Portals / global UI helpers */}
-        <Toast />
-        <FreeKickWatcher />
-      </body>
-    </html>
+        <div className="flex items-center justify-end gap-3 border-t border-white/10 p-5">
+          <button
+            onClick={onDismiss}
+            className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/20"
+          >
+            Let it End
+          </button>
+          <button
+            onClick={onUse}
+            className="rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400"
+          >
+            Use Free Kick
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
