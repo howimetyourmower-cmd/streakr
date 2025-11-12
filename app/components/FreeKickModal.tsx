@@ -1,22 +1,58 @@
-"use client";
-export default function FreeKickModal({
-  open, onUse, onEnd,
-}: { open: boolean; onUse: () => Promise<void>|void; onEnd: () => Promise<void>|void; }) {
-  if (!open) return null;
+// app/layout.tsx
+import type { Metadata } from "next";
+import Image from "next/image";
+import Link from "next/link";
+
+// ✅ must match the actual file name
+import "./globals.css";
+
+// ✅ use relative paths (no "@/")
+import Toast from "./components/Toast";
+import FreeKickWatcher from "./components/FreeKickWatcher";
+
+export const metadata: Metadata = {
+  title: "STREAKr",
+  description: "Free-to-play AFL prediction streaks",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/60" />
-      <div className="relative w-[92%] max-w-[560px] rounded-2xl bg-[#0F2236] p-6 ring-1 ring-white/10 shadow-2xl">
-        <h3 className="text-2xl font-extrabold text-white mb-2 text-center">Your streak has lost.</h3>
-        <p className="text-white/80 text-center">
-          But it doesn’t have to be that way. Use your <span className="text-[#ff9130] font-bold">FREE KICK</span> to keep your streak alive.
-        </p>
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <button onClick={onUse} className="rounded-xl bg-[#ff9130] px-4 py-3 font-semibold text-black hover:opacity-90">Use Free Kick</button>
-          <button onClick={onEnd} className="rounded-xl bg-white/10 px-4 py-3 font-semibold text-white hover:bg-white/15">Let it End</button>
-        </div>
-        <p className="mt-4 text-xs text-white/60 text-center">Shown only if you have a Free Kick available for your latest loss.</p>
-      </div>
-    </div>
+    <html lang="en">
+      <body className="bg-[#0b0f13] text-white antialiased">
+        {/* Header */}
+        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+            <Link href="/" className="flex items-center gap-2">
+              {/* uses /public/streakrlogo.jpg */}
+              <Image
+                src="/streakrlogo.jpg"
+                alt="STREAKr"
+                width={32}
+                height={32}
+                priority
+              />
+              <span className="text-xl font-semibold tracking-wide">STREAK<span className="text-orange-400">r</span></span>
+            </Link>
+
+            <nav className="flex items-center gap-6 text-sm">
+              <Link href="/picks" className="hover:text-orange-400">Picks</Link>
+              <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
+              <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
+              <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
+              <Link href="/auth" className="rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/15">
+                Login / Sign Up
+              </Link>
+            </nav>
+          </div>
+        </header>
+
+        {/* Page content */}
+        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+
+        {/* Portals / global UI helpers */}
+        <Toast />
+        <FreeKickWatcher />
+      </body>
+    </html>
   );
 }
