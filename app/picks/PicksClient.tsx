@@ -1,27 +1,25 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import dayjs from "dayjs";
 
-import dayjsBase from "dayjs";
-import utc from "dayjs/plugin/utc";
-import tz from "dayjs/plugin/timezone";
-
-import { db } from "@/lib/firebaseClient";
+import { db, auth } from "@/lib/firebaseClient";
 import {
   collection,
   getDocs,
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp,
   Timestamp,
   DocumentData,
 } from "firebase/firestore";
+import { onAuthStateChanged, User } from "firebase/auth";
 
-dayjsBase.extend(utc);
-dayjsBase.extend(tz);
-const dayjs = dayjsBase;
-const LOCAL_TZ = "Australia/Melbourne";
-
-/* ----------------------- Types ----------------------- */
+// ---------- Types ----------
 type Question = {
+  id?: string;
   quarter: number;
   question: string;
   yesPercent?: number;
@@ -31,7 +29,7 @@ type Question = {
 type Game = {
   match: string;
   venue?: string;
-  startTime?: Timestamp | string | Date | null;
+  startTime?: Timestamp | Date | string | null;
   status?: "open" | "pending" | "final" | "void";
   questions: Question[];
 };
@@ -39,32 +37,26 @@ type Game = {
 type RoundDoc = { games: Game[] };
 
 type Row = {
-  id: string;
+  id: string;          // roundId-gi-qid
   roundId: string;
   match: string;
   venue: string;
   quarter: number;
+  questionId: string;
   question: string;
   yesPercent: number;
   noPercent: number;
-  startTime: Timestamp | string | Date | null;
+  startTime: Timestamp | Date | string | null;
   status: "open" | "pending" | "final" | "void";
 };
 
-/* ----------------------- Helpers ----------------------- */
+// ---------- Utils ----------
 const toDate = (v: Row["startTime"]): Date | null => {
   if (!v) return null;
-
-  // Firestore Timestamp
   if (typeof (v as any)?.toDate === "function") {
-    try {
-      return (v as Timestamp).toDate();
-    } catch {
-      /* ignore */
-    }
+    try { return (v as Timestamp).toDate(); } catch { /* ignore */ }
   }
   if (v instanceof Date && !isNaN(v.getTime())) return v;
-
   if (typeof v === "string") {
     const iso = new Date(v);
     if (!isNaN(iso.getTime())) return iso;
@@ -72,55 +64,53 @@ const toDate = (v: Row["startTime"]): Date | null => {
   return null;
 };
 
-const formatStart = (v: Row["startTime"]) => {
+const fmtStart = (v: Row["startTime"]) => {
   const d = toDate(v);
   if (!d) return "TBD";
-  const z = dayjs(d).tz(LOCAL_TZ);
-  return `${z.format("ddd D Mar,")}\n${z.format("h:mm a")} AEDT`;
+  return `${dayjs(d).format("ddd, D MMM")} • ${dayjs(d).format("h:mm A")} AEDT`;
 };
 
-const statusBadge = (s: Row["status"]) => {
-  const cls =
-    s === "open"
-      ? "bg-emerald-700/30 text-emerald-300"
-      : s === "pending"
-      ? "bg-amber-700/30 text-amber-300"
-      : s === "final"
-      ? "bg-sky-700/30 text-sky-300"
-      : "bg-rose-700/30 text-rose-300";
-
-  return (
-    <span className={`mt-1 w-fit px-2 py-0.5 rounded-md text-[10px] ${cls}`}>
-      {s?.toUpperCase()}
-    </span>
-  );
-};
-
-/* ----------------------- Component ----------------------- */
-export default function PicksClient() {
+// ---------- Component ----------
+export default function PicksPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [me, setMe] = useState<any>(null); // /users profile (for free kick tracking)
   const [rows, setRows] = useState<Row[]>([]);
-  const [status, setStatus] = useState<"open" | "pending" | "final" | "void" | "all">("open");
   const [loading, setLoading] = useState(true);
 
+  // auth + load /users/{uid}
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        setMe(snap.exists() ? snap.data() : null);
+      } else {
+        setMe(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // load rounds -> open rows
   useEffect(() => {
     const load = async () => {
       try {
         const snap = await getDocs(collection(db, "rounds"));
-        const out: Row[] = [];
-        snap.forEach((doc) => {
-          const roundId = doc.id;
-          const data = doc.data() as RoundDoc | DocumentData;
-
+        const all: Row[] = [];
+        snap.forEach((d) => {
+          const roundId = d.id;
+          const data = d.data() as RoundDoc | DocumentData;
           const games: Game[] = Array.isArray(data?.games) ? data.games : [];
           games.forEach((g, gi) => {
-            const qs = Array.isArray(g.questions) ? g.questions : [];
-            qs.forEach((q, qi) => {
-              out.push({
-                id: `${roundId}-${gi}-${qi}`,
+            (Array.isArray(g.questions) ? g.questions : []).forEach((q, qi) => {
+              const qid = String(q.id ?? qi);
+              all.push({
+                id: `${roundId}-${gi}-${qid}`,
                 roundId,
                 match: g.match ?? "TBD",
-                venue: g.venue ?? "",
+                venue: g.venue ?? "TBD",
                 quarter: Number(q.quarter ?? 1),
+                questionId: qid,
                 question: q.question ?? "",
                 yesPercent: Number(q.yesPercent ?? 0),
                 noPercent: Number(q.noPercent ?? 0),
@@ -131,143 +121,132 @@ export default function PicksClient() {
           });
         });
 
-        // Sort by time then quarter
-        out.sort((a, b) => {
-          const ta = toDate(a.startTime)?.getTime() ?? 0;
-          const tb = toDate(b.startTime)?.getTime() ?? 0;
-          if (ta !== tb) return ta - tb;
-          return a.quarter - b.quarter;
-        });
+        const openSorted = all
+          .filter((r) => r.status === "open")
+          .sort((a, b) => {
+            const ta = toDate(a.startTime)?.getTime() ?? 0;
+            const tb = toDate(b.startTime)?.getTime() ?? 0;
+            if (ta !== tb) return ta - tb;
+            return a.quarter - b.quarter;
+          });
 
-        setRows(out);
+        setRows(openSorted);
       } finally {
         setLoading(false);
       }
     };
-
     load();
   }, []);
 
-  const filtered = useMemo(() => {
-    if (status === "all") return rows;
-    return rows.filter((r) => r.status === status);
-  }, [rows, status]);
+  // simple Free Kick eligibility
+  const canUseFreeKick = (roundId: string) => {
+    if (!me) return false;
+    if (!me.freeKickCredits || me.freeKickCredits <= 0) return false;
+    const last = me.freeKickLastUsedRound as string | null | undefined;
+    if (!last) return true;
+
+    const toNum = (rid: string) => (rid === "OR" ? 0 : Number(rid.replace("R", "")));
+    const nowN = toNum(roundId);
+    const lastN = toNum(last);
+    // usable every 4 rounds (adjust later to 3/5 per your rule)
+    return (nowN - lastN) >= 4;
+  };
+
+  // render each card as its own component so we can keep independent state (useFreeKick)
+  const Card: React.FC<{ r: Row }> = ({ r }) => {
+    const [useFK, setUseFK] = useState(false);
+    const eligibleFK = canUseFreeKick(r.roundId);
+
+    const makePick = async (choice: "yes" | "no") => {
+      if (!user) {
+        window.location.href = "/login";
+        return;
+      }
+      const ref = doc(db, "picks", user.uid, r.roundId, r.questionId);
+      await setDoc(
+        ref,
+        {
+          roundId: r.roundId,
+          questionId: r.questionId,
+          match: r.match,
+          quarter: r.quarter,
+          choice,
+          usedFreeKick: !!useFK,
+          madeAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      alert(`Saved: ${choice}${useFK ? " (Free Kick)" : ""}`);
+    };
+
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white">
+        <div className="flex items-center gap-2 text-xs md:text-sm text-white/70">
+          <span className="inline-flex items-center justify-center rounded-md bg-white/10 px-2 py-0.5">Open</span>
+          <span className="text-orange-400 font-semibold">{r.match}</span>
+          <span className="ml-auto">{fmtStart(r.startTime)} • {r.venue}</span>
+        </div>
+
+        <div className="mt-2 font-semibold">{r.question}</div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => makePick("yes")}
+            className="px-3 py-1.5 rounded-md bg-orange-500 text-black font-semibold hover:bg-orange-400"
+          >
+            Yes
+          </button>
+          <button
+            onClick={() => makePick("no")}
+            className="px-3 py-1.5 rounded-md bg-purple-600 text-white font-semibold hover:bg-purple-500"
+          >
+            No
+          </button>
+
+          <span className="ml-auto text-sm text-white/70">
+            Yes {r.yesPercent}% · No {r.noPercent}%
+          </span>
+        </div>
+
+        {user && (
+          <label className="mt-3 flex items-center gap-2 text-sm text-white/80">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-orange-500"
+              disabled={!eligibleFK}
+              checked={useFK}
+              onChange={(e) => setUseFK(e.target.checked)}
+            />
+            <span>
+              Use Free Kick on this pick {eligibleFK ? "" : "(not available this round)"}
+            </span>
+          </label>
+        )}
+
+        {!user && (
+          <div className="mt-3 text-sm text-white/70">
+            You must <Link className="underline text-orange-300" href="/login">sign in</Link> to make a pick.
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="mx-auto max-w-6xl px-3 sm:px-4 md:px-6 lg:px-8 py-6">
-      {/* Title */}
-      <h1 className="text-4xl sm:text-5xl font-extrabold text-orange-400 text-center">
-        Make Picks
-      </h1>
+    <main className="max-w-3xl mx-auto px-4 md:px-6 py-10">
+      <h1 className="text-3xl font-extrabold text-center text-orange-400 mb-2">Make Picks</h1>
+      {/* Sponsor banner */}
+      <div className="bg-white text-black text-center py-3 rounded-lg mb-6">Sponsor Banner • 970×90</div>
 
-      {/* Banner */}
-      <div className="mt-4 mb-6">
-        <div className="mx-auto max-w-[970px] rounded-2xl border border-white/10 bg-white/5 text-white/70 text-center text-sm py-6">
-          Sponsor Banner • 970×90
+      {loading ? (
+        <div className="text-white/70">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-white/70">No open selections.</div>
+      ) : (
+        <div className="space-y-4">
+          {rows.map((r) => <Card key={r.id} r={r} />)}
         </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-2 justify-center mb-4">
-        {(["open", "final", "pending", "void", "all"] as const).map((s) => {
-          const active = status === s;
-          return (
-            <button
-              key={s}
-              onClick={() => setStatus(s)}
-              className={`px-3 py-1.5 rounded-xl text-sm font-medium transition
-                ${active ? "bg-orange-500 text-black" : "bg-white/10 text-white/80 hover:bg-white/15"}`}
-            >
-              {s[0].toUpperCase() + s.slice(1)}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Table wrapper */}
-      <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/5">
-        {/* Header */}
-        <div
-          className="
-            grid items-center
-            px-3 py-3
-            text-xs tracking-wide text-white/70
-            border-b border-white/10
-            "
-          style={{
-            gridTemplateColumns:
-              "minmax(160px, 180px) minmax(260px, 1.3fr) 56px 1fr 160px",
-          }}
-        >
-          <div>Start</div>
-          <div className="pl-3">Match · Venue</div>
-          <div>Q#</div>
-          <div>Question</div>
-          <div className="text-right pr-1">Pick · Yes % · No %</div>
-        </div>
-
-        {/* Rows */}
-        <div className="divide-y divide-white/8">
-          {loading && (
-            <div className="px-4 py-6 text-white/70 text-sm">Loading…</div>
-          )}
-
-          {!loading && filtered.length === 0 && (
-            <div className="px-4 py-6 text-white/70 text-sm">
-              No questions found.
-            </div>
-          )}
-
-          {!loading &&
-            filtered.map((r) => (
-              <div
-                key={r.id}
-                className="grid items-center px-3 py-3 text-sm"
-                style={{
-                  gridTemplateColumns:
-                    "minmax(160px, 180px) minmax(260px, 1.3fr) 56px 1fr 160px",
-                }}
-              >
-                {/* START (date + status stacked) */}
-                <div className="text-[11px] leading-tight whitespace-pre-wrap text-white/80">
-                  {formatStart(r.startTime)}
-                  <div>{statusBadge(r.status)}</div>
-                </div>
-
-                {/* MATCH · VENUE (nudged right so pill never overlaps) */}
-                <div className="pl-3">
-                  <div className="text-orange-300 font-semibold">
-                    <Link href="#" className="hover:underline">
-                      {r.match}
-                    </Link>
-                  </div>
-                  <div className="text-[12px] text-white/70">
-                    {r.venue || "TBD"}
-                  </div>
-                </div>
-
-                {/* Q# */}
-                <div className="text-white/70 font-semibold">Q{r.quarter}</div>
-
-                {/* QUESTION */}
-                <div className="text-white font-medium">{r.question}</div>
-
-                {/* ACTIONS / PERCENTS */}
-                <div className="flex items-center justify-end gap-2">
-                  <button className="px-2.5 py-1 rounded-md bg-orange-500 text-black text-xs font-semibold hover:bg-orange-400">
-                    Yes
-                  </button>
-                  <button className="px-2.5 py-1 rounded-md bg-white/20 text-white text-xs font-semibold hover:bg-white/25">
-                    No
-                  </button>
-                  <div className="ml-2 text-[12px] text-white/70 tabular-nums">
-                    {Math.round(r.yesPercent)}% · {Math.round(r.noPercent)}%
-                  </div>
-                </div>
-              </div>
-            ))}
-        </div>
-      </div>
-    </div>
+      )}
+    </main>
   );
 }
