@@ -3,137 +3,137 @@
 import { useState, useEffect } from "react";
 import { db } from "@/lib/firebaseClient";
 import { collection, getDocs } from "firebase/firestore";
-import { Card } from "@/components/ui/card";
-
-interface Question {
-  question: string;
-  quarter: number;
-  yesVotes: number;
-  noVotes: number;
-}
-
-interface Game {
-  match: string;
-  venue: string;
-  startTime: string;
-  status: string;
-  questions: Question[];
-}
 
 export default function PicksClient() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [picks, setPicks] = useState<any[]>([]);
+  const [statusFilter, setStatusFilter] = useState("Open");
 
   useEffect(() => {
-    const fetchGames = async () => {
+    const fetchData = async () => {
       try {
-        const roundsRef = collection(db, "rounds");
-        const roundsSnapshot = await getDocs(roundsRef);
-        const fetchedGames: Game[] = [];
-
-        roundsSnapshot.forEach((roundDoc) => {
-          const roundData = roundDoc.data();
+        const querySnapshot = await getDocs(collection(db, "rounds"));
+        const data: any[] = [];
+        querySnapshot.forEach((doc) => {
+          const roundData = doc.data();
           if (roundData.games) {
             roundData.games.forEach((game: any) => {
-              fetchedGames.push({
-                match: game.match,
-                venue: game.venue,
-                startTime: game.startTime?.toDate
-                  ? game.startTime.toDate().toLocaleString("en-AU", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                      timeZoneName: "short",
-                    })
-                  : game.startTime || "TBD",
-                status: game.status || "OPEN",
-                questions: game.questions || [],
-              });
+              if (game.questions) {
+                game.questions.forEach((q: any, index: number) => {
+                  data.push({
+                    id: `${doc.id}-${index}`,
+                    match: game.match,
+                    venue: game.venue,
+                    startTime: game.startTime?.seconds
+                      ? new Date(game.startTime.seconds * 1000)
+                      : null,
+                    question: q.question,
+                    quarter: q.quarter,
+                    status: game.status || "Open",
+                  });
+                });
+              }
             });
           }
         });
-
-        setGames(fetchedGames);
+        setPicks(data);
       } catch (error) {
-        console.error("Error fetching games:", error);
-      } finally {
-        setLoading(false);
+        console.error("Error fetching picks:", error);
       }
     };
 
-    fetchGames();
+    fetchData();
   }, []);
 
-  if (loading) return <p className="text-center text-white mt-10">Loading picks...</p>;
+  const filteredPicks = picks.filter((pick) => {
+    if (statusFilter === "All") return true;
+    return pick.status.toLowerCase() === statusFilter.toLowerCase();
+  });
 
   return (
-    <main className="min-h-screen bg-[#0b0f13] text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Page Title + Sponsor Banner */}
-        <h1 className="text-center text-4xl font-extrabold text-[#fe6f27] mb-4">Make Picks</h1>
-        <div className="sponsor-banner flex items-center justify-center mb-8">
-          Sponsor Banner • 970×90
-        </div>
+    <div className="min-h-screen bg-[#0b0f13] text-white px-6 py-8">
+      <h1 className="text-center text-4xl font-bold text-orange-500 mb-4">
+        Make Picks
+      </h1>
 
-        {/* Filters */}
-        <div className="flex justify-center gap-3 mb-8">
-          {["Open", "Final", "Pending", "Void", "All"].map((status) => (
-            <button
-              key={status}
-              className={`px-4 py-2 rounded-lg font-semibold ${
-                status === "Open"
-                  ? "bg-[#fe6f27] text-black"
-                  : "bg-[#1c1f26] text-gray-300 hover:bg-[#2c2f36]"
-              }`}
-            >
-              {status}
-            </button>
-          ))}
-        </div>
-
-        {/* Picks Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-separate border-spacing-y-2">
-            <thead>
-              <tr className="text-gray-400 text-sm uppercase">
-                <th className="pl-4">Start</th>
-                <th>Match · Venue</th>
-                <th>Q#</th>
-                <th>Question</th>
-                <th>Pick · Yes % · No %</th>
-              </tr>
-            </thead>
-            <tbody>
-              {games.map((game, index) =>
-                game.questions.map((q, i) => (
-                  <tr key={`${index}-${i}`} className="bg-[#10151c] hover:bg-[#1b222e] rounded-lg">
-                    <td className="pl-4 py-3 text-sm text-gray-300">
-                      {game.startTime}{" "}
-                      <span className="chip-open ml-2">{game.status}</span>
-                    </td>
-                    <td className="py-3">
-                      <span className="font-semibold text-[#fe6f27]">{game.match}</span>
-                      <p className="text-xs text-gray-400">{game.venue}</p>
-                    </td>
-                    <td className="text-center">Q{q.quarter}</td>
-                    <td>{q.question}</td>
-                    <td className="pr-4 text-right text-sm">
-                      <button className="btn btn-primary mr-2">Yes</button>
-                      <button className="btn btn-ghost mr-4">No</button>
-                      <span className="text-gray-400">
-                        {q.yesVotes || 0}% · {q.noVotes || 0}%
-                      </span>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="flex justify-center gap-3 mb-6">
+        {["Open", "Final", "Pending", "Void", "All"].map((status) => (
+          <button
+            key={status}
+            onClick={() => setStatusFilter(status)}
+            className={`px-4 py-2 rounded-md font-medium ${
+              statusFilter === status
+                ? "bg-orange-500 text-white"
+                : "bg-gray-700 hover:bg-gray-600"
+            }`}
+          >
+            {status}
+          </button>
+        ))}
       </div>
-    </main>
+
+      <div className="bg-gray-900 rounded-lg overflow-hidden">
+        <table className="min-w-full text-left border-collapse">
+          <thead className="bg-gray-800 text-gray-300 text-sm uppercase">
+            <tr>
+              <th className="px-4 py-2">Start</th>
+              <th className="px-4 py-2">Match · Venue</th>
+              <th className="px-4 py-2">Q#</th>
+              <th className="px-4 py-2">Question</th>
+              <th className="px-4 py-2 text-right">Pick · Yes % · No %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredPicks.map((pick) => (
+              <tr key={pick.id} className="border-b border-gray-800">
+                <td className="px-4 py-3 text-sm text-gray-400">
+                  {pick.startTime
+                    ? pick.startTime.toLocaleString("en-AU", {
+                        weekday: "short",
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: true,
+                        timeZone: "Australia/Melbourne",
+                      })
+                    : "TBD"}
+                  <span className="ml-2 text-green-400 font-semibold text-xs">
+                    {pick.status.toUpperCase()}
+                  </span>
+                </td>
+                <td className="px-4 py-3">
+                  <div className="font-semibold text-orange-400">
+                    {pick.match}
+                  </div>
+                  <div className="text-sm text-gray-400">{pick.venue}</div>
+                </td>
+                <td className="px-4 py-3 text-gray-300 text-sm">
+                  Q{pick.quarter}
+                </td>
+
+                {/* 💪 Updated Question Styling */}
+                <td className="px-4 py-3 font-semibold text-lg text-orange-300">
+                  {pick.question}
+                </td>
+
+                <td className="px-4 py-3 text-right text-sm">
+                  <div className="flex justify-end gap-2">
+                    <button className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded-md text-sm">
+                      Yes
+                    </button>
+                    <button className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-md text-sm">
+                      No
+                    </button>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1">
+                    0% · 0%
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
