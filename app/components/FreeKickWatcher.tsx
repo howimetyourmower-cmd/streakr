@@ -1,59 +1,179 @@
-// app/layout.tsx
-import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
+// app/components/FreeKickWatcher.tsx
+"use client";
 
-// ✅ must match the actual file name
-import "./global.css";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { auth, db } from "@/lib/firebaseClient";
+import {
+  collection,
+  doc,
+  getDoc,
+  limit,
+  onSnapshot,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import { onAuthStateChanged, User } from "firebase/auth";
+import FreeKickModal from "./FreeKickModal";
 
-// ✅ use relative paths (no "@/")
-import Toast from "app/components/Toast";
-import FreeKickWatcher from "app/components/FreeKickWatcher";
+/**
+ * What this does (safe-by-default, no schema assumptions):
+ * - Watches for a "loss" event under users/{uid}/events where:
+ *     { type: "LOSS", processed: false }
+ * - When found, checks users/{uid} for a free kick flag:
+ *     { freeKick: { available: number } } OR { hasFreeKick: boolean }
+ * - If available, shows modal; user can "Use Free Kick" or "Let it End".
+ * - Writes the outcome back:
+ *     - Use: marks event.processed=true, event.action="revived"
+ *            and decrements available / clears hasFreeKick
+ *     - End: marks event.processed=true, event.action="ended"
+ *            and (optionally) sets currentStreak=0 if that field exists
+ *
+ * If your field names differ, this still compiles and runs; it just
+ * won’t find the fields until you add them.
+ */
 
-export const metadata: Metadata = {
-  title: "STREAKr",
-  description: "Free-to-play AFL prediction streaks",
+type LossEvent = {
+  id: string;
+  type?: string;
+  processed?: boolean;
+  questionId?: string;
+  roundId?: string;
+  createdAt?: any;
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function FreeKickWatcher() {
+  const [user, setUser] = useState<User | null>(null);
+  const [pendingEvent, setPendingEvent] = useState<LossEvent | null>(null);
+  const [canOffer, setCanOffer] = useState(false);
+  const checkingRef = useRef(false);
+
+  // auth
+  useEffect(() => {
+    return onAuthStateChanged(auth, (u) => setUser(u));
+  }, []);
+
+  // subscribe to loss events for this user
+  useEffect(() => {
+    if (!user) return;
+    const evCol = collection(db, "users", user.uid, "events");
+    const q = query(evCol, where("type", "==", "LOSS"), where("processed", "==", false), limit(1));
+
+    const unsub = onSnapshot(
+      q,
+      async (snap) => {
+        if (snap.empty) return;
+        const d = snap.docs[0];
+        const event: LossEvent = { id: d.id, ...(d.data() as any) };
+
+        // guard against overlapping checks
+        if (checkingRef.current) return;
+        checkingRef.current = true;
+
+        try {
+          // does user have a free kick available?
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          const udata: any = userDoc.exists() ? userDoc.data() : {};
+          const available =
+            (udata?.freeKick?.available as number | undefined) ??
+            (udata?.hasFreeKick ? 1 : 0);
+
+          setCanOffer((available ?? 0) > 0);
+          setPendingEvent(event);
+        } catch (e) {
+          // even if user read fails, still surface the modal as "not available"
+          setCanOffer(false);
+          setPendingEvent(event);
+        } finally {
+          checkingRef.current = false;
+        }
+      },
+      // ignore
+      () => {}
+    );
+
+    return () => unsub();
+  }, [user]);
+
+  const clearEvent = useCallback(() => setPendingEvent(null), []);
+
+  const handleUse = useCallback(async () => {
+    if (!user || !pendingEvent) return;
+
+    const userRef = doc(db, "users", user.uid);
+    const evRef = doc(db, "users", user.uid, "events", pendingEvent.id);
+
+    try {
+      // atomically mark processed first to avoid duplicate prompts
+      await updateDoc(evRef, { processed: true, action: "revived" }).catch(() => {});
+
+      // Try both shapes safely
+      const u = await getDoc(userRef);
+      if (u.exists()) {
+        const data = u.data() as any;
+        if (typeof data?.freeKick?.available === "number") {
+          await updateDoc(userRef, {
+            "freeKick.available": Math.max(0, (data.freeKick.available as number) - 1),
+            // optionally track usage
+            "freeKick.used": Math.max(0, Number(data?.freeKick?.used ?? 0)) + 1,
+          }).catch(() => {});
+        } else if (data?.hasFreeKick === true) {
+          await updateDoc(userRef, { hasFreeKick: false }).catch(() => {});
+        }
+        // optionally keep currentStreak unchanged (revived)
+      }
+
+      // toast-like feedback (uses your global Toast if you wire an event)
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("toast", {
+            detail: { title: "Free Kick used", message: "Your streak has been revived." },
+          })
+        );
+      }
+    } finally {
+      clearEvent();
+    }
+  }, [user, pendingEvent, clearEvent]);
+
+  const handleDismiss = useCallback(async () => {
+    if (!user || !pendingEvent) return;
+
+    const userRef = doc(db, "users", user.uid);
+    const evRef = doc(db, "users", user.uid, "events", pendingEvent.id);
+
+    try {
+      await updateDoc(evRef, { processed: true, action: "ended" }).catch(() => {});
+
+      // If your schema tracks streak:
+      const u = await getDoc(userRef);
+      if (u.exists()) {
+        const data = u.data() as any;
+        if (typeof data?.currentStreak === "number") {
+          await updateDoc(userRef, { currentStreak: 0 }).catch(() => {});
+        }
+      }
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("toast", {
+            detail: { title: "Streak ended", message: "Start a new streak with your next pick." },
+          })
+        );
+      }
+    } finally {
+      clearEvent();
+    }
+  }, [user, pendingEvent, clearEvent]);
+
+  // When there’s no event or no free kick to offer, render nothing
   return (
-    <html lang="en">
-      <body className="bg-[#0b0f13] text-white antialiased">
-        {/* Header */}
-        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="flex items-center gap-2">
-              {/* uses /public/streakrlogo.jpg */}
-              <Image
-                src="/streakrlogo.jpg"
-                alt="STREAKr"
-                width={32}
-                height={32}
-                priority
-              />
-              <span className="text-xl font-semibold tracking-wide">STREAK<span className="text-orange-400">r</span></span>
-            </Link>
-
-            <nav className="flex items-center gap-6 text-sm">
-              <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-              <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
-              <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-              <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
-              <Link href="/auth" className="rounded-md bg-white/10 px-3 py-1.5 hover:bg-white/15">
-                Login / Sign Up
-              </Link>
-            </nav>
-          </div>
-        </header>
-
-        {/* Page content */}
-        <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
-
-        {/* Portals / global UI helpers */}
-        <Toast />
-        <FreeKickWatcher />
-      </body>
-    </html>
+    <FreeKickModal
+      open={Boolean(pendingEvent && canOffer)}
+      onUse={handleUse}
+      onDismiss={handleDismiss}
+      title="Your streak just lost… use your FREE KICK?"
+      message="Use your Free Kick to revive your streak and keep it alive. If you’d rather save it, you can let this streak end and start a new run."
+    />
   );
 }
-
