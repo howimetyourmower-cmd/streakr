@@ -1,54 +1,45 @@
+import "./globals.css";
 import type { Metadata } from "next";
-import "./global.css";
+import { Inter } from "next/font/google";
 import Link from "next/link";
-import Image from "next/image";
+import ToastHost from "@/components/Toast";
+import FreeKickWatcher from "@/components/FreeKickWatcher";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "STREAKr",
-  description: "Build your streak. Win the round.",
+  description: "AFL prediction streaks — build your streak, win prizes.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-[#0b0f13] text-white antialiased">
+      <body className={`${inter.className} bg-[#0b0f13] text-white antialiased`}>
         <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="flex items-center gap-3">
-              <Image src="/streakrlogo.jpg" alt="STREAKr" width={200} height={200} className="h-14 w-auto" />
-              <span className="text-xl font-extrabold tracking-wide">
-                STREAK<span className="text-orange-500">r</span> 
-              </span>
+            <Link href="/" className="flex items-center space-x-2">
+              <img
+                src="/streakrlogo.jpg"
+                alt="STREAKr"
+                className="h-8 w-auto"
+              />
             </Link>
-            <nav className="flex items-center gap-6 text-sm">
-              <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-              <Link href="/leaderboard" className="hover:text-orange-400">Leaderboards</Link>
-              <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-              <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
-              <Link href="/auth" className="rounded-lg bg-white/10 px-3 py-1.5 hover:bg-white/20">
-                Login / Sign Up
-
-                import ToastHost from "@/components/Toast";
-import FreeKickWatcher from "@/components/FreeKickWatcher";
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body className="min-h-screen bg-[#0B1726] text-white">
-        {/* ...header/nav... */}
-        {children}
-        <FreeKickWatcher />
-        <ToastHost />
-      </body>
-    </html>
-  );
-}
-
-              </Link>
+            <nav className="flex space-x-6 text-sm font-medium">
+              <Link href="/picks">Picks</Link>
+              <Link href="/leaderboard">Leaderboards</Link>
+              <Link href="/rewards">Rewards</Link>
+              <Link href="/faq">FAQ</Link>
+              <Link href="/login">Login / Sign Up</Link>
             </nav>
           </div>
         </header>
-        {children}
+
+        <main className="min-h-screen">{children}</main>
+
+        {/* Global components */}
+        <FreeKickWatcher />
+        <ToastHost />
       </body>
     </html>
   );
