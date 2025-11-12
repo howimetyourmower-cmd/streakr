@@ -1,45 +1,84 @@
 import "./globals.css";
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import React from "react";
+import Toast from "@/app/components/Toast";
+import FreeKickWatcher from "@/app/components/FreeKickWatcher";
 import Link from "next/link";
-import ToastHost from "@/components/Toast";
-import FreeKickWatcher from "@/components/FreeKickWatcher";
+import Image from "next/image";
 
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
+export const metadata = {
   title: "STREAKr",
-  description: "AFL prediction streaks — build your streak, win prizes.",
+  description: "Real Streakr’s don’t get caught!",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className={`${inter.className} bg-[#0b0f13] text-white antialiased`}>
-        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
+      <body className="bg-[#0b0f13] text-white antialiased">
+        {/* HEADER */}
+        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur-sm border-b border-gray-800">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+            {/* Left Section - Logo */}
             <Link href="/" className="flex items-center space-x-2">
-              <img
+              <Image
                 src="/streakrlogo.jpg"
-                alt="STREAKr"
-                className="h-8 w-auto"
+                alt="STREAKr Logo"
+                width={45}
+                height={45}
+                className="rounded-md"
               />
+              <span className="text-2xl font-bold text-white">
+                STREAK<span className="text-orange-500">r</span>
+              </span>
             </Link>
-            <nav className="flex space-x-6 text-sm font-medium">
-              <Link href="/picks">Picks</Link>
-              <Link href="/leaderboard">Leaderboards</Link>
-              <Link href="/rewards">Rewards</Link>
-              <Link href="/faq">FAQ</Link>
-              <Link href="/login">Login / Sign Up</Link>
+
+            {/* Right Section - Nav */}
+            <nav className="space-x-6 text-sm font-medium">
+              <Link
+                href="/picks"
+                className="hover:text-orange-500 transition-colors"
+              >
+                Picks
+              </Link>
+              <Link
+                href="/leaderboard"
+                className="hover:text-orange-500 transition-colors"
+              >
+                Leaderboards
+              </Link>
+              <Link
+                href="/rewards"
+                className="hover:text-orange-500 transition-colors"
+              >
+                Rewards
+              </Link>
+              <Link
+                href="/faq"
+                className="hover:text-orange-500 transition-colors"
+              >
+                FAQ
+              </Link>
+              <Link
+                href="/login"
+                className="hover:text-orange-500 transition-colors"
+              >
+                Login / Sign Up
+              </Link>
             </nav>
           </div>
         </header>
 
-        <main className="min-h-screen">{children}</main>
+        {/* MAIN CONTENT */}
+        <main className="min-h-screen px-4 sm:px-6 lg:px-8 pt-6">
+          {children}
+        </main>
 
-        {/* Global components */}
+        {/* COMPONENTS */}
+        <Toast />
         <FreeKickWatcher />
-        <ToastHost />
       </body>
     </html>
   );
