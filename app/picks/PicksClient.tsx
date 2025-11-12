@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { db } from "@/lib/firebaseClient";
 import { collection, getDocs } from "firebase/firestore";
-
+import { Card } from "@/components/ui/card";
 
 interface Question {
   question: string;
