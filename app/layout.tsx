@@ -27,6 +27,23 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
               <Link href="/auth" className="rounded-lg bg-white/10 px-3 py-1.5 hover:bg-white/20">
                 Login / Sign Up
+
+                import ToastHost from "@/components/Toast";
+import FreeKickWatcher from "@/components/FreeKickWatcher";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className="min-h-screen bg-[#0B1726] text-white">
+        {/* ...header/nav... */}
+        {children}
+        <FreeKickWatcher />
+        <ToastHost />
+      </body>
+    </html>
+  );
+}
+
               </Link>
             </nav>
           </div>
