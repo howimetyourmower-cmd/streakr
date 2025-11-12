@@ -247,13 +247,15 @@ export default function PicksClient() {
                   {row.question}
                 </div>
 
-                {/* Comments */}
-                <div className="mt-3">
-                  <CommentsSection
-                    pickId={row.id}
-                    userName={user?.displayName || "Anonymous"}
-                  />
-                </div>
+                {/* Comments (compact pill) */}
+<div className="mt-2">
+  <CommentsSection
+    pickId={row.id}
+    userName={user?.displayName || "Anonymous"}
+    compact
+  />
+</div>
+
               </div>
 
               {/* Pick actions */}
