@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "../../../src/lib/admin";
+import { adminDb } from "../../../src/lib/admin"; // ⬅ same style as your working user-picks route
 import { Timestamp } from "firebase-admin/firestore";
 
 type Question = {
@@ -16,7 +16,7 @@ type Game = {
   id: string;
   match: string;
   venue: string;
-  startTime: string;
+  startTime: string; // ISO string
   questions: Question[];
 };
 
@@ -25,10 +25,11 @@ type PicksResponse = {
 };
 
 const CURRENT_SEASON = 2026;
-const CURRENT_ROUND = 1;
+const CURRENT_ROUND = 1; // change to 8 or whatever round you’ve seeded
 
 export async function GET() {
   try {
+    // 1) Load the round document from Firestore
     const roundSnap = await adminDb
       .collection("rounds")
       .where("season", "==", CURRENT_SEASON)
@@ -37,6 +38,12 @@ export async function GET() {
       .get();
 
     if (roundSnap.empty) {
+      console.warn(
+        "[/api/picks] No round document found for season",
+        CURRENT_SEASON,
+        "round",
+        CURRENT_ROUND
+      );
       const empty: PicksResponse = { games: [] };
       return NextResponse.json(empty);
     }
@@ -44,37 +51,47 @@ export async function GET() {
     const roundDoc = roundSnap.docs[0];
     const data = roundDoc.data() as any;
 
-    const games: Game[] = (data.games ?? []).map((g: any, i: number) => {
-      const ts = g.startTime as Timestamp | string;
-      let startISO = new Date().toISOString();
+    const gamesData = (data.games ?? []) as any[];
+
+    const games: Game[] = gamesData.map((g, gameIndex) => {
+      const ts = g.startTime as Timestamp | string | undefined;
+      let isoStart = new Date().toISOString();
 
       if (ts instanceof Timestamp) {
-        startISO = ts.toDate().toISOString();
-      } else if (typeof ts === "string") {
-        startISO = new Date(ts).toISOString();
+        isoStart = ts.toDate().toISOString();
+      } else if (typeof ts === "string" && ts) {
+        isoStart = new Date(ts).toISOString();
       }
 
-      const questions: Question[] = (g.questions ?? []).map(
-        (q: any, qIndex: number) => ({
-          id: `${roundDoc.id}-${i}-${qIndex}`,
+      const questionsData = (g.questions ?? []) as any[];
+
+      const questions: Question[] = questionsData.map(
+        (q: any, questionIndex: number) => ({
+          id: `${roundDoc.id}-${gameIndex}-${questionIndex}`,
           quarter: Number(q.quarter ?? 1),
-          question: q.question ?? "",
-          status: "open",
+          question: String(q.question ?? ""),
+          status: "open", // everything is open for now – you’ll hook this up later
+          userPick: undefined,
+          yesPercent: undefined,
+          noPercent: undefined,
         })
       );
 
       return {
-        id: `${roundDoc.id}-${i}`,
-        match: g.match ?? "",
-        venue: g.venue ?? "",
-        startTime: startISO,
+        id: `${roundDoc.id}-${gameIndex}`,
+        match: String(g.match ?? ""),
+        venue: String(g.venue ?? "MCG, Melbourne"),
+        startTime: isoStart,
         questions,
       };
     });
 
-    return NextResponse.json({ games });
+    const payload: PicksResponse = { games };
+
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("Error in /api/picks:", err);
-    return NextResponse.json({ games: [] }, { status: 500 });
+    const fallback: PicksResponse = { games: [] };
+    return NextResponse.json(fallback, { status: 500 });
   }
 }
