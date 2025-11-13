@@ -75,8 +75,118 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ---------- HOW IT WORKS ---------- */}
+      {/* ---------- LATEST QUESTIONS PREVIEW (3x2 GRID) ---------- */}
       <section className="max-w-6xl mx-auto px-4 py-10 md:py-14">
+        <h2 className="text-2xl md:text-3xl font-bold mb-6 text-white">
+          Latest questions
+        </h2>
+
+        <p className="text-slate-300 mb-6">
+          Here’s a quick look at the questions currently open. Jump into Picks
+          to lock in your streak.
+        </p>
+
+        <div className="grid gap-6 md:grid-cols-3">
+          {/* CARD 1 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Richmond vs Carlton
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Carlton win or draw against Richmond?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+
+          {/* CARD 2 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Richmond vs Carlton
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Patrick Cripps get 6 or more disposals in the 1st Quarter?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+
+          {/* CARD 3 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Richmond vs Carlton
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Sam Walsh kick a goal in the 2nd Quarter?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+
+          {/* CARD 4 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Hawthorn vs Essendon
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Hawthorn beat Essendon by 22 points or more?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+
+          {/* CARD 5 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Hawthorn vs Essendon
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Jai Newcombe get 6 or more disposals in the 1st Quarter?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+
+          {/* CARD 6 */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+            <h4 className="text-orange-500 font-semibold mb-2">
+              Hawthorn vs Essendon
+            </h4>
+            <p className="text-slate-300 text-sm mb-4">
+              Will Jayden Short have 5 or more disposals in the 4th Quarter?
+            </p>
+            <a
+              href="/picks"
+              className="text-orange-400 text-sm font-semibold hover:underline"
+            >
+              Make your pick →
+            </a>
+          </div>
+        </div>
+      </section>
+
+      {/* ---------- HOW IT WORKS ---------- */}
+      <section className="max-w-6xl mx-auto px-4 pb-10 md:pb-14">
         <h2 className="text-2xl md:text-3xl font-bold mb-6 text-white">
           How Streakr works
         </h2>
