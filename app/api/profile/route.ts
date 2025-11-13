@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "../../../../lib/admin"; // 🔧 adjust this path to your existing admin file
+import { adminDb } from "../../../src/lib/admin"; // 🔧 adjust this path to your existing admin file
 import { Timestamp } from "firebase-admin/firestore";
 
 type ProfileStats = {
