@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "../../../lib/admin"; // 🔧 adjust path if needed
+import { adminDb } from "../../../../lib/admin"; // 🔧 adjust path if needed
 import { Timestamp } from "firebase-admin/firestore";
 
 type LeaderboardEntry = {
