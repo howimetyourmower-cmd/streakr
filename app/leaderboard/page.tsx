@@ -24,7 +24,7 @@ type LeaderboardData = {
   };
 };
 
-export default function LeaderboardsPage() {
+export default function LeaderboardPage() {
   const [data, setData] = useState<LeaderboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +35,13 @@ export default function LeaderboardsPage() {
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch("/api/leaderboards");
-        if (!res.ok) throw new Error("Failed to load leaderboards");
+
+        // 🔥 IMPORTANT: singular "leaderboard"
+        const res = await fetch("/api/leaderboard");
+        if (!res.ok) {
+          throw new Error("Failed to load leaderboards");
+        }
+
         const json: LeaderboardData = await res.json();
         setData(json);
       } catch (err: any) {
@@ -84,7 +89,7 @@ export default function LeaderboardsPage() {
         <div className="flex items-center justify-between mb-6 md:mb-8">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-              Leaderboards
+              Leaderboard
             </h1>
             <p className="text-sm md:text-base text-slate-400">
               See where your streak stacks up against the rest of the comp.
@@ -213,7 +218,7 @@ function TabButton({
 }
 
 function LeaderboardRow({ entry }: { entry: LeaderboardEntry }) {
-  const isYou = entry.username === "glennmadds"; // later: replace with real user id
+  const isYou = entry.username === "glennmadds"; // placeholder for now
 
   return (
     <li
