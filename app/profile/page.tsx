@@ -35,86 +35,17 @@ export default function ProfilePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // TODO: Replace this with a real API call like `/api/profile`
     async function loadProfile() {
       try {
         setLoading(true);
         setError(null);
 
-        // --- MOCK DATA FOR NOW ---
-        const mock: ProfileData = {
-          stats: {
-            displayName: "Glenn M",
-            username: "glennmadds",
-            favouriteTeam: "Carlton",
-            suburb: "Bentleigh",
-            state: "VIC",
-            currentStreak: 5,
-            bestStreak: 12,
-            correctPercentage: 68,
-            roundsPlayed: 14,
-          },
-          recentPicks: [
-            {
-              id: "1",
-              round: 8,
-              match: "Carlton v Brisbane",
-              question:
-                "Will Patrick Cripps get 6 or more disposals in the 1st quarter?",
-              userPick: "Yes",
-              result: "correct",
-              settledAt: "2026-04-12T10:30:00Z",
-            },
-            {
-              id: "2",
-              round: 8,
-              match: "Carlton v Brisbane",
-              question:
-                "Will Charlie Curnow kick a goal in the 2nd quarter?",
-              userPick: "Yes",
-              result: "wrong",
-              settledAt: "2026-04-12T11:00:00Z",
-            },
-            {
-              id: "3",
-              round: 7,
-              match: "Richmond v Collingwood",
-              question:
-                "Will Collingwood win or draw against Richmond?",
-              userPick: "No",
-              result: "correct",
-              settledAt: "2026-04-05T09:50:00Z",
-            },
-            {
-              id: "4",
-              round: 7,
-              match: "Richmond v Collingwood",
-              question:
-                "Will Nick Daicos have 7 or more disposals in the 3rd quarter?",
-              userPick: "Yes",
-              result: "pending",
-            },
-            {
-              id: "5",
-              round: 6,
-              match: "Hawthorn v Essendon",
-              question:
-                "Will Hawthorn beat Essendon by 22 points or more?",
-              userPick: "No",
-              result: "void",
-            },
-          ],
-        };
-
-        // Simulate async
-        await new Promise((res) => setTimeout(res, 300));
-        setProfile(mock);
-
-        // When wired up for real:
-        // const res = await fetch("/api/profile");
-        // if (!res.ok) throw new Error("Failed to load profile");
-        // const data = await res.json();
-        // setProfile(data);
+        const res = await fetch("/api/profile");
+        if (!res.ok) {
+          throw new Error("Failed to load profile");
+        }
+        const data: ProfileData = await res.json();
+        setProfile(data);
       } catch (err: any) {
         setError(err.message ?? "Failed to load profile");
       } finally {
@@ -222,7 +153,7 @@ export default function ProfilePage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left column: extra stats + badges */}
           <div className="space-y-6">
-            {/* Extra stats card (placeholder for future stuff) */}
+            {/* Extra stats card */}
             <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-4 md:p-5">
               <h3 className="text-sm font-semibold text-slate-200 mb-3">
                 Streak snapshot
@@ -266,7 +197,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Right: recent picks (takes 2 columns on large screens) */}
+          {/* Right: recent picks */}
           <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-3xl p-4 md:p-5">
             <div className="flex items-center justify-between mb-3 md:mb-4">
               <h3 className="text-sm font-semibold text-slate-200">
