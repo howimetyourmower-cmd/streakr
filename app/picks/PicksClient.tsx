@@ -1,356 +1,232 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { db, auth } from "@/lib/firebaseClient";
-import {
-  collection,
-  getDocs,
-  Timestamp,
-  DocumentData,
-} from "firebase/firestore";
-import { onAuthStateChanged, User } from "firebase/auth";
-import dayjs from "dayjs";
+import { useEffect, useState } from "react";
 
-// ---------- Types ----------
 type Question = {
+  id: string;
   quarter: number;
   question: string;
+  status: "open" | "final" | "pending" | "void";
+  userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
-  commentsCount?: number;
 };
 
 type Game = {
+  id: string;
   match: string;
-  venue?: string;
-  startTime?: Timestamp | string | Date | null;
-  status?: "open" | "pending" | "final" | "void";
+  venue: string;
+  startTime: string; // ISO string from /api/picks
+  status: "open" | "final" | "pending" | "void";
   questions: Question[];
 };
 
-type RoundDoc = { games: Game[] };
-
-type Row = {
-  id: string;
-  roundId: string;
-  match: string;
-  venue: string;
-  quarter: number;
-  question: string;
-  yesPercent: number;
-  noPercent: number;
-  startTime: Timestamp | string | Date | null;
-  status: "open" | "pending" | "final" | "void";
-  commentsCount?: number;
+type PicksResponse = {
+  games: Game[];
 };
 
-// ---------- Helper Functions ----------
-const toDate = (v: Row["startTime"]): Date | null => {
-  if (!v) return null;
+type Filter = "open" | "final" | "pending" | "void" | "all";
 
-  if (typeof (v as any)?.toDate === "function") {
-    try {
-      return (v as Timestamp).toDate();
-    } catch {}
-  }
+function formatStartTwoLines(start: string | Date) {
+  const date = typeof start === "string" ? new Date(start) : start;
 
-  if (v instanceof Date && !isNaN(v.getTime())) return v;
+  const dateLine = date.toLocaleString("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Australia/Melbourne",
+  });
 
-  if (typeof v === "string") {
-    const d = new Date(v);
-    if (!isNaN(d.getTime())) return d;
-  }
+  const timeLine = date.toLocaleString("en-AU", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Australia/Melbourne",
+    timeZoneName: "short",
+  });
 
-  return null;
-};
+  return { dateLine, timeLine };
+}
 
-const formatStart = (v: Row["startTime"]) => {
-  const d = toDate(v);
-  if (!d) return "TBD";
-  return `${dayjs(d).format("ddd, D MMM")}, ${dayjs(d).format("h:mm A")} AEDT`;
-};
-
-// ---------- Component ----------
 export default function PicksClient() {
-  const [user, setUser] = useState<User | null>(null);
-  const [rows, setRows] = useState<Row[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [filter, setFilter] = useState<Filter>("open");
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<"open" | "final" | "pending" | "void" | "all">(
-    "open"
-  );
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, setUser);
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    const load = async () => {
+    async function load() {
       try {
-        const snap = await getDocs(collection(db, "rounds"));
-        const acc: Row[] = [];
+        setLoading(true);
+        setError(null);
+        const res = await fetch("/api/picks");
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data: PicksResponse = await res.json();
 
-        snap.forEach((doc) => {
-          const roundId = doc.id;
-          const data = doc.data() as RoundDoc | DocumentData;
-          const games: Game[] = Array.isArray(data?.games) ? data.games : [];
+        // Default game status to "open" if missing
+        const withStatus: Game[] = (data.games ?? []).map((g) => ({
+          ...g,
+          status: g.status ?? "open",
+          questions: (g.questions ?? []).map((q) => ({
+            ...q,
+            status: q.status ?? "open",
+          })),
+        }));
 
-          games.forEach((g, gi) => {
-            const qs = Array.isArray(g.questions) ? g.questions : [];
-
-            qs.forEach((q, qi) => {
-              acc.push({
-                id: `${roundId}-${gi}-${qi}`,
-                roundId,
-                match: g.match ?? "TBD",
-                venue: g.venue ?? "TBD",
-                quarter: Number(q.quarter ?? 1),
-                question: q.question ?? "",
-                yesPercent: Number(q.yesPercent ?? 0),
-                noPercent: Number(q.noPercent ?? 0),
-                startTime: g.startTime ?? null,
-                status: (g.status as Row["status"]) ?? "open",
-                commentsCount: q.commentsCount ?? 0,
-              });
-            });
-          });
-        });
-
-        acc.sort((a, b) => {
-          const ta = toDate(a.startTime)?.getTime() ?? 0;
-          const tb = toDate(b.startTime)?.getTime() ?? 0;
-          if (ta !== tb) return ta - tb;
-          if (a.match !== b.match) return a.match.localeCompare(b.match);
-          return a.quarter - b.quarter;
-        });
-
-        setRows(acc);
-      } catch (e) {
-        console.error("picks load error", e);
+        setGames(withStatus);
+      } catch (err) {
+        console.error("Error loading picks:", err);
+        setError("Failed to load picks");
       } finally {
         setLoading(false);
       }
-    };
+    }
 
     load();
   }, []);
 
-  const filtered = useMemo(() => {
-    if (tab === "all") return rows;
-    return rows.filter((r) => r.status === tab);
-  }, [rows, tab]);
+  const visibleGames =
+    filter === "all"
+      ? games
+      : games.filter((g) => g.questions.some((q) => q.status === filter));
 
-  const handlePick = (row: Row, choice: "yes" | "no") => {
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    console.log("pick logged:", {
-      rowId: row.id,
-      choice,
-      uid: user.uid,
-    });
-
-    // TODO: Write to Firestore + trigger percentage update
-  };
-
-  // ---------- Render ----------
   return (
-    <div className="mx-auto w-full max-w-7xl px-3 sm:px-4">
-      {/* Tabs */}
-      <div className="flex items-center gap-2 mb-4">
-        {[
-          { k: "open", label: "Open" },
-          { k: "final", label: "Final" },
-          { k: "pending", label: "Pending" },
-          { k: "void", label: "Void" },
-          { k: "all", label: "All" },
-        ].map((t) => (
+    <div className="w-full max-w-6xl mx-auto px-4 py-6">
+      <h1 className="text-3xl font-bold text-white mb-4">Picks</h1>
+
+      {/* FILTER TABS */}
+      <div className="flex gap-2 mb-6">
+        {(["open", "final", "pending", "void", "all"] as Filter[]).map((f) => (
           <button
-            key={t.k}
-            onClick={() => setTab(t.k as any)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              tab === t.k
-                ? "bg-[#ff6a1a] text-black"
-                : "bg-[#1a2230] text-gray-200 hover:bg-[#223044]"
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
+              filter === f
+                ? "bg-orange-500 text-black"
+                : "bg-slate-800 text-slate-200"
             }`}
           >
-            {t.label}
+            {f === "all"
+              ? "All"
+              : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
       </div>
 
-      {/* Header */}
-      <div className="hidden md:grid grid-cols-[200px_1fr_54px_1.8fr_220px] text-xs uppercase tracking-wide text-gray-300/80 px-3 py-2 bg-[#0f141c] rounded-t-lg border border-[#253244]">
-        <div>Start</div>
-        <div className="pl-2">Match • Venue</div>
+      {/* HEADER ROW */}
+      <div className="hidden md:grid grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] text-xs font-semibold text-slate-300 border-b border-slate-700 pb-2 mb-2">
+        <div>START</div>
+        <div className="text-center">STATUS</div>
+        <div>MATCH • VENUE</div>
         <div className="text-center">Q#</div>
-        <div className="pl-2">Question</div>
-        <div className="text-right pr-1">Pick · Yes % · No %</div>
+        <div>QUESTION</div>
+        <div className="text-right">PICK · YES % · NO %</div>
       </div>
 
-      {/* Rows */}
-      <div className="rounded-b-lg overflow-hidden border-x border-b border-[#253244]">
-        {loading && (
-          <div className="px-3 py-4 text-sm text-gray-300">Loading…</div>
-        )}
+      {loading && (
+        <div className="text-slate-300 text-sm">Loading picks…</div>
+      )}
 
-        {!loading && filtered.length === 0 && (
-          <div className="px-3 py-4 text-sm text-gray-300">
-            No selections for this filter yet.
-          </div>
-        )}
+      {error && !loading && (
+        <div className="text-red-400 text-sm mb-4">{error}</div>
+      )}
 
-        {filtered.map((r, idx) => (
-          <div
-            key={r.id}
-            className={`grid md:grid-cols-[200px_1fr_54px_1.8fr_220px] items-center px-3 ${
-              idx % 2 ? "bg-[#0d1219]" : "bg-[#0b1016]"
-            }`}
-            style={{
-              paddingTop: "8px",
-              paddingBottom: "8px",
-              rowGap: "4px",
-            }}
-          >
-            {/* ----------- START (2-LINE DATE/TIME FIX) ----------- */}
-            <div className="text-[13px] leading-tight text-gray-200">
-              <div>{dayjs(toDate(r.startTime)).format("ddd, D MMM")}</div>
-              <div className="text-gray-400">
-                {dayjs(toDate(r.startTime)).format("h:mm A")} AEDT
+      {!loading && !error && visibleGames.length === 0 && (
+        <div className="text-slate-400 text-sm mt-8">
+          No picks in this category.
+        </div>
+      )}
+
+      {/* QUESTION ROWS */}
+      <div className="flex flex-col gap-1">
+        {visibleGames.map((game) => {
+          const { dateLine, timeLine } = formatStartTwoLines(
+            game.startTime
+          );
+
+          return game.questions.map((q) => (
+            <div
+              key={q.id}
+              className="grid grid-cols-1 md:grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] gap-y-1 md:gap-y-0 items-center text-xs md:text-sm text-slate-100 py-3 px-3 rounded-lg hover:bg-slate-800/70 border-b border-slate-800"
+            >
+              {/* START (2 lines) */}
+              <div className="md:pr-2 text-slate-300">
+                <div>{dateLine}</div>
+                <div>{timeLine}</div>
               </div>
-            </div>
 
-            {/* Match & Venue */}
-            <div className="pl-2 leading-tight">
-              <div className="flex items-center gap-2">
+              {/* OPEN / FINAL / etc BADGE – now in the middle column */}
+              <div className="md:flex md:justify-center md:items-center">
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-[2px] text-[10px] font-semibold ${
-                    r.status === "open"
-                      ? "bg-emerald-900/40 text-emerald-300"
-                      : r.status === "final"
-                      ? "bg-sky-900/40 text-sky-300"
-                      : r.status === "pending"
-                      ? "bg-amber-900/40 text-amber-300"
-                      : "bg-zinc-800 text-zinc-300"
+                  className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${
+                    game.status === "open"
+                      ? "bg-green-700 text-white"
+                      : game.status === "final"
+                      ? "bg-blue-700 text-white"
+                      : game.status === "pending"
+                      ? "bg-yellow-500 text-black"
+                      : "bg-slate-600 text-white"
                   }`}
                 >
-                  {r.status.toUpperCase()}
-                </span>
-                <span className="font-semibold text-[15px] text-[#ff9c4d]">
-                  {r.match}
+                  {game.status.toUpperCase()}
                 </span>
               </div>
-              <div className="text-[12px] text-gray-400">{r.venue}</div>
-            </div>
 
-            {/* Quarter */}
-            <div className="text-center">
-              <span className="inline-block rounded-md bg-[#1a2230] px-2 py-[2px] text-[11px] text-gray-200">
-                Q{r.quarter}
-              </span>
-            </div>
-
-            {/* Question */}
-            <div className="pl-2">
-              <div className="font-semibold text-[15px] leading-snug text-gray-100">
-                {r.question}
+              {/* MATCH + VENUE */}
+              <div className="md:pr-2">
+                <div className="text-orange-400 font-semibold">
+                  {game.match}
+                </div>
+                <div className="text-slate-400 text-[11px] md:text-xs">
+                  {game.venue}
+                </div>
               </div>
 
-              <a
-                href="#"
-                className="mt-1 inline-flex items-center rounded-full border border-[#2a384b] px-2 py-[2px] text-[11px] text-gray-300 hover:border-[#415471]"
-              >
-                Comments ({r.commentsCount ?? 0})
-              </a>
-            </div>
-
-            {/* Pick + % */}
-            <div className="flex items-center justify-end gap-2 pr-1">
-              <button
-                onClick={() => handlePick(r, "yes")}
-                className="rounded-md bg-[#ff6a1a] text-black text-[13px] font-semibold px-3 py-1"
-              >
-                Yes
-              </button>
-
-              <button
-                onClick={() => handlePick(r, "no")}
-                className="rounded-md bg-[#2a384b] text-gray-100 text-[13px] font-semibold px-3 py-1"
-              >
-                No
-              </button>
-
-              <div className="ml-2 text-[12px] tabular-nums text-gray-300">
-                <span className="mr-1">{Math.round(r.yesPercent)}%</span>
-                <span className="mx-1 text-gray-500">·</span>
-                <span>{Math.round(r.noPercent)}%</span>
+              {/* Q# */}
+              <div className="md:text-center text-orange-400 font-semibold">
+                Q{q.quarter}
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* Mobile Cards */}
-      <div className="md:hidden space-y-3 mt-3">
-        {filtered.map((r) => (
-          <div key={r.id} className="rounded-lg border border-[#253244] bg-[#0b1016] p-3">
-            <div className="flex items-center justify-between text-xs text-gray-300 mb-1">
-              <div>{formatStart(r.startTime)}</div>
-
-              <span
-                className={`ml-2 rounded-full px-2 py-[2px] text-[10px] font-semibold ${
-                  r.status === "open"
-                    ? "bg-emerald-900/40 text-emerald-300"
-                    : r.status === "final"
-                    ? "bg-sky-900/40 text-sky-300"
-                    : r.status === "pending"
-                    ? "bg-amber-900/40 text-amber-300"
-                    : "bg-zinc-800 text-zinc-300"
-                }`}
-              >
-                {r.status.toUpperCase()}
-              </span>
-            </div>
-
-            <div className="text-[#ff9c4d] font-semibold">{r.match}</div>
-            <div className="text-xs text-gray-400">{r.venue}</div>
-
-            <div className="mt-2 text-[13.5px] font-semibold text-gray-100">
-              Q{r.quarter} · {r.question}
-            </div>
-
-            <div className="mt-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handlePick(r, "yes")}
-                  className="rounded-md bg-[#ff6a1a] text-black text-[13px] font-semibold px-3 py-1"
-                >
-                  Yes
-                </button>
-
-                <button
-                  onClick={() => handlePick(r, "no")}
-                  className="rounded-md bg-[#2a384b] text-gray-100 text-[13px] font-semibold px-3 py-1"
-                >
-                  No
+              {/* QUESTION + COMMENTS */}
+              <div className="md:pr-2">
+                <div className="mb-1">{q.question}</div>
+                <button className="text-[11px] md:text-xs text-slate-300 underline decoration-slate-600 hover:decoration-slate-300">
+                  Comments (0)
                 </button>
               </div>
 
-              <a
-                href="#"
-                className="rounded-full border border-[#2a384b] px-2 py-[2px] text-[11px] text-gray-300"
-              >
-                Comments ({r.commentsCount ?? 0})
-              </a>
+              {/* YES / NO BUTTONS + PERCENTAGES */}
+              <div className="flex justify-end gap-2 md:gap-3">
+                <button
+                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[54px] text-center ${
+                    q.userPick === "yes"
+                      ? "bg-orange-500 border-orange-400 text-black"
+                      : "bg-slate-900 border-slate-600 text-slate-100"
+                  }`}
+                >
+                  Yes{" "}
+                  {typeof q.yesPercent === "number"
+                    ? `${q.yesPercent}%`
+                    : ""}
+                </button>
+                <button
+                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[54px] text-center ${
+                    q.userPick === "no"
+                      ? "bg-slate-500 border-slate-400 text-black"
+                      : "bg-slate-900 border-slate-600 text-slate-100"
+                  }`}
+                >
+                  No{" "}
+                  {typeof q.noPercent === "number"
+                    ? `${q.noPercent}%`
+                    : ""}
+                </button>
+              </div>
             </div>
-
-            <div className="mt-1 text-xs tabular-nums text-gray-300 text-right">
-              Yes {Math.round(r.yesPercent)}% · No {Math.round(r.noPercent)}%
-            </div>
-          </div>
-        ))}
+          ));
+        })}
       </div>
     </div>
   );
