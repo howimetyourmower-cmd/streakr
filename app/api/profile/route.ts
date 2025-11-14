@@ -110,18 +110,24 @@ export async function GET() {
       roundsPlayed: roundsPlayedSet.size,
     };
 
-    // Last 5 settled picks
-    const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => ({
-      id: p.id,
-      round: p.round ?? "",
-      match: p.match,
-      question: p.question,
-      userPick: p.userPick,
-      result: p.result,
-      settledAt: p.settledAt
-        ? (p.settledAt.toDate ? p.settledAt.toDate() : p.settledAt).toISOString()
-        : undefined,
-    }));
+  // Last 5 settled picks (normalising userPick safely)
+const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => ({
+  id: p.id,
+  round: p.round ?? "",
+  match: p.match ?? "",
+  question: p.question ?? "",
+  userPick:
+    p.userPick === "yes" || p.userPick === "no"
+      ? p.userPick
+      : p.userPick?.toLowerCase() === "yes"
+      ? "yes"
+      : "no",
+  result: p.result ?? "pending",
+  settledAt: p.settledAt
+    ? (p.settledAt.toDate ? p.settledAt.toDate() : p.settledAt).toISOString()
+    : undefined,
+}));
+
 
     return NextResponse.json({ stats, recentPicks });
   } catch (error) {
