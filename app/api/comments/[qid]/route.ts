@@ -1,8 +1,8 @@
 export const runtime = "nodejs";
-import { adminDb } from "@/lib/admin";
+import { db } from "@/lib/admin";
 
 export async function GET(_: Request, { params }: { params: { qid: string } }) {
-  const ref = adminDb.collection("comments").doc(params.qid).collection("items");
+  const ref = db.collection("comments").doc(params.qid).collection("items");
   const qs = await ref.orderBy("createdAt", "desc").limit(20).get();
   const items = qs.docs.map((d) => ({ id: d.id, ...d.data() }));
   return Response.json({ items });
