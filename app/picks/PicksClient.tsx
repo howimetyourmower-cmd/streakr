@@ -26,6 +26,18 @@ type ApiResponse = {
   games: Game[];
 };
 
+type FlatRow = {
+  id: string;
+  startTime: string;
+  status: QuestionStatus;
+  match: string;
+  venue: string;
+  quarter: number;
+  question: string;
+  yesPercent?: number;
+  noPercent?: number;
+};
+
 const FILTER_TABS: { key: QuestionStatus | "all"; label: string }[] = [
   { key: "open", label: "Open" },
   { key: "final", label: "Final" },
@@ -49,8 +61,10 @@ function formatStart(startTime: string) {
 }
 
 export default function PicksClient() {
-  const [games, setGames] = useState<Game[]>([]);
-  const [activeFilter, setActiveFilter] = useState<"open" | "final" | "pending" | "void" | "all">("open");
+  const [rows, setRows] = useState<FlatRow[]>([]);
+  const [activeFilter, setActiveFilter] = useState<
+    QuestionStatus | "all"
+  >("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -66,11 +80,30 @@ export default function PicksClient() {
         }
 
         const data: ApiResponse = await res.json();
-        setGames(data.games ?? []);
+
+        const flat: FlatRow[] = [];
+
+        (data.games ?? []).forEach((game) => {
+          (game.questions ?? []).forEach((q) => {
+            flat.push({
+              id: q.id,
+              startTime: game.startTime,
+              status: q.status,
+              match: game.match,
+              venue: game.venue,
+              quarter: q.quarter,
+              question: q.question,
+              yesPercent: q.yesPercent,
+              noPercent: q.noPercent,
+            });
+          });
+        });
+
+        setRows(flat);
       } catch (err) {
         console.error("Error loading picks", err);
         setError("Failed to load picks");
-        setGames([]);
+        setRows([]);
       } finally {
         setLoading(false);
       }
@@ -79,16 +112,10 @@ export default function PicksClient() {
     loadPicks();
   }, []);
 
-  const filteredGames = games
-    .map((game) => {
-      const filteredQuestions =
-        activeFilter === "all"
-          ? game.questions
-          : game.questions.filter((q) => q.status === activeFilter);
-
-      return { ...game, questions: filteredQuestions };
-    })
-    .filter((game) => game.questions.length > 0);
+  const filteredRows =
+    activeFilter === "all"
+      ? rows
+      : rows.filter((r) => r.status === activeFilter);
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10 text-white">
@@ -116,7 +143,7 @@ export default function PicksClient() {
       </div>
 
       {/* Header row */}
-      <div className="hidden md:grid grid-cols-[1.5fr,1.1fr,2fr,0.5fr,2.4fr,1.8fr] text-xs uppercase text-gray-400 mb-2 px-4">
+      <div className="hidden md:grid grid-cols-[1.5fr,1.1fr,2fr,0.5fr,3fr,2fr] text-xs uppercase text-gray-400 mb-2 px-4">
         <span>Start</span>
         <span>Status</span>
         <span>Match • Venue</span>
@@ -126,7 +153,7 @@ export default function PicksClient() {
       </div>
 
       {/* Content */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         {loading && (
           <div className="flex items-center justify-center py-16 text-gray-300">
             Loading picks...
@@ -139,7 +166,7 @@ export default function PicksClient() {
           </div>
         )}
 
-        {!loading && !error && filteredGames.length === 0 && (
+        {!loading && !error && filteredRows.length === 0 && (
           <div className="flex items-center justify-center py-16 text-gray-300">
             No picks in this category.
           </div>
@@ -147,125 +174,75 @@ export default function PicksClient() {
 
         {!loading &&
           !error &&
-          filteredGames.map((game) => {
-            const { date, time } = formatStart(game.startTime);
+          filteredRows.map((row) => {
+            const { date, time } = formatStart(row.startTime);
 
             return (
               <div
-                key={game.id}
-                className="bg-[#111827] border border-[#1f2937] rounded-2xl overflow-hidden"
+                key={row.id}
+                className="grid md:grid-cols-[1.5fr,1.1fr,2fr,0.5fr,3fr,2fr] grid-cols-1 gap-3 px-4 py-3 items-center text-sm bg-[#111827] border border-[#1f2937] rounded-2xl"
               >
-                {/* Game header (desktop) */}
-                <div className="hidden md:grid grid-cols-[1.5fr,1.1fr,2fr] items-center px-4 py-3 border-b border-[#1f2937] text-sm">
-                  <div className="flex flex-col">
-                    <span className="font-medium">{date}</span>
-                    <span className="text-xs text-gray-400">{time}</span>
-                  </div>
-                  <div>
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
-                      OPEN
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-semibold text-orange-400">
-                      {game.match}
-                    </span>
-                    <span className="text-xs text-gray-400">{game.venue}</span>
-                  </div>
+                {/* Start */}
+                <div className="flex flex-col text-xs text-gray-300">
+                  <span className="font-medium">{date}</span>
+                  <span className="text-gray-400">{time}</span>
                 </div>
 
-                {/* Game header (mobile) */}
-                <div className="md:hidden px-4 py-3 border-b border-[#1f2937]">
-                  <div className="flex justify-between items-center mb-1">
-                    <div>
-                      <p className="text-sm font-medium">{date}</p>
-                      <p className="text-xs text-gray-400">{time}</p>
-                    </div>
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
-                      OPEN
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-orange-400">
-                      {game.match}
-                    </p>
-                    <p className="text-xs text-gray-400">{game.venue}</p>
-                  </div>
+                {/* Status */}
+                <div>
+                  <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
+                    {row.status.toUpperCase()}
+                  </span>
                 </div>
 
-                {/* Questions */}
-                <div className="divide-y divide-[#1f2937]">
-                  {game.questions.map((q, index) => (
-                    <div
-                      key={q.id}
-                      className="grid md:grid-cols-[1.5fr,1.1fr,2fr,0.5fr,2.4fr,1.8fr] grid-cols-1 gap-3 px-4 py-3 items-center text-sm"
+                {/* Match + venue */}
+                <div className="flex flex-col">
+                  <span className="font-semibold text-orange-400">
+                    {row.match}
+                  </span>
+                  <span className="text-xs text-gray-400">{row.venue}</span>
+                </div>
+
+                {/* Q# */}
+                <div className="md:text-center text-xs font-semibold text-gray-300">
+                  Q{row.quarter}
+                </div>
+
+                {/* Question */}
+                <div className="text-sm">
+                  <p className="font-medium">{row.question}</p>
+                </div>
+
+                {/* Pick buttons + percents */}
+                <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2">
+                  <div className="inline-flex rounded-full border border-[#374151] overflow-hidden">
+                    <button
+                      type="button"
+                      className="px-4 py-1 text-sm font-semibold bg-orange-500 text-white"
                     >
-                      {/* Start (mobile row repeats simple info) */}
-                      <div className="md:hidden flex justify-between text-xs text-gray-400">
-                        <span>
-                          Q{q.quarter} • {date}
-                        </span>
-                        <span>{time}</span>
-                      </div>
-
-                      {/* Start (desktop placeholder – already shown in header) */}
-                      <div className="hidden md:block text-xs text-gray-400">
-                        {/* empty; header handles date/time */}
-                      </div>
-
-                      {/* Status */}
-                      <div className="hidden md:flex">
-                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
-                          {q.status.toUpperCase()}
-                        </span>
-                      </div>
-
-                      {/* Match+venue column already shown in header, so blank in rows on desktop */}
-                      <div className="hidden md:block" />
-
-                      {/* Q# */}
-                      <div className="md:text-center text-xs font-semibold text-gray-300">
-                        Q{q.quarter}
-                      </div>
-
-                      {/* Question text */}
-                      <div className="text-sm">
-                        <p className="font-medium">{q.question}</p>
-                      </div>
-
-                      {/* Pick buttons + percents */}
-                      <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2">
-                        <div className="inline-flex rounded-full border border-[#374151] overflow-hidden">
-                          <button
-                            type="button"
-                            className="px-4 py-1 text-sm font-semibold bg-orange-500 text-white"
-                          >
-                            Yes
-                          </button>
-                          <button
-                            type="button"
-                            className="px-4 py-1 text-sm font-semibold bg-purple-600 text-white"
-                          >
-                            No
-                          </button>
-                        </div>
-                        <div className="flex justify-end gap-3 text-xs text-gray-400">
-                          <span>
-                            Yes:{" "}
-                            {q.yesPercent !== undefined
-                              ? `${q.yesPercent}%`
-                              : "0%"}
-                          </span>
-                          <span>
-                            No:{" "}
-                            {q.noPercent !== undefined
-                              ? `${q.noPercent}%`
-                              : "0%"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      className="px-4 py-1 text-sm font-semibold bg-purple-600 text-white"
+                    >
+                      No
+                    </button>
+                  </div>
+                  <div className="flex justify-end gap-3 text-xs text-gray-400">
+                    <span>
+                      Yes:{" "}
+                      {row.yesPercent !== undefined
+                        ? `${row.yesPercent}%`
+                        : "0%"}
+                    </span>
+                    <span>
+                      No:{" "}
+                      {row.noPercent !== undefined
+                        ? `${row.noPercent}%`
+                        : "0%"}
+                    </span>
+                  </div>
                 </div>
               </div>
             );
