@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getClientDb } from "@/lib/firebaseClient";
+import {
+  addDoc,
+  collection,
+  serverTimestamp,
+} from "firebase/firestore";
 
 type Question = {
   id: string;
@@ -18,6 +24,8 @@ type Game = {
   venue: string;
   startTime: string; // ISO string from /api/picks
   status: "open" | "final" | "pending" | "void";
+  round?: number;
+  season?: number;
   questions: Question[];
 };
 
@@ -53,6 +61,10 @@ export default function PicksClient() {
   const [filter, setFilter] = useState<Filter>("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [savingPickId, setSavingPickId] = useState<string | null>(null);
+
+  // TODO: replace with real Firebase Auth user when ready
+  const demoUserId = "demo-user";
 
   useEffect(() => {
     async function load() {
@@ -90,6 +102,57 @@ export default function PicksClient() {
     filter === "all"
       ? games
       : games.filter((g) => g.questions.some((q) => q.status === filter));
+
+  async function handlePick(
+    game: Game,
+    question: Question,
+    answer: "yes" | "no"
+  ) {
+    try {
+      if (!demoUserId) {
+        // once auth exists, show a proper message / redirect to login
+        alert("Please log in to make a pick.");
+        return;
+      }
+
+      const compoundId = `${game.id}-${question.id}`;
+      setSavingPickId(compoundId);
+
+      const db = await getClientDb();
+
+      // Write pick to Firestore
+      await addDoc(collection(db, "picks"), {
+        userId: demoUserId,
+        gameId: game.id,
+        questionId: question.id,
+        answer,
+        match: game.match,
+        venue: game.venue,
+        round: game.round ?? 1,
+        season: game.season ?? 2026,
+        createdAt: serverTimestamp(),
+      });
+
+      // Update local state so UI highlights the selection
+      setGames((prev) =>
+        prev.map((g) =>
+          g.id === game.id
+            ? {
+                ...g,
+                questions: g.questions.map((q) =>
+                  q.id === question.id ? { ...q, userPick: answer } : q
+                ),
+              }
+            : g
+        )
+      );
+    } catch (err) {
+      console.error("Error saving pick:", err);
+      alert("Could not save your pick. Please try again.");
+    } finally {
+      setSavingPickId(null);
+    }
+  }
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-6">
@@ -145,91 +208,116 @@ export default function PicksClient() {
             game.startTime
           );
 
-          return game.questions.map((q) => (
-            <div
-              key={q.id}
-              className="grid grid-cols-1 md:grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] gap-y-1 md:gap-y-0 items-center text-xs md:text-sm text-slate-100 py-3 px-3 rounded-lg hover:bg-slate-800/70 border-b border-slate-800"
-            >
-              {/* START (2 lines) */}
-              <div className="md:pr-2 text-slate-300">
-                <div>{dateLine}</div>
-                <div>{timeLine}</div>
-              </div>
+          return game.questions.map((q) => {
+            const compoundId = `${game.id}-${q.id}`;
+            const isSavingThis = savingPickId === compoundId;
 
-              {/* STATUS BADGE */}
-              <div className="md:flex md:justify-center md:items-center">
-                <span
-                  className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${
-                    game.status === "open"
-                      ? "bg-green-700 text-white"
-                      : game.status === "final"
-                      ? "bg-blue-700 text-white"
-                      : game.status === "pending"
-                      ? "bg-yellow-500 text-black"
-                      : "bg-slate-600 text-white"
-                  }`}
-                >
-                  {game.status.toUpperCase()}
-                </span>
-              </div>
-
-              {/* MATCH + VENUE */}
-              <div className="md:pr-2">
-                <div className="text-orange-400 font-semibold">
-                  {game.match}
+            return (
+              <div
+                key={q.id}
+                className="grid grid-cols-1 md:grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] gap-y-1 md:gap-y-0 items-center text-xs md:text-sm text-slate-100 py-3 px-3 rounded-lg hover:bg-slate-800/70 border-b border-slate-800"
+              >
+                {/* START (2 lines) */}
+                <div className="md:pr-2 text-slate-300">
+                  <div>{dateLine}</div>
+                  <div>{timeLine}</div>
                 </div>
-                <div className="text-slate-400 text-[11px] md:text-xs">
-                  {game.venue}
+
+                {/* STATUS BADGE */}
+                <div className="md:flex md:justify-center md:items-center">
+                  <span
+                    className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${
+                      game.status === "open"
+                        ? "bg-green-700 text-white"
+                        : game.status === "final"
+                        ? "bg-blue-700 text-white"
+                        : game.status === "pending"
+                        ? "bg-yellow-500 text-black"
+                        : "bg-slate-600 text-white"
+                    }`}
+                  >
+                    {game.status.toUpperCase()}
+                  </span>
+                </div>
+
+                {/* MATCH + VENUE */}
+                <div className="md:pr-2">
+                  <div className="text-orange-400 font-semibold">
+                    {game.match}
+                  </div>
+                  <div className="text-slate-400 text-[11px] md:text-xs">
+                    {game.venue}
+                  </div>
+                </div>
+
+                {/* Q# */}
+                <div className="md:text-center text-orange-400 font-semibold">
+                  Q{q.quarter}
+                </div>
+
+                {/* QUESTION + COMMENTS */}
+                <div className="md:pr-2">
+                  <div className="mb-1">{q.question}</div>
+                  <button className="text-[11px] md:text-xs text-slate-300 underline decoration-slate-600 hover:decoration-slate-300">
+                    Comments (0)
+                  </button>
+                </div>
+
+                {/* YES / NO BUTTONS + PERCENTAGES */}
+                <div className="flex justify-end gap-2 md:gap-3">
+                  {/* YES = BRIGHT ORANGE */}
+                  <button
+                    onClick={() =>
+                      !isSavingThis && handlePick(game, q, "yes")
+                    }
+                    disabled={isSavingThis || game.status !== "open"}
+                    className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
+                      ${
+                        q.userPick === "yes"
+                          ? "bg-[#FF7A00] border-[#FFB366] text-black ring-2 ring-white/70"
+                          : "bg-[#FF7A00] border-[#FFB366] text-black hover:bg-[#ff8a26]"
+                      }
+                      ${
+                        isSavingThis || game.status !== "open"
+                          ? "opacity-60 cursor-not-allowed"
+                          : ""
+                      }
+                    `}
+                  >
+                    Yes{" "}
+                    {typeof q.yesPercent === "number"
+                      ? `${q.yesPercent}%`
+                      : ""}
+                  </button>
+
+                  {/* NO = PURPLE */}
+                  <button
+                    onClick={() =>
+                      !isSavingThis && handlePick(game, q, "no")
+                    }
+                    disabled={isSavingThis || game.status !== "open"}
+                    className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
+                      ${
+                        q.userPick === "no"
+                          ? "bg-[#7C3AED] border-[#C4B5FD] text-white ring-2 ring-white/70"
+                          : "bg-[#7C3AED] border-[#C4B5FD] text-white hover:bg-[#8B5CF6]"
+                      }
+                      ${
+                        isSavingThis || game.status !== "open"
+                          ? "opacity-60 cursor-not-allowed"
+                          : ""
+                      }
+                    `}
+                  >
+                    No{" "}
+                    {typeof q.noPercent === "number"
+                      ? `${q.noPercent}%`
+                      : ""}
+                  </button>
                 </div>
               </div>
-
-              {/* Q# */}
-              <div className="md:text-center text-orange-400 font-semibold">
-                Q{q.quarter}
-              </div>
-
-              {/* QUESTION + COMMENTS */}
-              <div className="md:pr-2">
-                <div className="mb-1">{q.question}</div>
-                <button className="text-[11px] md:text-xs text-slate-300 underline decoration-slate-600 hover:decoration-slate-300">
-                  Comments (0)
-                </button>
-              </div>
-
-              {/* YES / NO BUTTONS + PERCENTAGES */}
-              <div className="flex justify-end gap-2 md:gap-3">
-                {/* YES = BRIGHT ORANGE */}
-                <button
-                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
-                    ${
-                      q.userPick === "yes"
-                        ? "bg-[#FF7A00] border-[#FFB366] text-black ring-2 ring-white/70"
-                        : "bg-[#FF7A00] border-[#FFB366] text-black hover:bg-[#ff8a26]"
-                    }`}
-                >
-                  Yes{" "}
-                  {typeof q.yesPercent === "number"
-                    ? `${q.yesPercent}%`
-                    : ""}
-                </button>
-
-                {/* NO = PURPLE */}
-                <button
-                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
-                    ${
-                      q.userPick === "no"
-                        ? "bg-[#7C3AED] border-[#C4B5FD] text-white ring-2 ring-white/70"
-                        : "bg-[#7C3AED] border-[#C4B5FD] text-white hover:bg-[#8B5CF6]"
-                    }`}
-                >
-                  No{" "}
-                  {typeof q.noPercent === "number"
-                    ? `${q.noPercent}%`
-                    : ""}
-                </button>
-              </div>
-            </div>
-          ));
+            );
+          });
         })}
       </div>
     </div>
