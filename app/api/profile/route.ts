@@ -26,6 +26,16 @@ type RecentPick = {
   settledAt?: string; // ISO string
 };
 
+type InternalPick = {
+  id: string;
+  round: string | number;
+  match: string;
+  question: string;
+  userPick: string;
+  result: "correct" | "wrong" | "pending" | "void" | string;
+  settledAt?: Timestamp | Date;
+};
+
 // GET /api/profile
 export async function GET() {
   try {
@@ -51,20 +61,25 @@ export async function GET() {
       .orderBy("settledAt", "desc")
       .get();
 
-    const picks = picksSnap.docs.map((doc) => {
+    const picks: InternalPick[] = picksSnap.docs.map((doc) => {
       const data = doc.data() as any;
       return {
         id: doc.id,
-        round: data.round,
+        round: data.round ?? "",
         match: data.match ?? "",
         question: data.question ?? "",
-        userPick: (data.answer ?? "Yes").toLowerCase() === "yes" ? "yes" : "no",
+        // raw answer as string, we'll normalise later
+        userPick: (data.answer ?? "").toString(),
         result: (data.result ?? "pending") as
           | "correct"
           | "wrong"
           | "pending"
-          | "void",
-        settledAt: data.settledAt as Timestamp | undefined,
+          | "void"
+          | string,
+        settledAt: (data.settledAt ?? undefined) as
+          | Timestamp
+          | Date
+          | undefined,
       };
     });
 
@@ -110,24 +125,40 @@ export async function GET() {
       roundsPlayed: roundsPlayedSet.size,
     };
 
-  // Last 5 settled picks (normalising userPick safely)
-const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => ({
-  id: p.id,
-  round: p.round ?? "",
-  match: p.match ?? "",
-  question: p.question ?? "",
-  userPick:
-    p.userPick === "yes" || p.userPick === "no"
-      ? p.userPick
-      : p.userPick?.toLowerCase() === "yes"
-      ? "yes"
-      : "no",
-  result: p.result ?? "pending",
-  settledAt: p.settledAt
-    ? (p.settledAt.toDate ? p.settledAt.toDate() : p.settledAt).toISOString()
-    : undefined,
-}));
+    // 4) Last 5 settled picks (normalising userPick & settledAt safely)
+    const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => {
+      // normalise settledAt (Timestamp | Date | undefined) -> ISO string
+      let settledAt: string | undefined;
+      if (p.settledAt) {
+        const value: any = p.settledAt;
+        const date: Date = value.toDate ? value.toDate() : value;
+        settledAt = date.toISOString();
+      }
 
+      const rawUserPick = p.userPick ?? "";
+      const lower = rawUserPick.toLowerCase();
+
+      const normalisedUserPick: "yes" | "no" =
+        lower === "yes" ? "yes" : "no";
+
+      const normalisedResult =
+        p.result === "correct" ||
+        p.result === "wrong" ||
+        p.result === "pending" ||
+        p.result === "void"
+          ? p.result
+          : "pending";
+
+      return {
+        id: p.id,
+        round: p.round ?? "",
+        match: p.match ?? "",
+        question: p.question ?? "",
+        userPick: normalisedUserPick,
+        result: normalisedResult,
+        settledAt,
+      };
+    });
 
     return NextResponse.json({ stats, recentPicks });
   } catch (error) {
