@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getClientDb } from "@/lib/firebaseClient";
+import { db } from "@/lib/firebaseClient";
 import {
   addDoc,
   collection,
@@ -118,7 +118,7 @@ export default function PicksClient() {
       const compoundId = `${game.id}-${question.id}`;
       setSavingPickId(compoundId);
 
-      const db = await getClientDb();
+      // db already imported;
 
       // Write pick to Firestore
       await addDoc(collection(db, "picks"), {
