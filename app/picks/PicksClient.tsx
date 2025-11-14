@@ -6,6 +6,9 @@ import {
   addDoc,
   collection,
   serverTimestamp,
+  query,
+  where,
+  getDocs,
 } from "firebase/firestore";
 
 type Question = {
@@ -71,19 +74,52 @@ export default function PicksClient() {
       try {
         setLoading(true);
         setError(null);
+
+        // 1) Load games/questions from API
         const res = await fetch("/api/picks");
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
         const data: PicksResponse = await res.json();
 
-        const withStatus: Game[] = (data.games ?? []).map((g) => ({
+        let withStatus: Game[] = (data.games ?? []).map((g) => ({
           ...g,
           status: g.status ?? "open",
           questions: (g.questions ?? []).map((q) => ({
             ...q,
             status: q.status ?? "open",
           })),
+        }));
+
+        // 2) Load this user's picks from Firestore
+        const picksSnap = await getDocs(
+          query(
+            collection(db, "picks"),
+            where("userId", "==", demoUserId)
+          )
+        );
+
+        const pickMap = new Map<string, "yes" | "no">();
+        picksSnap.forEach((doc) => {
+          const d = doc.data() as {
+            gameId?: string;
+            questionId?: string;
+            answer?: "yes" | "no";
+          };
+          if (d.gameId && d.questionId && d.answer) {
+            const key = `${d.gameId}-${d.questionId}`;
+            pickMap.set(key, d.answer);
+          }
+        });
+
+        // 3) Merge user picks into games/questions
+        withStatus = withStatus.map((g) => ({
+          ...g,
+          questions: g.questions.map((q) => {
+            const key = `${g.id}-${q.id}`;
+            const answer = pickMap.get(key);
+            return answer ? { ...q, userPick: answer } : q;
+          }),
         }));
 
         setGames(withStatus);
@@ -96,7 +132,7 @@ export default function PicksClient() {
     }
 
     load();
-  }, []);
+  }, [demoUserId]);
 
   const visibleGames =
     filter === "all"
@@ -110,15 +146,12 @@ export default function PicksClient() {
   ) {
     try {
       if (!demoUserId) {
-        // once auth exists, show a proper message / redirect to login
         alert("Please log in to make a pick.");
         return;
       }
 
       const compoundId = `${game.id}-${question.id}`;
       setSavingPickId(compoundId);
-
-      // db already imported;
 
       // Write pick to Firestore
       await addDoc(collection(db, "picks"), {
@@ -133,7 +166,7 @@ export default function PicksClient() {
         createdAt: serverTimestamp(),
       });
 
-      // Update local state so UI highlights the selection
+      // Update local state so UI highlights the selection immediately
       setGames((prev) =>
         prev.map((g) =>
           g.id === game.id
