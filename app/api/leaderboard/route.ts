@@ -104,7 +104,7 @@ export async function GET() {
     // 4) Load user profiles
     const userIDs = Array.from(picksByUser.keys());
     const userDocs = await Promise.all(
-      userIDs.map((uid) => adminDb.collection("users").doc(uid).get())
+      userIDs.map((uid) => db.collection("users").doc(uid).get())
     );
 
     const userInfo = new Map<
