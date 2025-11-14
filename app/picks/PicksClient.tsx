@@ -65,7 +65,6 @@ export default function PicksClient() {
         }
         const data: PicksResponse = await res.json();
 
-        // Default game status to "open" if missing
         const withStatus: Game[] = (data.games ?? []).map((g) => ({
           ...g,
           status: g.status ?? "open",
@@ -157,7 +156,7 @@ export default function PicksClient() {
                 <div>{timeLine}</div>
               </div>
 
-              {/* OPEN / FINAL / etc BADGE – now in the middle column */}
+              {/* STATUS BADGE */}
               <div className="md:flex md:justify-center md:items-center">
                 <span
                   className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${
@@ -199,24 +198,29 @@ export default function PicksClient() {
 
               {/* YES / NO BUTTONS + PERCENTAGES */}
               <div className="flex justify-end gap-2 md:gap-3">
+                {/* YES = BRIGHT ORANGE */}
                 <button
-                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[54px] text-center ${
-                    q.userPick === "yes"
-                      ? "bg-orange-500 border-orange-400 text-black"
-                      : "bg-slate-900 border-slate-600 text-slate-100"
-                  }`}
+                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
+                    ${
+                      q.userPick === "yes"
+                        ? "bg-[#FF7A00] border-[#FFB366] text-black ring-2 ring-white/70"
+                        : "bg-[#FF7A00] border-[#FFB366] text-black hover:bg-[#ff8a26]"
+                    }`}
                 >
                   Yes{" "}
                   {typeof q.yesPercent === "number"
                     ? `${q.yesPercent}%`
                     : ""}
                 </button>
+
+                {/* NO = PURPLE */}
                 <button
-                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[54px] text-center ${
-                    q.userPick === "no"
-                      ? "bg-slate-500 border-slate-400 text-black"
-                      : "bg-slate-900 border-slate-600 text-slate-100"
-                  }`}
+                  className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
+                    ${
+                      q.userPick === "no"
+                        ? "bg-[#7C3AED] border-[#C4B5FD] text-white ring-2 ring-white/70"
+                        : "bg-[#7C3AED] border-[#C4B5FD] text-white hover:bg-[#8B5CF6]"
+                    }`}
                 >
                   No{" "}
                   {typeof q.noPercent === "number"
