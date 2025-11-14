@@ -65,7 +65,6 @@ export default function PicksClient() {
         }
         const data: PicksResponse = await res.json();
 
-        // Default game + question status to "open" if missing
         const withStatus: Game[] = (data.games ?? []).map((g) => ({
           ...g,
           status: g.status ?? "open",
@@ -199,13 +198,13 @@ export default function PicksClient() {
 
               {/* YES / NO BUTTONS + PERCENTAGES */}
               <div className="flex justify-end gap-2 md:gap-3">
-                {/* YES = ORANGE */}
+                {/* YES = BRIGHT ORANGE */}
                 <button
                   className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
                     ${
                       q.userPick === "yes"
-                        ? "bg-orange-500 border-orange-300 text-black ring-2 ring-white/70"
-                        : "bg-orange-500/80 border-orange-400 text-black hover:bg-orange-500"
+                        ? "bg-[#FF7A00] border-[#FFB366] text-black ring-2 ring-white/70"
+                        : "bg-[#FF7A00] border-[#FFB366] text-black hover:bg-[#ff8a26]"
                     }`}
                 >
                   Yes{" "}
@@ -219,8 +218,8 @@ export default function PicksClient() {
                   className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
                     ${
                       q.userPick === "no"
-                        ? "bg-purple-600 border-purple-300 text-white ring-2 ring-white/70"
-                        : "bg-purple-600/80 border-purple-400 text-white hover:bg-purple-600"
+                        ? "bg-[#7C3AED] border-[#C4B5FD] text-white ring-2 ring-white/70"
+                        : "bg-[#7C3AED] border-[#C4B5FD] text-white hover:bg-[#8B5CF6]"
                     }`}
                 >
                   No{" "}
@@ -236,4 +235,3 @@ export default function PicksClient() {
     </div>
   );
 }
-
