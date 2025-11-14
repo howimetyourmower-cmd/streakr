@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb } from "../../../src/lib/admin"; // 🔧 adjust this path to your existing admin file
+import { db } from "@/src/lib/admin"; // 🔧 adjust this path to your existing admin file
 import { Timestamp } from "firebase-admin/firestore";
 
 type ProfileStats = {
@@ -56,7 +56,7 @@ function computeStreaks(picks: { result: string }[]) {
 export async function GET() {
   try {
     // 1) Load the user doc
-    const userSnap = await adminDb.collection("users").doc(DEMO_USER_ID).get();
+    const userSnap = await db.collection("users").doc(DEMO_USER_ID).get();
 
     if (!userSnap.exists) {
       return NextResponse.json(
