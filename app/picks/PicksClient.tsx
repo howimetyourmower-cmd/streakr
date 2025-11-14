@@ -1,21 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebaseClient";
-import {
-  addDoc,
-  collection,
-  serverTimestamp,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
+
+type QuestionStatus = "open" | "final" | "pending" | "void";
 
 type Question = {
   id: string;
   quarter: number;
   question: string;
-  status: "open" | "final" | "pending" | "void";
+  status: QuestionStatus;
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
@@ -26,332 +19,257 @@ type Game = {
   match: string;
   venue: string;
   startTime: string; // ISO string from /api/picks
-  status: "open" | "final" | "pending" | "void";
-  round?: number;
-  season?: number;
   questions: Question[];
 };
 
-type PicksResponse = {
+type ApiResponse = {
   games: Game[];
 };
 
-type Filter = "open" | "final" | "pending" | "void" | "all";
+const FILTER_TABS: { key: QuestionStatus | "all"; label: string }[] = [
+  { key: "open", label: "Open" },
+  { key: "final", label: "Final" },
+  { key: "pending", label: "Pending" },
+  { key: "void", label: "Void" },
+  { key: "all", label: "All" },
+];
 
-function formatStartTwoLines(start: string | Date) {
-  const date = typeof start === "string" ? new Date(start) : start;
-
-  const dateLine = date.toLocaleString("en-AU", {
+function formatStart(startTime: string) {
+  const d = new Date(startTime);
+  const date = d.toLocaleDateString("en-AU", {
     weekday: "short",
-    day: "numeric",
+    day: "2-digit",
     month: "short",
-    timeZone: "Australia/Melbourne",
   });
-
-  const timeLine = date.toLocaleString("en-AU", {
+  const time = d.toLocaleTimeString("en-AU", {
     hour: "numeric",
     minute: "2-digit",
-    hour12: true,
-    timeZone: "Australia/Melbourne",
-    timeZoneName: "short",
   });
-
-  return { dateLine, timeLine };
+  return { date, time: `${time} AEDT` };
 }
 
 export default function PicksClient() {
   const [games, setGames] = useState<Game[]>([]);
-  const [filter, setFilter] = useState<Filter>("open");
+  const [activeFilter, setActiveFilter] = useState<"open" | "final" | "pending" | "void" | "all">("open");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [savingPickId, setSavingPickId] = useState<string | null>(null);
-
-  // TODO: replace with real Firebase Auth user when ready
-  const demoUserId = "demo-user";
 
   useEffect(() => {
-    async function load() {
+    const loadPicks = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        // 1) Load games/questions from API
-        const res = await fetch("/api/picks");
+        const res = await fetch("/api/picks", { cache: "no-store" });
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          throw new Error(`Failed to fetch picks: ${res.status}`);
         }
-        const data: PicksResponse = await res.json();
 
-        let withStatus: Game[] = (data.games ?? []).map((g) => ({
-          ...g,
-          status: g.status ?? "open",
-          questions: (g.questions ?? []).map((q) => ({
-            ...q,
-            status: q.status ?? "open",
-          })),
-        }));
-
-        // 2) Load this user's picks from Firestore
-        const picksSnap = await getDocs(
-          query(
-            collection(db, "picks"),
-            where("userId", "==", demoUserId)
-          )
-        );
-
-        const pickMap = new Map<string, "yes" | "no">();
-        picksSnap.forEach((doc) => {
-          const d = doc.data() as {
-            gameId?: string;
-            questionId?: string;
-            answer?: "yes" | "no";
-          };
-          if (d.gameId && d.questionId && d.answer) {
-            const key = `${d.gameId}-${d.questionId}`;
-            pickMap.set(key, d.answer);
-          }
-        });
-
-        // 3) Merge user picks into games/questions
-        withStatus = withStatus.map((g) => ({
-          ...g,
-          questions: g.questions.map((q) => {
-            const key = `${g.id}-${q.id}`;
-            const answer = pickMap.get(key);
-            return answer ? { ...q, userPick: answer } : q;
-          }),
-        }));
-
-        setGames(withStatus);
+        const data: ApiResponse = await res.json();
+        setGames(data.games ?? []);
       } catch (err) {
-        console.error("Error loading picks:", err);
+        console.error("Error loading picks", err);
         setError("Failed to load picks");
+        setGames([]);
       } finally {
         setLoading(false);
       }
-    }
+    };
 
-    load();
-  }, [demoUserId]);
+    loadPicks();
+  }, []);
 
-  const visibleGames =
-    filter === "all"
-      ? games
-      : games.filter((g) => g.questions.some((q) => q.status === filter));
+  const filteredGames = games
+    .map((game) => {
+      const filteredQuestions =
+        activeFilter === "all"
+          ? game.questions
+          : game.questions.filter((q) => q.status === activeFilter);
 
-  async function handlePick(
-    game: Game,
-    question: Question,
-    answer: "yes" | "no"
-  ) {
-    try {
-      if (!demoUserId) {
-        alert("Please log in to make a pick.");
-        return;
-      }
-
-      const compoundId = `${game.id}-${question.id}`;
-      setSavingPickId(compoundId);
-
-      // Write pick to Firestore
-      await addDoc(collection(db, "picks"), {
-        userId: demoUserId,
-        gameId: game.id,
-        questionId: question.id,
-        answer,
-        match: game.match,
-        venue: game.venue,
-        round: game.round ?? 1,
-        season: game.season ?? 2026,
-        createdAt: serverTimestamp(),
-      });
-
-      // Update local state so UI highlights the selection immediately
-      setGames((prev) =>
-        prev.map((g) =>
-          g.id === game.id
-            ? {
-                ...g,
-                questions: g.questions.map((q) =>
-                  q.id === question.id ? { ...q, userPick: answer } : q
-                ),
-              }
-            : g
-        )
-      );
-    } catch (err) {
-      console.error("Error saving pick:", err);
-      alert("Could not save your pick. Please try again.");
-    } finally {
-      setSavingPickId(null);
-    }
-  }
+      return { ...game, questions: filteredQuestions };
+    })
+    .filter((game) => game.questions.length > 0);
 
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold text-white mb-4">Picks</h1>
+    <div className="max-w-6xl mx-auto px-4 py-10 text-white">
+      <h1 className="text-3xl font-bold mb-6">Picks</h1>
 
-      {/* FILTER TABS */}
-      <div className="flex gap-2 mb-6">
-        {(["open", "final", "pending", "void", "all"] as Filter[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold ${
-              filter === f
-                ? "bg-orange-500 text-black"
-                : "bg-slate-800 text-slate-200"
-            }`}
-          >
-            {f === "all"
-              ? "All"
-              : f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {/* HEADER ROW */}
-      <div className="hidden md:grid grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] text-xs font-semibold text-slate-300 border-b border-slate-700 pb-2 mb-2">
-        <div>START</div>
-        <div className="text-center">STATUS</div>
-        <div>MATCH • VENUE</div>
-        <div className="text-center">Q#</div>
-        <div>QUESTION</div>
-        <div className="text-right">PICK · YES % · NO %</div>
-      </div>
-
-      {loading && (
-        <div className="text-slate-300 text-sm">Loading picks…</div>
-      )}
-
-      {error && !loading && (
-        <div className="text-red-400 text-sm mb-4">{error}</div>
-      )}
-
-      {!loading && !error && visibleGames.length === 0 && (
-        <div className="text-slate-400 text-sm mt-8">
-          No picks in this category.
-        </div>
-      )}
-
-      {/* QUESTION ROWS */}
-      <div className="flex flex-col gap-1">
-        {visibleGames.map((game) => {
-          const { dateLine, timeLine } = formatStartTwoLines(
-            game.startTime
+      {/* Filter tabs */}
+      <div className="flex gap-3 mb-6">
+        {FILTER_TABS.map((tab) => {
+          const isActive = activeFilter === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveFilter(tab.key as any)}
+              className={`px-4 py-2 rounded-full text-sm font-medium transition
+                ${
+                  isActive
+                    ? "bg-orange-500 text-white"
+                    : "bg-[#141b2f] text-gray-200 hover:bg-[#1c2438]"
+                }`}
+            >
+              {tab.label}
+            </button>
           );
+        })}
+      </div>
 
-          return game.questions.map((q) => {
-            const compoundId = `${game.id}-${q.id}`;
-            const isSavingThis = savingPickId === compoundId;
+      {/* Header row */}
+      <div className="hidden md:grid grid-cols-[1.5fr,1.1fr,2fr,0.5fr,2.4fr,1.8fr] text-xs uppercase text-gray-400 mb-2 px-4">
+        <span>Start</span>
+        <span>Status</span>
+        <span>Match • Venue</span>
+        <span>Q#</span>
+        <span>Question</span>
+        <span className="text-right">Pick • Yes % • No %</span>
+      </div>
+
+      {/* Content */}
+      <div className="space-y-3">
+        {loading && (
+          <div className="flex items-center justify-center py-16 text-gray-300">
+            Loading picks...
+          </div>
+        )}
+
+        {!loading && error && (
+          <div className="flex items-center justify-center py-16 text-red-400">
+            {error}
+          </div>
+        )}
+
+        {!loading && !error && filteredGames.length === 0 && (
+          <div className="flex items-center justify-center py-16 text-gray-300">
+            No picks in this category.
+          </div>
+        )}
+
+        {!loading &&
+          !error &&
+          filteredGames.map((game) => {
+            const { date, time } = formatStart(game.startTime);
 
             return (
               <div
-                key={q.id}
-                className="grid grid-cols-1 md:grid-cols-[150px_80px_1.3fr_0.4fr_2.2fr_1.3fr] gap-y-1 md:gap-y-0 items-center text-xs md:text-sm text-slate-100 py-3 px-3 rounded-lg hover:bg-slate-800/70 border-b border-slate-800"
+                key={game.id}
+                className="bg-[#111827] border border-[#1f2937] rounded-2xl overflow-hidden"
               >
-                {/* START (2 lines) */}
-                <div className="md:pr-2 text-slate-300">
-                  <div>{dateLine}</div>
-                  <div>{timeLine}</div>
-                </div>
-
-                {/* STATUS BADGE */}
-                <div className="md:flex md:justify-center md:items-center">
-                  <span
-                    className={`inline-flex items-center px-2 py-1 rounded-full text-[10px] font-semibold ${
-                      game.status === "open"
-                        ? "bg-green-700 text-white"
-                        : game.status === "final"
-                        ? "bg-blue-700 text-white"
-                        : game.status === "pending"
-                        ? "bg-yellow-500 text-black"
-                        : "bg-slate-600 text-white"
-                    }`}
-                  >
-                    {game.status.toUpperCase()}
-                  </span>
-                </div>
-
-                {/* MATCH + VENUE */}
-                <div className="md:pr-2">
-                  <div className="text-orange-400 font-semibold">
-                    {game.match}
+                {/* Game header (desktop) */}
+                <div className="hidden md:grid grid-cols-[1.5fr,1.1fr,2fr] items-center px-4 py-3 border-b border-[#1f2937] text-sm">
+                  <div className="flex flex-col">
+                    <span className="font-medium">{date}</span>
+                    <span className="text-xs text-gray-400">{time}</span>
                   </div>
-                  <div className="text-slate-400 text-[11px] md:text-xs">
-                    {game.venue}
+                  <div>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
+                      OPEN
+                    </span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-orange-400">
+                      {game.match}
+                    </span>
+                    <span className="text-xs text-gray-400">{game.venue}</span>
                   </div>
                 </div>
 
-                {/* Q# */}
-                <div className="md:text-center text-orange-400 font-semibold">
-                  Q{q.quarter}
+                {/* Game header (mobile) */}
+                <div className="md:hidden px-4 py-3 border-b border-[#1f2937]">
+                  <div className="flex justify-between items-center mb-1">
+                    <div>
+                      <p className="text-sm font-medium">{date}</p>
+                      <p className="text-xs text-gray-400">{time}</p>
+                    </div>
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
+                      OPEN
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-orange-400">
+                      {game.match}
+                    </p>
+                    <p className="text-xs text-gray-400">{game.venue}</p>
+                  </div>
                 </div>
 
-                {/* QUESTION + COMMENTS */}
-                <div className="md:pr-2">
-                  <div className="mb-1">{q.question}</div>
-                  <button className="text-[11px] md:text-xs text-slate-300 underline decoration-slate-600 hover:decoration-slate-300">
-                    Comments (0)
-                  </button>
-                </div>
+                {/* Questions */}
+                <div className="divide-y divide-[#1f2937]">
+                  {game.questions.map((q, index) => (
+                    <div
+                      key={q.id}
+                      className="grid md:grid-cols-[1.5fr,1.1fr,2fr,0.5fr,2.4fr,1.8fr] grid-cols-1 gap-3 px-4 py-3 items-center text-sm"
+                    >
+                      {/* Start (mobile row repeats simple info) */}
+                      <div className="md:hidden flex justify-between text-xs text-gray-400">
+                        <span>
+                          Q{q.quarter} • {date}
+                        </span>
+                        <span>{time}</span>
+                      </div>
 
-                {/* YES / NO BUTTONS + PERCENTAGES */}
-                <div className="flex justify-end gap-2 md:gap-3">
-                  {/* YES = BRIGHT ORANGE */}
-                  <button
-                    onClick={() =>
-                      !isSavingThis && handlePick(game, q, "yes")
-                    }
-                    disabled={isSavingThis || game.status !== "open"}
-                    className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
-                      ${
-                        q.userPick === "yes"
-                          ? "bg-[#FF7A00] border-[#FFB366] text-black ring-2 ring-white/70"
-                          : "bg-[#FF7A00] border-[#FFB366] text-black hover:bg-[#ff8a26]"
-                      }
-                      ${
-                        isSavingThis || game.status !== "open"
-                          ? "opacity-60 cursor-not-allowed"
-                          : ""
-                      }
-                    `}
-                  >
-                    Yes{" "}
-                    {typeof q.yesPercent === "number"
-                      ? `${q.yesPercent}%`
-                      : ""}
-                  </button>
+                      {/* Start (desktop placeholder – already shown in header) */}
+                      <div className="hidden md:block text-xs text-gray-400">
+                        {/* empty; header handles date/time */}
+                      </div>
 
-                  {/* NO = PURPLE */}
-                  <button
-                    onClick={() =>
-                      !isSavingThis && handlePick(game, q, "no")
-                    }
-                    disabled={isSavingThis || game.status !== "open"}
-                    className={`px-3 py-1 rounded-full border text-xs md:text-sm min-w-[60px] text-center font-semibold transition
-                      ${
-                        q.userPick === "no"
-                          ? "bg-[#7C3AED] border-[#C4B5FD] text-white ring-2 ring-white/70"
-                          : "bg-[#7C3AED] border-[#C4B5FD] text-white hover:bg-[#8B5CF6]"
-                      }
-                      ${
-                        isSavingThis || game.status !== "open"
-                          ? "opacity-60 cursor-not-allowed"
-                          : ""
-                      }
-                    `}
-                  >
-                    No{" "}
-                    {typeof q.noPercent === "number"
-                      ? `${q.noPercent}%`
-                      : ""}
-                  </button>
+                      {/* Status */}
+                      <div className="hidden md:flex">
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
+                          {q.status.toUpperCase()}
+                        </span>
+                      </div>
+
+                      {/* Match+venue column already shown in header, so blank in rows on desktop */}
+                      <div className="hidden md:block" />
+
+                      {/* Q# */}
+                      <div className="md:text-center text-xs font-semibold text-gray-300">
+                        Q{q.quarter}
+                      </div>
+
+                      {/* Question text */}
+                      <div className="text-sm">
+                        <p className="font-medium">{q.question}</p>
+                      </div>
+
+                      {/* Pick buttons + percents */}
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-2">
+                        <div className="inline-flex rounded-full border border-[#374151] overflow-hidden">
+                          <button
+                            type="button"
+                            className="px-4 py-1 text-sm font-semibold bg-orange-500 text-white"
+                          >
+                            Yes
+                          </button>
+                          <button
+                            type="button"
+                            className="px-4 py-1 text-sm font-semibold bg-purple-600 text-white"
+                          >
+                            No
+                          </button>
+                        </div>
+                        <div className="flex justify-end gap-3 text-xs text-gray-400">
+                          <span>
+                            Yes:{" "}
+                            {q.yesPercent !== undefined
+                              ? `${q.yesPercent}%`
+                              : "0%"}
+                          </span>
+                          <span>
+                            No:{" "}
+                            {q.noPercent !== undefined
+                              ? `${q.noPercent}%`
+                              : "0%"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             );
-          });
-        })}
+          })}
       </div>
     </div>
   );
