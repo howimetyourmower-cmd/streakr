@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "../../../src/lib/admin"; // 🔧 adjust path if needed
+import { db } from "@/lib/admin"; // 🔧 adjust path if needed
 import { Timestamp } from "firebase-admin/firestore";
 
 type LeaderboardEntry = {
@@ -55,7 +55,7 @@ function computeStreaks(picks: { result: string; settledAtDate?: Date }[]) {
 export async function GET() {
   try {
     // 1) Load all picks for current season
-    const picksSnap = await adminDb
+    const picksSnap = await db
       .collection("picks")
       .where("season", "==", CURRENT_SEASON)
       .get();
