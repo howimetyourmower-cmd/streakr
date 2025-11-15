@@ -1,7 +1,7 @@
 // app/profile/page.tsx
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
 import {
@@ -165,13 +165,13 @@ export default function ProfilePage() {
     };
 
     loadUserDoc();
-  }, [user, db]);
+  }, [user]);
 
   const handleChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (e: ChangeEvent<HTMLInputElement>) => {
     setAvatarError("");
     const file = e.target.files?.[0];
     if (!file) {
@@ -180,7 +180,7 @@ export default function ProfilePage() {
     }
 
     if (!file.type.startsWith("image/")) {
-      setAvatarError("Please select an image file.");
+      setAvatarError("Please select an image file (JPG/PNG).");
       setAvatarFile(null);
       return;
     }
@@ -226,12 +226,21 @@ export default function ProfilePage() {
       );
       await reauthenticateWithCredential(user, cred);
 
-      // If a new avatar file selected, upload it first
-      let newAvatarUrl: string | undefined;
+      // Start from existing avatar (so if upload fails we keep old one)
+      let newAvatarUrl: string | undefined = userDoc?.avatarUrl;
+
       if (avatarFile) {
-        const storageRef = ref(storage, `avatars/${user.uid}`);
-        await uploadBytes(storageRef, avatarFile);
-        newAvatarUrl = await getDownloadURL(storageRef);
+        try {
+          const storageRef = ref(storage, `avatars/${user.uid}`);
+          await uploadBytes(storageRef, avatarFile);
+          newAvatarUrl = await getDownloadURL(storageRef);
+        } catch (err) {
+          console.error("Avatar upload error", err);
+          setAvatarError(
+            "Could not upload avatar. Profile saved without changing avatar."
+          );
+          // IMPORTANT: do NOT throw here – we still want to save other fields
+        }
       }
 
       // Prepare updated fields (only editable ones)
