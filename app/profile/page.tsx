@@ -89,6 +89,7 @@ export default function ProfilePage() {
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
 
+  // If not logged in, push to auth
   useEffect(() => {
     if (!loading && !user) {
       router.push("/auth");
@@ -104,7 +105,9 @@ export default function ProfilePage() {
         const refDoc = doc(db, "users", user.uid);
         const snap = await getDoc(refDoc);
 
-        const data = snap.exists() ? (snap.data() as Partial<UserDoc>) : {}) ?? {};
+        const data: Partial<UserDoc> = snap.exists()
+          ? (snap.data() as Partial<UserDoc>)
+          : {};
 
         const merged: UserDoc = {
           uid: user.uid,
@@ -179,7 +182,7 @@ export default function ProfilePage() {
     setSaveSuccess(null);
 
     try {
-      // Re-auth with current password
+      // Require current password
       if (!currentPassword) {
         throw new Error("Please enter your current password to save changes.");
       }
@@ -192,7 +195,7 @@ export default function ProfilePage() {
 
       let avatarUrl = form.avatarUrl ?? null;
 
-      // If a new avatar file is selected, upload it
+      // Upload new avatar if selected
       if (avatarFile) {
         const ext = avatarFile.type === "image/png" ? "png" : "jpg";
         const storageRef = ref(
@@ -298,8 +301,8 @@ export default function ProfilePage() {
               className="block w-full text-xs text-gray-200 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-orange-500 file:text-white hover:file:bg-orange-600 cursor-pointer"
             />
             <p className="mt-1 text-[11px] text-gray-400">
-              JPG/PNG, max 3MB. This will show on leaderboards and around the
-              site.
+              JPG/PNG, max 3MB. This will show on leaderboards and around
+              the site.
             </p>
           </div>
 
@@ -516,7 +519,7 @@ export default function ProfilePage() {
               {form.email ?? user.email}
             </p>
             <p className="text-xs text-gray-400">
-              Use this account across web & app (when we launch it) to keep
+              Use this account across web &amp; app (when we launch it) to keep
               your streaks in sync.
             </p>
           </div>
