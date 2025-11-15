@@ -1,6 +1,11 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  ChangeEvent,
+} from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -64,18 +69,18 @@ export default function ProfilePage() {
         setForm({
           uid: user.uid,
           email: user.email ?? "",
-          username: data.username ?? "",
-          firstName: data.firstName ?? "",
-          surname: data.surname ?? "",
-          dob: data.dob ?? "",
-          suburb: data.suburb ?? "",
-          state: data.state ?? "",
-          phone: data.phone ?? "",
-          gender: data.gender ?? "",
-          team: data.team ?? "",
-          avatarUrl: data.avatarUrl ?? "",
-          currentStreak: data.currentStreak ?? 0,
-          longestStreak: data.longestStreak ?? 0,
+          username: (data as any).username ?? "",
+          firstName: (data as any).firstName ?? "",
+          surname: (data as any).surname ?? "",
+          dob: (data as any).dob ?? "",
+          suburb: (data as any).suburb ?? "",
+          state: (data as any).state ?? "",
+          phone: (data as any).phone ?? "",
+          gender: (data as any).gender ?? "",
+          team: (data as any).team ?? "",
+          avatarUrl: (data as any).avatarUrl ?? "",
+          currentStreak: (data as any).currentStreak ?? 0,
+          longestStreak: (data as any).longestStreak ?? 0,
         });
 
         setInitialLoaded(true);
@@ -104,21 +109,20 @@ export default function ProfilePage() {
   const currentAvatarSrc = useMemo(() => {
     if (avatarPreviewUrl) return avatarPreviewUrl;
     if (form.avatarUrl) return form.avatarUrl;
-    return "/default-avatar.png"; // make sure this exists in /public
+    return "/default-avatar.png"; // your placeholder
   }, [avatarPreviewUrl, form.avatarUrl]);
 
   const update = (key: keyof UserDoc, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
   };
 
-  const handleAvatarSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarSelect = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     if (!file) {
       setAvatarFile(null);
       return;
     }
 
-    // Basic validation here too (extra safety)
     const ext = file.name.split(".").pop()?.toLowerCase();
     const allowed = ["jpg", "jpeg", "png"];
 
