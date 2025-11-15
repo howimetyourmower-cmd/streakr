@@ -2,7 +2,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
-import SponsorBanner from "@/components/SponsorBanner";
+import SponsorBanner from "@/app/components/SponsorBanner";
 
 export const metadata: Metadata = {
   title: "STREAKr",
