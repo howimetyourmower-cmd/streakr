@@ -184,7 +184,6 @@ export default function PicksClient() {
       if (!res.ok) throw new Error("Failed to load comments");
 
       const data = await res.json();
-      // Expecting { comments: [...] } but fall back safely
       const list: Comment[] = (data.comments || []).map((c: any) => ({
         id: c.id,
         body: c.body,
@@ -258,7 +257,9 @@ export default function PicksClient() {
             key={f}
             onClick={() => applyFilter(f)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-              activeFilter === f ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"
+              activeFilter === f
+                ? "bg-orange-500"
+                : "bg-gray-700 hover:bg-gray-600"
             }`}
           >
             {f.toUpperCase()}
@@ -288,12 +289,12 @@ export default function PicksClient() {
           return (
             <div
               key={row.id}
-              className="grid grid-cols-12 bg-[#101a2a] px-4 py-0.5 rounded-lg items-center"
+              className="grid grid-cols-12 bg-[#ff7a00] px-4 py-0.5 rounded-lg items-center text-white shadow-sm"
             >
               {/* DATE */}
               <div className="col-span-2">
                 <div>{date}</div>
-                <div className="text-xs text-gray-400">{time} AEDT</div>
+                <div className="text-xs text-white/80">{time} AEDT</div>
               </div>
 
               {/* STATUS */}
@@ -309,12 +310,12 @@ export default function PicksClient() {
 
               {/* MATCH */}
               <div className="col-span-3">
-                <div className="text-orange-400 font-semibold">{row.match}</div>
-                <div className="text-xs text-gray-400">{row.venue}</div>
+                <div className="font-semibold">{row.match}</div>
+                <div className="text-xs text-white/80">{row.venue}</div>
               </div>
 
               {/* Q# */}
-              <div className="col-span-1 text-center text-orange-400 font-bold">
+              <div className="col-span-1 text-center font-bold">
                 Q{row.quarter}
               </div>
 
@@ -323,7 +324,7 @@ export default function PicksClient() {
                 <div>{row.question}</div>
                 <button
                   type="button"
-                  className="text-xs text-blue-400 mt-1 underline"
+                  className="text-xs text-white/90 mt-1 underline"
                   onClick={() => openComments(row)}
                 >
                   Comments (0)
@@ -358,7 +359,7 @@ export default function PicksClient() {
                   </button>
                 </div>
 
-                <div className="text-[11px] text-gray-400">
+                <div className="text-[11px] text-white/90">
                   Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
                 </div>
               </div>
