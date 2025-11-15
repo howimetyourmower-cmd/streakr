@@ -56,6 +56,7 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -265,10 +266,20 @@ export default function PicksClient() {
         ))}
       </div>
 
+      {/* HEADER ROW (desktop-style like your screenshot) */}
+      <div className="grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+        <div className="col-span-2">START</div>
+        <div className="col-span-1">STATUS</div>
+        <div className="col-span-3">MATCH • VENUE</div>
+        <div className="col-span-1 text-center">Q#</div>
+        <div className="col-span-3">QUESTION</div>
+        <div className="col-span-2 text-right">PICK • YES% • NO%</div>
+      </div>
+
       {loading && <p>Loading…</p>}
 
-      {/* LIST OF QUESTIONS – compact cards */}
-      <div className="space-y-3">
+      {/* ROWS – 12-column layout, compact height, orange gradient */}
+      <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
@@ -277,96 +288,91 @@ export default function PicksClient() {
           return (
             <div
               key={row.id}
-              className="
-                w-full rounded-lg overflow-hidden shadow-md
-                bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00]
-                border border-black/20
-              "
+              className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
-              <div className="p-3 sm:p-4 text-white space-y-1.5">
-                {/* TIME + STATUS */}
-                <div className="flex items-center justify-between text-xs sm:text-sm">
-                  <div>
-                    <div className="font-semibold">{date}</div>
-                    <div className="text-white/70 text-[10px] sm:text-xs">
-                      {time} AEDT
-                    </div>
+              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white">
+                {/* START */}
+                <div className="col-span-2">
+                  <div className="text-sm font-semibold">{date}</div>
+                  <div className="text-[11px] text-white/80">
+                    {time} AEDT
                   </div>
+                </div>
 
+                {/* STATUS */}
+                <div className="col-span-1">
                   <span
                     className={`${statusClasses(
                       row.status
-                    )} text-[9px] px-2 py-0.5 rounded-full font-bold`}
+                    )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
                   >
                     {row.status.toUpperCase()}
                   </span>
                 </div>
 
-                {/* MATCH + QUARTER */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold text-sm sm:text-base">
-                      {row.match}
-                    </div>
-                    <div className="text-[10px] sm:text-xs text-white/70">
-                      {row.venue}
-                    </div>
+                {/* MATCH + VENUE */}
+                <div className="col-span-3">
+                  <div className="text-sm font-semibold">
+                    {row.match}
                   </div>
-
-                  <div className="font-bold text-sm sm:text-base">
-                    Q{row.quarter}
+                  <div className="text-[11px] text-white/80">
+                    {row.venue}
                   </div>
                 </div>
 
-                {/* QUESTION */}
-                <div className="text-sm font-semibold leading-tight">
-                  {row.question}
+                {/* Q# */}
+                <div className="col-span-1 text-center text-sm font-bold">
+                  Q{row.quarter}
                 </div>
 
-                {/* COMMENTS */}
-                <button
-                  type="button"
-                  onClick={() => openComments(row)}
-                  className="text-xs underline text-white/80"
-                >
-                  Comments (0)
-                </button>
-
-                {/* YES / NO + PERCENTAGES */}
-                <div className="flex items-center gap-2 pt-1">
+                {/* QUESTION + COMMENTS */}
+                <div className="col-span-3">
+                  <div className="text-sm leading-snug font-medium">
+                    {row.question}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => handlePick(row, "yes")}
-                    className={`
-                      px-4 py-1.5 rounded-full font-bold text-white text-sm
-                      transition
-                      ${
-                        yesSelected
-                          ? "bg-green-700 ring-2 ring-white"
-                          : "bg-green-600 hover:bg-green-700"
-                      }
-                    `}
+                    onClick={() => openComments(row)}
+                    className="text-[11px] text-white/85 mt-0.5 underline"
                   >
-                    Yes
+                    Comments (0)
                   </button>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handlePick(row, "no")}
-                    className={`
-                      px-4 py-1.5 rounded-full font-bold text-white text-sm
-                      transition
-                      ${
-                        noSelected
-                          ? "bg-red-700 ring-2 ring-white"
-                          : "bg-red-600 hover:bg-red-700"
-                      }
-                    `}
-                  >
-                    No
-                  </button>
+                {/* PICK / YES / NO */}
+                <div className="col-span-2 flex flex-col items-end">
+                  <div className="flex gap-2 mb-0.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "yes")}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        ${
+                          yesSelected
+                            ? "bg-green-700 ring-2 ring-white"
+                            : "bg-green-600 hover:bg-green-700"
+                        }
+                      `}
+                    >
+                      Yes
+                    </button>
 
-                  <div className="text-[11px] text-white/80 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "no")}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        ${
+                          noSelected
+                            ? "bg-red-700 ring-2 ring-white"
+                            : "bg-red-600 hover:bg-red-700"
+                        }
+                      `}
+                    >
+                      No
+                    </button>
+                  </div>
+                  <div className="text-[11px] text-white/85">
                     Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
                   </div>
                 </div>
