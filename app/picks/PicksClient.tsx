@@ -56,10 +56,9 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Comment drawer state
-  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(
-    null
-  );
+  // Comment drawer
+  const [commentsOpenFor, setCommentsOpenFor] =
+    useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState("");
@@ -76,14 +75,14 @@ export default function PicksClient() {
         weekday: "short",
         day: "2-digit",
         month: "short",
-        timeZone: "Australia/Melbourne",
+        timeZone: "Australia/Melbourne"
       }),
       time: d.toLocaleTimeString("en-AU", {
         hour: "numeric",
         minute: "2-digit",
         hour12: true,
-        timeZone: "Australia/Melbourne",
-      }),
+        timeZone: "Australia/Melbourne"
+      })
     };
   };
 
@@ -107,7 +106,7 @@ export default function PicksClient() {
             status: q.status,
             userPick: q.userPick,
             yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
+            noPercent: q.noPercent
           }))
         );
 
@@ -141,7 +140,7 @@ export default function PicksClient() {
         match: row.match,
         question: row.question,
         quarter: row.quarter,
-        createdAt: serverTimestamp(),
+        createdAt: serverTimestamp()
       });
 
       setRows((prev) =>
@@ -171,7 +170,7 @@ export default function PicksClient() {
     }
   };
 
-  // -------- Comment drawer logic --------
+  // -------- Comments --------
   const openComments = async (row: QuestionRow) => {
     setCommentsOpenFor(row);
     setComments([]);
@@ -188,8 +187,9 @@ export default function PicksClient() {
         id: c.id,
         body: c.body,
         displayName: c.displayName,
-        createdAt: c.createdAt,
+        createdAt: c.createdAt
       }));
+
       setComments(list);
     } catch (e) {
       console.error(e);
@@ -220,7 +220,7 @@ export default function PicksClient() {
       const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: commentText.trim() }),
+        body: JSON.stringify({ body: commentText.trim() })
       });
 
       if (!res.ok) throw new Error("Failed to post comment");
@@ -230,7 +230,7 @@ export default function PicksClient() {
         id: created.id || Math.random().toString(36),
         body: commentText.trim(),
         displayName: created.displayName,
-        createdAt: created.createdAt,
+        createdAt: created.createdAt
       };
 
       setComments((prev) => [newComment, ...prev]);
@@ -243,7 +243,10 @@ export default function PicksClient() {
     }
   };
 
-  // -------- Render --------
+  // ---------------------------------------------------
+  // ----------------------- RENDER ---------------------
+  // ---------------------------------------------------
+
   return (
     <div className="w-full max-w-7xl mx-auto p-6 text-white">
       <h1 className="text-4xl font-bold mb-4">Picks</h1>
@@ -279,8 +282,8 @@ export default function PicksClient() {
 
       {loading && <p>Loading…</p>}
 
-      {/* ROWS */}
-      <div className="space-y-2">
+      {/* IMPROVED ROW DESIGN */}
+      <div className="space-y-3">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
@@ -289,78 +292,99 @@ export default function PicksClient() {
           return (
             <div
               key={row.id}
-              className="grid grid-cols-12 bg-[#ff7a00] px-4 py-0.5 rounded-lg items-center text-white shadow-sm"
+              className="
+                grid grid-cols-12 
+                rounded-xl 
+                overflow-hidden 
+                shadow-md
+                bg-gradient-to-r from-[#ff7a00] to-[#ff9b2b]
+                border border-black/10
+              "
             >
-              {/* DATE */}
-              <div className="col-span-2">
-                <div>{date}</div>
-                <div className="text-xs text-white/80">{time} AEDT</div>
-              </div>
+              <div className="col-span-12 grid grid-cols-12 px-4 py-3 bg-black/10 backdrop-blur-[2px]">
+                {/* START */}
+                <div className="col-span-2">
+                  <div className="font-semibold text-white">{date}</div>
+                  <div className="text-xs text-white/70">{time} AEDT</div>
+                </div>
 
-              {/* STATUS */}
-              <div className="col-span-1">
-                <span
-                  className={`${statusClasses(
-                    row.status
-                  )} text-[10px] px-2 py-1 rounded-full font-bold`}
-                >
-                  {row.status.toUpperCase()}
-                </span>
-              </div>
+                {/* STATUS */}
+                <div className="col-span-1 flex items-center">
+                  <span
+                    className={`${statusClasses(
+                      row.status
+                    )} text-[10px] px-2 py-1 rounded-full font-bold`}
+                  >
+                    {row.status.toUpperCase()}
+                  </span>
+                </div>
 
-              {/* MATCH */}
-              <div className="col-span-3">
-                <div className="font-semibold">{row.match}</div>
-                <div className="text-xs text-white/80">{row.venue}</div>
-              </div>
+                {/* MATCH */}
+                <div className="col-span-3">
+                  <div className="font-bold text-white">
+                    {row.match}
+                  </div>
+                  <div className="text-xs text-white/70">{row.venue}</div>
+                </div>
 
-              {/* Q# */}
-              <div className="col-span-1 text-center font-bold">
-                Q{row.quarter}
-              </div>
+                {/* Q# */}
+                <div className="col-span-1 text-center text-white font-bold">
+                  Q{row.quarter}
+                </div>
 
-              {/* QUESTION + COMMENTS LINK */}
-              <div className="col-span-3">
-                <div>{row.question}</div>
-                <button
-                  type="button"
-                  className="text-xs text-white/90 mt-1 underline"
-                  onClick={() => openComments(row)}
-                >
-                  Comments (0)
-                </button>
-              </div>
-
-              {/* YES / NO BUTTONS + PERCENTAGES */}
-              <div className="col-span-2 flex flex-col items-end">
-                <div className="flex gap-2 mb-1">
+                {/* QUESTION */}
+                <div className="col-span-3">
+                  <div className="text-sm font-semibold text-white leading-tight">
+                    {row.question}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => handlePick(row, "yes")}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition ${
-                      yesSelected
-                        ? "bg-orange-500 ring-2 ring-white"
-                        : "bg-orange-500/80 hover:bg-orange-500"
-                    }`}
+                    className="text-xs text-white/70 mt-1 underline hover:text-white"
+                    onClick={() => openComments(row)}
                   >
-                    Yes
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePick(row, "no")}
-                    className={`px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition ${
-                      noSelected
-                        ? "bg-purple-600 ring-2 ring-white"
-                        : "bg-purple-600/80 hover:bg-purple-600"
-                    }`}
-                  >
-                    No
+                    Comments (0)
                   </button>
                 </div>
 
-                <div className="text-[11px] text-white/90">
-                  Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
+                {/* PICK BUTTONS */}
+                <div className="col-span-2 flex flex-col items-end">
+                  <div className="flex gap-2 mb-1">
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "yes")}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white
+                        transition 
+                        ${
+                          yesSelected
+                            ? "bg-orange-700 ring-2 ring-white"
+                            : "bg-orange-600/90 hover:bg-orange-700"
+                        }
+                      `}
+                    >
+                      Yes
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "no")}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white
+                        transition 
+                        ${
+                          noSelected
+                            ? "bg-purple-700 ring-2 ring-white"
+                            : "bg-purple-600/90 hover:bg-purple-700"
+                        }
+                      `}
+                    >
+                      No
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-white/80">
+                    Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
+                  </div>
                 </div>
               </div>
             </div>
@@ -368,7 +392,7 @@ export default function PicksClient() {
         })}
       </div>
 
-      {/* COMMENT DRAWER */}
+      {/* COMMENT DRAWER (unchanged) */}
       {commentsOpenFor && (
         <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
           <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
@@ -390,7 +414,7 @@ export default function PicksClient() {
               </button>
             </div>
 
-            {/* New comment */}
+            {/* Input */}
             <div className="mb-4">
               <textarea
                 value={commentText}
@@ -399,9 +423,6 @@ export default function PicksClient() {
                 className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                 placeholder="Add your comment…"
               />
-              {commentsError && (
-                <p className="text-xs text-red-500 mt-1">{commentsError}</p>
-              )}
               <div className="flex justify-end mt-2">
                 <button
                   type="button"
@@ -414,7 +435,6 @@ export default function PicksClient() {
               </div>
             </div>
 
-            {/* Comment list */}
             <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
                 <p className="text-sm text-gray-400">Loading comments…</p>
