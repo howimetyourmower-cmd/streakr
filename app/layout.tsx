@@ -25,7 +25,7 @@ export default function RootLayout({
               <img
                 src="/streakrlogo.jpg" // <= change to /Streakrlogo.jpg if needed
                 alt="STREAKr logo"
-                className="h-9 w-auto rounded-md object-contain"
+                className="h-14 w-auto rounded-md object-contain"
               />
               <span className="text-xl font-bold tracking-wide">
                 STREAK<span className="lowercase text-orange-500">r</span>
