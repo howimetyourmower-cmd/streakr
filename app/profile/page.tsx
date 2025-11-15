@@ -104,7 +104,7 @@ export default function ProfilePage() {
         const refDoc = doc(db, "users", user.uid);
         const snap = await getDoc(refDoc);
 
-        const data = snap.exists() ? (snap.data() as UserDoc) : {};
+        const data = snap.exists() ? (snap.data() as Partial<UserDoc>) : {}) ?? {};
 
         const merged: UserDoc = {
           uid: user.uid,
