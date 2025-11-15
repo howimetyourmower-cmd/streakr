@@ -100,6 +100,7 @@ export default function ProfilePage() {
   });
 
   const [currentPassword, setCurrentPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -224,11 +225,10 @@ export default function ProfilePage() {
       );
       await reauthenticateWithCredential(user, cred);
 
-      // NOTE: for now we do NOT upload avatar to Storage.
-      // We just save text fields, so nothing here can hang.
+      // NOTE: avatar upload disabled for now – just preview.
       if (avatarFile) {
         setAvatarError(
-          "Avatar upload coming soon. Your profile details were saved."
+          "Avatar upload is coming soon. Your profile details were saved."
         );
       }
 
@@ -587,12 +587,22 @@ export default function ProfilePage() {
                 <label className="block text-xs mb-1 text-gray-400">
                   Current password (required to save changes)
                 </label>
-                <input
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Enter your password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
               </div>
               <div className="flex items-end">
                 <button
