@@ -23,7 +23,7 @@ export default function RootLayout({
             {/* Logo + brand */}
             <Link href="/" className="flex items-center gap-3">
               <img
-                src="/streakrlogo.jpg" // <= change to /Streakrlogo.jpg if needed
+                src="/streakrlogo.jpg" // change to /Streakrlogo.jpg if your file uses a capital S
                 alt="STREAKr logo"
                 className="h-14 w-auto rounded-md object-contain"
               />
@@ -77,6 +77,23 @@ export default function RootLayout({
             </nav>
           </div>
         </header>
+
+        {/* Sponsor banner (global) */}
+        <div className="border-b border-white/10 bg-gradient-to-r from-orange-500 via-purple-600 to-orange-500">
+          <div className="max-w-7xl mx-auto px-6 py-2 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs sm:text-sm">
+            <div className="flex items-center gap-2">
+              <span className="uppercase tracking-wide font-semibold text-black/80 bg-white/80 px-2 py-0.5 rounded-full">
+                Sponsor
+              </span>
+              <span className="font-semibold text-white">
+                Your Brand Here — backing the streak.
+              </span>
+            </div>
+            <span className="text-white/90 text-[10px] sm:text-xs">
+              Free game of skill. Not gambling. 18+ only.
+            </span>
+          </div>
+        </div>
 
         {/* Page content */}
         <main className="pt-4 pb-12">
