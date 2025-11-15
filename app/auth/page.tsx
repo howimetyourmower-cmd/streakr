@@ -10,6 +10,7 @@ import {
   User,
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc, getDoc } from "firebase/firestore";
+import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebaseClient";
 
 // --------------------------
@@ -76,11 +77,18 @@ const TEAMS: TeamOption[] = [
 export default function AuthPage() {
   const [mode, setMode] = useState<"signup" | "login">("signup");
   const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      // If already logged in, push them to picks
+      if (u) {
+        router.push("/picks");
+      }
+    });
     return () => unsub();
-  }, []);
+  }, [router]);
 
   return (
     <main className="min-h-screen w-full bg-black text-white flex items-center justify-center p-6">
@@ -90,7 +98,9 @@ export default function AuthPage() {
           <h1 className="text-4xl font-extrabold tracking-tight">
             STREAK<span className="text-orange-500">r</span>
           </h1>
-          <p className="text-sm text-zinc-300 mt-1">Real Streakr's don't get caught.</p>
+          <p className="text-sm text-zinc-300 mt-1">
+            Real Streakr&apos;s don&apos;t get caught.
+          </p>
         </div>
 
         {/* Card */}
@@ -99,7 +109,9 @@ export default function AuthPage() {
             <button
               className={clsx(
                 "py-3 text-center font-semibold transition",
-                mode === "signup" ? "bg-zinc-900 text-white" : "bg-zinc-950 text-zinc-400 hover:text-white"
+                mode === "signup"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-zinc-950 text-zinc-400 hover:text-white"
               )}
               onClick={() => setMode("signup")}
             >
@@ -108,7 +120,9 @@ export default function AuthPage() {
             <button
               className={clsx(
                 "py-3 text-center font-semibold transition",
-                mode === "login" ? "bg-zinc-900 text-white" : "bg-zinc-950 text-zinc-400 hover:text-white"
+                mode === "login"
+                  ? "bg-zinc-900 text-white"
+                  : "bg-zinc-950 text-zinc-400 hover:text-white"
               )}
               onClick={() => setMode("login")}
             >
@@ -121,7 +135,8 @@ export default function AuthPage() {
 
         {user && (
           <p className="mt-4 text-center text-sm text-green-400">
-            Signed in as <span className="font-semibold">{user.email}</span>.
+            Signed in as{" "}
+            <span className="font-semibold">{user.email}</span>.
           </p>
         )}
       </div>
@@ -165,7 +180,11 @@ function SignUpPanel() {
 
     try {
       setLoading(true);
-      const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
+      const cred = await createUserWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
 
       // Create Firestore profile if missing
       const ref = doc(db, "users", cred.user.uid);
@@ -184,7 +203,9 @@ function SignUpPanel() {
       }
 
       await sendEmailVerification(cred.user);
-      setMessage("Sign-up successful! Check your email to verify, then log in to continue.");
+      setMessage(
+        "Sign-up successful! Check your email to verify, then log in to continue."
+      );
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Something went wrong.");
@@ -196,10 +217,14 @@ function SignUpPanel() {
   return (
     <form onSubmit={handleSignUp} className="p-6 md:p-8 space-y-4">
       {message && (
-        <div className="rounded-lg border border-green-700 bg-green-900/30 p-3 text-sm text-green-300">{message}</div>
+        <div className="rounded-lg border border-green-700 bg-green-900/30 p-3 text-sm text-green-300">
+          {message}
+        </div>
       )}
       {error && (
-        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">{error}</div>
+        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
+          {error}
+        </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -243,7 +268,14 @@ function SignUpPanel() {
             className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
           />
           {age !== null && (
-            <p className={clsx("mt-1 text-xs", age < 16 ? "text-red-400" : "text-zinc-400")}>Age: {age}</p>
+            <p
+              className={clsx(
+                "mt-1 text-xs",
+                age < 16 ? "text-red-400" : "text-zinc-400"
+              )}
+            >
+              Age: {age}
+            </p>
           )}
         </Field>
         <Field label="Suburb">
@@ -294,7 +326,9 @@ function SignUpPanel() {
             onChange={(e) => setAgreeAge16(e.target.checked)}
           />
           <span>
-            I confirm I am <span className="font-semibold">16 years or older</span> and agree to the Streakr Rules.
+            I confirm I am{" "}
+            <span className="font-semibold">16 years or older</span> and agree
+            to the Streakr Rules.
           </span>
         </label>
         {isMinor && (
@@ -306,7 +340,11 @@ function SignUpPanel() {
               onChange={(e) => setConsentMinor(e.target.checked)}
             />
             <span>
-              I am under 18 and have <span className="font-semibold">parent/guardian permission</span> to play.
+              I am under 18 and have{" "}
+              <span className="font-semibold">
+                parent/guardian permission
+              </span>{" "}
+              to play.
             </span>
           </label>
         )}
@@ -317,13 +355,17 @@ function SignUpPanel() {
         disabled={!canSubmit || loading}
         className={clsx(
           "w-full rounded-xl py-3 font-semibold transition",
-          canSubmit && !loading ? "bg-orange-500 hover:bg-orange-600 text-black" : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+          canSubmit && !loading
+            ? "bg-orange-500 hover:bg-orange-600 text-black"
+            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
         )}
       >
         {loading ? "Creating account…" : "Create account"}
       </button>
 
-      <p className="text-center text-xs text-zinc-400">By creating an account you agree to our Terms and Privacy Policy.</p>
+      <p className="text-center text-xs text-zinc-400">
+        By creating an account you agree to our Terms and Privacy Policy.
+      </p>
     </form>
   );
 }
@@ -344,11 +386,17 @@ function LoginPanel() {
     setMessage(null);
     try {
       setLoading(true);
-      const { user } = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const { user } = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
       if (!user.emailVerified) {
-        setMessage("You're signed in, but your email isn't verified yet. Please verify to access all features.");
+        setMessage(
+          "You're signed in, but your email isn't verified yet. Please verify to access all features."
+        );
       }
-      // TODO: redirect to /picks after login
+      // After login, onAuthStateChanged in AuthPage will push to /picks
     } catch (err: any) {
       console.error(err);
       setError(err?.message || "Login failed.");
@@ -360,10 +408,14 @@ function LoginPanel() {
   return (
     <form onSubmit={handleLogin} className="p-6 md:p-8 space-y-4">
       {message && (
-        <div className="rounded-lg border border-amber-700 bg-amber-900/30 p-3 text-sm text-amber-200">{message}</div>
+        <div className="rounded-lg border border-amber-700 bg-amber-900/30 p-3 text-sm text-amber-200">
+          {message}
+        </div>
       )}
       {error && (
-        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">{error}</div>
+        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
+          {error}
+        </div>
       )}
 
       <Field label="Email">
@@ -392,13 +444,17 @@ function LoginPanel() {
         disabled={loading}
         className={clsx(
           "w-full rounded-xl py-3 font-semibold transition",
-          !loading ? "bg-orange-500 hover:bg-orange-600 text-black" : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+          !loading
+            ? "bg-orange-500 hover:bg-orange-600 text-black"
+            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
         )}
       >
         {loading ? "Signing in…" : "Sign in"}
       </button>
 
-      <p className="text-center text-xs text-zinc-400">Forgot password? Reset link coming soon.</p>
+      <p className="text-center text-xs text-zinc-400">
+        Forgot password? Reset link coming soon.
+      </p>
     </form>
   );
 }
@@ -406,7 +462,13 @@ function LoginPanel() {
 // --------------------------
 // Small Field component
 // --------------------------
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block text-sm">
       <span className="text-zinc-300 mb-1 inline-block">{label}</span>
