@@ -1,264 +1,199 @@
+// app/leaderboards/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
-type LeaderboardEntry = {
-  rank: number;
-  displayName: string;
+type DemoPlayer = {
   username: string;
-  favouriteTeam: string;
+  team: string;
   currentStreak: number;
-  bestStreak: number;
+  longestStreak: number;
 };
 
-type LeaderboardData = {
-  round: number;
-  season: number;
-  roundLeaderboard: LeaderboardEntry[];
-  seasonLeaderboard: LeaderboardEntry[];
-  yourPosition: {
-    roundRank: number | null;
-    seasonRank: number | null;
-    currentStreak: number;
-    bestStreak: number;
-  };
-};
+const demoPlayers: DemoPlayer[] = [
+  { username: "HotStreak23", team: "Collingwood", currentStreak: 9, longestStreak: 12 },
+  { username: "LionHeart", team: "Brisbane Lions", currentStreak: 8, longestStreak: 10 },
+  { username: "BlueBagger", team: "Carlton", currentStreak: 7, longestStreak: 9 },
+  { username: "TigerTime", team: "Richmond", currentStreak: 6, longestStreak: 8 },
+  { username: "SaintsFan", team: "St Kilda", currentStreak: 5, longestStreak: 7 },
+];
 
-export default function LeaderboardPage() {
-  const [data, setData] = useState<LeaderboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"round" | "season">("round");
+function getInitials(username: string) {
+  return username.slice(0, 2).toUpperCase();
+}
 
+export default function LeaderboardsPage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
+  // Gate page behind auth
   useEffect(() => {
-    async function loadLeaderboard() {
-      try {
-        setLoading(true);
-        setError(null);
-
-        // 🔥 IMPORTANT: singular "leaderboard"
-        const res = await fetch("/api/leaderboard");
-        if (!res.ok) {
-          throw new Error("Failed to load leaderboards");
-        }
-
-        const json: LeaderboardData = await res.json();
-        setData(json);
-      } catch (err: any) {
-        setError(err.message ?? "Failed to load leaderboards");
-      } finally {
-        setLoading(false);
-      }
+    if (!loading && !user) {
+      router.push("/auth");
     }
+  }, [loading, user, router]);
 
-    loadLeaderboard();
-  }, []);
-
-  if (loading) {
+  if (loading || (!user && !loading)) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <p className="text-lg font-medium">Loading leaderboards...</p>
+      <div className="min-h-[60vh] flex items-center justify-center text-sm text-gray-300">
+        Loading leaderboards…
       </div>
     );
   }
 
-  if (error || !data) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center">
-        <div className="bg-slate-900/70 border border-red-500/40 rounded-2xl px-6 py-4 max-w-md text-center">
-          <p className="text-red-400 font-semibold mb-2">
-            Couldn&apos;t load leaderboards
+  return (
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 text-white">
+      {/* Header + toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-bold">Leaderboards</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            See who&apos;s on a heater. Live data coming soon – this is a demo layout.
           </p>
-          <p className="text-sm text-slate-300 mb-4">
-            {error ?? "Something went wrong. Please try again later."}
-          </p>
+        </div>
+        <div className="inline-flex rounded-full bg-black/40 border border-white/10 p-1 text-xs">
+          <button className="px-3 py-1 rounded-full bg-orange-500 font-semibold">
+            Global streak
+          </button>
+          <button className="px-3 py-1 rounded-full text-gray-300 hover:bg-white/5">
+            This round
+          </button>
         </div>
       </div>
-    );
-  }
 
-  const { round, season, roundLeaderboard, seasonLeaderboard, yourPosition } =
-    data;
-
-  const activeList = tab === "round" ? roundLeaderboard : seasonLeaderboard;
-
-  return (
-    <div className="min-h-screen bg-slate-950 text-slate-50">
-      <div className="max-w-5xl mx-auto px-4 py-6 md:py-10">
-        {/* HEADER */}
-        <div className="flex items-center justify-between mb-6 md:mb-8">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-              Leaderboard
-            </h1>
-            <p className="text-sm md:text-base text-slate-400">
-              See where your streak stacks up against the rest of the comp.
-            </p>
-          </div>
-          <div className="hidden md:flex flex-col items-end text-xs text-slate-400">
-            <span>Season {season}</span>
-            <span>Current round: {round}</span>
-          </div>
-        </div>
-
-        {/* YOUR POSITION CARD */}
-        <div className="bg-slate-900/60 border border-slate-700/70 rounded-3xl p-4 md:p-6 mb-6 md:mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-200 mb-1">
-              Your position
-            </h2>
-            <p className="text-xs md:text-sm text-slate-400">
-              Keep your streak alive to climb the ladder.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 w-full md:w-auto">
-            <MiniStat
-              label="Round rank"
-              value={
-                yourPosition.roundRank ? `#${yourPosition.roundRank}` : "—"
-              }
-            />
-            <MiniStat
-              label="Season rank"
-              value={
-                yourPosition.seasonRank ? `#${yourPosition.seasonRank}` : "—"
-              }
-            />
-            <MiniStat
-              label="Current streak"
-              value={yourPosition.currentStreak}
-            />
-            <MiniStat label="Best streak" value={yourPosition.bestStreak} />
-          </div>
-        </div>
-
-        {/* TABS */}
-        <div className="mb-4 md:mb-5 flex items-center justify-between gap-3">
-          <div className="inline-flex p-1 rounded-full bg-slate-900/70 border border-slate-700/70">
-            <TabButton
-              active={tab === "round"}
-              onClick={() => setTab("round")}
-            >
-              This round
-            </TabButton>
-            <TabButton
-              active={tab === "season"}
-              onClick={() => setTab("season")}
-            >
-              Season
-            </TabButton>
-          </div>
-          <span className="text-[11px] md:text-xs text-slate-400">
-            Longest active streaks are ranked highest.
-          </span>
-        </div>
-
-        {/* TABLE */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-800 text-[11px] md:text-xs uppercase tracking-wide text-slate-400 flex">
-            <div className="w-10">Rank</div>
-            <div className="flex-1">Player</div>
-            <div className="w-28 text-right hidden md:block">
-              Favourite team
-            </div>
-            <div className="w-28 text-right">Current streak</div>
-            <div className="w-24 text-right hidden md:block">Best streak</div>
-          </div>
-
-          {activeList.length === 0 ? (
-            <div className="px-4 py-6 text-sm text-slate-400">
-              No players on the board yet. Make your picks to start the
-              leaderboard.
-            </div>
-          ) : (
-            <ul className="divide-y divide-slate-800">
-              {activeList.map((entry) => (
-                <LeaderboardRow key={entry.rank} entry={entry} />
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-2xl px-3 py-2 border border-slate-700/80 bg-slate-950/60 text-xs md:text-sm">
-      <div className="text-[10px] md:text-[11px] uppercase tracking-wide text-slate-400 mb-0.5">
-        {label}
-      </div>
-      <div className="text-base md:text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 md:px-4 py-1.5 md:py-2 rounded-full text-xs md:text-sm font-medium transition ${
-        active
-          ? "bg-orange-500 text-black"
-          : "text-slate-300 hover:text-white"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function LeaderboardRow({ entry }: { entry: LeaderboardEntry }) {
-  const isYou = entry.username === "glennmadds"; // placeholder for now
-
-  return (
-    <li
-      className={`px-4 py-3 text-xs md:text-sm flex items-center ${
-        isYou ? "bg-orange-500/5" : ""
-      }`}
-    >
-      <div className="w-10 font-semibold text-slate-100">
-        {entry.rank <= 3 ? (
-          <span>
-            {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : "🥉"}
-          </span>
-        ) : (
-          <>#{entry.rank}</>
-        )}
-      </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-slate-100">
-            {entry.displayName}
-          </span>
-          <span className="text-[11px] text-slate-400 hidden md:inline">
-            @{entry.username}
-          </span>
-          {isYou && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/15 border border-orange-500/60 text-orange-300">
-              You
+      {/* Leaderboard card */}
+      <div className="rounded-2xl bg-[#050818] border border-white/10 shadow-xl overflow-hidden">
+        <div className="px-4 sm:px-6 py-3 border-b border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500 text-[11px] font-bold">
+              S
             </span>
-          )}
+            <div>
+              <div className="text-sm font-semibold">Global longest streak</div>
+              <div className="text-[11px] text-gray-400">
+                Demo data – we&apos;ll wire this to real stats soon.
+              </div>
+            </div>
+          </div>
+          <div className="text-[11px] text-gray-400 hidden sm:block">
+            Showing top 5
+          </div>
+        </div>
+
+        {/* Header row (desktop) */}
+        <div className="hidden sm:grid grid-cols-[3rem,2fr,2fr,1.2fr,1.2fr] text-[11px] text-gray-400 px-6 py-2 border-b border-white/5">
+          <div>#</div>
+          <div>Player</div>
+          <div>Team</div>
+          <div className="text-right">Current streak</div>
+          <div className="text-right">Longest streak</div>
+        </div>
+
+        {/* Rows */}
+        <div className="divide-y divide-white/5">
+          {demoPlayers.map((p, index) => {
+            const rank = index + 1;
+            const isLeader = rank === 1;
+
+            return (
+              <div
+                key={p.username}
+                className="px-4 sm:px-6 py-3 sm:py-3.5 grid grid-cols-[auto,1fr] sm:grid-cols-[3rem,2fr,2fr,1.2fr,1.2fr] gap-3 sm:gap-2 items-center bg-gradient-to-r from-transparent to-transparent hover:from-orange-500/5 hover:to-purple-500/10 transition"
+              >
+                {/* Rank (mobile + desktop) */}
+                <div className="flex items-center gap-2 sm:gap-0">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/40 border border-white/10 text-xs font-semibold">
+                    {rank}
+                  </span>
+                  {/* Mobile player block */}
+                  <div className="sm:hidden">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center text-xs font-bold">
+                        {getInitials(p.username)}
+                      </div>
+                      <div>
+                        <div className="text-sm font-semibold">
+                          {p.username}
+                        </div>
+                        <div className="text-[11px] text-gray-400">
+                          {p.team}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Player (desktop) */}
+                <div className="hidden sm:flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center text-xs font-bold">
+                    {getInitials(p.username)}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold">{p.username}</div>
+                    {isLeader && (
+                      <div className="text-[11px] text-orange-300">
+                        🔥 On a hot streak
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Team (desktop only) */}
+                <div className="hidden sm:block text-sm text-gray-200">
+                  {p.team}
+                </div>
+
+                {/* Current streak */}
+                <div className="text-right text-sm">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    <span className="font-semibold">{p.currentStreak}</span>
+                    <span className="text-[11px] text-gray-400">in a row</span>
+                  </span>
+                </div>
+
+                {/* Longest streak */}
+                <div className="text-right text-sm">
+                  <span
+                    className={`inline-flex items-center justify-end gap-1 ${
+                      isLeader ? "text-orange-300" : ""
+                    }`}
+                  >
+                    <span className="font-semibold">
+                      {p.longestStreak}
+                    </span>
+                    <span className="text-[11px] text-gray-400">
+                      longest
+                    </span>
+                  </span>
+                </div>
+
+                {/* Mobile streak summary */}
+                <div className="col-span-2 sm:hidden text-[11px] text-gray-400 flex justify-between mt-1">
+                  <span>
+                    Current:{" "}
+                    <span className="font-semibold text-gray-100">
+                      {p.currentStreak}
+                    </span>
+                  </span>
+                  <span>
+                    Longest:{" "}
+                    <span className="font-semibold text-orange-300">
+                      {p.longestStreak}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-4 sm:px-6 py-3 bg-black/40 text-[11px] text-gray-400">
+          This is a visual preview only. Later we&apos;ll pull live data from
+          your picks and show full global / round / private league ladders.
         </div>
       </div>
-      <div className="w-28 text-right text-[11px] md:text-xs text-slate-300 hidden md:block">
-        {entry.favouriteTeam}
-      </div>
-      <div className="w-28 text-right font-semibold text-slate-100">
-        {entry.currentStreak} in a row
-      </div>
-      <div className="w-24 text-right text-[11px] md:text-xs text-slate-300 hidden md:block">
-        Best {entry.bestStreak}
-      </div>
-    </li>
+    </div>
   );
 }
