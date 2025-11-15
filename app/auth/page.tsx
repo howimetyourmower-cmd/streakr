@@ -1,7 +1,13 @@
 // app/auth/page.tsx
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  FormEvent,
+  ChangeEvent,
+} from "react";
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -9,54 +15,43 @@ import {
   onAuthStateChanged,
   User,
 } from "firebase/auth";
-import { doc, serverTimestamp, setDoc, getDoc } from "firebase/firestore";
+import {
+  doc,
+  serverTimestamp,
+  setDoc,
+  getDoc,
+} from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebaseClient";
 
-// --------------------------
-// Helpers
-// --------------------------
-function getAgeFromDob(dob: string): number | null {
-  if (!dob) return null;
-  const d = new Date(dob);
-  if (isNaN(d.getTime())) return null;
-  const today = new Date();
-  let age = today.getFullYear() - d.getFullYear();
-  const m = today.getMonth() - d.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--;
-  return age;
-}
-function clsx(...classes: (string | false | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
+type Gender = "" | "female" | "male" | "nonbinary" | "other";
 
-type TeamOption =
-  | "Adelaide Crows"
-  | "Brisbane Lions"
-  | "Carlton"
-  | "Collingwood"
-  | "Essendon"
-  | "Fremantle"
-  | "Geelong Cats"
-  | "Gold Coast Suns"
-  | "GWS Giants"
-  | "Hawthorn"
-  | "Melbourne"
-  | "North Melbourne"
-  | "Port Adelaide"
-  | "Richmond"
-  | "St Kilda"
-  | "Sydney Swans"
-  | "West Coast Eagles"
-  | "Western Bulldogs";
+type SignUpForm = {
+  email: string;
+  password: string;
+  username: string;
+  firstName: string;
+  surname: string;
+  phone: string;
+  dob: string;
+  suburb: string;
+  state: string;
+  gender: Gender;
+  team: string;
+};
 
-const TEAMS: TeamOption[] = [
+type LoginForm = {
+  email: string;
+  password: string;
+};
+
+const AFL_TEAMS = [
   "Adelaide Crows",
   "Brisbane Lions",
   "Carlton",
   "Collingwood",
   "Essendon",
-  "Fremantle",
+  "Fremantle Dockers",
   "Geelong Cats",
   "Gold Coast Suns",
   "GWS Giants",
@@ -71,18 +66,42 @@ const TEAMS: TeamOption[] = [
   "Western Bulldogs",
 ];
 
-// --------------------------
-// Page
-// --------------------------
 export default function AuthPage() {
-  const [mode, setMode] = useState<"signup" | "login">("signup");
-  const [user, setUser] = useState<User | null>(null);
   const router = useRouter();
 
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [loginForm, setLoginForm] = useState<LoginForm>({
+    email: "",
+    password: "",
+  });
+  const [loginError, setLoginError] = useState("");
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+
+  const [signUpForm, setSignUpForm] = useState<SignUpForm>({
+    email: "",
+    password: "",
+    username: "",
+    firstName: "",
+    surname: "",
+    phone: "",
+    dob: "",
+    suburb: "",
+    state: "",
+    gender: "",
+    team: "",
+  });
+  const [signUpError, setSignUpError] = useState("");
+  const [signUpSubmitting, setSignUpSubmitting] = useState(false);
+  const [showSignUpPassword, setShowSignUpPassword] = useState(false);
+
+  // Watch auth state
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      // If already logged in, push them to picks
+      setAuthUser(u);
+      setAuthLoading(false);
       if (u) {
         router.push("/picks");
       }
@@ -90,389 +109,419 @@ export default function AuthPage() {
     return () => unsub();
   }, [router]);
 
-  return (
-    <main className="min-h-screen w-full bg-black text-white flex items-center justify-center p-6">
-      <div className="w-full max-w-2xl">
-        {/* Brand */}
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-extrabold tracking-tight">
-            STREAK<span className="text-orange-500">r</span>
-          </h1>
-          <p className="text-sm text-zinc-300 mt-1">
-            Real Streakr&apos;s don&apos;t get caught.
-          </p>
-        </div>
+  const isSignUpValid = useMemo(() => {
+    return (
+      signUpForm.email.trim() &&
+      signUpForm.password.trim().length >= 6 &&
+      signUpForm.username.trim() &&
+      signUpForm.firstName.trim() &&
+      signUpForm.dob.trim()
+    );
+  }, [signUpForm]);
 
-        {/* Card */}
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
-          <div className="grid grid-cols-2">
+  const handleLoginChange = (field: keyof LoginForm, value: string) => {
+    setLoginForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleSignUpChange = (field: keyof SignUpForm, value: string) => {
+    setSignUpForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleLoginSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setLoginError("");
+
+    if (!loginForm.email.trim() || !loginForm.password.trim()) {
+      setLoginError("Please enter your email and password.");
+      return;
+    }
+
+    try {
+      setLoginSubmitting(true);
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        loginForm.email.trim(),
+        loginForm.password.trim()
+      );
+
+      if (!cred.user.emailVerified) {
+        // not blocking, but we can nudge
+        setLoginError("Logged in. Please verify your email to get full access.");
+      } else {
+        setLoginError("");
+      }
+
+      router.push("/picks");
+    } catch (err: any) {
+      console.error(err);
+      let msg = "Failed to log in. Please try again.";
+      if (err?.code === "auth/invalid-credential") {
+        msg = "Incorrect email or password.";
+      } else if (err?.code === "auth/user-not-found") {
+        msg = "No account found with that email.";
+      } else if (err?.code === "auth/wrong-password") {
+        msg = "Incorrect password.";
+      }
+      setLoginError(msg);
+    } finally {
+      setLoginSubmitting(false);
+    }
+  };
+
+  const handleSignUpSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSignUpError("");
+
+    if (!isSignUpValid) {
+      setSignUpError(
+        "Please fill in email, password (6+ chars), username, first name and date of birth."
+      );
+      return;
+    }
+
+    try {
+      setSignUpSubmitting(true);
+
+      const email = signUpForm.email.trim();
+      const password = signUpForm.password.trim();
+
+      // Create auth user
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+
+      try {
+        await sendEmailVerification(cred.user);
+      } catch (err) {
+        console.warn("Could not send verification email", err);
+      }
+
+      // Create Firestore user doc
+      const userRef = doc(db, "users", cred.user.uid);
+      const existingSnap = await getDoc(userRef);
+
+      const baseData = {
+        email,
+        username: signUpForm.username.trim(),
+        firstName: signUpForm.firstName.trim(),
+        surname: signUpForm.surname.trim() || null,
+        phone: signUpForm.phone.trim() || null,
+        dob: signUpForm.dob.trim(),
+        suburb: signUpForm.suburb.trim() || null,
+        state: signUpForm.state.trim() || null,
+        gender: (signUpForm.gender as Gender) || null,
+        team: signUpForm.team || null,
+        name: `${signUpForm.firstName.trim()} ${
+          signUpForm.surname.trim() || ""
+        }`.trim(),
+        currentStreak: 0,
+        longestStreak: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (existingSnap.exists()) {
+        await setDoc(userRef, baseData, { merge: true });
+      } else {
+        await setDoc(userRef, baseData);
+      }
+
+      router.push("/picks");
+    } catch (err: any) {
+      console.error(err);
+      let msg = "Failed to create account. Please try again.";
+      if (err?.code === "auth/email-already-in-use") {
+        msg = "That email is already in use.";
+      } else if (err?.code === "auth/weak-password") {
+        msg = "Password is too weak. Use at least 6 characters.";
+      }
+      setSignUpError(msg);
+    } finally {
+      setSignUpSubmitting(false);
+    }
+  };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center text-sm text-gray-300">
+        Loading…
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 text-white">
+      <h1 className="text-3xl sm:text-4xl font-bold mb-6 text-center sm:text-left">
+        Log in or create your STREAKr account
+      </h1>
+
+      <div className="grid gap-6 md:grid-cols-[1.1fr,1.4fr]">
+        {/* LOGIN PANEL */}
+        <form
+          onSubmit={handleLoginSubmit}
+          className="rounded-2xl bg-[#050818] border border-white/10 p-5 sm:p-6 shadow-xl flex flex-col"
+        >
+          <h2 className="text-xl font-semibold mb-4">Log in</h2>
+
+          <label className="block text-xs mb-1 text-gray-400">
+            Email address
+          </label>
+          <input
+            type="email"
+            value={loginForm.email}
+            onChange={(e) => handleLoginChange("email", e.target.value)}
+            className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-orange-500"
+          />
+
+          <label className="block text-xs mb-1 text-gray-400">Password</label>
+          <div className="relative mb-2">
+            <input
+              type={showLoginPassword ? "text" : "password"}
+              value={loginForm.password}
+              onChange={(e) => handleLoginChange("password", e.target.value)}
+              className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
             <button
-              className={clsx(
-                "py-3 text-center font-semibold transition",
-                mode === "signup"
-                  ? "bg-zinc-900 text-white"
-                  : "bg-zinc-950 text-zinc-400 hover:text-white"
-              )}
-              onClick={() => setMode("signup")}
+              type="button"
+              onClick={() =>
+                setShowLoginPassword((prev) => !prev)
+              }
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white"
             >
-              Sign Up
-            </button>
-            <button
-              className={clsx(
-                "py-3 text-center font-semibold transition",
-                mode === "login"
-                  ? "bg-zinc-900 text-white"
-                  : "bg-zinc-950 text-zinc-400 hover:text-white"
-              )}
-              onClick={() => setMode("login")}
-            >
-              Log In
+              {showLoginPassword ? "Hide" : "Show"}
             </button>
           </div>
 
-          {mode === "signup" ? <SignUpPanel /> : <LoginPanel />}
-        </div>
-
-        {user && (
-          <p className="mt-4 text-center text-sm text-green-400">
-            Signed in as{" "}
-            <span className="font-semibold">{user.email}</span>.
-          </p>
-        )}
-      </div>
-    </main>
-  );
-}
-
-// --------------------------
-// Sign Up
-// --------------------------
-function SignUpPanel() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [dob, setDob] = useState(""); // yyyy-mm-dd
-  const [suburb, setSuburb] = useState("");
-  const [state, setState] = useState("VIC");
-  const [team, setTeam] = useState<TeamOption | "">("");
-  const [consentMinor, setConsentMinor] = useState(false);
-  const [agreeAge16, setAgreeAge16] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const age = useMemo(() => getAgeFromDob(dob), [dob]);
-  const isMinor = age !== null && age < 18;
-
-  const canSubmit = useMemo(() => {
-    if (!name || !email || !password || !dob || !team) return false;
-    if (!agreeAge16) return false;
-    if (age === null || age < 16) return false;
-    if (isMinor && !consentMinor) return false;
-    return true;
-  }, [name, email, password, dob, team, agreeAge16, age, isMinor, consentMinor]);
-
-  async function handleSignUp(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-    if (!canSubmit) return;
-
-    try {
-      setLoading(true);
-      const cred = await createUserWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
-
-      // Create Firestore profile if missing
-      const ref = doc(db, "users", cred.user.uid);
-      const existing = await getDoc(ref);
-      if (!existing.exists()) {
-        await setDoc(ref, {
-          uid: cred.user.uid,
-          name: name.trim(),
-          email: email.trim().toLowerCase(),
-          dob,
-          suburb: suburb.trim(),
-          state,
-          team,
-          createdAt: serverTimestamp(),
-        });
-      }
-
-      await sendEmailVerification(cred.user);
-      setMessage(
-        "Sign-up successful! Check your email to verify, then log in to continue."
-      );
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Something went wrong.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handleSignUp} className="p-6 md:p-8 space-y-4">
-      {message && (
-        <div className="rounded-lg border border-green-700 bg-green-900/30 p-3 text-sm text-green-300">
-          {message}
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Field label="Full name">
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-            placeholder="Your name"
-          />
-        </Field>
-        <Field label="Email">
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-            placeholder="you@example.com"
-          />
-        </Field>
-        <Field label="Password (min 8 chars)">
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-            placeholder="••••••••"
-          />
-        </Field>
-        <Field label="Date of birth">
-          <input
-            type="date"
-            required
-            value={dob}
-            onChange={(e) => setDob(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-          />
-          {age !== null && (
-            <p
-              className={clsx(
-                "mt-1 text-xs",
-                age < 16 ? "text-red-400" : "text-zinc-400"
-              )}
-            >
-              Age: {age}
-            </p>
+          {loginError && (
+            <p className="text-xs text-red-400 mb-2">{loginError}</p>
           )}
-        </Field>
-        <Field label="Suburb">
-          <input
-            type="text"
-            value={suburb}
-            onChange={(e) => setSuburb(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-            placeholder="e.g. Bentleigh"
-          />
-        </Field>
-        <Field label="State">
-          <select
-            value={state}
-            onChange={(e) => setState(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
+
+          <button
+            type="submit"
+            disabled={loginSubmitting}
+            className="mt-2 w-full rounded-md bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 px-4 py-2 text-sm font-semibold"
           >
-            {"ACT,NSW,NT,QLD,SA,TAS,VIC,WA".split(",").map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Favourite team">
-          <select
-            required
-            value={team}
-            onChange={(e) => setTeam(e.target.value as TeamOption)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
+            {loginSubmitting ? "Logging in…" : "Log in"}
+          </button>
+
+          <p className="mt-3 text-[11px] text-gray-400">
+            Use the same account on web and mobile (when the app launches) to
+            keep your streaks and rewards in sync.
+          </p>
+        </form>
+
+        {/* SIGNUP PANEL */}
+        <form
+          onSubmit={handleSignUpSubmit}
+          className="rounded-2xl bg-[#050818] border border-white/10 p-5 sm:p-6 shadow-xl flex flex-col gap-4"
+        >
+          <h2 className="text-xl font-semibold">Create an account</h2>
+          <p className="text-xs text-gray-400 mb-1">
+            We&apos;ll use these details for leaderboards and prizes. You can
+            edit most of them later in your profile.
+          </p>
+
+          {/* Email + password */}
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Email address
+              </label>
+              <input
+                type="email"
+                value={signUpForm.email}
+                onChange={(e) =>
+                  handleSignUpChange("email", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Password
+              </label>
+              <div className="relative">
+                <input
+                  type={showSignUpPassword ? "text" : "password"}
+                  value={signUpForm.password}
+                  onChange={(e) =>
+                    handleSignUpChange("password", e.target.value)
+                  }
+                  className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Min 6 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowSignUpPassword((prev) => !prev)
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-white"
+                >
+                  {showSignUpPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Username / name / DOB */}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Username
+              </label>
+              <input
+                type="text"
+                value={signUpForm.username}
+                onChange={(e) =>
+                  handleSignUpChange("username", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="This will show on leaderboards"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                First name
+              </label>
+              <input
+                type="text"
+                value={signUpForm.firstName}
+                onChange={(e) =>
+                  handleSignUpChange("firstName", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Surname (optional)
+              </label>
+              <input
+                type="text"
+                value={signUpForm.surname}
+                onChange={(e) =>
+                  handleSignUpChange("surname", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Date of birth
+              </label>
+              <input
+                type="date"
+                value={signUpForm.dob}
+                onChange={(e) =>
+                  handleSignUpChange("dob", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Suburb
+              </label>
+              <input
+                type="text"
+                value={signUpForm.suburb}
+                onChange={(e) =>
+                  handleSignUpChange("suburb", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="e.g. Bentleigh"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                State
+              </label>
+              <input
+                type="text"
+                value={signUpForm.state}
+                onChange={(e) =>
+                  handleSignUpChange("state", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="e.g. VIC"
+              />
+            </div>
+          </div>
+
+          {/* Phone / gender / team */}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Phone (optional)
+              </label>
+              <input
+                type="tel"
+                value={signUpForm.phone}
+                onChange={(e) =>
+                  handleSignUpChange("phone", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Gender
+              </label>
+              <select
+                value={signUpForm.gender}
+                onChange={(e: ChangeEvent<HTMLSelectElement>) =>
+                  handleSignUpChange("gender", e.target.value as Gender)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">Prefer not to say</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="nonbinary">Non-binary</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs mb-1 text-gray-400">
+                Favourite AFL team
+              </label>
+              <select
+                value={signUpForm.team}
+                onChange={(e) =>
+                  handleSignUpChange("team", e.target.value)
+                }
+                className="w-full rounded-md bg-[#0b1020] border border-white/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+              >
+                <option value="">Select a team</option>
+                {AFL_TEAMS.map((team) => (
+                  <option key={team} value={team}>
+                    {team}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {signUpError && (
+            <p className="text-xs text-red-400">{signUpError}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={signUpSubmitting || !isSignUpValid}
+            className="mt-2 w-full rounded-md bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 px-4 py-2 text-sm font-semibold"
           >
-            <option value="">Select team…</option>
-            {TEAMS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </Field>
+            {signUpSubmitting ? "Creating account…" : "Create account"}
+          </button>
+
+          <p className="mt-3 text-[11px] text-gray-400">
+            By creating an account you agree to play fair and follow any
+            competition terms. We&apos;ll only use your details for STREAKr
+            (no spam).
+          </p>
+        </form>
       </div>
-
-      <div className="space-y-3">
-        <label className="flex items-start gap-3 text-sm">
-          <input
-            type="checkbox"
-            className="mt-1 h-4 w-4 accent-orange-500"
-            checked={agreeAge16}
-            onChange={(e) => setAgreeAge16(e.target.checked)}
-          />
-          <span>
-            I confirm I am{" "}
-            <span className="font-semibold">16 years or older</span> and agree
-            to the Streakr Rules.
-          </span>
-        </label>
-        {isMinor && (
-          <label className="flex items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              className="mt-1 h-4 w-4 accent-orange-500"
-              checked={consentMinor}
-              onChange={(e) => setConsentMinor(e.target.checked)}
-            />
-            <span>
-              I am under 18 and have{" "}
-              <span className="font-semibold">
-                parent/guardian permission
-              </span>{" "}
-              to play.
-            </span>
-          </label>
-        )}
-      </div>
-
-      <button
-        type="submit"
-        disabled={!canSubmit || loading}
-        className={clsx(
-          "w-full rounded-xl py-3 font-semibold transition",
-          canSubmit && !loading
-            ? "bg-orange-500 hover:bg-orange-600 text-black"
-            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-        )}
-      >
-        {loading ? "Creating account…" : "Create account"}
-      </button>
-
-      <p className="text-center text-xs text-zinc-400">
-        By creating an account you agree to our Terms and Privacy Policy.
-      </p>
-    </form>
-  );
-}
-
-// --------------------------
-// Login
-// --------------------------
-function LoginPanel() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
-    try {
-      setLoading(true);
-      const { user } = await signInWithEmailAndPassword(
-        auth,
-        email.trim(),
-        password
-      );
-      if (!user.emailVerified) {
-        setMessage(
-          "You're signed in, but your email isn't verified yet. Please verify to access all features."
-        );
-      }
-      // After login, onAuthStateChanged in AuthPage will push to /picks
-    } catch (err: any) {
-      console.error(err);
-      setError(err?.message || "Login failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handleLogin} className="p-6 md:p-8 space-y-4">
-      {message && (
-        <div className="rounded-lg border border-amber-700 bg-amber-900/30 p-3 text-sm text-amber-200">
-          {message}
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-red-700 bg-red-900/30 p-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
-      <Field label="Email">
-        <input
-          type="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-          placeholder="you@example.com"
-        />
-      </Field>
-      <Field label="Password">
-        <input
-          type="password"
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-orange-500"
-          placeholder="••••••••"
-        />
-      </Field>
-
-      <button
-        type="submit"
-        disabled={loading}
-        className={clsx(
-          "w-full rounded-xl py-3 font-semibold transition",
-          !loading
-            ? "bg-orange-500 hover:bg-orange-600 text-black"
-            : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-        )}
-      >
-        {loading ? "Signing in…" : "Sign in"}
-      </button>
-
-      <p className="text-center text-xs text-zinc-400">
-        Forgot password? Reset link coming soon.
-      </p>
-    </form>
-  );
-}
-
-// --------------------------
-// Small Field component
-// --------------------------
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block text-sm">
-      <span className="text-zinc-300 mb-1 inline-block">{label}</span>
-      {children}
-    </label>
+    </div>
   );
 }
