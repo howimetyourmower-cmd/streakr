@@ -3,7 +3,7 @@
 
 import { useEffect, useState, FormEvent, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db, storage } from "@/lib/firebaseClient";
+import { auth, db } from "@/lib/firebaseClient";
 import {
   signOut,
   sendEmailVerification,
@@ -11,7 +11,6 @@ import {
   reauthenticateWithCredential,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/hooks/useAuth";
 
 type UserDoc = {
@@ -28,7 +27,7 @@ type UserDoc = {
   surname?: string;
   phone?: string;
   gender?: string;
-  avatarUrl?: string;
+  avatarUrl?: string; // future use
 };
 
 type FormState = {
@@ -110,7 +109,7 @@ export default function ProfilePage() {
   const [verifError, setVerifError] = useState("");
   const [sendingVerif, setSendingVerif] = useState(false);
 
-  // Avatar state
+  // Avatar UI state (preview only for now)
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState("");
@@ -165,7 +164,7 @@ export default function ProfilePage() {
     };
 
     loadUserDoc();
-  }, [user]);
+  }, [user, db]);
 
   const handleChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -186,7 +185,6 @@ export default function ProfilePage() {
     }
 
     if (file.size > 3 * 1024 * 1024) {
-      // 3MB limit
       setAvatarError("Image too large. Please use a file under 3MB.");
       setAvatarFile(null);
       return;
@@ -226,21 +224,12 @@ export default function ProfilePage() {
       );
       await reauthenticateWithCredential(user, cred);
 
-      // Start from existing avatar (so if upload fails we keep old one)
-      let newAvatarUrl: string | undefined = userDoc?.avatarUrl;
-
+      // NOTE: for now we do NOT upload avatar to Storage.
+      // We just save text fields, so nothing here can hang.
       if (avatarFile) {
-        try {
-          const storageRef = ref(storage, `avatars/${user.uid}`);
-          await uploadBytes(storageRef, avatarFile);
-          newAvatarUrl = await getDownloadURL(storageRef);
-        } catch (err) {
-          console.error("Avatar upload error", err);
-          setAvatarError(
-            "Could not upload avatar. Profile saved without changing avatar."
-          );
-          // IMPORTANT: do NOT throw here – we still want to save other fields
-        }
+        setAvatarError(
+          "Avatar upload coming soon. Your profile details were saved."
+        );
       }
 
       // Prepare updated fields (only editable ones)
@@ -273,10 +262,6 @@ export default function ProfilePage() {
         updateData.name = updatedName;
       }
 
-      if (typeof newAvatarUrl === "string") {
-        updateData.avatarUrl = newAvatarUrl;
-      }
-
       await setDoc(refDoc, updateData, { merge: true });
 
       setSaveMessage("Profile updated.");
@@ -292,7 +277,6 @@ export default function ProfilePage() {
               gender: form.gender || undefined,
               team: form.team || undefined,
               name: updatedName ?? prev.name,
-              avatarUrl: newAvatarUrl ?? prev.avatarUrl,
             }
           : {
               surname: updatedSurname || undefined,
@@ -302,14 +286,8 @@ export default function ProfilePage() {
               gender: form.gender || undefined,
               team: form.team || undefined,
               name: updatedName,
-              avatarUrl: newAvatarUrl,
             }
       );
-
-      if (newAvatarUrl) {
-        setAvatarPreview(newAvatarUrl);
-        setAvatarFile(null);
-      }
 
       setCurrentPassword("");
       setTimeout(() => setSaveMessage(""), 3000);
@@ -431,7 +409,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Avatar upload */}
+          {/* Avatar upload (preview only) */}
           <div className="border-t border-white/5 pt-4">
             <label className="block text-xs mb-1 text-gray-400">
               Avatar (optional)
@@ -444,7 +422,7 @@ export default function ProfilePage() {
                 className="text-xs text-gray-300"
               />
               <span className="text-[11px] text-gray-500">
-                JPG/PNG, max 3MB. This will show on leaderboards.
+                JPG/PNG, max 3MB. Avatars will be fully enabled soon.
               </span>
             </div>
             {avatarError && (
