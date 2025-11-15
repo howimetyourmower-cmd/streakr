@@ -3,7 +3,7 @@
 
 import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db } from "@/lib/firebaseClient";
+import { auth, db, storage } from "@/lib/firebaseClient";
 import {
   signOut,
   sendEmailVerification,
@@ -11,6 +11,7 @@ import {
   reauthenticateWithCredential,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/hooks/useAuth";
 
 type UserDoc = {
@@ -27,6 +28,7 @@ type UserDoc = {
   surname?: string;
   phone?: string;
   gender?: string;
+  avatarUrl?: string;
 };
 
 type FormState = {
@@ -108,6 +110,11 @@ export default function ProfilePage() {
   const [verifError, setVerifError] = useState("");
   const [sendingVerif, setSendingVerif] = useState(false);
 
+  // Avatar state
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState("");
+
   // Redirect if not logged in
   useEffect(() => {
     if (!loading && !user) {
@@ -121,8 +128,8 @@ export default function ProfilePage() {
       if (!user) return;
       setDocLoading(true);
       try {
-        const ref = doc(db, "users", user.uid);
-        const snap = await getDoc(ref);
+        const refDoc = doc(db, "users", user.uid);
+        const snap = await getDoc(refDoc);
 
         let data: UserDoc;
         if (snap.exists()) {
@@ -150,16 +157,44 @@ export default function ProfilePage() {
           phone: data.phone || "",
           gender: data.gender || "",
         });
+
+        setAvatarPreview(data.avatarUrl || null);
       } finally {
         setDocLoading(false);
       }
     };
 
     loadUserDoc();
-  }, [user]);
+  }, [user, db]);
 
   const handleChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAvatarError("");
+    const file = e.target.files?.[0];
+    if (!file) {
+      setAvatarFile(null);
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      setAvatarError("Please select an image file.");
+      setAvatarFile(null);
+      return;
+    }
+
+    if (file.size > 3 * 1024 * 1024) {
+      // 3MB limit
+      setAvatarError("Image too large. Please use a file under 3MB.");
+      setAvatarFile(null);
+      return;
+    }
+
+    setAvatarFile(file);
+    const previewUrl = URL.createObjectURL(file);
+    setAvatarPreview(previewUrl);
   };
 
   const handleSaveProfile = async (e: FormEvent) => {
@@ -169,6 +204,7 @@ export default function ProfilePage() {
     setSaving(true);
     setSaveMessage("");
     setSaveError("");
+    setAvatarError("");
 
     try {
       if (!currentPassword) {
@@ -190,6 +226,14 @@ export default function ProfilePage() {
       );
       await reauthenticateWithCredential(user, cred);
 
+      // If a new avatar file selected, upload it first
+      let newAvatarUrl: string | undefined;
+      if (avatarFile) {
+        const storageRef = ref(storage, `avatars/${user.uid}`);
+        await uploadBytes(storageRef, avatarFile);
+        newAvatarUrl = await getDownloadURL(storageRef);
+      }
+
       // Prepare updated fields (only editable ones)
       const updatedSurname = form.surname.trim() || null;
 
@@ -201,7 +245,7 @@ export default function ProfilePage() {
         if (combined) updatedName = combined;
       }
 
-      const ref = doc(db, "users", user.uid);
+      const refDoc = doc(db, "users", user.uid);
 
       const updateData: any = {
         surname: updatedSurname,
@@ -220,7 +264,11 @@ export default function ProfilePage() {
         updateData.name = updatedName;
       }
 
-      await setDoc(ref, updateData, { merge: true });
+      if (typeof newAvatarUrl === "string") {
+        updateData.avatarUrl = newAvatarUrl;
+      }
+
+      await setDoc(refDoc, updateData, { merge: true });
 
       setSaveMessage("Profile updated.");
 
@@ -235,6 +283,7 @@ export default function ProfilePage() {
               gender: form.gender || undefined,
               team: form.team || undefined,
               name: updatedName ?? prev.name,
+              avatarUrl: newAvatarUrl ?? prev.avatarUrl,
             }
           : {
               surname: updatedSurname || undefined,
@@ -244,8 +293,14 @@ export default function ProfilePage() {
               gender: form.gender || undefined,
               team: form.team || undefined,
               name: updatedName,
+              avatarUrl: newAvatarUrl,
             }
       );
+
+      if (newAvatarUrl) {
+        setAvatarPreview(newAvatarUrl);
+        setAvatarFile(null);
+      }
 
       setCurrentPassword("");
       setTimeout(() => setSaveMessage(""), 3000);
@@ -297,8 +352,11 @@ export default function ProfilePage() {
   }
 
   const displayEmail = user?.email || userDoc?.email || "";
+  const displayNameForInitials =
+    userDoc?.name || form.username || displayEmail;
 
-  const initials = getInitials(userDoc?.name || form.username || displayEmail);
+  const initials = getInitials(displayNameForInitials);
+  const avatarToShow = avatarPreview || userDoc?.avatarUrl || null;
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
@@ -312,10 +370,20 @@ export default function ProfilePage() {
         >
           {/* Top row: avatar + basic info */}
           <div className="flex items-center gap-4">
-            <div className="h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center text-lg sm:text-xl font-bold">
-              {initials}
+            <div className="relative h-16 w-16 sm:h-20 sm:w-20">
+              {avatarToShow ? (
+                <img
+                  src={avatarToShow}
+                  alt="Avatar"
+                  className="h-full w-full rounded-full object-cover border border-white/20"
+                />
+              ) : (
+                <div className="h-full w-full rounded-full bg-gradient-to-br from-orange-500 to-pink-500 flex items-center justify-center text-lg sm:text-2xl font-bold">
+                  {initials}
+                </div>
+              )}
             </div>
-            <div>
+            <div className="flex-1">
               <div className="text-sm text-gray-400">Logged in as</div>
               <div className="text-base font-semibold break-all">
                 {displayEmail}
@@ -352,6 +420,27 @@ export default function ProfilePage() {
                 <p className="text-[11px] text-red-400 mt-1">{verifError}</p>
               )}
             </div>
+          </div>
+
+          {/* Avatar upload */}
+          <div className="border-t border-white/5 pt-4">
+            <label className="block text-xs mb-1 text-gray-400">
+              Avatar (optional)
+            </label>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarChange}
+                className="text-xs text-gray-300"
+              />
+              <span className="text-[11px] text-gray-500">
+                JPG/PNG, max 3MB. This will show on leaderboards.
+              </span>
+            </div>
+            {avatarError && (
+              <p className="text-[11px] text-red-400 mt-1">{avatarError}</p>
+            )}
           </div>
 
           {/* Account fields */}
