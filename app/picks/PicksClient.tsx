@@ -288,7 +288,7 @@ export default function PicksClient() {
           return (
             <div
               key={row.id}
-              className="grid grid-cols-12 bg-[#101a2a] px-4 py-1.5 rounded-lg items-center"
+              className="grid grid-cols-12 bg-[#101a2a] px-4 py-0.5 rounded-lg items-center"
             >
               {/* DATE */}
               <div className="col-span-2">
