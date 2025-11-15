@@ -1,6 +1,88 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Image from "next/image";
 
+type QuestionStatus = "open" | "final" | "pending" | "void";
+
+type ApiQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+};
+
+type ApiGame = {
+  id: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  questions: ApiQuestion[];
+};
+
+type QuestionRow = {
+  id: string;
+  gameId: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+};
+
+type PicksApiResponse = { games: ApiGame[] };
+
 export default function HomePage() {
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  // Load latest open questions from /api/picks
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch("/api/picks");
+        if (!res.ok) throw new Error("Failed to load picks");
+
+        const data: PicksApiResponse = await res.json();
+
+        const flat: QuestionRow[] = data.games.flatMap((g) =>
+          g.questions.map((q) => ({
+            id: q.id,
+            gameId: g.id,
+            match: g.match,
+            venue: g.venue,
+            startTime: g.startTime,
+            quarter: q.quarter,
+            question: q.question,
+            status: q.status,
+          }))
+        );
+
+        // Only open questions, sorted by start time
+        const open = flat
+          .filter((r) => r.status === "open")
+          .sort((a, b) => {
+            const da = new Date(a.startTime).getTime();
+            const db = new Date(b.startTime).getTime();
+            return da - db;
+          });
+
+        setQuestions(open);
+      } catch (e) {
+        console.error(e);
+        setError("Failed to load latest questions.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
+  const previewQuestions = questions.slice(0, 6);
+
   return (
     <main className="min-h-screen bg-[#020617] text-white">
       {/* ---------- HERO SECTION ---------- */}
@@ -86,103 +168,54 @@ export default function HomePage() {
           to lock in your streak.
         </p>
 
-        <div className="grid gap-6 md:grid-cols-3">
-          {/* CARD 1 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Richmond vs Carlton
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Carlton win or draw against Richmond?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
+        {loading && (
+          <div className="grid gap-6 md:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="rounded-2xl p-5 bg-orange-500/40 animate-pulse h-28"
+              />
+            ))}
           </div>
+        )}
 
-          {/* CARD 2 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Richmond vs Carlton
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Patrick Cripps get 6 or more disposals in the 1st Quarter?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
-          </div>
+        {!loading && error && (
+          <p className="text-sm text-red-400">{error}</p>
+        )}
 
-          {/* CARD 3 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Richmond vs Carlton
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Sam Walsh kick a goal in the 2nd Quarter?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
-          </div>
+        {!loading && !error && previewQuestions.length === 0 && (
+          <p className="text-sm text-slate-300">
+            No open questions right now. Check back soon or see previous
+            rounds in Picks.
+          </p>
+        )}
 
-          {/* CARD 4 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Hawthorn vs Essendon
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Hawthorn beat Essendon by 22 points or more?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
+        {!loading && !error && previewQuestions.length > 0 && (
+          <div className="grid gap-6 md:grid-cols-3">
+            {previewQuestions.map((q) => (
+              <div
+                key={q.id}
+                className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg"
+              >
+                <h4 className="font-semibold mb-1 text-white truncate">
+                  {q.match}
+                </h4>
+                <p className="text-xs text-white/80 mb-2">
+                  Q{q.quarter} • {q.venue}
+                </p>
+                <p className="text-white/90 text-sm mb-4 line-clamp-3">
+                  {q.question}
+                </p>
+                <a
+                  href="/picks"
+                  className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
+                >
+                  Make your pick →
+                </a>
+              </div>
+            ))}
           </div>
-
-          {/* CARD 5 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Hawthorn vs Essendon
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Jai Newcombe get 6 or more disposals in the 1st Quarter?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
-          </div>
-
-          {/* CARD 6 */}
-          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
-            <h4 className="font-semibold mb-2 text-white">
-              Hawthorn vs Essendon
-            </h4>
-            <p className="text-white/90 text-sm mb-4">
-              Will Jayden Short have 5 or more disposals in the 4th Quarter?
-            </p>
-            <a
-              href="/picks"
-              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
-            >
-              Make your pick →
-            </a>
-          </div>
-        </div>
+        )}
       </section>
 
       {/* ---------- HOW IT WORKS ---------- */}
