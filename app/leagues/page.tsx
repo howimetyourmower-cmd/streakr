@@ -1,90 +1,102 @@
-// app/leagues/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { auth, db } from "@/lib/firebaseClient";
-import { collection, getDocs, doc } from "firebase/firestore";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { db } from "@/lib/firebaseClient";
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  doc,
+  setDoc,
+} from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 
-export default function LeaguesHomePage() {
-  const [leagues, setLeagues] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function JoinLeaguePage() {
+  const router = useRouter();
+  const { user } = useAuth();
 
-  useEffect(() => {
-    const load = async () => {
-      const user = auth.currentUser;
-      if (!user) return;
+  const [code, setCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [error, setError] = useState("");
 
-      // We find all leagues where this user is in the members subcollection
-      const leaguesSnap = await getDocs(collection(db, "leagues"));
-      const list: any[] = [];
+  const handleJoin = async () => {
+    if (!user) {
+      router.push("/auth");
+      return;
+    }
 
-      for (const leagueDoc of leaguesSnap.docs) {
-        const memberRef = doc(
-          db,
-          `leagues/${leagueDoc.id}/members/${user.uid}`
-        );
-        const memberSnap = await getDocs(
-          collection(db, `leagues/${leagueDoc.id}/members`)
-        );
+    setJoining(true);
+    setError("");
 
-        const isMember = memberSnap.docs.some((d) => d.id === user.uid);
+    try {
+      // Look up league by code
+      const q = query(
+        collection(db, "leagues"),
+        where("code", "==", code.toUpperCase())
+      );
 
-        if (isMember) {
-          list.push({
-            id: leagueDoc.id,
-            ...leagueDoc.data(),
-          });
-        }
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        setError("No league found with that code.");
+        setJoining(false);
+        return;
       }
 
-      setLeagues(list);
-      setLoading(false);
-    };
+      const leagueDoc = snap.docs[0];
+      const leagueId = leagueDoc.id;
 
-    load();
-  }, []);
+      // Add user as member
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      await setDoc(memberRef, {
+        uid: user.uid,
+        username: user.displayName || user.email?.split("@")[0] || "Player",
+        avatarUrl: "",
+        currentStreak: 0,
+        longestStreak: 0,
+        isOwner: false,
+      });
+
+      router.push(`/leagues/${leagueId}`);
+    } catch (err) {
+      console.error("Failed to join league:", err);
+      setError("Something went wrong joining the league.");
+    } finally {
+      setJoining(false);
+    }
+  };
 
   return (
-    <main className="max-w-3xl mx-auto p-6 text-white">
-      <h1 className="text-3xl font-bold mb-6">Private Leagues</h1>
+    <main className="max-w-md mx-auto p-6 text-white">
+      <h1 className="text-3xl font-bold mb-4">Join a League</h1>
 
-      <div className="flex gap-4 mb-8">
-        <Link
-          href="/leagues/create"
-          className="bg-orange-500 text-black px-4 py-2 rounded-lg font-semibold hover:bg-orange-600"
-        >
-          Create League
-        </Link>
+      <p className="text-gray-300 mb-6 text-sm">
+        Enter the league code your mate shared with you.
+      </p>
 
-        <Link
-          href="/leagues/join"
-          className="bg-purple-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-purple-500"
-        >
-          Join League
-        </Link>
+      <div className="mb-4">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="Enter code (e.g. X7Q9F3)"
+          className="w-full px-4 py-2 rounded-lg bg-black/30 border border-white/20 focus:border-orange-400 outline-none"
+        />
       </div>
 
-      {loading && <p>Loading leagues…</p>}
-
-      {!loading && leagues.length === 0 && (
-        <p className="text-gray-300">You are not in any private leagues yet.</p>
+      {error && (
+        <p className="text-red-400 text-sm mb-3">{error}</p>
       )}
 
-      {!loading && leagues.length > 0 && (
-        <div className="space-y-4">
-          {leagues.map((league) => (
-            <Link
-              key={league.id}
-              href={`/leagues/${league.id}`}
-              className="block bg-slate-900/60 border border-white/10 rounded-lg p-4 hover:bg-slate-800 transition"
-            >
-              <h3 className="text-lg font-bold">{league.name}</h3>
-              <p className="text-sm text-gray-400">League code: {league.code}</p>
-            </Link>
-          ))}
-        </div>
-      )}
+      <button
+        onClick={handleJoin}
+        disabled={joining}
+        className="w-full bg-orange-500 hover:bg-orange-600 text-black font-semibold py-2 rounded-lg transition disabled:opacity-50"
+      >
+        {joining ? "Joining…" : "Join League"}
+      </button>
     </main>
   );
 }
