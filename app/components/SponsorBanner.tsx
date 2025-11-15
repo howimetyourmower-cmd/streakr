@@ -1,20 +1,29 @@
-// components/SponsorBanner.tsx
+// app/components/SponsorBanner.tsx
 import Link from "next/link";
 
 export default function SponsorBanner() {
   return (
-    <div className="bg-gradient-to-r from-orange-500 via-pink-500 to-purple-500 text-white text-xs md:text-sm">
-      <div className="max-w-6xl mx-auto px-4 py-2 flex flex-col md:flex-row items-center justify-between gap-2">
-        <p className="font-medium tracking-wide text-center md:text-left">
-          Sponsored by{" "}
-          <span className="font-semibold">Your Sponsor Here</span>
-        </p>
+    <div className="bg-gradient-to-r from-[#0b2447] via-[#0b3565] to-[#041322] shadow-md">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2 text-xs sm:text-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="rounded-full bg-[#f9d548] px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-black">
+            Sponsored
+          </span>
+
+          <p className="text-white/90">
+            Brought to you by{" "}
+            <span className="font-semibold text-white">
+              Your Sponsor Here
+            </span>
+            . Please tip responsibly.
+          </p>
+        </div>
 
         <Link
           href="#"
-          className="inline-flex items-center rounded-full bg-black/20 px-4 py-1 font-semibold hover:bg-black/30 transition text-[11px] md:text-xs"
+          className="hidden shrink-0 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-[#f9d548] hover:bg-white/15 sm:inline-flex"
         >
-          Become a sponsor
+          View offer
         </Link>
       </div>
     </div>
