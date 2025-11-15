@@ -1,5 +1,3 @@
-// FULL UPDATED PAGE — OPTIMISED, GRADIENT A, MOBILE-FRIENDLY, NEW YES/NO BUTTONS
-
 "use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
@@ -58,7 +56,6 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Comments
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -67,7 +64,7 @@ export default function PicksClient() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
-  // Date formatting
+  // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     const d = new Date(iso);
     if (isNaN(d.getTime())) return { date: "", time: "" };
@@ -88,7 +85,7 @@ export default function PicksClient() {
     };
   };
 
-  // Load picks from API
+  // -------- Load Picks --------
   useEffect(() => {
     const load = async () => {
       try {
@@ -96,7 +93,6 @@ export default function PicksClient() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
-
         const flat: QuestionRow[] = data.games.flatMap((g) =>
           g.questions.map((q) => ({
             id: q.id,
@@ -126,14 +122,14 @@ export default function PicksClient() {
     load();
   }, []);
 
-  // Filters
+  // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
     if (f === "all") setFilteredRows(rows);
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // Save pick
+  // -------- Save Pick --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     try {
       await addDoc(collection(db, "picks"), {
@@ -157,7 +153,7 @@ export default function PicksClient() {
     }
   };
 
-  // Status pill colours
+  // -------- Status pill styling --------
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
@@ -173,7 +169,7 @@ export default function PicksClient() {
     }
   };
 
-  // Comments
+  // -------- Comment drawer logic --------
   const openComments = async (row: QuestionRow) => {
     setCommentsOpenFor(row);
     setComments([]);
@@ -183,6 +179,8 @@ export default function PicksClient() {
 
     try {
       const res = await fetch(`/api/comments/${row.id}`);
+      if (!res.ok) throw new Error("Failed to load comments");
+
       const data = await res.json();
       const list: Comment[] = (data.comments || []).map((c: any) => ({
         id: c.id,
@@ -190,9 +188,9 @@ export default function PicksClient() {
         displayName: c.displayName,
         createdAt: c.createdAt,
       }));
-
       setComments(list);
     } catch (e) {
+      console.error(e);
       setCommentsError("Failed to load comments");
     } finally {
       setCommentsLoading(false);
@@ -201,12 +199,21 @@ export default function PicksClient() {
 
   const closeComments = () => {
     setCommentsOpenFor(null);
+    setComments([]);
+    setCommentText("");
+    setCommentsError("");
+  };
+
+  const handleCommentChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
+    setCommentText(e.target.value);
   };
 
   const submitComment = async () => {
     if (!commentsOpenFor || !commentText.trim()) return;
 
     setSubmittingComment(true);
+    setCommentsError("");
+
     try {
       const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
         method: "POST",
@@ -214,34 +221,32 @@ export default function PicksClient() {
         body: JSON.stringify({ body: commentText.trim() }),
       });
 
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) throw new Error("Failed to post comment");
 
       const created = await res.json();
+      const newComment: Comment = {
+        id: created.id || Math.random().toString(36),
+        body: commentText.trim(),
+        displayName: created.displayName,
+        createdAt: created.createdAt,
+      };
 
-      setComments((prev) => [
-        {
-          id: created.id || Math.random().toString(36),
-          displayName: created.displayName,
-          body: commentText.trim(),
-          createdAt: created.createdAt,
-        },
-        ...prev,
-      ]);
-
+      setComments((prev) => [newComment, ...prev]);
       setCommentText("");
     } catch (e) {
-      setCommentsError("Failed to post");
+      console.error(e);
+      setCommentsError("Failed to post comment");
     } finally {
       setSubmittingComment(false);
     }
   };
 
-  // ---------------------- UI ----------------------
-
+  // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
-
       <h1 className="text-3xl sm:text-4xl font-bold mb-6">Picks</h1>
+
+      {error && <p className="text-red-500 mb-2">{error}</p>}
 
       {/* FILTER BUTTONS */}
       <div className="flex flex-wrap gap-2 mb-6">
@@ -262,8 +267,8 @@ export default function PicksClient() {
 
       {loading && <p>Loading…</p>}
 
-      {/* LIST OF QUESTIONS */}
-      <div className="space-y-4">
+      {/* LIST OF QUESTIONS – compact cards */}
+      <div className="space-y-3">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
@@ -273,44 +278,48 @@ export default function PicksClient() {
             <div
               key={row.id}
               className="
-                w-full rounded-xl overflow-hidden shadow-md
+                w-full rounded-lg overflow-hidden shadow-md
                 bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00]
                 border border-black/20
               "
             >
-              {/* CARD CONTENT */}
-              <div className="p-4 sm:p-5 text-white space-y-3">
-
-                {/* TOP ROW: TIME + STATUS */}
-                <div className="flex items-center justify-between text-sm">
+              <div className="p-3 sm:p-4 text-white space-y-1.5">
+                {/* TIME + STATUS */}
+                <div className="flex items-center justify-between text-xs sm:text-sm">
                   <div>
                     <div className="font-semibold">{date}</div>
-                    <div className="text-white/70 text-xs">{time} AEDT</div>
+                    <div className="text-white/70 text-[10px] sm:text-xs">
+                      {time} AEDT
+                    </div>
                   </div>
 
                   <span
                     className={`${statusClasses(
                       row.status
-                    )} text-[10px] px-2 py-1 rounded-full font-bold`}
+                    )} text-[9px] px-2 py-0.5 rounded-full font-bold`}
                   >
                     {row.status.toUpperCase()}
                   </span>
                 </div>
 
-                {/* MATCH & QUARTER */}
+                {/* MATCH + QUARTER */}
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="font-bold text-base">
+                    <div className="font-bold text-sm sm:text-base">
                       {row.match}
                     </div>
-                    <div className="text-xs text-white/70">{row.venue}</div>
+                    <div className="text-[10px] sm:text-xs text-white/70">
+                      {row.venue}
+                    </div>
                   </div>
 
-                  <div className="font-bold text-lg">Q{row.quarter}</div>
+                  <div className="font-bold text-sm sm:text-base">
+                    Q{row.quarter}
+                  </div>
                 </div>
 
                 {/* QUESTION */}
-                <div className="text-sm sm:text-base font-semibold leading-tight">
+                <div className="text-sm font-semibold leading-tight">
                   {row.question}
                 </div>
 
@@ -318,18 +327,18 @@ export default function PicksClient() {
                 <button
                   type="button"
                   onClick={() => openComments(row)}
-                  className="text-xs underline text-white/80 hover:text-white"
+                  className="text-xs underline text-white/80"
                 >
                   Comments (0)
                 </button>
 
-                {/* YES / NO BUTTONS */}
-                <div className="flex items-center gap-3 pt-1">
-                  
+                {/* YES / NO + PERCENTAGES */}
+                <div className="flex items-center gap-2 pt-1">
                   <button
+                    type="button"
                     onClick={() => handlePick(row, "yes")}
                     className={`
-                      px-5 py-2 rounded-full font-bold text-white text-sm
+                      px-4 py-1.5 rounded-full font-bold text-white text-sm
                       transition
                       ${
                         yesSelected
@@ -342,9 +351,10 @@ export default function PicksClient() {
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => handlePick(row, "no")}
                     className={`
-                      px-5 py-2 rounded-full font-bold text-white text-sm
+                      px-4 py-1.5 rounded-full font-bold text-white text-sm
                       transition
                       ${
                         noSelected
@@ -356,22 +366,20 @@ export default function PicksClient() {
                     No
                   </button>
 
-                  <div className="text-xs text-white/80 ml-auto">
+                  <div className="text-[11px] text-white/80 ml-auto">
                     Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
                   </div>
                 </div>
-
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* COMMENTS DRAWER */}
+      {/* COMMENT DRAWER */}
       {commentsOpenFor && (
         <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
           <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
-
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-lg font-semibold mb-1">
@@ -381,8 +389,8 @@ export default function PicksClient() {
                   {commentsOpenFor.question}
                 </p>
               </div>
-
               <button
+                type="button"
                 onClick={closeComments}
                 className="text-sm text-gray-400 hover:text-white"
               >
@@ -390,56 +398,64 @@ export default function PicksClient() {
               </button>
             </div>
 
-            {/* Textarea */}
+            {/* New comment */}
             <div className="mb-4">
               <textarea
                 value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
+                onChange={handleCommentChange}
                 rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500"
+                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                placeholder="Add your comment…"
               />
-
+              {commentsError && (
+                <p className="text-xs text-red-500 mt-1">{commentsError}</p>
+              )}
               <div className="flex justify-end mt-2">
                 <button
+                  type="button"
                   onClick={submitComment}
-                  disabled={submittingComment}
-                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded-md text-sm font-semibold"
+                  disabled={submittingComment || !commentText.trim()}
+                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
                 >
                   {submittingComment ? "Posting…" : "Post"}
                 </button>
               </div>
             </div>
 
-            {/* Comments list */}
-            <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3 space-y-3">
+            {/* Comment list */}
+            <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
-                <p className="text-gray-400">Loading comments…</p>
+                <p className="text-sm text-gray-400">Loading comments…</p>
               ) : comments.length === 0 ? (
-                <p className="text-gray-400">No comments yet.</p>
+                <p className="text-sm text-gray-400">
+                  No comments yet. Be the first!
+                </p>
               ) : (
-                comments.map((c) => (
-                  <div
-                    key={c.id}
-                    className="bg-[#0b1220] p-3 rounded-md text-sm"
-                  >
-                    <div className="flex justify-between mb-1">
-                      <span className="font-semibold">
-                        {c.displayName || "User"}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {c.createdAt}
-                      </span>
-                    </div>
-                    <p>{c.body}</p>
-                  </div>
-                ))
+                <ul className="space-y-3">
+                  {comments.map((c) => (
+                    <li
+                      key={c.id}
+                      className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
+                    >
+                      <div className="flex justify-between mb-1">
+                        <span className="font-semibold">
+                          {c.displayName || "User"}
+                        </span>
+                        {c.createdAt && (
+                          <span className="text-[11px] text-gray-400">
+                            {c.createdAt}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-100">{c.body}</p>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-
           </div>
         </div>
       )}
-
     </div>
   );
 }
