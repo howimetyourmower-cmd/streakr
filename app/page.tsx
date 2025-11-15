@@ -40,7 +40,7 @@ export default function HomePage() {
             </a>
 
             <a
-              href="/leaderboard"
+              href="/leaderboards"
               className="bg-white/15 hover:bg-white/25 backdrop-blur text-white px-6 py-3 rounded-lg font-semibold text-lg shadow-lg transition border border-white/10"
             >
               View Leaderboard
@@ -88,96 +88,96 @@ export default function HomePage() {
 
         <div className="grid gap-6 md:grid-cols-3">
           {/* CARD 1 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Richmond vs Carlton
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Carlton win or draw against Richmond?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
           </div>
 
           {/* CARD 2 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Richmond vs Carlton
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Patrick Cripps get 6 or more disposals in the 1st Quarter?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
           </div>
 
           {/* CARD 3 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Richmond vs Carlton
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Sam Walsh kick a goal in the 2nd Quarter?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
           </div>
 
           {/* CARD 4 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Hawthorn vs Essendon
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Hawthorn beat Essendon by 22 points or more?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
           </div>
 
           {/* CARD 5 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Hawthorn vs Essendon
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Jai Newcombe get 6 or more disposals in the 1st Quarter?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
           </div>
 
           {/* CARD 6 */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h4 className="text-orange-500 font-semibold mb-2">
+          <div className="rounded-2xl p-5 bg-gradient-to-br from-orange-600 via-orange-500 to-orange-500 shadow-lg">
+            <h4 className="font-semibold mb-2 text-white">
               Hawthorn vs Essendon
             </h4>
-            <p className="text-slate-300 text-sm mb-4">
+            <p className="text-white/90 text-sm mb-4">
               Will Jayden Short have 5 or more disposals in the 4th Quarter?
             </p>
             <a
               href="/picks"
-              className="text-orange-400 text-sm font-semibold hover:underline"
+              className="text-sm font-semibold underline underline-offset-2 decoration-white/70 hover:decoration-white"
             >
               Make your pick →
             </a>
