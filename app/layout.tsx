@@ -1,59 +1,90 @@
 // app/layout.tsx
-import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
-
-// must match the actual file name (singular)
 import "./globals.css";
-
-// use relative paths (no "@")
-import Toast from "./components/Toast";
-import FreeKickWatcher from "./components/FreeKickWatcher";
+import type { Metadata } from "next";
+import Link from "next/link";
+import SponsorBanner from "@/components/SponsorBanner";
 
 export const metadata: Metadata = {
   title: "STREAKr",
-  description: "Free-to-play AFL prediction streaks",
+  description: "AFL prediction streaks – build your streak, climb the ladder, win prizes.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className="bg-[#0b0f13] text-white antialiased">
-        {/* Header */}
-        <header className="sticky top-0 z-40 w-full bg-[#0b0f13]/80 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-            <Link href="/" className="flex items-center gap-2">
-              <Image
-                src="/streakrlogo.jpg"
-                alt="STREAKr"
-                width={66}
-                height={66}
-                priority
-                className="rounded"
-              />
-              <span className="text-xl font-extrabold tracking-wide">
-                STREAK<span className="text-orange-400">r</span>
-              </span>
-            </Link>
-
-            <nav className="flex items-center gap-6 text-sm">
-              <Link href="/picks" className="hover:text-orange-300">Picks</Link>
-              <Link href="/leaderboard" className="hover:text-orange-300">Leaderboards</Link>
-              <Link href="/rewards" className="hover:text-orange-300">Rewards</Link>
-              <Link href="/faq" className="hover:text-orange-300">FAQ</Link>
-              <Link href="/auth" className="rounded bg-white/10 px-3 py-1.5 hover:bg-white/20">
-                Login / Sign Up
+      <body className="min-h-screen bg-[#020617] text-white">
+        <div className="min-h-screen flex flex-col">
+          {/* TOP NAVBAR */}
+          <header className="border-b border-white/5 bg-gradient-to-b from-black/80 via-black/60 to-transparent">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+              {/* Logo / Brand */}
+              <Link href="/" className="flex items-center gap-2">
+                <div className="h-7 w-7 rounded-md bg-gradient-to-tr from-orange-500 to-purple-500 flex items-center justify-center text-xs font-bold">
+                  S
+                </div>
+                <span className="text-lg font-extrabold tracking-wide">
+                  STREAK<span className="text-orange-500">r</span>
+                </span>
               </Link>
-            </nav>
-          </div>
-        </header>
 
-        {/* Page */}
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+              {/* Nav links */}
+              <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
+                <Link
+                  href="/picks"
+                  className="hover:text-orange-400 transition-colors"
+                >
+                  Picks
+                </Link>
+                <Link
+                  href="/leaderboard"
+                  className="hover:text-orange-400 transition-colors"
+                >
+                  Leaderboards
+                </Link>
+                <Link
+                  href="/rewards"
+                  className="hover:text-orange-400 transition-colors"
+                >
+                  Rewards
+                </Link>
+                <Link
+                  href="/faq"
+                  className="hover:text-orange-400 transition-colors"
+                >
+                  FAQ
+                </Link>
+                <Link
+                  href="/auth"
+                  className="rounded-full border border-white/15 px-4 py-1.5 hover:bg-white/10 transition-colors"
+                >
+                  Login / Sign Up
+                </Link>
+              </nav>
+            </div>
 
-        {/* Global helpers */}
-        <Toast />
-        <FreeKickWatcher />
+            {/* SPONSOR BANNER – shows on ALL pages */}
+            <SponsorBanner />
+          </header>
+
+          {/* MAIN CONTENT */}
+          <main className="flex-1">
+            {children}
+          </main>
+
+          {/* (Optional) Footer */}
+          <footer className="border-t border-white/5 bg-black/80">
+            <div className="max-w-6xl mx-auto px-4 py-4 text-xs text-white/60 flex flex-col md:flex-row items-center justify-between gap-2">
+              <span>© {new Date().getFullYear()} STREAKr. All rights reserved.</span>
+              <span className="text-[11px]">
+                Real Streakr&apos;s don&apos;t get caught!
+              </span>
+            </div>
+          </footer>
+        </div>
       </body>
     </html>
   );
