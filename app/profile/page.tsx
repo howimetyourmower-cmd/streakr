@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebaseClient";
 import { doc, getDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
-import { useAuth } from "@/hooks/useAuth";
+import { useAuth } from "@/app/auth/hooks/useAuth";
 
 type UserDoc = {
   uid?: string;
