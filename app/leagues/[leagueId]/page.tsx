@@ -1,15 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDoc,
-  getDocs,
-} from "firebase/firestore";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 
 type League = {
@@ -17,285 +12,194 @@ type League = {
   name: string;
   code: string;
   ownerUid: string;
+  memberCount?: number;
 };
 
-type Member = {
-  uid: string;
-  username: string;
-  avatarUrl?: string;
-  currentStreak: number;
-  longestStreak: number;
-  isOwner?: boolean;
-};
-
-export default function LeagueDetailPage() {
-  const params = useParams();
+export default function LeaguesPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
 
-  const leagueId = (params?.leagueId as string) || "";
-
-  const [league, setLeague] = useState<League | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
+  const [leagues, setLeagues] = useState<League[]>([]);
   const [loading, setLoading] = useState(true);
-  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
-
-  // Redirect to auth if not logged in
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/auth");
-    }
-  }, [user, authLoading, router]);
 
   useEffect(() => {
     const load = async () => {
-      if (!leagueId) return;
+      if (!user) return;
 
       setLoading(true);
       setError("");
 
       try {
-        // Load league doc
-        const leagueRef = doc(db, "leagues", leagueId);
-        const leagueSnap = await getDoc(leagueRef);
+        const leaguesRef = collection(db, "leagues");
+        // We assume league docs have memberIds: string[]
+        const q = query(leaguesRef, where("memberIds", "array-contains", user.uid));
+        const snap = await getDocs(q);
 
-        if (!leagueSnap.exists()) {
-          setError("League not found.");
-          setLoading(false);
-          return;
-        }
-
-        const data = leagueSnap.data() as any;
-        const leagueData: League = {
-          id: leagueSnap.id,
-          name: data.name || "Private League",
-          code: data.code || "",
-          ownerUid: data.ownerUid || "",
-        };
-        setLeague(leagueData);
-
-        // Load members
-        const membersRef = collection(db, "leagues", leagueId, "members");
-        const membersSnap = await getDocs(membersRef);
-        const list: Member[] = membersSnap.docs.map((m) => {
-          const d = m.data() as any;
+        const list: League[] = snap.docs.map((d) => {
+          const data = d.data() as any;
           return {
-            uid: d.uid || m.id,
-            username: d.username || "Player",
-            avatarUrl: d.avatarUrl || "",
-            currentStreak:
-              typeof d.currentStreak === "number" ? d.currentStreak : 0,
-            longestStreak:
-              typeof d.longestStreak === "number" ? d.longestStreak : 0,
-            isOwner: d.isOwner || false,
+            id: d.id,
+            name: data.name ?? "Unnamed league",
+            code: data.code ?? "—",
+            ownerUid: data.ownerUid ?? "",
+            memberCount: Array.isArray(data.memberIds) ? data.memberIds.length : undefined,
           };
         });
 
-        // Sort by longest streak desc, then currentStreak desc
-        list.sort((a, b) => {
-          if ((b.longestStreak ?? 0) !== (a.longestStreak ?? 0)) {
-            return (b.longestStreak ?? 0) - (a.longestStreak ?? 0);
-          }
-          return (b.currentStreak ?? 0) - (a.currentStreak ?? 0);
-        });
-
-        setMembers(list);
+        setLeagues(list);
       } catch (err) {
-        console.error("Failed to load league detail:", err);
-        setError("Failed to load league. Please try again.");
+        console.error("Failed to load leagues:", err);
+        setError("Failed to load your leagues. Please try again later.");
       } finally {
         setLoading(false);
       }
     };
 
     if (user) {
-      void load();
+      load();
+    } else {
+      setLoading(false);
     }
-  }, [leagueId, user]);
+  }, [user]);
 
-  const handleLeaveLeague = async () => {
-    if (!user || !leagueId) return;
-
-    const confirmed = window.confirm(
-      "Are you sure you want to leave this league?"
-    );
-    if (!confirmed) return;
-
-    setLeaving(true);
-    try {
-      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
-      await deleteDoc(memberRef);
-      router.push("/leagues");
-    } catch (err) {
-      console.error("Failed to leave league:", err);
-      alert("Failed to leave league. Please try again.");
-    } finally {
-      setLeaving(false);
-    }
-  };
-
-  const currentUserUid = user?.uid || null;
-
-  if (authLoading || (user && loading)) {
+  // If still checking auth
+  if (authLoading) {
     return (
-      <main className="max-w-4xl mx-auto p-6 text-white">
-        <p>Loading league…</p>
+      <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+        <p className="text-sm text-gray-300">Checking your session…</p>
       </main>
     );
   }
 
+  // If not logged in
   if (!user) {
-    return null; // redirect handled above
-  }
-
-  if (error || !league) {
     return (
-      <main className="max-w-4xl mx-auto p-6 text-white">
-        <h1 className="text-2xl font-bold mb-2">League</h1>
-        <p className="text-sm text-red-400">{error || "League not found."}</p>
+      <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+        <h1 className="text-3xl font-bold mb-3">Private leagues</h1>
+        <p className="text-gray-300 mb-6 text-sm">
+          Log in or create an account to create a league with mates and track your streaks together.
+        </p>
+        <button
+          onClick={() => router.push("/auth")}
+          className="inline-flex items-center px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm transition"
+        >
+          Login / Sign up
+        </button>
       </main>
     );
   }
 
   return (
-    <main className="max-w-4xl mx-auto p-6 text-white">
-      {/* League header */}
+    <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold mb-1">{league.name}</h1>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1">
-              <span className="font-semibold uppercase tracking-wide">
-                Code
-              </span>
-              <span className="font-mono tracking-[0.2em] text-orange-300">
-                {league.code}
-              </span>
-            </span>
-            <span className="text-gray-400">
-              Share this code with mates to invite them into your private ladder.
-            </span>
-          </div>
+          <h1 className="text-3xl font-bold mb-1">Private leagues</h1>
+          <p className="text-gray-300 text-sm">
+            Create a league for your mates or join one with a code. Your streaks will still count in the global ladder.
+          </p>
         </div>
 
-        <div className="flex flex-col items-start md:items-end gap-2">
-          <button
-            type="button"
-            onClick={handleLeaveLeague}
-            disabled={leaving}
-            className="px-4 py-1.5 rounded-full border border-red-500 text-xs font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-60"
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/leagues/create"
+            className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black text-sm font-semibold transition"
           >
-            {leaving ? "Leaving…" : "Leave league"}
-          </button>
-          <p className="text-[11px] text-gray-400">
-            Leaving removes you from this league’s leaderboard only.
-          </p>
+            Create league
+          </Link>
+          <Link
+            href="/leagues/join"
+            className="px-4 py-2 rounded-lg border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm font-semibold transition"
+          >
+            Join with code
+          </Link>
         </div>
       </div>
 
-      {/* Members leaderboard */}
-      <section className="bg-black/40 border border-white/10 rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-orange-300">
-            League leaderboard
-          </h2>
-          <p className="text-[11px] text-gray-400">
-            Ranked by longest streak, then current streak.
+      {/* Error message */}
+      {error && (
+        <p className="text-red-400 text-sm mb-4">{error}</p>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <p className="text-gray-300 text-sm">Loading your leagues…</p>
+      )}
+
+      {/* No leagues */}
+      {!loading && leagues.length === 0 && !error && (
+        <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 text-sm text-gray-300">
+          <p className="mb-3">
+            You’re not in any private leagues yet.
           </p>
+          <ul className="list-disc list-inside space-y-1 text-gray-400">
+            <li>Create a league and share the code with your mates.</li>
+            <li>Or join an existing league using a code they send you.</li>
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link
+              href="/leagues/create"
+              className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black text-sm font-semibold transition"
+            >
+              Create league
+            </Link>
+            <Link
+              href="/leagues/join"
+              className="px-4 py-2 rounded-lg border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm font-semibold transition"
+            >
+              Join with code
+            </Link>
+          </div>
         </div>
+      )}
 
-        {members.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-gray-300">
-            No members yet. Share your code and get your first mate to join.
-          </div>
-        ) : (
-          <div className="divide-y divide-white/5">
-            {/* Header row (desktop) */}
-            <div className="hidden sm:grid grid-cols-[40px,minmax(0,2.5fr),minmax(0,1fr),minmax(0,1fr)] px-4 py-2 text-[11px] text-gray-400 uppercase tracking-wide">
-              <div>#</div>
-              <div>Player</div>
-              <div className="text-right">Current streak</div>
-              <div className="text-right">Longest streak</div>
-            </div>
-
-            {members.map((m, index) => {
-              const isYou = m.uid === currentUserUid;
-
-              return (
-                <div
-                  key={m.uid}
-                  className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-[40px,minmax(0,2.5fr),minmax(0,1fr),minmax(0,1fr)] sm:items-center ${
-                    isYou ? "bg-white/5" : "bg-black/10"
-                  } hover:bg-white/8 transition`}
-                >
-                  {/* Rank */}
-                  <div className="flex items-center gap-2 sm:block">
-                    <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-white/10 text-xs font-semibold">
-                      {index + 1}
-                    </span>
-                    <span className="sm:hidden text-[11px] text-gray-400 ml-2">
-                      Rank
-                    </span>
-                  </div>
-
-                  {/* Player info */}
-                  <div className="flex items-center gap-3 min-w-0">
-                    <img
-                      src={m.avatarUrl || "/default-avatar.png"}
-                      alt={m.username}
-                      className="w-9 h-9 rounded-full border border-white/15 object-cover"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold truncate">
-                        {m.username}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-400">
-                        {m.isOwner && (
-                          <span className="px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-semibold">
-                            Owner
-                          </span>
-                        )}
-                        {isYou && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold">
-                            You
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Current streak */}
-                  <div className="flex sm:block justify-between text-sm">
-                    <span className="sm:hidden text-[11px] text-gray-400 mr-2">
-                      Current
-                    </span>
-                    <span className="font-semibold">
-                      {m.currentStreak ?? 0}
-                      <span className="text-[11px] text-gray-400 ml-1">
-                        in a row
+      {/* League list */}
+      {!loading && leagues.length > 0 && (
+        <div className="mt-4 space-y-4">
+          {leagues.map((league) => (
+            <Link
+              key={league.id}
+              href={`/leagues/${league.id}`}
+              className="block rounded-2xl border border-slate-800 bg-gradient-to-r from-slate-900/80 via-slate-900/60 to-slate-950/80 hover:border-orange-400 hover:shadow-lg hover:shadow-orange-500/10 transition p-5"
+            >
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-lg font-semibold">{league.name}</h2>
+                    {league.ownerUid === user.uid && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-300 border border-orange-400/40">
+                        You’re the commissioner
                       </span>
-                    </span>
+                    )}
                   </div>
-
-                  {/* Longest streak */}
-                  <div className="flex sm:block justify-between text-sm">
-                    <span className="sm:hidden text-[11px] text-gray-400 mr-2">
-                      Longest
+                  <p className="text-xs text-gray-400">
+                    Code:{" "}
+                    <span className="font-mono tracking-wide text-orange-300">
+                      {league.code}
                     </span>
-                    <span className="font-semibold text-orange-300">
-                      {m.longestStreak ?? 0}
-                      <span className="text-[11px] text-gray-400 ml-1">
-                        longest
+                    {league.memberCount !== undefined && (
+                      <span className="ml-3 text-gray-500">
+                        • {league.memberCount}{" "}
+                        {league.memberCount === 1 ? "player" : "players"}
                       </span>
-                    </span>
-                  </div>
+                    )}
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
+
+                <div className="flex items-center gap-3 text-xs text-gray-400">
+                  <span className="hidden md:inline">
+                    View ladder &amp; members
+                  </span>
+                  <span className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-orange-500 text-black font-bold text-sm">
+                    &gt;
+                  </span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </main>
   );
 }
