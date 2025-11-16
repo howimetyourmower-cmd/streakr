@@ -16,6 +16,7 @@ import {
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
+export const dynamic = "force-dynamic";
 export default function JoinLeaguePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
