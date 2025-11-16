@@ -1,68 +1,93 @@
-// app/leagues/page.tsx
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import Link from "next/link";
+import { collection, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
-type MyLeague = {
+type LeagueSummary = {
   id: string;
   name: string;
   code: string;
+  currentRank: number | null;
   memberCount: number;
-  isManager: boolean;
 };
 
 export default function LeaguesPage() {
   const { user } = useAuth();
 
-  const [myLeagues, setMyLeagues] = useState<MyLeague[]>([]);
   const [loading, setLoading] = useState(true);
+  const [myLeagues, setMyLeagues] = useState<LeagueSummary[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!user) {
-      setLoading(false);
-      return;
-    }
-
     const load = async () => {
+      if (!user) return;
+
       try {
         setLoading(true);
 
-        // Find leagues that include this user in /members
-        const leaguesSnap = await getDocs(collection(db, "leagues"));
+        // Get all leagues
+        const allLeaguesSnap = await getDocs(collection(db, "leagues"));
+        const leagues: LeagueSummary[] = [];
 
-        const rows: MyLeague[] = [];
-
-        for (const leagueDoc of leaguesSnap.docs) {
-          const leagueData = leagueDoc.data() || {};
+        for (const leagueDoc of allLeaguesSnap.docs) {
           const leagueId = leagueDoc.id;
+          const leagueData = leagueDoc.data() || {};
 
-          // Check if this user has a member doc
-          const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+          // Check if user is a member
+          const memberRef = doc(
+            db,
+            "leagues",
+            leagueId,
+            "members",
+            user.uid
+          );
           const memberSnap = await getDoc(memberRef);
 
-          if (!memberSnap.exists()) continue;
+          if (!memberSnap.exists()) continue; // not in this league
 
-          // Count members
+          // Get all members to compute rank
           const membersSnap = await getDocs(
             collection(db, "leagues", leagueId, "members")
           );
 
-          rows.push({
+          const members = membersSnap.docs.map((d) => {
+            const m = d.data() || {};
+            return {
+              uid: m.uid ?? d.id,
+              currentStreak: Number(m.currentStreak ?? 0),
+              longestStreak: Number(m.longestStreak ?? 0),
+              displayName: m.displayName ?? "",
+            };
+          });
+
+          // Sort by streak
+          members.sort((a, b) => {
+            if (b.currentStreak !== a.currentStreak)
+              return b.currentStreak - a.currentStreak;
+            if (b.longestStreak !== a.longestStreak)
+              return b.longestStreak - a.longestStreak;
+            return a.displayName.localeCompare(b.displayName);
+          });
+
+          const userRank =
+            members.findIndex((m) => m.uid === user.uid) + 1;
+
+          leagues.push({
             id: leagueId,
-            name: leagueData.name ?? "League",
-            code: leagueData.code ?? "—",
-            memberCount: membersSnap.size,
-            isManager: leagueData.createdBy === user.uid,
+            name: leagueData.name ?? "Private league",
+            code: leagueData.code ?? "",
+            currentRank: userRank,
+            memberCount: members.length,
           });
         }
 
-        setMyLeagues(rows);
+        setMyLeagues(leagues);
       } catch (err) {
-        console.error("Failed to load leagues", err);
+        console.error(err);
+        setError("Failed to load your leagues.");
       } finally {
         setLoading(false);
       }
@@ -72,81 +97,86 @@ export default function LeaguesPage() {
   }, [user]);
 
   return (
-    <div className="py-6 md:py-10">
+    <div className="py-6 md:py-10 space-y-10">
+
       <h1 className="text-3xl font-bold mb-6">Leagues</h1>
 
-      <p className="text-slate-300 max-w-2xl mb-8">
-        Play Streakr with your mates, work crew or fantasy league. Create a private league,
-        invite friends with a code, and battle it out on your own ladder while still
-        counting towards the global leaderboard.
-      </p>
+      {/* Three columns */}
+      <div className="grid md:grid-cols-3 gap-6">
 
-      {/* ---------- ACTION CARDS ---------- */}
-      <div className="grid md:grid-cols-3 gap-6 mb-12">
-        {/* Create league */}
+        {/* ------- CREATE LEAGUE ------- */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6">
-          <h3 className="font-semibold text-xl mb-2">Create a league</h3>
-          <ul className="text-slate-400 text-sm mb-4 list-disc ml-4">
-            <li>You automatically join as League Manager</li>
-            <li>Share a single code to invite players</li>
-            <li>Everyone’s streak still counts globally</li>
-          </ul>
+          <h3 className="text-xl font-bold mb-2">Create a league</h3>
+          <p className="text-slate-300 text-sm mb-4">
+            You’re the commish. Name your league, set how many mates
+            can join, and share a single invite code.
+          </p>
           <Link
             href="/leagues/create"
-            className="block bg-orange-500 hover:bg-orange-600 text-black text-center py-2 rounded-lg font-semibold"
+            className="block w-full text-center bg-orange-500 hover:bg-orange-600 text-black rounded-lg py-2 font-semibold"
           >
             Create league
           </Link>
         </div>
 
-        {/* Join league */}
+        {/* ------- JOIN LEAGUE ------- */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6">
-          <h3 className="font-semibold text-xl mb-2">Join a league</h3>
-          <ul className="text-slate-400 text-sm mb-4 list-disc ml-4">
-            <li>League Manager controls who gets the code</li>
-            <li>Join multiple private leagues</li>
-            <li>Still 100% free</li>
-          </ul>
+          <h3 className="text-xl font-bold mb-2">Join a league</h3>
+          <p className="text-slate-300 text-sm mb-4">
+            Got a code? Enter it and your streak will appear on that
+            league’s ladder.
+          </p>
           <Link
             href="/leagues/join"
-            className="block bg-blue-500/80 hover:bg-blue-500 text-white text-center py-2 rounded-lg font-semibold"
+            className="block w-full text-center bg-blue-500 hover:bg-blue-600 rounded-lg py-2 font-semibold"
           >
             Join with a code
           </Link>
         </div>
 
-        {/* My leagues */}
+        {/* ------- MY LEAGUES ------- */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6">
-          <h3 className="font-semibold text-xl mb-2">My leagues</h3>
+          <h3 className="text-xl font-bold mb-3">My leagues</h3>
 
-          {loading ? (
-            <p className="text-slate-400 text-sm">Loading…</p>
-          ) : myLeagues.length === 0 ? (
-            <p className="text-slate-400 text-sm">You're not in any leagues yet.</p>
-          ) : (
-            <ul className="text-slate-300 text-sm space-y-3">
+          {loading && (
+            <p className="text-slate-400 text-sm">Loading your leagues…</p>
+          )}
+
+          {error && (
+            <p className="text-red-400 text-sm">{error}</p>
+          )}
+
+          {!loading && myLeagues.length === 0 && (
+            <p className="text-slate-400 text-sm">
+              You’re not in any leagues yet. Create one or join with a code.
+            </p>
+          )}
+
+          {!loading && myLeagues.length > 0 && (
+            <div className="space-y-3">
               {myLeagues.map((lg) => (
-                <li key={lg.id}>
-                  <Link
-                    href={`/leagues/${lg.id}`}
-                    className="flex justify-between items-center bg-slate-800/40 hover:bg-slate-700/40 px-3 py-2 rounded-lg transition"
-                  >
-                    <div>
-                      <div className="font-semibold">{lg.name}</div>
-                      <div className="text-xs text-slate-400">
-                        {lg.memberCount} members
-                      </div>
-                    </div>
-
-                    {lg.isManager && (
-                      <span className="text-orange-400 text-xs font-semibold">
-                        Manager
-                      </span>
-                    )}
-                  </Link>
-                </li>
+                <Link
+                  key={lg.id}
+                  href={`/leagues/${lg.id}`}
+                  className="block p-4 rounded-lg bg-slate-800/60 border border-slate-700 hover:border-orange-500 transition"
+                >
+                  <div className="font-semibold">{lg.name}</div>
+                  <div className="text-xs text-slate-400 mt-1">
+                    {lg.memberCount} players — you’re{" "}
+                    <span className="text-orange-400 font-semibold">
+                      {lg.currentRank}
+                      {lg.currentRank === 1
+                        ? "st"
+                        : lg.currentRank === 2
+                        ? "nd"
+                        : lg.currentRank === 3
+                        ? "rd"
+                        : "th"}
+                    </span>
+                  </div>
+                </Link>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </div>
