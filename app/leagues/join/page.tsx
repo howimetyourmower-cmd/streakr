@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   collection,
   doc,
@@ -18,11 +18,20 @@ import { useAuth } from "@/hooks/useAuth";
 
 export default function JoinLeaguePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, loading: authLoading } = useAuth();
 
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Pre-fill from ?code=XYZ
+  useEffect(() => {
+    const paramCode = searchParams.get("code");
+    if (paramCode) {
+      setCode(paramCode.toUpperCase());
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -87,7 +96,7 @@ export default function JoinLeaguePage() {
           displayName,
           team: team || null,
           avatarUrl: avatarUrl || null,
-          currentStreak: 0, // you can later sync from picks
+          currentStreak: 0,
           longestStreak: 0,
           joinedAt: serverTimestamp(),
         },
@@ -118,9 +127,9 @@ export default function JoinLeaguePage() {
   return (
     <div className="py-6 md:py-8">
       <h1 className="text-2xl md:text-3xl font-bold mb-2">Join a league</h1>
-      <p className="text-slate-300 text-sm mb-6 max-w-xl">
-        Drop in the invite code your mate sent you. Once you join, your streak
-        will appear on that league&apos;s ladder as you make picks.
+      <p className="text-slate-300 text-sm mb-3 max-w-xl">
+        Enter the league code your mate or league manager sent you. If you
+        clicked a invite link, we&apos;ve pre-filled it for you.
       </p>
 
       <form
