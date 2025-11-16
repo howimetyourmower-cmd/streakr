@@ -1,163 +1,87 @@
-"use client";
+// app/leagues/page.tsx
 
-import { FormEvent, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  serverTimestamp,
-  setDoc,
-  where,
-} from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
-import { useAuth } from "@/hooks/useAuth";
+import Link from "next/link";
 
-export default function JoinLeaguePage() {
-  const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
-
-  const [code, setCode] = useState("");
-  const [joining, setJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push("/auth");
-    }
-  }, [authLoading, user, router]);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!user) return;
-
-    const trimmed = code.trim().toUpperCase();
-    if (!trimmed) {
-      setError("Please enter a league code.");
-      return;
-    }
-
-    setJoining(true);
-    setError(null);
-
-    try {
-      // 1) Find league by invite code
-      const leaguesRef = collection(db, "leagues");
-      const q = query(leaguesRef, where("code", "==", trimmed), limit(1));
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        setError("No league found with that code. Double check and try again.");
-        setJoining(false);
-        return;
-      }
-
-      const leagueDoc = snap.docs[0];
-      const leagueId = leagueDoc.id;
-
-      // 2) Pull profile info to seed member row
-      let displayName = user.email?.split("@")[0] || "Player";
-      let team: string | undefined;
-      let avatarUrl: string | undefined;
-
-      try {
-        const profileSnap = await getDoc(doc(db, "users", user.uid));
-        if (profileSnap.exists()) {
-          const p = profileSnap.data() as any;
-          if (p.username) displayName = p.username;
-          else if (p.firstName && p.surname) {
-            displayName = `${p.firstName} ${p.surname}`;
-          }
-          if (p.team) team = p.team;
-          if (p.avatarUrl) avatarUrl = p.avatarUrl;
-        }
-      } catch {
-        // ignore soft failures
-      }
-
-      // 3) Upsert member in league's members subcollection
-      const membersRef = collection(leagueDoc.ref, "members");
-      await setDoc(
-        doc(membersRef, user.uid),
-        {
-          uid: user.uid,
-          displayName,
-          team: team || null,
-          avatarUrl: avatarUrl || null,
-          currentStreak: 0, // you can later sync from picks
-          longestStreak: 0,
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      // 4) Go to league detail
-      router.push(`/leagues/${leagueId}`);
-    } catch (err) {
-      console.error("Failed to join league", err);
-      setError("Failed to join league. Please try again.");
-      setJoining(false);
-    }
-  }
-
-  if (authLoading || !user) {
-    return (
-      <div className="py-6 md:py-8">
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6">
-          <p className="text-slate-300 text-sm">
-            Loading your account&hellip;
-          </p>
-        </div>
-      </div>
-    );
-  }
-
+export default function LeaguesPage() {
   return (
     <div className="py-6 md:py-8">
-      <h1 className="text-2xl md:text-3xl font-bold mb-2">Join a league</h1>
-      <p className="text-slate-300 text-sm mb-6 max-w-xl">
-        Drop in the invite code your mate sent you. Once you join, your streak
-        will appear on that league&apos;s ladder as you make picks.
+      <h1 className="text-2xl md:text-3xl font-bold mb-2">Leagues</h1>
+      <p className="text-slate-300 text-sm mb-6 max-w-2xl">
+        Play Streakr with your mates, work crew or fantasy league. Create a
+        private league, invite friends with a code, and battle it out on your
+        own ladder while still counting towards the global Streak leaderboard.
       </p>
 
-      <form
-        onSubmit={handleSubmit}
-        className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 max-w-md space-y-5"
-      >
-        <div>
-          <label className="block text-sm font-medium mb-1" htmlFor="code">
-            League code
-          </label>
-          <input
-            id="code"
-            type="text"
-            value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
-            placeholder="e.g. 7FQ9LZ"
-            className="w-full rounded-lg bg-slate-950/80 border border-slate-700 px-3 py-2 text-sm tracking-[0.2em] font-mono uppercase focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-          />
-          <p className="mt-1 text-[11px] text-slate-400">
-            Your league manager can find this on their League Detail page.
-          </p>
+      <div className="grid gap-6 md:grid-cols-3">
+        {/* CREATE LEAGUE CARD */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <h2 className="text-lg font-semibold mb-1">Create a league</h2>
+            <p className="text-slate-300 text-sm mb-4">
+              You&apos;re the commish. Name your league, set how many mates can
+              join and share a single invite code with your group.
+            </p>
+            <ul className="text-slate-400 text-xs space-y-1 mb-4">
+              <li>• You automatically join as League Manager</li>
+              <li>• Share one code to invite players</li>
+              <li>• Everyone&apos;s streak still counts globally</li>
+            </ul>
+          </div>
+
+          <Link
+            href="/leagues/create"
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition"
+          >
+            Create league
+          </Link>
         </div>
 
-        {error && (
-          <div className="text-sm text-red-400 bg-red-900/30 border border-red-500/50 rounded-lg px-3 py-2">
-            {error}
+        {/* JOIN LEAGUE CARD */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <h2 className="text-lg font-semibold mb-1">Join a league</h2>
+            <p className="text-slate-300 text-sm mb-4">
+              Got a code from a mate? Drop it in and you&apos;ll appear on that
+              league&apos;s ladder as soon as you start making picks.
+            </p>
+            <ul className="text-slate-400 text-xs space-y-1 mb-4">
+              <li>• League Manager controls who gets the code</li>
+              <li>• You can join multiple private leagues</li>
+              <li>• No extra cost – still 100% free</li>
+            </ul>
           </div>
-        )}
 
-        <button
-          type="submit"
-          disabled={joining}
-          className="inline-flex items-center justify-center rounded-lg bg-blue-500 hover:bg-blue-400 text-black font-semibold text-sm px-5 py-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {joining ? "Joining…" : "Join with code"}
-        </button>
-      </form>
+          <Link
+            href="/leagues/join"
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-blue-500 hover:bg-blue-400 text-black font-semibold text-sm px-4 py-2 transition"
+          >
+            Join with a code
+          </Link>
+        </div>
+
+        {/* MY LEAGUES CARD */}
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <h2 className="text-lg font-semibold mb-1">My leagues</h2>
+            <p className="text-slate-300 text-sm mb-4">
+              Soon you&apos;ll see all the leagues you&apos;re in, your current
+              rank and a quick link to each ladder.
+            </p>
+            <ul className="text-slate-400 text-xs space-y-1 mb-4">
+              <li>• Track streaks across mates, offices &amp; clubs</li>
+              <li>• Private leagues are just for bragging rights</li>
+              <li>• Global ladder still shows your best streak</li>
+            </ul>
+          </div>
+
+          <button
+            disabled
+            className="mt-2 inline-flex items-center justify-center rounded-lg bg-slate-800 text-slate-400 font-semibold text-sm px-4 py-2 cursor-not-allowed"
+          >
+            My leagues (coming soon)
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
