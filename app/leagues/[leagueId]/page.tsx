@@ -1,5 +1,3 @@
-// app/leagues/[leagueId]/page.tsx  (works even if folder is [[leagueId]])
-export const dynamic = "force-dynamic";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -7,11 +5,12 @@ import Link from "next/link";
 import { useRouter, useParams } from "next/navigation";
 import {
   collection,
-  deleteDoc,
   doc,
-  getDoc,
-  getDocs,
+  onSnapshot,
+  orderBy,
   query,
+  limit,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -20,292 +19,261 @@ type League = {
   id: string;
   name: string;
   code: string;
-  createdByUid: string;
+  createdBy: string;
 };
 
 type Member = {
   id: string;
   uid: string;
-  role: "manager" | "member";
   displayName: string;
+  role: "manager" | "member" | string;
 };
 
 export default function LeagueDetailPage() {
   const router = useRouter();
-  const params = useParams<{ leagueId?: string }>();
-  const { user } = useAuth();
-
-  const leagueId = params?.leagueId as string | undefined;
+  const params = useParams<{ leagueId: string }>();
+  const leagueId = params.leagueId;
+  const { user } = useAuth() as any;
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // ---------- LOAD LEAGUE + MEMBERS ----------
+  // Redirect to auth if somehow no user
   useEffect(() => {
-    if (!user || !leagueId) return; // don't run until both exist
+    if (user === null || user === undefined) return;
+    if (!user) {
+      router.push("/auth?redirect=/leagues");
+    }
+  }, [user, router]);
 
-    let cancelled = false;
+  // Subscribe to league + members
+  useEffect(() => {
+    if (!user || !leagueId) return;
 
-    async function load() {
-      setLoading(true);
-      setError(null);
+    const leagueRef = doc(db, "leagues", leagueId);
+    const membersRef = collection(db, "leagues", leagueId, "members");
+    const membersQuery = query(
+      membersRef,
+      orderBy("joinedAt", "asc"),
+      limit(100)
+    );
 
-      try {
-        // 1) League doc
-        const leagueRef = doc(db, "leagues", leagueId);
-        const leagueSnap = await getDoc(leagueRef);
-
-        if (!leagueSnap.exists()) {
-          if (!cancelled) {
-            setError("League not found.");
-            setLoading(false);
-          }
+    const unsubLeague = onSnapshot(
+      leagueRef,
+      (snap) => {
+        if (!snap.exists()) {
+          setError("League not found.");
+          setLeague(null);
+          setLoading(false);
           return;
         }
-
-        const leagueData = leagueSnap.data() as Omit<League, "id">;
-        const leagueObj: League = { id: leagueSnap.id, ...leagueData };
-
-        // 2) Members subcollection
-        const membersRef = collection(leagueRef, "members");
-        const membersSnap = await getDocs(query(membersRef));
-
-        const memberList: Member[] = [];
-        membersSnap.forEach((docSnap) => {
-          const data = docSnap.data() as Omit<Member, "id">;
-          memberList.push({ id: docSnap.id, ...data });
+        const data = snap.data() as any;
+        setLeague({
+          id: snap.id,
+          name: data.name ?? "Untitled League",
+          code: data.code ?? "",
+          createdBy: data.createdBy ?? "",
         });
-
-        if (!cancelled) {
-          setLeague(leagueObj);
-          setMembers(memberList);
-          setLoading(false);
-        }
-      } catch (err) {
+        setLoading(false);
+      },
+      (err) => {
         console.error("Failed to load league", err);
-        if (!cancelled) {
-          setError("Failed to load league. Please try again later.");
-          setLoading(false);
-        }
+        setError("Failed to load league.");
+        setLoading(false);
       }
-    }
+    );
 
-    load();
+    const unsubMembers = onSnapshot(
+      membersQuery,
+      (snap) => {
+        const list: Member[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data() as any;
+          list.push({
+            id: docSnap.id,
+            uid: d.uid,
+            displayName: d.displayName ?? "Player",
+            role: d.role ?? "member",
+          });
+        });
+        setMembers(list);
+      },
+      (err) => {
+        console.error("Failed to load members", err);
+      }
+    );
 
     return () => {
-      cancelled = true;
+      unsubLeague();
+      unsubMembers();
     };
-  }, [user, leagueId]);
+  }, [leagueId, user]);
 
-  // ---------- GUARDS ----------
-  if (!user) {
-    return (
-      <div className="py-8">
-        <h1 className="text-2xl font-bold mb-2">League</h1>
-        <p className="text-slate-300 mb-4">
-          You need to be logged in to view this league.
-        </p>
-        <Link
-          href="/auth"
-          className="inline-flex items-center px-4 py-2 rounded-lg bg-orange-500 text-black font-semibold hover:bg-orange-400"
-        >
-          Login / Sign up
-        </Link>
-      </div>
-    );
-  }
+  const isManager = !!members.find(
+    (m) => m.uid === user?.uid && m.role === "manager"
+  );
 
-  if (!leagueId) {
-    return (
-      <div className="py-8">
-        <h1 className="text-2xl font-bold mb-2">League</h1>
-        <p className="text-slate-300">No league selected.</p>
-        <Link
-          href="/leagues"
-          className="inline-flex mt-4 items-center px-4 py-2 rounded-lg bg-slate-800 text-white hover:bg-slate-700"
-        >
-          ← Back to leagues
-        </Link>
-      </div>
-    );
-  }
-
-  const isManager = league && league.createdByUid === user.uid;
-  const currentMember = members.find((m) => m.uid === user.uid) || null;
-
-  // ---------- ACTIONS ----------
-  async function handleLeaveLeague() {
-    if (!league || !currentMember) return;
-
-    const ok = window.confirm(
-      "Leave this league? Your streak still counts on the global leaderboard."
-    );
-    if (!ok) return;
+  const handleLeaveLeague = async () => {
+    if (!user || !leagueId) return;
+    const confirmLeave = window.confirm("Leave this league?");
+    if (!confirmLeave) return;
 
     try {
       setLeaving(true);
-      const memberRef = doc(
-        db,
-        "leagues",
-        league.id,
-        "members",
-        currentMember.id
-      );
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
       await deleteDoc(memberRef);
       router.push("/leagues");
     } catch (err) {
       console.error("Failed to leave league", err);
-      alert("Sorry, we couldn't leave the league. Please try again.");
+      setError("Failed to leave league. Please try again.");
     } finally {
       setLeaving(false);
     }
-  }
+  };
 
-  async function handleDeleteLeague() {
-    if (!league || !isManager) return;
-
-    const ok = window.confirm(
+  const handleDeleteLeague = async () => {
+    if (!user || !leagueId || !isManager) return;
+    const confirmDelete = window.confirm(
       "Delete this league for everyone? This cannot be undone."
     );
-    if (!ok) return;
+    if (!confirmDelete) return;
 
     try {
       setDeleting(true);
-      const leagueRef = doc(db, "leagues", league.id);
+      const leagueRef = doc(db, "leagues", leagueId);
       await deleteDoc(leagueRef);
       router.push("/leagues");
     } catch (err) {
       console.error("Failed to delete league", err);
-      alert("Sorry, we couldn't delete the league. Please try again.");
+      setError("Failed to delete league. Please try again.");
     } finally {
       setDeleting(false);
     }
+  };
+
+  if (loading) {
+    return (
+      <div className="py-6 md:py-8">
+        <p className="text-slate-300 text-sm">Loading league…</p>
+      </div>
+    );
   }
 
-  // ---------- RENDER ----------
-  return (
-    <div className="py-6 md:py-8">
-      <div className="mb-4">
+  if (error || !league) {
+    return (
+      <div className="py-6 md:py-8">
         <Link
           href="/leagues"
-          className="text-sm text-slate-300 hover:text-orange-400"
+          className="inline-flex items-center text-sm text-slate-300 hover:text-orange-400 mb-4"
         >
           ← Back to leagues
         </Link>
+        <p className="text-red-400 text-sm">{error ?? "League not found."}</p>
       </div>
+    );
+  }
 
-      {loading ? (
-        <p className="text-slate-300">Loading league…</p>
-      ) : error ? (
-        <p className="text-red-400">{error}</p>
-      ) : !league ? (
-        <p className="text-slate-300">League not found.</p>
-      ) : (
-        <div className="grid gap-6 md:grid-cols-[2fr,1fr]">
-          {/* LEFT: League + members */}
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <h1 className="text-2xl md:text-3xl font-bold mb-1">
-              {league.name}
-            </h1>
-            <p className="text-slate-300 mb-4">
-              Private league. Share this code with your mates so they can join.
-            </p>
-
-            {/* League code */}
-            <div className="mb-6">
-              <div className="text-xs uppercase text-slate-400 mb-1">
-                League code
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="px-3 py-2 rounded-lg bg-slate-800 font-mono text-lg tracking-[0.2em]">
-                  {league.code}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => navigator.clipboard.writeText(league.code)}
-                  className="px-3 py-2 rounded-lg bg-slate-800 text-sm hover:bg-slate-700"
-                >
-                  Copy
-                </button>
-              </div>
-            </div>
-
-            {/* Members list */}
-            <div>
-              <h2 className="text-lg font-semibold mb-3">Members</h2>
-              {members.length === 0 ? (
-                <p className="text-slate-300 text-sm">
-                  No one has joined this league yet.
-                </p>
-              ) : (
-                <ul className="space-y-2 text-sm">
-                  {members.map((m) => (
-                    <li
-                      key={m.id}
-                      className="flex items-center justify-between rounded-lg bg-slate-800/70 px-3 py-2"
-                    >
-                      <div>
-                        <div className="font-semibold">
-                          {m.displayName || "Player"}
-                          {m.uid === user.uid && (
-                            <span className="ml-2 text-xs text-orange-400">
-                              (You)
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-slate-400">
-                          {m.role === "manager" ? "League Manager" : "Member"}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-
-          {/* RIGHT: Actions */}
-          <div className="space-y-4">
-            <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-              <h2 className="text-lg font-semibold mb-3">League actions</h2>
-              <p className="text-sm text-slate-300 mb-4">
-                Your streak still counts on the global leaderboard even if you
-                leave this league.
-              </p>
-
-              <button
-                type="button"
-                onClick={handleLeaveLeague}
-                disabled={leaving || deleting || !currentMember}
-                className="w-full mb-3 px-4 py-2 rounded-lg bg-slate-800 text-sm hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {leaving ? "Leaving league…" : "Leave this league"}
-              </button>
-
-              {isManager && (
-                <>
-                  <div className="h-px bg-slate-800 my-3" />
-                  <p className="text-xs text-red-400 mb-2 uppercase">
-                    League manager only
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleDeleteLeague}
-                    disabled={deleting}
-                    className="w-full px-4 py-2 rounded-lg bg-red-600 text-sm font-semibold hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {deleting ? "Deleting league…" : "Delete league"}
-                  </button>
-                </>
-              )}
-            </div>
+  return (
+    <div className="py-6 md:py-8">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div>
+          <Link
+            href="/leagues"
+            className="inline-flex items-center text-sm text-slate-300 hover:text-orange-400 mb-2"
+          >
+            ← Back to leagues
+          </Link>
+          <h1 className="text-2xl md:text-3xl font-bold text-white">
+            {league.name}
+          </h1>
+          <p className="text-slate-300 text-sm mt-1">
+            Private league · invite mates with this code:
+          </p>
+          <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-slate-900/80 border border-slate-700 px-4 py-1.5">
+            <span className="font-mono text-sm tracking-[0.25em] uppercase text-orange-400">
+              {league.code}
+            </span>
           </div>
         </div>
-      )}
+
+        <div className="flex flex-col items-end gap-2 text-xs md:text-sm">
+          {isManager && (
+            <button
+              onClick={handleDeleteLeague}
+              disabled={deleting}
+              className="px-3 py-1.5 rounded-full bg-red-600 hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold"
+            >
+              {deleting ? "Deleting…" : "Delete league"}
+            </button>
+          )}
+          <button
+            onClick={handleLeaveLeague}
+            disabled={leaving}
+            className="px-3 py-1.5 rounded-full bg-slate-800 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed text-slate-100 font-semibold"
+          >
+            {leaving ? "Leaving…" : "Leave league"}
+          </button>
+        </div>
+      </div>
+
+      {/* Members list */}
+      <section className="mt-6">
+        <h2 className="text-lg md:text-xl font-semibold mb-3 text-white">
+          Members
+        </h2>
+        {members.length === 0 ? (
+          <p className="text-slate-300 text-sm">
+            No members yet. Share the code <span className="font-mono">{league.code}</span>{" "}
+            with your mates so they can join.
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-900/80">
+                <tr className="text-left text-slate-300">
+                  <th className="px-4 py-3 font-medium">Player</th>
+                  <th className="px-4 py-3 font-medium">Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr
+                    key={m.id}
+                    className="border-t border-slate-800/80 hover:bg-slate-800/60"
+                  >
+                    <td className="px-4 py-3 text-white">
+                      {m.displayName}
+                      {m.uid === user?.uid && (
+                        <span className="ml-2 text-xs text-orange-400">
+                          (you)
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-300 capitalize text-xs">
+                      {m.role === "manager" ? "League Manager" : "Member"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Future: ladder summary here */}
+      <section className="mt-8">
+        <h2 className="text-lg md:text-xl font-semibold mb-2 text-white">
+          League ladder (coming soon)
+        </h2>
+        <p className="text-slate-300 text-sm max-w-xl">
+          Once we hook this up, you&apos;ll see your private league ladder here,
+          based on everyone&apos;s streaks from the global game.
+        </p>
+      </section>
     </div>
   );
 }
