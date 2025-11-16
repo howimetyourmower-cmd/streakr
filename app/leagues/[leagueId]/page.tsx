@@ -7,6 +7,8 @@ import { db } from "@/lib/firebaseClient";
 import {
   doc,
   getDoc,
+  updateDoc,
+  arrayRemove,
 } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -40,6 +42,8 @@ export default function LeagueDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notMember, setNotMember] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState("");
 
   // Load league + member profiles
   useEffect(() => {
@@ -55,7 +59,6 @@ export default function LeagueDetailPage() {
       setNotMember(false);
 
       try {
-        // 1) Get league doc
         const leagueRef = doc(db, "leagues", leagueId);
         const leagueSnap = await getDoc(leagueRef);
 
@@ -72,7 +75,6 @@ export default function LeagueDetailPage() {
 
         const memberIds = leagueData.memberIds ?? [];
 
-        // If current user not in league, show friendly msg
         if (!memberIds.includes(user.uid)) {
           setNotMember(true);
         }
@@ -83,7 +85,6 @@ export default function LeagueDetailPage() {
           return;
         }
 
-        // 2) Load member profiles one-by-one (leagues are small, so this is fine)
         const memberRows: MemberRow[] = [];
 
         for (const uid of memberIds) {
@@ -111,7 +112,6 @@ export default function LeagueDetailPage() {
           });
         }
 
-        // 3) Sort: longest streak, then current streak, then name
         memberRows.sort((a, b) => {
           if (b.longestStreak !== a.longestStreak) {
             return b.longestStreak - a.longestStreak;
@@ -142,6 +142,29 @@ export default function LeagueDetailPage() {
     if (!league || !user) return "";
     return league.ownerUid === user.uid ? "You’re the commissioner" : "";
   }, [league, user]);
+
+  const isMember =
+    !!league && !!user && (league.memberIds ?? []).includes(user.uid);
+
+  const handleLeaveLeague = async () => {
+    if (!leagueId || !user) return;
+    setLeaving(true);
+    setLeaveError("");
+
+    try {
+      const leagueRef = doc(db, "leagues", leagueId);
+      await updateDoc(leagueRef, {
+        memberIds: arrayRemove(user.uid),
+      });
+
+      router.push("/leagues");
+    } catch (err) {
+      console.error("Failed to leave league:", err);
+      setLeaveError("Failed to leave this league. Please try again.");
+    } finally {
+      setLeaving(false);
+    }
+  };
 
   // While checking auth
   if (authLoading) {
@@ -209,28 +232,45 @@ export default function LeagueDetailPage() {
             ← Back to my leagues
           </button>
 
-          {league && (
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(league.code);
-                  alert("League code copied.");
-                } catch {
-                  alert("Copy failed – you can highlight and copy the code manually.");
-                }
-              }}
-              className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-700 hover:border-orange-400 hover:text-orange-300 text-xs font-medium transition"
-            >
-              Copy invite code
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {league && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(league.code);
+                    alert("League code copied.");
+                  } catch {
+                    alert("Copy failed – you can highlight and copy the code manually.");
+                  }
+                }}
+                className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-slate-700 hover:border-orange-400 hover:text-orange-300 text-xs font-medium transition"
+              >
+                Copy invite code
+              </button>
+            )}
+
+            {isMember && (
+              <button
+                type="button"
+                onClick={handleLeaveLeague}
+                disabled={leaving}
+                className="px-3 py-1.5 rounded-full bg-slate-900/70 border border-red-500/60 text-red-300 hover:bg-red-500/10 text-xs font-medium transition disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {leaving ? "Leaving…" : "Leave league"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* STATUS MESSAGES */}
       {error && (
         <p className="text-red-400 text-sm mb-4">{error}</p>
+      )}
+
+      {leaveError && (
+        <p className="text-red-400 text-sm mb-4">{leaveError}</p>
       )}
 
       {notMember && !error && (
@@ -278,12 +318,10 @@ export default function LeagueDetailPage() {
                     m.isYou ? "bg-slate-900/70" : ""
                   }`}
                 >
-                  {/* Position */}
                   <div className="w-8 text-xs font-semibold text-gray-400">
                     {index + 1}
                   </div>
 
-                  {/* Avatar + name */}
                   <div className="flex-1 flex items-center gap-3 min-w-0">
                     <div className="relative h-9 w-9 rounded-full overflow-hidden bg-slate-800 border border-slate-700 flex-shrink-0">
                       {m.avatarUrl ? (
@@ -317,7 +355,6 @@ export default function LeagueDetailPage() {
                     </div>
                   </div>
 
-                  {/* Current streak */}
                   <div className="w-28 text-right text-xs">
                     <div className="text-gray-400 uppercase tracking-wide text-[10px]">
                       Current
@@ -328,7 +365,6 @@ export default function LeagueDetailPage() {
                     </div>
                   </div>
 
-                  {/* Longest streak */}
                   <div className="w-32 text-right text-xs">
                     <div className="text-gray-400 uppercase tracking-wide text-[10px]">
                       Longest
