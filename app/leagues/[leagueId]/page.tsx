@@ -1,6 +1,6 @@
+// app/leagues/[leagueId]/page.tsx
 "use client";
 
-// app/leagues/[leagueId]/page.tsx
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState, FormEvent } from "react";
@@ -13,7 +13,8 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
-  serverTimestamp,
+  query,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,400 +22,553 @@ import { useAuth } from "@/hooks/useAuth";
 type League = {
   id: string;
   name: string;
+  description?: string;
   code: string;
   managerUid: string;
   managerEmail?: string;
-  isLocked?: boolean;
 };
 
-type LadderPlayer = {
+type LeagueMember = {
+  id: string;
   uid: string;
-  role: "manager" | "member";
   displayName: string;
-  avatarUrl: string | null;
-  team: string;
-  currentStreak: number;
-  longestStreak: number;
+  role: "manager" | "member";
 };
 
 export default function LeagueDetailPage() {
-  const params = useParams();
+  const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
-  const leagueId = (params?.leagueId as string) || "";
-
   const { user, loading: authLoading } = useAuth();
 
   const [league, setLeague] = useState<League | null>(null);
-  const [loadingLeague, setLoadingLeague] = useState(true);
-  const [leagueError, setLeagueError] = useState<string | null>(null);
+  const [members, setMembers] = useState<LeagueMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
-  // Settings form state
-  const [editName, setEditName] = useState("");
-  const [editLocked, setEditLocked] = useState(false);
-  const [savingSettings, setSavingSettings] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    name: "",
+    description: "",
+  });
 
-  // Ladder state
-  const [ladder, setLadder] = useState<LadderPlayer[]>([]);
-  const [loadingLadder, setLoadingLadder] = useState(true);
+  const [origin, setOrigin] = useState("");
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+
+  // Make sure we have window origin for invite link
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  const leagueDocRef = leagueId
+    ? doc(collection(db, "leagues"), leagueId as string)
+    : null;
 
   const isManager =
-    !!user && !!league && league.managerUid === user.uid;
+    !!league && !!user && league.managerUid === user.uid;
 
-  // ---------- Load league ----------
+  const currentMember = members.find((m) => m.uid === user?.uid);
+
+  // Load league + members
   useEffect(() => {
-    const loadLeague = async () => {
-      if (!leagueId) return;
-      setLoadingLeague(true);
-      setLeagueError(null);
+    const load = async () => {
+      if (!leagueDocRef || !user) return;
 
+      setLoading(true);
+      setError(null);
       try {
-        const leagueRef = doc(db, "leagues", leagueId);
-        const snap = await getDoc(leagueRef);
-
+        // 1) League
+        const snap = await getDoc(leagueDocRef);
         if (!snap.exists()) {
-          setLeagueError("League not found.");
-          setLeague(null);
+          setError("League not found.");
+          setLoading(false);
           return;
         }
 
         const data = snap.data() as any;
-
-        const loadedLeague: League = {
+        const leagueData: League = {
           id: snap.id,
-          name: data.name || "Untitled league",
-          code: data.code || "",
-          managerUid: data.managerUid,
-          managerEmail: data.managerEmail || "",
-          isLocked: !!data.isLocked,
+          name: data.name ?? "Untitled league",
+          description: data.description ?? "",
+          code: data.code ?? "",
+          managerUid: data.managerUid ?? "",
+          managerEmail: data.managerEmail ?? "",
         };
 
-        setLeague(loadedLeague);
-        setEditName(loadedLeague.name);
-        setEditLocked(!!loadedLeague.isLocked);
+        setLeague(leagueData);
+        setForm({
+          name: leagueData.name,
+          description: leagueData.description ?? "",
+        });
+
+        // 2) Members
+        const membersRef = collection(leagueDocRef, "members");
+        const membersSnap = await getDocs(
+          query(membersRef, orderBy("role"), orderBy("displayName"))
+        );
+
+        const membersData: LeagueMember[] = [];
+        membersSnap.forEach((docSnap) => {
+          const m = docSnap.data() as any;
+          membersData.push({
+            id: docSnap.id,
+            uid: m.uid,
+            displayName: m.displayName ?? "Player",
+            role: (m.role as "manager" | "member") ?? "member",
+          });
+        });
+
+        setMembers(membersData);
       } catch (err) {
-        console.error("Failed to load league", err);
-        setLeagueError("Failed to load league. Please try again later.");
+        console.error(err);
+        setError("Failed to load league. Please try again.");
       } finally {
-        setLoadingLeague(false);
+        setLoading(false);
       }
     };
 
-    loadLeague();
-  }, [leagueId]);
-
-  // ---------- Load ladder ----------
-  useEffect(() => {
-    const loadLadder = async () => {
-      if (!leagueId) return;
-      setLoadingLadder(true);
-
-      try {
-        const membersRef = collection(db, `leagues/${leagueId}/members`);
-        const membersSnap = await getDocs(membersRef);
-
-        const players: LadderPlayer[] = [];
-
-        for (const m of membersSnap.docs) {
-          const uid = m.id;
-          const memberData = m.data() as any;
-          const userSnap = await getDoc(doc(db, "users", uid));
-
-          if (userSnap.exists()) {
-            const u = userSnap.data() as any;
-            players.push({
-              uid,
-              role: memberData.role === "manager" ? "manager" : "member",
-              displayName: u.username || u.email || "Player",
-              avatarUrl: u.avatarUrl || null,
-              team: u.team || "",
-              currentStreak: u.currentStreak || 0,
-              longestStreak: u.longestStreak || 0,
-            });
-          }
-        }
-
-        // Sort by current streak desc
-        players.sort((a, b) => b.currentStreak - a.currentStreak);
-        setLadder(players);
-      } catch (err) {
-        console.error("Failed to load ladder", err);
-      } finally {
-        setLoadingLadder(false);
-      }
-    };
-
-    loadLadder();
-  }, [leagueId]);
-
-  // ---------- Handlers: Save settings ----------
-  const handleSaveSettings = async (e: FormEvent) => {
-    e.preventDefault();
-    setSettingsMessage(null);
-
-    if (!leagueId || !user || !league) return;
-    if (league.managerUid !== user.uid) return;
-
-    const trimmedName = editName.trim();
-    if (!trimmedName) {
-      setSettingsMessage("League name cannot be empty.");
-      return;
+    if (!authLoading && user && leagueDocRef) {
+      load();
     }
+  }, [authLoading, user, leagueDocRef]);
 
-    setSavingSettings(true);
+  const handleInputChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    setForm((prev) => ({
+      ...prev,
+      [e.target.name]: e.target.value,
+    }));
+  };
 
+  const handleSaveLeague = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!leagueDocRef || !isManager) return;
+
+    setSaveLoading(true);
+    setError(null);
+    setSuccess(null);
     try {
-      const leagueRef = doc(db, "leagues", leagueId);
-      await updateDoc(leagueRef, {
-        name: trimmedName,
-        isLocked: editLocked,
-        updatedAt: serverTimestamp(),
+      await updateDoc(leagueDocRef, {
+        name: form.name.trim() || "Untitled league",
+        description: form.description.trim(),
+        updatedAt: new Date(),
       });
 
       setLeague((prev) =>
         prev
-          ? { ...prev, name: trimmedName, isLocked: editLocked }
+          ? {
+              ...prev,
+              name: form.name.trim() || "Untitled league",
+              description: form.description.trim(),
+            }
           : prev
       );
-      setSettingsMessage("Settings saved.");
+
+      setSuccess("League details updated.");
     } catch (err) {
-      console.error("Failed to save settings", err);
-      setSettingsMessage("Failed to save settings. Please try again.");
+      console.error(err);
+      setError("Failed to save league. Please try again.");
     } finally {
-      setSavingSettings(false);
+      setSaveLoading(false);
     }
   };
 
-  // ---------- Handlers: Delete league ----------
-  const handleDeleteLeague = async () => {
-    if (!leagueId || !user || !league) return;
-    if (league.managerUid !== user.uid) return;
-
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this league? This cannot be undone."
-    );
-    if (!confirmed) return;
-
-    setDeleting(true);
-    setSettingsMessage(null);
-
+  const handleCopyCode = async () => {
+    if (!league?.code) return;
     try {
-      // Note: This deletes the league doc. Members subcollection
-      // will be left behind unless you add a Cloud Function cleanup.
-      await deleteDoc(doc(db, "leagues", leagueId));
+      await navigator.clipboard.writeText(league.code);
+      setCopyMessage("League code copied.");
+    } catch {
+      setCopyMessage("Unable to copy. You can copy it manually.");
+    }
+    setTimeout(() => setCopyMessage(null), 2000);
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!league?.code || !origin) return;
+    const url = `${origin}/leagues/join?code=${encodeURIComponent(
+      league.code
+    )}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyMessage("Invite link copied.");
+    } catch {
+      setCopyMessage("Unable to copy. You can copy it manually.");
+    }
+    setTimeout(() => setCopyMessage(null), 2000);
+  };
+
+  const handleLeaveLeague = async () => {
+    if (!leagueDocRef || !currentMember || !user) return;
+    if (
+      isManager &&
+      members.filter((m) => m.uid !== user.uid).length === 0
+    ) {
+      alert(
+        "You are the only member and the manager. Delete the league instead, or transfer management (coming later)."
+      );
+      return;
+    }
+
+    if (!confirm("Are you sure you want to leave this league?")) return;
+
+    setLeaveLoading(true);
+    setError(null);
+    try {
+      const memberRef = doc(
+        collection(leagueDocRef, "members"),
+        currentMember.id
+      );
+      await deleteDoc(memberRef);
       router.push("/leagues");
     } catch (err) {
-      console.error("Failed to delete league", err);
-      setSettingsMessage("Failed to delete league. Please try again.");
-      setDeleting(false);
+      console.error(err);
+      setError("Failed to leave league. Please try again.");
+    } finally {
+      setLeaveLoading(false);
     }
   };
 
-  // ---------- Render ----------
+  const handleDeleteLeague = async () => {
+    if (!leagueDocRef || !isManager) return;
 
-  if (!leagueId) {
-    return <p className="text-slate-300">Invalid league.</p>;
+    const sure = confirm(
+      "Delete this league for everyone? This cannot be undone. (Members will disappear from this league.)"
+    );
+    if (!sure) return;
+
+    setDeleteLoading(true);
+    setError(null);
+    try {
+      // NOTE: This only deletes the league document itself.
+      // Any subcollection docs (members) will remain until we add a Cloud Function to clean them up.
+      await deleteDoc(leagueDocRef);
+      router.push("/leagues");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to delete league. Please try again.");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  if (authLoading || loading) {
+    return (
+      <div className="py-10 text-slate-300">
+        Loading league details...
+      </div>
+    );
   }
 
+  if (!user) {
+    return (
+      <div className="py-10">
+        <p className="text-slate-200 mb-4">
+          You need to be logged in to view this league.
+        </p>
+        <Link
+          href="/auth"
+          className="inline-flex items-center px-4 py-2 rounded-md bg-orange-500 text-black font-semibold hover:bg-orange-400 transition-colors"
+        >
+          Login / Sign up
+        </Link>
+      </div>
+    );
+  }
+
+  if (!league) {
+    return (
+      <div className="py-10 text-red-400">
+        League not found or you don&apos;t have access.
+      </div>
+    );
+  }
+
+  const inviteUrl =
+    league.code && origin
+      ? `${origin}/leagues/join?code=${encodeURIComponent(
+          league.code
+        )}`
+      : "";
+
   return (
-    <div className="py-6 md:py-8">
+    <div className="py-6 md:py-8 space-y-8">
+      {/* Back link */}
       <div className="mb-4">
         <Link
           href="/leagues"
-          className="text-sm text-slate-300 hover:text-orange-400"
+          className="text-sm text-slate-300 hover:text-orange-400 transition-colors"
         >
           ← Back to leagues
         </Link>
       </div>
 
-      {loadingLeague ? (
-        <p className="text-slate-300">Loading league…</p>
-      ) : leagueError ? (
-        <p className="text-red-400">{leagueError}</p>
-      ) : !league ? (
-        <p className="text-slate-300">League not found.</p>
-      ) : (
-        <>
-          {/* ---------- League header ---------- */}
-          <div className="mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">
+      {/* Top row: league info + actions */}
+      <div className="grid gap-6 md:grid-cols-[2fr,1.4fr]">
+        {/* League details / edit form */}
+        <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 md:p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-2xl md:text-3xl font-bold text-white">
               {league.name}
             </h1>
-            <p className="text-slate-300 mb-3">
-              Private league. Battle it out with your mates while your streak
-              still counts towards the global leaderboard.
+            <span className="inline-flex items-center rounded-full border border-slate-700 px-3 py-1 text-xs uppercase tracking-wide text-slate-300">
+              {isManager ? "League Manager" : "Member"}
+            </span>
+          </div>
+
+          <p className="text-sm text-slate-300">
+            Private league. Your streak still counts on the global
+            ladder – this page is just for bragging rights with your
+            mates, work crew or fantasy league.
+          </p>
+
+          {error && (
+            <div className="text-sm text-red-400 bg-red-950/40 border border-red-800 rounded-md px-3 py-2">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="text-sm text-emerald-400 bg-emerald-950/40 border border-emerald-800 rounded-md px-3 py-2">
+              {success}
+            </div>
+          )}
+
+          {/* Manager can edit; others see read-only copy */}
+          {isManager ? (
+            <form
+              onSubmit={handleSaveLeague}
+              className="space-y-4 mt-2"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  League name
+                </label>
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={handleInputChange}
+                  className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  placeholder="E.g. Thursday Night Footy Crew"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Description (optional)
+                </label>
+                <textarea
+                  name="description"
+                  value={form.description}
+                  onChange={handleInputChange}
+                  rows={3}
+                  className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  placeholder="E.g. Season-long office comp. Winner shouts the end-of-year pub session."
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={saveLoading}
+                className="inline-flex items-center px-4 py-2 rounded-md bg-orange-500 text-black font-semibold text-sm hover:bg-orange-400 disabled:opacity-70 disabled:cursor-not-allowed transition-colors"
+              >
+                {saveLoading ? "Saving..." : "Save changes"}
+              </button>
+            </form>
+          ) : (
+            <div className="mt-3 space-y-2">
+              {league.description && (
+                <p className="text-sm text-slate-200">
+                  {league.description}
+                </p>
+              )}
+              {league.managerEmail && (
+                <p className="text-xs text-slate-400">
+                  League manager:{" "}
+                  <span className="font-semibold">
+                    {league.managerEmail}
+                  </span>
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Invite & danger zone */}
+        <section className="space-y-4">
+          {/* Invite card */}
+          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <h2 className="text-lg font-semibold text-white">
+              Invite your mates
+            </h2>
+            <p className="text-sm text-slate-300">
+              Share this code or link so people can join. Anyone with
+              the code can join your league.
             </p>
 
-            <div className="flex flex-wrap items-center gap-3 text-sm">
-              <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-200">
-                Code:{" "}
-                <span className="font-mono font-semibold">
-                  {league.code}
-                </span>
-              </div>
-              <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-200">
-                Manager:{" "}
-                <span className="font-semibold">
-                  {league.managerEmail || "Unknown"}
-                </span>
-              </div>
-              <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-200">
-                Members:{" "}
-                <span className="font-semibold">{ladder.length}</span>
-              </div>
-              <div className="px-3 py-1 rounded-full bg-slate-800/80 border border-slate-700 text-slate-200">
-                Status:{" "}
-                <span className="font-semibold">
-                  {league.isLocked ? "Locked (no new joins)" : "Open"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* ---------- League settings (manager only) ---------- */}
-          <div className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-            {/* Settings card */}
-            <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-5">
-              <h2 className="text-xl font-bold mb-3">League settings</h2>
-
-              {!user ? (
-                <p className="text-slate-400 text-sm">
-                  Login to manage this league.
-                </p>
-              ) : !isManager ? (
-                <p className="text-slate-400 text-sm">
-                  Only the league manager can edit settings.
-                </p>
-              ) : (
-                <form onSubmit={handleSaveSettings} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-200 mb-1">
-                      League name
-                    </label>
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="w-full rounded-md bg-slate-950 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-orange-500"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="lockLeague"
-                      type="checkbox"
-                      checked={editLocked}
-                      onChange={(e) => setEditLocked(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-orange-500"
-                    />
-                    <label
-                      htmlFor="lockLeague"
-                      className="text-sm text-slate-200"
-                    >
-                      Lock league (stop new members joining with the code)
-                    </label>
-                  </div>
-
-                  {settingsMessage && (
-                    <p className="text-xs text-slate-300">{settingsMessage}</p>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={savingSettings}
-                    className="mt-1 inline-flex items-center justify-center rounded-md bg-orange-500 px-4 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60"
-                  >
-                    {savingSettings ? "Saving…" : "Save settings"}
-                  </button>
-
-                  {/* Danger zone */}
-                  <div className="mt-6 border-t border-slate-800 pt-4">
-                    <p className="text-sm font-semibold text-red-400 mb-2">
-                      Danger zone
-                    </p>
-                    <p className="text-xs text-slate-400 mb-3">
-                      Deleting this league will remove it from Streakr. This
-                      cannot be undone.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleDeleteLeague}
-                      disabled={deleting}
-                      className="inline-flex items-center justify-center rounded-md border border-red-500 px-4 py-2 text-sm font-semibold text-red-400 hover:bg-red-500/10 disabled:opacity-60"
-                    >
-                      {deleting ? "Deleting…" : "Delete league"}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </div>
-
-            {/* Ladder card */}
             <div>
-              <h2 className="text-xl font-bold mb-3">League ladder</h2>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                League code
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={league.code || "No code set"}
+                  className="flex-1 rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm text-white"
+                />
+                <button
+                  type="button"
+                  onClick={handleCopyCode}
+                  className="px-3 py-2 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-50 font-semibold transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
 
-              {loadingLadder ? (
-                <p className="text-slate-400 text-sm">Loading ladder…</p>
-              ) : ladder.length === 0 ? (
-                <p className="text-slate-400 text-sm">
-                  No members yet. Share your league code to get your mates in.
-                </p>
-              ) : (
-                <div className="bg-slate-900/60 rounded-xl border border-slate-800 overflow-hidden">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-800/60 text-slate-300 uppercase text-xs">
-                      <tr>
-                        <th className="px-4 py-3">#</th>
-                        <th className="px-4 py-3">Player</th>
-                        <th className="px-4 py-3">Team</th>
-                        <th className="px-4 py-3">Current</th>
-                        <th className="px-4 py-3">Longest</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ladder.map((p, i) => (
-                        <tr
-                          key={p.uid}
-                          className="border-t border-slate-800 hover:bg-slate-800/40 transition"
-                        >
-                          <td className="px-4 py-3 font-semibold text-slate-300">
-                            {i + 1}
-                          </td>
-                          <td className="px-4 py-3 flex items-center gap-3">
-                            <img
-                              src={p.avatarUrl || "/default-avatar.png"}
-                              className="w-8 h-8 rounded-full object-cover"
-                              alt={p.displayName}
-                            />
-                            <span className="text-white font-semibold">
-                              {p.displayName}
-                            </span>
-                            {p.role === "manager" && (
-                              <span className="ml-2 text-[10px] bg-orange-500 text-black px-2 py-0.5 rounded-full">
-                                Manager
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-slate-300">
-                            {p.team || "-"}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-white">
-                            {p.currentStreak}
-                          </td>
-                          <td className="px-4 py-3 text-slate-300">
-                            {p.longestStreak}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                Invite link
+              </label>
+              <div className="flex flex-col gap-2">
+                <input
+                  readOnly
+                  value={
+                    inviteUrl || "Invite link will appear here."
+                  }
+                  className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-xs text-slate-100"
+                />
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyInviteLink}
+                    className="px-3 py-2 text-xs rounded-md bg-slate-800 hover:bg-slate-700 text-slate-50 font-semibold transition-colors"
+                  >
+                    Copy link
+                  </button>
+                  {copyMessage && (
+                    <span className="text-xs text-emerald-400">
+                      {copyMessage}
+                    </span>
+                  )}
                 </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-400">
+              Anyone who joins still plays in the global game – this
+              league just gives you your own ladder for bragging rights.
+            </p>
+          </div>
+
+          {/* Danger zone */}
+          <div className="bg-slate-900/70 border border-red-900/70 rounded-2xl p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-red-300">
+              League actions
+            </h3>
+
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={handleLeaveLeague}
+                disabled={leaveLoading}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-md border border-red-600 text-red-300 text-xs font-semibold hover:bg-red-900/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {leaveLoading ? "Leaving..." : "Leave league"}
+              </button>
+
+              {isManager && (
+                <button
+                  type="button"
+                  onClick={handleDeleteLeague}
+                  disabled={deleteLoading}
+                  className="inline-flex items-center justify-center px-4 py-2 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-500 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                >
+                  {deleteLoading
+                    ? "Deleting..."
+                    : "Delete league for everyone"}
+                </button>
               )}
             </div>
+
+            <p className="text-[11px] text-slate-400">
+              Deleting a league removes it for all members. Leaving a
+              league only removes you – you can always rejoin with the
+              code.
+            </p>
           </div>
-        </>
-      )}
+        </section>
+      </div>
+
+      {/* Members & ladder section */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Members list */}
+        <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 md:p-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold text-white">
+              League members
+            </h2>
+            <span className="text-xs text-slate-400">
+              {members.length} player
+              {members.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          {members.length === 0 ? (
+            <p className="text-sm text-slate-300">
+              No-one has joined yet. Share your league code to get
+              things started.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {members.map((m) => (
+                <li
+                  key={m.id}
+                  className="flex items-center justify-between rounded-lg bg-slate-950/70 border border-slate-800 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm text-white">
+                      {m.displayName}
+                      {m.uid === user.uid && (
+                        <span className="ml-2 text-[11px] text-emerald-400">
+                          (you)
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Role:{" "}
+                      {m.role === "manager"
+                        ? "League Manager"
+                        : "Member"}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* Ladder placeholder */}
+        <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 md:p-6">
+          <h2 className="text-lg font-semibold text-white mb-2">
+            League ladder (coming soon)
+          </h2>
+          <p className="text-sm text-slate-300 mb-3">
+            Soon this will show each member&apos;s current streak and
+            best streak for this season, ranked from top to bottom just
+            like the global leaderboard.
+          </p>
+          <p className="text-xs text-slate-400">
+            For now, streaks are still tracked globally – we&apos;ll
+            plug private ladders into that same data once we wire in
+            the stats.
+          </p>
+        </section>
+      </div>
     </div>
   );
 }
