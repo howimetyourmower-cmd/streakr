@@ -12,6 +12,7 @@ import {
   limit,
   query,
   serverTimestamp,
+  setDoc,
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
