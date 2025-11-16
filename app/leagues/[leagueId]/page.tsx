@@ -1,4 +1,4 @@
-// app/leagues/[id]/page.tsx
+// app/leagues/[leagueId]/page.tsx
 export const dynamic = "force-dynamic";
 
 "use client";
