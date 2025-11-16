@@ -1,39 +1,52 @@
-// app/leagues/page.tsx
 "use client";
 
+import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
 import {
+  collection,
   collectionGroup,
+  doc,
   getDoc,
   getDocs,
   limit,
   query,
+  serverTimestamp,
+  setDoc,
   where,
 } from "firebase/firestore";
+
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
-type LeagueSummary = {
+// Types
+interface LeagueSummary {
   id: string;
   name: string;
   code: string;
   memberCount: number;
   role: "manager" | "member";
-};
+}
 
 export default function LeaguesPage() {
+  const router = useRouter();
   const { user, loading } = useAuth();
 
   const [myLeagues, setMyLeagues] = useState<LeagueSummary[]>([]);
-  const [loadingLeagues, setLoadingLeagues] = useState(false);
+  const [loadingLeagues, setLoadingLeagues] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load leagues this user belongs to
+  // -----------------------------------
+  // LOAD MY LEAGUES
+  // -----------------------------------
   useEffect(() => {
     if (loading) return;
+
+    // If not logged in, show empty leagues list
     if (!user) {
       setMyLeagues([]);
+      setLoadingLeagues(false);
       return;
     }
 
@@ -42,10 +55,11 @@ export default function LeaguesPage() {
       setError(null);
 
       try {
+        // user is guaranteed here
         const membershipsSnap = await getDocs(
           query(
             collectionGroup(db, "members"),
-            where("uid", "==", user.uid!), // user is guaranteed here
+            where("uid", "==", user.uid),
             limit(20)
           )
         );
@@ -53,7 +67,7 @@ export default function LeaguesPage() {
         const results: LeagueSummary[] = [];
 
         for (const membershipDoc of membershipsSnap.docs) {
-          const leagueRef = membershipDoc.ref.parent.parent; // leagues/{leagueId}
+          const leagueRef = membershipDoc.ref.parent.parent;
           if (!leagueRef) continue;
 
           const leagueSnap = await getDoc(leagueRef);
@@ -84,133 +98,91 @@ export default function LeaguesPage() {
   }, [user, loading]);
 
   return (
-    <div className="py-6 md:py-8">
-      {/* Page heading + intro */}
-      <div className="mb-6">
-        <h1 className="text-3xl md:text-4xl font-bold mb-2">Leagues</h1>
-        <p className="text-slate-300 max-w-2xl text-sm md:text-base">
-          Play Streakr with your mates, work crew or fantasy league. Create a
-          private league, invite friends with a code, and battle it out on your
-          own ladder while still counting towards the global Streak leaderboard.
-        </p>
-      </div>
+    <div className="py-6 md:py-10">
+      {/* Page title */}
+      <h1 className="text-3xl font-bold mb-2">Leagues</h1>
+      <p className="text-slate-300 mb-8 max-w-2xl">
+        Play Streakr with your mates, work crew or fantasy league. Create a private league,
+        invite friends with a code, and compete while still counting towards the global leaderboard.
+      </p>
 
-      {/* 3-column layout: Create / Join / My leagues */}
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* CREATE A LEAGUE */}
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
-          <div>
-            <h2 className="text-xl font-semibold mb-2">Create a league</h2>
-            <p className="text-slate-300 text-sm mb-4">
-              You’re the commish. Name your league, set how many mates can
-              join, and share a single invite code with your group.
-            </p>
-            <ul className="text-slate-400 text-xs space-y-1 mb-4 list-disc list-inside">
-              <li>You automatically join as League Manager</li>
-              <li>Share one code to invite players</li>
-              <li>Everyone’s streak still counts globally</li>
-            </ul>
-          </div>
+      {/* 3-column layout */}
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* CREATE LEAGUE */}
+        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 flex flex-col">
+          <h2 className="text-xl font-semibold mb-3">Create a league</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            You’re the commish. Name your league, set how many mates can join and share a single invite code.
+          </p>
+
+          <ul className="text-slate-400 text-sm mb-6 space-y-1">
+            <li>• You join as League Manager automatically</li>
+            <li>• Share one code to invite players</li>
+            <li>• All streaks still count globally</li>
+          </ul>
 
           <Link
             href="/leagues/create"
-            className="mt-4 inline-flex items-center justify-center rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold px-4 py-2 text-sm shadow-lg transition-colors"
+            className="mt-auto bg-orange-500 hover:bg-orange-600 transition text-black font-semibold text-center py-2 rounded-lg"
           >
             Create league
           </Link>
         </div>
 
-        {/* JOIN A LEAGUE */}
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between">
-          <div>
-            <h2 className="text-xl font-semibold mb-2">Join a league</h2>
-            <p className="text-slate-300 text-sm mb-4">
-              Got a code from a mate? Drop it in and you&apos;ll appear on that
-              league&apos;s ladder as soon as you make picks.
-            </p>
-            <ul className="text-slate-400 text-xs space-y-1 mb-4 list-disc list-inside">
-              <li>League Manager controls who gets the code</li>
-              <li>You can join multiple private leagues</li>
-              <li>No extra cost – still 100% free</li>
-            </ul>
-          </div>
+        {/* JOIN LEAGUE */}
+        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 flex flex-col">
+          <h2 className="text-xl font-semibold mb-3">Join a league</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Got a code from a mate? Enter it and you’ll appear on that league’s ladder.
+          </p>
+
+          <ul className="text-slate-400 text-sm mb-6 space-y-1">
+            <li>• League Manager decides who gets the code</li>
+            <li>• Join as many private leagues as you like</li>
+            <li>• Still 100% free</li>
+          </ul>
 
           <Link
             href="/leagues/join"
-            className="mt-4 inline-flex items-center justify-center rounded-lg bg-sky-500 hover:bg-sky-600 text-black font-semibold px-4 py-2 text-sm shadow-lg transition-colors"
+            className="mt-auto bg-blue-500 hover:bg-blue-600 transition text-white font-semibold text-center py-2 rounded-lg"
           >
             Join with a code
           </Link>
         </div>
 
         {/* MY LEAGUES */}
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xl font-semibold">My leagues</h2>
-          </div>
+        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6">
+          <h2 className="text-xl font-semibold mb-3">My leagues</h2>
 
-          {!user && !loading && (
-            <p className="text-slate-400 text-sm">
-              Log in to see any leagues you&apos;re part of.
-            </p>
-          )}
-
-          {loading && (
-            <p className="text-slate-400 text-sm">Checking your leagues…</p>
-          )}
-
-          {!loading && user && loadingLeagues && (
+          {loadingLeagues ? (
             <p className="text-slate-400 text-sm">Loading your leagues…</p>
-          )}
-
-          {!loading && user && error && (
+          ) : error ? (
             <p className="text-red-400 text-sm">{error}</p>
-          )}
-
-          {!loading &&
-            user &&
-            !loadingLeagues &&
-            !error &&
-            myLeagues.length === 0 && (
-              <p className="text-slate-400 text-sm">
-                You&apos;re not in any private leagues yet. Create one or join
-                with a code to see them here.
-              </p>
-            )}
-
-          {!loading && user && !loadingLeagues && myLeagues.length > 0 && (
-            <div className="mt-3 space-y-2">
-              {myLeagues.map((league) => (
+          ) : myLeagues.length === 0 ? (
+            <p className="text-slate-400 text-sm">You haven't joined any leagues yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {myLeagues.map((lg) => (
                 <Link
-                  key={league.id}
-                  href={`/leagues/${league.id}`}
-                  className="block rounded-lg border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm hover:border-orange-500 hover:bg-slate-900/80 transition-colors"
+                  key={lg.id}
+                  href={`/leagues/${lg.id}`}
+                  className="block bg-slate-800/60 hover:bg-slate-800 transition rounded-lg p-4"
                 >
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex justify-between items-center">
                     <div>
-                      <div className="font-semibold">{league.name}</div>
-                      <div className="text-xs text-slate-400">
-                        {league.memberCount}{" "}
-                        {league.memberCount === 1 ? "player" : "players"} •{" "}
-                        {league.role === "manager" ? "Manager" : "Member"}
+                      <div className="font-semibold">{lg.name}</div>
+                      <div className="text-slate-400 text-xs">
+                        Code: {lg.code} • {lg.memberCount} members
                       </div>
                     </div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-400">
-                      Code:{" "}
-                      <span className="font-mono text-slate-200">
-                        {league.code}
-                      </span>
-                    </div>
+                    <span className="text-xs px-2 py-1 rounded bg-slate-700">
+                      {lg.role === "manager" ? "Manager" : "Member"}
+                    </span>
                   </div>
                 </Link>
               ))}
             </div>
           )}
-
-          <p className="mt-4 text-[11px] text-slate-500">
-            Private leagues are just for bragging rights. Your streak still
-            counts on the global ladder no matter which league you&apos;re in.
-          </p>
         </div>
       </div>
     </div>
