@@ -42,7 +42,8 @@ export default function LeagueDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -110,10 +111,28 @@ export default function LeagueDetailPage({
     if (!league?.code) return;
     try {
       await navigator.clipboard.writeText(league.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
     } catch (err) {
       console.error("Failed to copy", err);
+    }
+  };
+
+  const handleCopyInviteLink = async () => {
+    if (!league?.code) return;
+    if (typeof window === "undefined") return;
+
+    const origin = window.location.origin;
+    const url = `${origin}/leagues/join?code=${encodeURIComponent(
+      league.code
+    )}`;
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy invite link", err);
     }
   };
 
@@ -180,7 +199,13 @@ export default function LeagueDetailPage({
                 onClick={handleCopyCode}
                 className="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
               >
-                {copied ? "Copied!" : "Copy"}
+                {copiedCode ? "Code copied" : "Copy code"}
+              </button>
+              <button
+                onClick={handleCopyInviteLink}
+                className="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+              >
+                {copiedLink ? "Link copied" : "Copy invite link"}
               </button>
               {isManager && (
                 <span className="text-xs px-2 py-1 rounded-full bg-orange-500/20 text-orange-400 border border-orange-400/40">
@@ -196,7 +221,7 @@ export default function LeagueDetailPage({
           </p>
         </div>
 
-        {/* Leave button */}
+        {/* Right side: your rank + leave button */}
         <div className="flex flex-col items-start md:items-end gap-2">
           {myRank && (
             <div className="text-sm text-slate-300">
@@ -246,7 +271,8 @@ export default function LeagueDetailPage({
 
           {members.length === 0 ? (
             <div className="px-4 py-6 text-sm text-slate-400">
-              No members yet. Share your invite code to get your mates in.
+              No members yet. Share your invite code or link to get your mates
+              in.
             </div>
           ) : (
             <div className="overflow-x-auto">
