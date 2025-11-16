@@ -59,7 +59,7 @@ export default function LeaguesPage() {
         const membershipsSnap = await getDocs(
           query(
             collectionGroup(db, "members"),
-            where("uid", "==", user.uid),
+            where("uid", "==", user!.uid),
             limit(20)
           )
         );
