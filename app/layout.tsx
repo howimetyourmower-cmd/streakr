@@ -9,23 +9,20 @@ export const metadata: Metadata = {
   description: "Keep your streak alive – sports prediction game.",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-[#050816] text-white min-h-screen">
-        {/* Top nav / header */}
+        {/* ------------------ TOP NAV ------------------ */}
         <header className="border-b border-white/10 bg-[#050816]/90 backdrop-blur">
           <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-6">
+
             {/* Logo + brand */}
             <Link href="/" className="flex items-center gap-3">
               <img
                 src="/streakrlogo.jpg"
                 alt="STREAKr logo"
-                className="h-14 w-auto rounded-md object-contain"
+                className="h-16 w-auto rounded-md object-contain"
               />
               <span className="text-xl font-bold tracking-wide">
                 STREAK<span className="lowercase text-orange-500">r</span>
@@ -37,17 +34,24 @@ export default function RootLayout({
               <Link href="/picks" className="hover:text-orange-400 transition-colors">
                 Picks
               </Link>
+
               <Link href="/leaderboards" className="hover:text-orange-400 transition-colors">
                 Leaderboards
               </Link>
+
+              <Link href="/leagues" className="hover:text-orange-400 transition-colors">
+                Leagues
+              </Link>
+
               <Link href="/rewards" className="hover:text-orange-400 transition-colors">
                 Rewards
               </Link>
+
               <Link href="/faq" className="hover:text-orange-400 transition-colors">
                 FAQ
               </Link>
 
-              {/* Right-hand auth / profile buttons */}
+              {/* Right-hand auth buttons */}
               <div className="ml-4 flex items-center gap-3">
                 <Link
                   href="/auth"
@@ -55,6 +59,7 @@ export default function RootLayout({
                 >
                   Login / Sign up
                 </Link>
+
                 <Link
                   href="/profile"
                   className="text-xs sm:text-sm px-3 py-1.5 rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold transition-colors"
@@ -64,38 +69,21 @@ export default function RootLayout({
               </div>
             </nav>
           </div>
-        </header>
 
-        {/* -------------------------------------------------------------------------------- */}
-        {/* SPORTS BET–STYLE SPONSOR BANNER */}
-        {/* -------------------------------------------------------------------------------- */}
-
-        <div className="border-b border-black/20 bg-[#005AC8]">
-          <div className="max-w-7xl mx-auto px-6 py-2 flex flex-col sm:flex-row items-center justify-between gap-3">
-
-            {/* LEFT SIDE — Faux sponsor logo */}
-            <div className="flex items-center gap-2">
-              <div className="bg-[#003F8A] px-2 py-1 rounded-md flex items-center shadow-sm">
-                <span className="text-[#FFD200] text-xs font-extrabold tracking-wide">
-                  SPONSOR
-                </span>
-              </div>
-
-              <span className="text-white font-semibold text-sm sm:text-base">
-                Proudly backed by our official partner
+          {/* ------------------ SPONSOR BANNER ------------------ */}
+          <div className="w-full bg-[#1f2937] border-t border-white/5">
+            <div className="max-w-7xl mx-auto px-6 py-2 flex items-center justify-center gap-3">
+              <span className="text-[10px] uppercase tracking-widest text-gray-400">
+                Proudly supported by
+              </span>
+              <span className="text-xs font-bold text-blue-400">
+                SPORTSNET.io
               </span>
             </div>
-
-            {/* RIGHT SIDE — Small text */}
-            <span className="text-white/80 text-[10px] sm:text-xs font-medium">
-              Free game of skill • No gambling • 18+ only
-            </span>
           </div>
-        </div>
+        </header>
 
-        {/* -------------------------------------------------------------------------------- */}
-
-        {/* Page content */}
+        {/* ------------------ PAGE CONTENT ------------------ */}
         <main className="pt-4 pb-12">
           <div className="max-w-7xl mx-auto px-6">{children}</div>
         </main>
