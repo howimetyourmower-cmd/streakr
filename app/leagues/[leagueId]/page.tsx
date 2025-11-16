@@ -2,16 +2,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
-  query,
-  orderBy,
-  deleteDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,41 +17,40 @@ import { useAuth } from "@/hooks/useAuth";
 type LeagueDoc = {
   name: string;
   code: string;
-  createdBy?: string;
+  createdBy: string;
 };
 
 type MemberRow = {
   uid: string;
-  username: string;
+  displayName: string;
   team?: string;
-  avatarUrl?: string;
   currentStreak: number;
   longestStreak: number;
 };
 
-type PageProps = {
+export default function LeagueDetailPage({
+  params,
+}: {
   params: { leagueId: string };
-};
-
-export default function LeagueDetailPage({ params }: PageProps) {
+}) {
   const { leagueId } = params;
+  const { user } = useAuth();
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
 
   const [league, setLeague] = useState<LeagueDoc | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  // Load league + members
   useEffect(() => {
     const load = async () => {
       try {
-        setError(null);
         setLoading(true);
+        setError(null);
 
-        // 1) League doc
+        // --- Load league doc ---
         const leagueRef = doc(db, "leagues", leagueId);
         const leagueSnap = await getDoc(leagueRef);
 
@@ -64,47 +61,42 @@ export default function LeagueDetailPage({ params }: PageProps) {
         }
 
         const data = leagueSnap.data() || {};
-        const leagueData: LeagueDoc = {
-          name: data.name ?? "My league",
-          code: data.code ?? "—",
-          createdBy: data.createdBy,
-        };
-        setLeague(leagueData);
+        setLeague({
+          name: data.name ?? "Private league",
+          code: data.code ?? "",
+          createdBy: data.createdBy ?? "",
+        });
 
-        // 2) Members subcollection
-        const membersRef = collection(leagueRef, "members");
-        const membersQuery = query(membersRef, orderBy("joinedAt", "asc"));
-        const membersSnap = await getDocs(membersQuery);
+        // --- Load members subcollection ---
+        const membersSnap = await getDocs(
+          collection(db, "leagues", leagueId, "members")
+        );
 
-        const rows: MemberRow[] = [];
+        const rows: MemberRow[] = membersSnap.docs.map((d) => {
+          const m = d.data() || {};
+          return {
+            uid: m.uid ?? d.id,
+            displayName: m.displayName ?? "Player",
+            team: m.team ?? "",
+            currentStreak: Number(m.currentStreak ?? 0),
+            longestStreak: Number(m.longestStreak ?? 0),
+          };
+        });
 
-        for (const m of membersSnap.docs) {
-          const memberData = m.data() || {};
-          const uid = m.id;
-
-          // Look up profile in /users/{uid}
-          const userRef = doc(db, "users", uid);
-          const userSnap = await getDoc(userRef);
-          const profile = userSnap.data() || {};
-
-          rows.push({
-            uid,
-            username:
-              profile.username ||
-              profile.name ||
-              profile.email ||
-              "Player",
-            team: profile.team || profile.favouriteTeam || "",
-            avatarUrl:
-              profile.avatarUrl || "/default-avatar.png",
-            currentStreak: profile.currentStreak ?? 0,
-            longestStreak: profile.longestStreak ?? 0,
-          });
-        }
+        // Sort by current streak, then longest, then name
+        rows.sort((a, b) => {
+          if (b.currentStreak !== a.currentStreak) {
+            return b.currentStreak - a.currentStreak;
+          }
+          if (b.longestStreak !== a.longestStreak) {
+            return b.longestStreak - a.longestStreak;
+          }
+          return a.displayName.localeCompare(b.displayName);
+        });
 
         setMembers(rows);
       } catch (err) {
-        console.error("Failed to load league detail", err);
+        console.error("Failed to load league", err);
         setError("Failed to load league. Please try again.");
       } finally {
         setLoading(false);
@@ -118,10 +110,10 @@ export default function LeagueDetailPage({ params }: PageProps) {
     if (!league?.code) return;
     try {
       await navigator.clipboard.writeText(league.code);
-      alert("League code copied to clipboard.");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error("Copy failed", err);
-      alert("Could not copy code. Please copy it manually.");
+      console.error("Failed to copy", err);
     }
   };
 
@@ -131,10 +123,13 @@ export default function LeagueDetailPage({ params }: PageProps) {
       return;
     }
 
-    const confirmLeave = window.confirm(
-      "Leave this league? You can re-join later with the invite code."
-    );
-    if (!confirmLeave) return;
+    if (
+      !window.confirm(
+        "Are you sure you want to leave this league? You can rejoin later with the code."
+      )
+    ) {
+      return;
+    }
 
     try {
       setLeaving(true);
@@ -143,162 +138,182 @@ export default function LeagueDetailPage({ params }: PageProps) {
       router.push("/leagues");
     } catch (err) {
       console.error("Failed to leave league", err);
-      alert("Failed to leave league. Please try again.");
+      alert("Could not leave league. Please try again.");
     } finally {
       setLeaving(false);
     }
   };
 
-  const isManager = league?.createdBy && user?.uid === league.createdBy;
+  const isManager = !!user && league?.createdBy === user.uid;
+
+  const myIndex =
+    user && members.length
+      ? members.findIndex((m) => m.uid === user.uid)
+      : -1;
+  const myRank = myIndex >= 0 ? myIndex + 1 : null;
 
   return (
-    <div className="py-6 md:py-8">
-      {/* Breadcrumb back link */}
-      <div className="mb-4">
+    <div className="py-6 md:py-10 space-y-6">
+      {/* Back link */}
+      <div className="mb-2">
         <Link
           href="/leagues"
-          className="text-xs text-slate-300 hover:text-orange-400"
+          className="text-sm text-slate-400 hover:text-orange-400"
         >
           ← Back to leagues
         </Link>
       </div>
 
-      {/* Heading */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold mb-1">
-            {league?.name || "League"}
+          <h1 className="text-3xl font-bold mb-2">
+            {league ? league.name : "League"}
           </h1>
-          <p className="text-slate-300 text-sm">
-            Private league. Your streak still counts towards the global ladder.
-          </p>
-          {isManager && (
-            <p className="text-xs text-emerald-400 mt-1">
-              You are the League Manager.
-            </p>
+          {league?.code && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-slate-400">Invite code:</span>
+              <span className="font-mono px-2 py-1 rounded bg-slate-900 border border-slate-700">
+                {league.code}
+              </span>
+              <button
+                onClick={handleCopyCode}
+                className="text-xs px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700"
+              >
+                {copied ? "Copied!" : "Copy"}
+              </button>
+              {isManager && (
+                <span className="text-xs px-2 py-1 rounded-full bg-orange-500/20 text-orange-400 border border-orange-400/40">
+                  You are the manager
+                </span>
+              )}
+            </div>
           )}
+          <p className="text-slate-400 text-sm mt-3 max-w-xl">
+            Your streak in this league still counts towards the global
+            leaderboard. This page shows how you stack up against everyone in
+            this private group.
+          </p>
         </div>
 
-        {/* League code + actions */}
-        {league && (
-          <div className="bg-slate-900/80 border border-slate-700 rounded-2xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 text-sm">
-            <div>
-              <div className="text-slate-400 text-xs uppercase tracking-wide">
-                League code
-              </div>
-              <div className="font-mono text-lg">
-                {league.code || "—"}
-              </div>
+        {/* Leave button */}
+        <div className="flex flex-col items-start md:items-end gap-2">
+          {myRank && (
+            <div className="text-sm text-slate-300">
+              You&apos;re currently{" "}
+              <span className="font-semibold text-orange-400">
+                {myRank}
+                {myRank === 1 ? "st" : myRank === 2 ? "nd" : myRank === 3 ? "rd" : "th"}
+              </span>{" "}
+              in this league.
             </div>
-            <div className="flex flex-wrap gap-2 sm:ml-4">
-              <button
-                type="button"
-                onClick={handleCopyCode}
-                className="px-3 py-1.5 rounded-full border border-slate-600 text-xs font-semibold hover:border-orange-400 hover:text-orange-400 transition-colors"
-              >
-                Copy code
-              </button>
-              <button
-                type="button"
-                onClick={handleLeaveLeague}
-                disabled={leaving}
-                className="px-3 py-1.5 rounded-full border border-red-500/70 text-xs font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-60 transition-colors"
-              >
-                {leaving ? "Leaving…" : "Leave league"}
-              </button>
-            </div>
-          </div>
-        )}
+          )}
+
+          <button
+            onClick={handleLeaveLeague}
+            disabled={leaving}
+            className="text-xs mt-1 px-3 py-1.5 rounded-full border border-red-500/70 text-red-400 hover:bg-red-500/10 disabled:opacity-60"
+          >
+            {leaving ? "Leaving…" : "Leave league"}
+          </button>
+        </div>
       </div>
 
       {/* Error / loading */}
       {loading && (
-        <div className="text-slate-300 text-sm">Loading league…</div>
+        <p className="text-slate-400 text-sm">Loading league ladder…</p>
       )}
-      {error && !loading && (
-        <div className="text-red-400 text-sm mb-4">{error}</div>
+      {error && (
+        <p className="text-red-400 text-sm bg-red-950/40 border border-red-800/60 rounded-lg px-4 py-2">
+          {error}
+        </p>
       )}
 
-      {/* Members table */}
+      {/* Ladder table */}
       {!loading && !error && (
-        <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 md:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg md:text-xl font-semibold">
-              League ladder
-            </h2>
-            <p className="text-xs text-slate-400">
-              Showing {members.length}{" "}
-              {members.length === 1 ? "player" : "players"}
-            </p>
+        <div className="mt-4 bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold">League ladder</h2>
+              <p className="text-xs text-slate-400">
+                Sorted by current streak, then longest streak.
+              </p>
+            </div>
+            <span className="text-xs text-slate-400">
+              {members.length} player{members.length === 1 ? "" : "s"}
+            </span>
           </div>
 
           {members.length === 0 ? (
-            <p className="text-slate-300 text-sm">
-              No members yet. Share the league code with your mates to get
-              them in.
-            </p>
+            <div className="px-4 py-6 text-sm text-slate-400">
+              No members yet. Share your invite code to get your mates in.
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-xs uppercase tracking-wide text-slate-400 border-b border-slate-800">
-                    <th className="py-2 pr-4 text-left">Player</th>
-                    <th className="py-2 px-4 text-left hidden sm:table-cell">
-                      Team
-                    </th>
-                    <th className="py-2 px-4 text-right">
-                      Current streak
-                    </th>
-                    <th className="py-2 pl-4 text-right">
-                      Longest streak
-                    </th>
+                <thead className="bg-slate-950/60 text-slate-400 text-xs uppercase tracking-wide">
+                  <tr>
+                    <th className="text-left px-4 py-2 w-14">Rank</th>
+                    <th className="text-left px-4 py-2">Player</th>
+                    <th className="text-left px-4 py-2">Team</th>
+                    <th className="text-right px-4 py-2">Current streak</th>
+                    <th className="text-right px-4 py-2">Longest streak</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {members.map((m, index) => (
-                    <tr
-                      key={m.uid}
-                      className="border-b border-slate-800/70 last:border-0"
-                    >
-                      <td className="py-3 pr-4 flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full overflow-hidden bg-slate-700 flex items-center justify-center text-xs font-semibold">
-                          <img
-                            src={m.avatarUrl || "/default-avatar.png"}
-                            alt={m.username}
-                            className="h-full w-full object-cover"
-                          />
-                        </div>
-                        <div>
-                          <div className="font-semibold">
-                            {index + 1}. {m.username}
+                  {members.map((m, index) => {
+                    const isYou = user && m.uid === user.uid;
+                    const rank = index + 1;
+
+                    return (
+                      <tr
+                        key={m.uid}
+                        className={
+                          "border-t border-slate-800 " +
+                          (isYou
+                            ? "bg-orange-500/5"
+                            : index % 2 === 0
+                            ? "bg-slate-900/40"
+                            : "bg-slate-900/20")
+                        }
+                      >
+                        <td className="px-4 py-2 text-xs md:text-sm text-slate-300">
+                          {rank}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold">
+                              {m.displayName}
+                            </span>
+                            {isYou && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-400">
+                                You
+                              </span>
+                            )}
+                            {league?.createdBy === m.uid && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/40">
+                                Manager
+                              </span>
+                            )}
                           </div>
-                          <div className="text-xs text-slate-400 sm:hidden">
-                            {m.team || "No team set"}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-slate-300 hidden sm:table-cell">
-                        {m.team || "—"}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        {m.currentStreak}{" "}
-                        <span className="text-xs text-slate-400">
-                          in a row
-                        </span>
-                      </td>
-                      <td className="py-3 pl-4 text-right">
-                        {m.longestStreak}{" "}
-                        <span className="text-xs text-slate-400">
-                          longest
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-2 text-slate-300">
+                          {m.team || "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-100">
+                          {m.currentStreak} in a row
+                        </td>
+                        <td className="px-4 py-2 text-right text-slate-300">
+                          {m.longestStreak} longest
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
-        </section>
+        </div>
       )}
     </div>
   );
