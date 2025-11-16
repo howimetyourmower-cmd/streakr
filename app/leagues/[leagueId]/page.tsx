@@ -57,16 +57,18 @@ export default function LeagueDetailPage() {
   const [origin, setOrigin] = useState("");
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
-  // Make sure we have window origin for invite link
+  // Get window origin for invite link
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
     }
   }, []);
 
-  const leagueDocRef = leagueId
-    ? doc(collection(db, "leagues"), leagueId as string)
-    : null;
+  // Helper to get doc ref (don’t put this in deps)
+  const getLeagueDocRef = () => {
+    if (!leagueId) return null;
+    return doc(collection(db, "leagues"), leagueId as string);
+  };
 
   const isManager =
     !!league && !!user && league.managerUid === user.uid;
@@ -76,12 +78,15 @@ export default function LeagueDetailPage() {
   // Load league + members
   useEffect(() => {
     const load = async () => {
-      if (!leagueDocRef || !user) return;
+      if (!user || !leagueId) return;
+
+      const leagueDocRef = getLeagueDocRef();
+      if (!leagueDocRef) return;
 
       setLoading(true);
       setError(null);
       try {
-        // 1) League
+        // 1) League doc
         const snap = await getDoc(leagueDocRef);
         if (!snap.exists()) {
           setError("League not found.");
@@ -105,7 +110,7 @@ export default function LeagueDetailPage() {
           description: leagueData.description ?? "",
         });
 
-        // 2) Members
+        // 2) Members subcollection
         const membersRef = collection(leagueDocRef, "members");
         const membersSnap = await getDocs(
           query(membersRef, orderBy("role"), orderBy("displayName"))
@@ -131,10 +136,10 @@ export default function LeagueDetailPage() {
       }
     };
 
-    if (!authLoading && user && leagueDocRef) {
+    if (!authLoading && user && leagueId) {
       load();
     }
-  }, [authLoading, user, leagueDocRef]);
+  }, [authLoading, user, leagueId]); // <— no doc ref here
 
   const handleInputChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -147,7 +152,10 @@ export default function LeagueDetailPage() {
 
   const handleSaveLeague = async (e: FormEvent) => {
     e.preventDefault();
-    if (!leagueDocRef || !isManager) return;
+    if (!isManager) return;
+
+    const leagueDocRef = getLeagueDocRef();
+    if (!leagueDocRef) return;
 
     setSaveLoading(true);
     setError(null);
@@ -204,7 +212,11 @@ export default function LeagueDetailPage() {
   };
 
   const handleLeaveLeague = async () => {
-    if (!leagueDocRef || !currentMember || !user) return;
+    if (!user || !currentMember) return;
+
+    const leagueDocRef = getLeagueDocRef();
+    if (!leagueDocRef) return;
+
     if (
       isManager &&
       members.filter((m) => m.uid !== user.uid).length === 0
@@ -235,18 +247,20 @@ export default function LeagueDetailPage() {
   };
 
   const handleDeleteLeague = async () => {
-    if (!leagueDocRef || !isManager) return;
+    if (!isManager) return;
+
+    const leagueDocRef = getLeagueDocRef();
+    if (!leagueDocRef) return;
 
     const sure = confirm(
-      "Delete this league for everyone? This cannot be undone. (Members will disappear from this league.)"
+      "Delete this league for everyone? This cannot be undone."
     );
     if (!sure) return;
 
     setDeleteLoading(true);
     setError(null);
     try {
-      // NOTE: This only deletes the league document itself.
-      // Any subcollection docs (members) will remain until we add a Cloud Function to clean them up.
+      // Note: this only deletes the league doc, not subcollections.
       await deleteDoc(leagueDocRef);
       router.push("/leagues");
     } catch (err) {
@@ -308,9 +322,9 @@ export default function LeagueDetailPage() {
         </Link>
       </div>
 
-      {/* Top row: league info + actions */}
+      {/* Top row */}
       <div className="grid gap-6 md:grid-cols-[2fr,1.4fr]">
-        {/* League details / edit form */}
+        {/* League details */}
         <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 md:p-6 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-2xl md:text-3xl font-bold text-white">
@@ -338,7 +352,6 @@ export default function LeagueDetailPage() {
             </div>
           )}
 
-          {/* Manager can edit; others see read-only copy */}
           {isManager ? (
             <form
               onSubmit={handleSaveLeague}
@@ -398,9 +411,9 @@ export default function LeagueDetailPage() {
           )}
         </section>
 
-        {/* Invite & danger zone */}
+        {/* Invite + danger zone */}
         <section className="space-y-4">
-          {/* Invite card */}
+          {/* Invite */}
           <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-3">
             <h2 className="text-lg font-semibold text-white">
               Invite your mates
@@ -504,9 +517,9 @@ export default function LeagueDetailPage() {
         </section>
       </div>
 
-      {/* Members & ladder section */}
+      {/* Members + ladder placeholder */}
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Members list */}
+        {/* Members */}
         <section className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 md:p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-white">
