@@ -1,7 +1,7 @@
+"use client";
+
 // app/leagues/[leagueId]/page.tsx
 export const dynamic = "force-dynamic";
-
-"use client";
 
 import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
