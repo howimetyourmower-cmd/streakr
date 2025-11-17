@@ -22,6 +22,10 @@ export const SPORTS = {
   ufc: {
     name: "UFC",
     icon: "/sports/ufc.svg",
+   },
+  golf: {
+    name: "Golf",
+    icon: "/sports/golf.svg",
  },
   soccer: {
     name: "soccer",
