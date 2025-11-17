@@ -1,9 +1,6 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useState, FormEvent } from "react";
-import Link from "next/link";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   addDoc,
@@ -14,59 +11,70 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
+import Link from "next/link";
 
-function generateLeagueCode(length = 6): string {
+function generateLeagueCode(length = 6) {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let result = "";
+  let code = "";
   for (let i = 0; i < length; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  return result;
+  return code;
 }
 
 export default function CreateLeaguePage() {
-  const router = useRouter();
   const { user } = useAuth();
+  const router = useRouter();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  if (!user) {
+    return (
+      <div className="py-6 md:py-8 space-y-4">
+        <Link
+          href="/leagues"
+          className="text-sm text-slate-300 hover:text-orange-400"
+        >
+          ← Back to leagues
+        </Link>
+        <p className="text-slate-200">
+          You need to be logged in to create a league.
+        </p>
+      </div>
+    );
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
-
-    if (!user) {
-      setError("You need to be logged in to create a league.");
-      return;
-    }
-
-    const trimmedName = name.trim();
-    if (!trimmedName) {
+    if (!name.trim()) {
       setError("Please give your league a name.");
       return;
     }
 
-    try {
-      setSaving(true);
+    setSaving(true);
+    setError(null);
 
+    try {
       const code = generateLeagueCode();
 
-      // 1) Create the league
       const leaguesRef = collection(db, "leagues");
       const leagueDocRef = await addDoc(leaguesRef, {
-        name: trimmedName,
-        description: description.trim() || "",
+        name: name.trim(),
+        description: description.trim(),
         code,
         managerUid: user.uid,
-        createdAt: serverTimestamp(),
         memberCount: 1,
+        createdAt: serverTimestamp(),
       });
 
-      // 2) Add the creator as manager in /leagues/{id}/members/{uid}
       const memberRef = doc(
-        collection(leagueDocRef, "members"),
+        db,
+        "leagues",
+        leagueDocRef.id,
+        "members",
         user.uid
       );
 
@@ -74,91 +82,71 @@ export default function CreateLeaguePage() {
         uid: user.uid,
         role: "manager",
         displayName: user.displayName || user.email || "Player",
+        joinedAt: serverTimestamp(),
       });
 
-      // 3) Go to league detail page
       router.push(`/leagues/${leagueDocRef.id}`);
     } catch (err) {
-      console.error("Error creating league", err);
+      console.error("Failed to create league", err);
       setError("Failed to create league. Please try again.");
-    } finally {
       setSaving(false);
     }
   };
 
-  if (!user) {
-    return (
-      <div className="py-8">
-        <h1 className="text-2xl font-bold mb-4">Create a league</h1>
-        <p className="text-slate-300 mb-4">
-          You need to be logged in to create a private league.
-        </p>
+  return (
+    <div className="py-6 md:py-8 max-w-xl">
+      <div className="mb-4">
         <Link
-          href="/auth"
-          className="inline-flex items-center px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm"
+          href="/leagues"
+          className="text-sm text-slate-300 hover:text-orange-400"
         >
-          Go to login / sign up
+          ← Back to leagues
         </Link>
       </div>
-    );
-  }
 
-  return (
-    <div className="py-6 md:py-8 max-w-3xl">
-      <Link
-        href="/leagues"
-        className="text-sm text-slate-300 hover:text-white mb-4 inline-flex items-center gap-1"
-      >
-        ← Back to leagues
-      </Link>
-
-      <h1 className="text-3xl font-bold mb-2">Create a league</h1>
-      <p className="text-slate-300 mb-6">
-        Name your league and invite your mates with a single code. Everyone’s
-        streak still counts on the global ladder.
+      <h1 className="text-2xl md:text-3xl font-bold text-white mb-2">
+        Create a league
+      </h1>
+      <p className="text-slate-300 mb-6 text-sm md:text-base">
+        Set up a private ladder for your mates, work crew or fantasy league.
+        Everyone&apos;s streaks still count on the global leaderboard.
       </p>
 
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-200">
-          {error}
-        </div>
-      )}
-
-      <form
-        onSubmit={handleSubmit}
-        className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4"
-      >
+      <form onSubmit={handleSubmit} className="space-y-5">
         <div>
-          <label className="block text-sm font-medium mb-1">
-            League name<span className="text-red-400">*</span>
+          <label className="block text-sm font-medium text-slate-200 mb-1">
+            League name
           </label>
           <input
             type="text"
-            className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            placeholder="E.g. The Shed Crew"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            placeholder="E.g. Thursday Night Punters"
+            className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">
-            Description <span className="text-slate-400 text-xs">(optional)</span>
+          <label className="block text-sm font-medium text-slate-200 mb-1">
+            Description (optional)
           </label>
           <textarea
-            className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 min-h-[80px]"
-            placeholder="E.g. Season-long office comp. Winner shouts the end-of-year pub session."
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            placeholder="E.g. Season-long office comp. Winner shouts the end-of-year pub session."
+            rows={3}
+            className="w-full rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
           />
         </div>
+
+        {error && <p className="text-sm text-red-400">{error}</p>}
 
         <button
           type="submit"
           disabled={saving}
-          className="inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm disabled:opacity-60 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:cursor-not-allowed text-black font-semibold text-sm shadow-lg transition-colors"
         >
-          {saving ? "Creating league..." : "Create league"}
+          {saving ? "Creating league…" : "Create league"}
         </button>
       </form>
     </div>
