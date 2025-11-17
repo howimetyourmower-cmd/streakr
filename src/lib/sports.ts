@@ -1,3 +1,4 @@
+// src/lib/sports.ts
 export const SPORTS = {
   afl: {
     name: "AFL",
@@ -11,9 +12,9 @@ export const SPORTS = {
     name: "Cricket",
     icon: "/sports/cricket.svg",
   },
-  basketball: {
-    name: "Basketball",
-    icon: "/sports/basketball.svg",
+  nba: {
+    name: "NBA",
+    icon: "/sports/basketball.svg", // matches basketball.svg
   },
   tennis: {
     name: "Tennis",
@@ -22,15 +23,15 @@ export const SPORTS = {
   ufc: {
     name: "UFC",
     icon: "/sports/ufc.svg",
-   },
-  golf: {
-    name: "Golf",
-    icon: "/sports/golf.svg",
- },
+  },
   soccer: {
     name: "Soccer",
     icon: "/sports/soccer.svg",
-   },
+  },
+  golf: {
+    name: "Golf",
+    icon: "/sports/golf.svg",
+  },
   nfl: {
     name: "NFL",
     icon: "/sports/nfl.svg",
