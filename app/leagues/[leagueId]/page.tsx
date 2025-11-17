@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -11,7 +11,9 @@ import {
   doc,
   getDoc,
   getDocs,
-  serverTimestamp,
+  limit,
+  orderBy,
+  query,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
@@ -22,178 +24,224 @@ type League = {
   description?: string;
   code: string;
   managerUid: string;
-  managerEmail?: string;
   memberCount?: number;
 };
 
 type Member = {
+  id: string;
   uid: string;
   displayName: string;
   role: "manager" | "member";
 };
 
-type LoadState = "loading" | "ready" | "error";
-
 export default function LeagueDetailPage() {
-  const { user } = useAuth();
-  const params = useParams<{ leagueId: string }>();
+  const { leagueId } = useParams<{ leagueId: string }>();
   const router = useRouter();
-
-  const leagueId = params?.leagueId as string;
+  const { user } = useAuth();
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [loadingState, setLoadingState] = useState<LoadState>("loading");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [leaving, setLeaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
-  const isManager = !!user && !!league && user.uid === league.managerUid;
+  const isManager = !!league && !!user && league.managerUid === user.uid;
 
-  // ---------- LOAD LEAGUE + MEMBERS ----------
   useEffect(() => {
-    if (!leagueId) return;
-
-    const load = async () => {
-      setLoadingState("loading");
-      setError("");
+    const fetchData = async () => {
+      if (!leagueId || !user) {
+        setLoading(false);
+        return;
+      }
 
       try {
-        const leagueRef = doc(db, "leagues", leagueId);
-        const snap = await getDoc(leagueRef);
+        setError(null);
 
-        if (!snap.exists()) {
-          throw new Error("League not found");
+        // 1) Load league
+        const leagueRef = doc(db, "leagues", leagueId);
+        const leagueSnap = await getDoc(leagueRef);
+
+        if (!leagueSnap.exists()) {
+          setError("League not found.");
+          setLoading(false);
+          return;
         }
 
-        const data = snap.data() as League;
-        const leagueData: League = {
-          name: data.name ?? "",
-          description: data.description ?? "",
-          code: data.code,
-          managerUid: data.managerUid,
-          managerEmail: data.managerEmail ?? "",
-          memberCount: data.memberCount ?? 0,
-        };
-
+        const leagueData = leagueSnap.data() as League;
         setLeague(leagueData);
         setName(leagueData.name);
-        setDescription(leagueData.description ?? "");
+        setDescription(leagueData.description || "");
 
-        // Try to load members, but don't crash detail page if this fails
-        try {
-          const membersCol = collection(leagueRef, "members");
-          const membersSnap = await getDocs(membersCol);
-          const list: Member[] = membersSnap.docs.map((d) => {
-            const m = d.data() as any;
-            return {
-              uid: m.uid,
-              displayName: m.displayName ?? "Player",
-              role: (m.role as Member["role"]) || "member",
-            };
-          });
-          setMembers(list);
-        } catch (innerErr) {
-          console.warn("Failed to load members (non-fatal):", innerErr);
-          setMembers([]);
-        }
+        // 2) Load members (first 50, ordered by displayName)
+        const membersRef = collection(db, "leagues", leagueId, "members");
+        const membersQuery = query(
+          membersRef,
+          orderBy("displayName"),
+          limit(50)
+        );
+        const membersSnap = await getDocs(membersQuery);
 
-        setLoadingState("ready");
+        const loadedMembers: Member[] = membersSnap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Member, "id">),
+        }));
+
+        setMembers(loadedMembers);
       } catch (err) {
-        console.error("Failed to load league:", err);
+        console.error("Error loading league data", err);
         setError("Failed to load league. Please try again.");
-        setLoadingState("error");
+      } finally {
+        setLoading(false);
       }
     };
 
-    load();
-  }, [leagueId]);
+    fetchData();
+  }, [leagueId, user]);
 
-  // ---------- SAVE BASIC SETTINGS ----------
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    if (!leagueId || !isManager) return;
+    if (!leagueId || !league || !isManager) return;
 
-    setSaving(true);
-    setError("");
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("League name cannot be empty.");
+      return;
+    }
 
     try {
+      setSaving(true);
+      setError(null);
+      setInfo(null);
+
       const leagueRef = doc(db, "leagues", leagueId);
       await updateDoc(leagueRef, {
-        name: name.trim(),
+        name: trimmedName,
         description: description.trim(),
-        updatedAt: serverTimestamp(),
       });
 
-      setLeague((prev) =>
-        prev
-          ? { ...prev, name: name.trim(), description: description.trim() }
-          : prev,
-      );
+      setLeague({
+        ...league,
+        name: trimmedName,
+        description: description.trim(),
+      });
+      setInfo("League details saved.");
     } catch (err) {
-      console.error("Failed to save league:", err);
-      setError("Failed to save changes. Please try again.");
+      console.error("Error saving league", err);
+      setError("Failed to save league. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  // ---------- LEAVE LEAGUE ----------
-  const handleLeaveLeague = async () => {
-    if (!user || !leagueId) return;
+  const handleCopyCode = async () => {
+    if (!league?.code) return;
+    try {
+      await navigator.clipboard?.writeText(league.code);
+      setInfo("Invite code copied to clipboard.");
+    } catch {
+      setInfo("Invite code: " + league.code);
+    }
+  };
 
-    setSaving(true);
-    setError("");
+  const handleLeaveLeague = async () => {
+    if (!leagueId || !user) return;
+
+    if (
+      !window.confirm(
+        "Are you sure you want to leave this league? You can rejoin later with the invite code."
+      )
+    ) {
+      return;
+    }
 
     try {
-      const leagueRef = doc(db, "leagues", leagueId);
-      const myMemberRef = doc(leagueRef, "members", user.uid);
-      await deleteDoc(myMemberRef);
+      setLeaving(true);
+      setError(null);
+      setInfo(null);
+
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      await deleteDoc(memberRef);
+
+      if (league && typeof league.memberCount === "number") {
+        const leagueRef = doc(db, "leagues", leagueId);
+        await updateDoc(leagueRef, {
+          memberCount: Math.max(0, league.memberCount - 1),
+        });
+      }
 
       router.push("/leagues");
     } catch (err) {
-      console.error("Failed to leave league:", err);
+      console.error("Error leaving league", err);
       setError("Failed to leave league. Please try again.");
     } finally {
-      setSaving(false);
+      setLeaving(false);
     }
   };
 
-  // ---------- DELETE LEAGUE (MANAGER ONLY) ----------
   const handleDeleteLeague = async () => {
-    if (!user || !isManager || !leagueId) return;
-    const confirmed = window.confirm(
-      "Are you sure you want to delete this league for everyone?",
-    );
-    if (!confirmed) return;
+    if (!leagueId || !league || !isManager) return;
 
-    setSaving(true);
-    setError("");
+    if (
+      !window.confirm(
+        "Delete this league for everyone? This will remove all members and the league itself. This cannot be undone."
+      )
+    ) {
+      return;
+    }
 
     try {
+      setDeleting(true);
+      setError(null);
+      setInfo(null);
+
       const leagueRef = doc(db, "leagues", leagueId);
 
-      // delete members subcollection docs (simple fan-out delete)
-      const membersSnap = await getDocs(collection(leagueRef, "members"));
-      await Promise.all(membersSnap.docs.map((d) => deleteDoc(d.ref)));
+      // Delete all members
+      const membersRef = collection(db, "leagues", leagueId, "members");
+      const membersSnap = await getDocs(membersRef);
+      const batchDeletes: Promise<void>[] = [];
+      membersSnap.forEach((m) => {
+        batchDeletes.push(deleteDoc(m.ref));
+      });
+      await Promise.all(batchDeletes);
 
+      // Delete league
       await deleteDoc(leagueRef);
 
       router.push("/leagues");
     } catch (err) {
-      console.error("Failed to delete league:", err);
+      console.error("Error deleting league", err);
       setError("Failed to delete league. Please try again.");
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   };
 
-  // ---------- UI ----------
-  if (loadingState === "loading") {
+  if (!user) {
     return (
       <div className="py-8">
-        <p className="text-slate-300 text-sm">Loading league…</p>
+        <p className="text-slate-300 mb-4">
+          You need to be logged in to view league details.
+        </p>
+        <Link
+          href="/auth"
+          className="inline-flex items-center px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm"
+        >
+          Go to login / sign up
+        </Link>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="py-8">
+        <p className="text-slate-300">Loading league...</p>
       </div>
     );
   }
@@ -201,101 +249,103 @@ export default function LeagueDetailPage() {
   if (!league) {
     return (
       <div className="py-8">
-        <p className="text-red-400 text-sm">
-          {error || "League not found or failed to load."}
-        </p>
-        <div className="mt-4">
-          <Link href="/leagues" className="text-sm text-orange-400 hover:underline">
-            ← Back to leagues
-          </Link>
-        </div>
+        <Link
+          href="/leagues"
+          className="text-sm text-slate-300 hover:text-white mb-4 inline-flex items-center gap-1"
+        >
+          ← Back to leagues
+        </Link>
+        <p className="text-red-300">League not found.</p>
       </div>
     );
   }
 
+  const currentUserMember = members.find((m) => m.uid === user.uid);
+
   return (
-    <div className="py-6 md:py-8">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <Link href="/leagues" className="text-sm text-slate-300 hover:text-orange-400">
-          ← Back to leagues
-        </Link>
+    <div className="py-6 md:py-8 max-w-5xl">
+      <Link
+        href="/leagues"
+        className="text-sm text-slate-300 hover:text-white mb-4 inline-flex items-center gap-1"
+      >
+        ← Back to leagues
+      </Link>
 
-        <div className="text-xs rounded-full bg-slate-900/80 border border-slate-700 px-3 py-1">
-          <span className="uppercase tracking-wide text-slate-300">
-            League manager:
-          </span>{" "}
-          <span className="font-semibold text-orange-400">
-            {isManager ? "You" : league.managerEmail || "Unknown"}
-          </span>
-        </div>
-      </div>
+      <div className="grid gap-6 md:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)]">
+        {/* LEFT: League details & edit form */}
+        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h1 className="text-2xl md:text-3xl font-bold">{league.name}</h1>
+            {isManager && (
+              <span className="inline-flex items-center px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/60 text-xs font-semibold text-orange-300">
+                LEAGUE MANAGER
+              </span>
+            )}
+          </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
-        {/* Left – settings */}
-        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 md:p-7">
-          <h1 className="text-2xl md:text-3xl font-bold mb-2">{league.name}</h1>
           <p className="text-slate-300 text-sm mb-4">
             Private league. Your streak still counts on the global ladder – this
-            page is just for bragging rights with your mates, work crew or fantasy
-            league.
+            page is just for bragging rights with your mates, work crew or
+            fantasy league.
           </p>
 
+          {/* Invite code panel */}
+          <div className="mb-5 rounded-xl bg-slate-950/60 border border-slate-700 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <div className="text-xs text-slate-400 uppercase tracking-wide mb-0.5">
+                Invite code
+              </div>
+              <div className="text-lg font-mono tracking-[0.35em] uppercase">
+                {league.code}
+              </div>
+              <div className="text-xs text-slate-400 mt-1">
+                Share this code so your mates can join.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleCopyCode}
+              className="self-start sm:self-auto inline-flex items-center px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-black text-xs font-semibold"
+            >
+              Copy code
+            </button>
+          </div>
+
           {error && (
-            <p className="mb-4 text-sm text-red-400 bg-red-950/40 border border-red-800/60 rounded-lg px-3 py-2">
+            <div className="mb-3 rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-200">
               {error}
-            </p>
+            </div>
           )}
 
-          <div className="mb-6">
-            <div className="text-xs font-semibold text-slate-400 uppercase mb-1">
-              Invite code
+          {info && (
+            <div className="mb-3 rounded-lg bg-emerald-900/40 border border-emerald-700 px-4 py-3 text-sm text-emerald-200">
+              {info}
             </div>
-            <div className="inline-flex items-center gap-3 bg-slate-950/70 border border-slate-700 rounded-full px-4 py-1.5 text-sm">
-              <span className="font-mono tracking-[0.25em] uppercase">
-                {league.code}
-              </span>
-              <button
-                type="button"
-                className="text-xs text-orange-400 hover:text-orange-300"
-                onClick={() => navigator.clipboard.writeText(league.code)}
-              >
-                Copy
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-slate-400">
-              Share this code so your mates can join.
-            </p>
-          </div>
+          )}
 
           <form onSubmit={handleSave} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1" htmlFor="name">
+              <label className="block text-sm font-medium mb-1">
                 League name
               </label>
               <input
-                id="name"
                 type="text"
+                className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 disabled={!isManager}
-                className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60"
               />
             </div>
 
             <div>
-              <label
-                className="block text-sm font-medium mb-1"
-                htmlFor="description"
-              >
-                Description (optional)
+              <label className="block text-sm font-medium mb-1">
+                Description <span className="text-slate-400 text-xs">(optional)</span>
               </label>
               <textarea
-                id="description"
+                className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                rows={3}
                 disabled={!isManager}
-                className="w-full rounded-lg bg-slate-950/70 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-60"
               />
             </div>
 
@@ -303,77 +353,77 @@ export default function LeagueDetailPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm shadow-md disabled:opacity-60"
+                className="inline-flex items-center px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {saving ? "Saving…" : "Save changes"}
+                {saving ? "Saving..." : "Save changes"}
               </button>
             )}
           </form>
-        </div>
 
-        {/* Right – members & danger zone */}
-        <div className="space-y-4">
-          <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold">League members</h2>
-              <span className="text-xs text-slate-400">
-                {members.length} member{members.length === 1 ? "" : "s"}
-              </span>
-            </div>
-
-            {members.length === 0 ? (
-              <p className="text-xs text-slate-400">
-                No members found yet. Once people join with your invite code,
-                they&apos;ll show up here.
-              </p>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {members.map((m) => (
-                  <li
-                    key={m.uid}
-                    className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2"
-                  >
-                    <span>{m.displayName}</span>
-                    <span className="text-xs uppercase tracking-wide text-slate-400">
-                      {m.role === "manager" ? "Manager" : "Player"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div className="bg-slate-950/80 border border-red-900/60 rounded-2xl p-5">
-            <h3 className="text-sm font-semibold text-red-300 mb-2">
-              Danger zone
-            </h3>
-            <p className="text-xs text-slate-300 mb-3">
-              You can leave the league any time. Only the League Manager can
-              delete the league for everyone.
-            </p>
-
-            <div className="flex flex-col gap-2">
+          {/* Danger actions */}
+          <div className="mt-6 border-t border-slate-800 pt-4 flex flex-wrap gap-3">
+            {currentUserMember && currentUserMember.role !== "manager" && (
               <button
                 type="button"
                 onClick={handleLeaveLeague}
-                disabled={saving}
-                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-slate-700 text-xs text-slate-200 hover:bg-slate-900 disabled:opacity-60"
+                disabled={leaving}
+                className="inline-flex items-center px-4 py-2 rounded-lg border border-red-500/60 text-red-300 text-xs font-semibold hover:bg-red-900/30 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Leave league
+                {leaving ? "Leaving..." : "Leave league"}
               </button>
+            )}
 
-              {isManager && (
-                <button
-                  type="button"
-                  onClick={handleDeleteLeague}
-                  disabled={saving}
-                  className="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-xs font-semibold text-white disabled:opacity-60"
-                >
-                  Delete league for everyone
-                </button>
-              )}
-            </div>
+            {isManager && (
+              <button
+                type="button"
+                onClick={handleDeleteLeague}
+                disabled={deleting}
+                className="inline-flex items-center px-4 py-2 rounded-lg border border-red-500/60 text-red-300 text-xs font-semibold hover:bg-red-900/30 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {deleting ? "Deleting..." : "Delete league for everyone"}
+              </button>
+            )}
           </div>
+        </div>
+
+        {/* RIGHT: Members list */}
+        <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold">Members</h2>
+            <span className="text-xs text-slate-400">
+              {league.memberCount ?? members.length}{" "}
+              {league.memberCount === 1 ? "member" : "members"}
+            </span>
+          </div>
+
+          {members.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              No members yet. Share the invite code to get your mates in.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {members.map((m) => (
+                <li
+                  key={m.id}
+                  className="flex items-center justify-between rounded-lg bg-slate-950/60 border border-slate-800 px-3 py-2"
+                >
+                  <div>
+                    <div className="font-medium">
+                      {m.displayName || "Player"}
+                      {m.uid === user.uid && (
+                        <span className="ml-2 text-xs text-slate-400">
+                          (you)
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {m.role === "manager" ? "League manager" : "Member"}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>
