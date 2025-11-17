@@ -1,8 +1,10 @@
-// app/leagues/join/page.tsx
 "use client";
 
-import { Suspense, useEffect, useState, FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+export const dynamic = "force-dynamic";
+
+import { useState, FormEvent } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   collection,
   doc,
@@ -10,193 +12,158 @@ import {
   getDocs,
   limit,
   query,
-  where,
-  serverTimestamp,
   setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
-export const dynamic = "force-dynamic";
-
-/**
- * Wrapper needed so we can use useSearchParams inside Suspense.
- */
-export default function JoinLeaguePageWrapper() {
-  return (
-    <Suspense
-      fallback={
-        <div className="py-10 text-center text-slate-300">Loading…</div>
-      }
-    >
-      <JoinLeaguePage />
-    </Suspense>
-  );
-}
-
-function JoinLeaguePage() {
+export default function JoinLeaguePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
 
   const [code, setCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
-  // Prefill code from ?code=ABCDEFG in URL if present
-  useEffect(() => {
-    const initial = searchParams.get("code");
-    if (initial) {
-      setCode(initial.toUpperCase());
-    }
-  }, [searchParams]);
-
-  // If not logged in, send them to auth
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push("/auth?next=/leagues/join");
-    }
-  }, [loading, user, router]);
-
-  if (loading || !user) {
-    return (
-      <div className="py-10 text-center text-slate-300">
-        Loading your account…
-      </div>
-    );
-  }
-
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccess(null);
-    setJoining(true);
+
+    if (!user) {
+      setError("You need to be logged in to join a league.");
+      return;
+    }
+
+    const trimmedCode = code.trim().toUpperCase();
+    if (!trimmedCode) {
+      setError("Please enter a league code.");
+      return;
+    }
 
     try {
-      const trimmed = code.trim().toUpperCase();
-      if (!trimmed) {
-        setError("Enter a league code to join.");
-        return;
-      }
+      setJoining(true);
 
-      // 1) Find league by code
+      // 1) Look up the league by code
+      const leaguesRef = collection(db, "leagues");
       const q = query(
-        collection(db, "leagues"),
-        where("code", "==", trimmed),
+        leaguesRef,
+        where("code", "==", trimmedCode),
         limit(1)
       );
       const snap = await getDocs(q);
 
       if (snap.empty) {
-        setError("We couldn’t find a league with that code.");
+        setError("No league found with that code. Double-check and try again.");
         return;
       }
 
       const leagueDoc = snap.docs[0];
       const leagueId = leagueDoc.id;
-      const leagueData = leagueDoc.data() as { name?: string };
+      const leagueData = leagueDoc.data() as any;
 
-      // 2) Check if already a member
-      const uid = user.uid;
-      const memberRef = doc(db, "leagues", leagueId, "members", uid);
+      // 2) Check if user is already a member
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
       const memberSnap = await getDoc(memberRef);
 
       if (memberSnap.exists()) {
-        setError("You’re already in this league.");
+        // Already a member – just go to the league
+        router.push(`/leagues/${leagueId}`);
         return;
       }
 
       // 3) Add user as member
       await setDoc(memberRef, {
-        uid,
+        uid: user.uid,
         role: "member",
         displayName: user.displayName || user.email || "Player",
-        joinedAt: serverTimestamp(),
-        currentStreak: 0,
-        longestStreak: 0,
       });
 
-      setSuccess(`Joined ${leagueData.name || "this league"} successfully.`);
+      // 4) Increment memberCount (if present)
+      if (typeof leagueData.memberCount === "number") {
+        await updateDoc(leagueDoc.ref, {
+          memberCount: leagueData.memberCount + 1,
+        });
+      }
 
-      // Small delay so they see success message
-      setTimeout(() => {
-        router.push(`/leagues/${leagueId}`);
-      }, 800);
+      router.push(`/leagues/${leagueId}`);
     } catch (err) {
-      console.error("Failed to join league", err);
-      setError(
-        "Something went wrong joining this league. Please try again in a moment."
-      );
+      console.error("Error joining league", err);
+      setError("Failed to join league. Please try again.");
     } finally {
       setJoining(false);
     }
   };
 
+  if (!user) {
+    return (
+      <div className="py-8">
+        <h1 className="text-2xl font-bold mb-4">Join a league</h1>
+        <p className="text-slate-300 mb-4">
+          You need to be logged in to join a private league.
+        </p>
+        <Link
+          href="/auth"
+          className="inline-flex items-center px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm"
+        >
+          Go to login / sign up
+        </Link>
+      </div>
+    );
+  }
+
   return (
-    <div className="py-6 md:py-8">
-      {/* Back link */}
-      <button
-        type="button"
-        onClick={() => router.push("/leagues")}
-        className="mb-4 text-sm text-slate-300 hover:text-orange-400"
+    <div className="py-6 md:py-8 max-w-lg">
+      <Link
+        href="/leagues"
+        className="text-sm text-slate-300 hover:text-white mb-4 inline-flex items-center gap-1"
       >
         ← Back to leagues
-      </button>
+      </Link>
 
-      <h1 className="text-3xl md:text-4xl font-bold mb-2">Join a league</h1>
-      <p className="text-slate-300 mb-6 max-w-2xl">
+      <h1 className="text-3xl font-bold mb-2">Join a league</h1>
+      <p className="text-slate-300 mb-6">
         Drop in the invite code your mate sent you. Once you join, your streak
         will appear on that league’s ladder as you make picks.
       </p>
 
-      <div className="max-w-md">
-        <form
-          onSubmit={handleSubmit}
-          className="bg-slate-900/70 border border-slate-800 rounded-2xl p-6 space-y-4"
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-200">
+          {error}
+        </div>
+      )}
+
+      <form
+        onSubmit={handleSubmit}
+        className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 space-y-4"
+      >
+        <div>
+          <label className="block text-sm font-medium mb-1">
+            League code
+          </label>
+          <input
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm tracking-[0.3em] uppercase focus:outline-none focus:ring-2 focus:ring-orange-500"
+            placeholder="E.g. 7F9LZQ"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase())}
+          />
+          <p className="text-xs text-slate-400 mt-1">
+            Ask your League Manager for the code on their League Detail page.
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={joining}
+          className="inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-black font-semibold text-sm disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <div>
-            <label
-              htmlFor="leagueCode"
-              className="block text-sm font-medium text-slate-200 mb-1"
-            >
-              League code
-            </label>
-            <input
-              id="leagueCode"
-              type="text"
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
-              placeholder="E.g. 7F09LZ"
-              maxLength={8}
-              className="w-full rounded-lg bg-slate-950/60 border border-slate-700 px-3 py-2 text-sm outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-            />
-            <p className="mt-1 text-xs text-slate-400">
-              Your league manager can find this on their League Detail page.
-            </p>
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-400 bg-red-950/30 border border-red-800/50 rounded-lg px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          {success && (
-            <p className="text-sm text-emerald-400 bg-emerald-950/30 border border-emerald-800/50 rounded-lg px-3 py-2">
-              {success}
-            </p>
-          )}
-
-          <button
-            type="submit"
-            disabled={joining}
-            className="w-full flex items-center justify-center rounded-lg bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/60 disabled:cursor-not-allowed text-black font-semibold py-2.5 text-sm transition-colors"
-          >
-            {joining ? "Joining…" : "Join with code"}
-          </button>
-        </form>
-      </div>
+          {joining ? "Joining league..." : "Join with code"}
+        </button>
+      </form>
     </div>
   );
 }
