@@ -306,7 +306,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* SPORT */}
-                <div className="col-span-1 flex items-center">
+                <div className="col-span 4 flex items-center">
                   <SportBadge sport={row.sport} />
                 </div>
 
