@@ -14,10 +14,10 @@ import {
   doc,
   getDoc,
   getDocs,
-  query,
-  where,
+  updateDoc,
+  deleteDoc,
+  setDoc,
   serverTimestamp,
-  limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
