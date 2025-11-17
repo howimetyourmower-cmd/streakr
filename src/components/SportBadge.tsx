@@ -1,13 +1,22 @@
+// src/components/SportBadge.tsx
+"use client";
+
 import Image from "next/image";
 import { SPORTS, SportType } from "@/lib/sports";
 
-export default function SportBadge({ sport }: { sport: SportType }) {
-  const data = SPORTS[sport];
+type Props = {
+  sport: SportType;
+  className?: string;
+};
 
+export default function SportBadge({ sport, className }: Props) {
+  const data = SPORTS[sport];
   if (!data) return null;
 
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800 text-white text-xs">
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 border border-white/10 text-[11px] font-medium uppercase tracking-wide ${className ?? ""}`}
+    >
       <Image
         src={data.icon}
         alt={data.name}
@@ -15,7 +24,7 @@ export default function SportBadge({ sport }: { sport: SportType }) {
         height={14}
         className="opacity-90"
       />
-      {data.name}
+      <span>{data.name}</span>
     </span>
   );
 }
