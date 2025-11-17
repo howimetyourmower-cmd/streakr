@@ -28,11 +28,11 @@ export const SPORTS = {
     icon: "/sports/golf.svg",
  },
   soccer: {
-    name: "soccer",
+    name: "Soccer",
     icon: "/sports/soccer.svg",
    },
   nfl: {
-    name: "nfl",
+    name: "NFL",
     icon: "/sports/nfl.svg",
   },
 } as const;
