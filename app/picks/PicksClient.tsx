@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
-import { db } from "@/lib/firebaseClient";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import SportBadge from "@/components/SportBadge";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -20,16 +19,18 @@ type ApiGame = {
   id: string;
   match: string;
   venue: string;
-  startTime: string;
+  startTime: string; // ISO string from API
+  sport?: string;    // optional, defaults to AFL
   questions: ApiQuestion[];
 };
 
 type QuestionRow = {
-  id: string;
+  id: string;              // question id
   gameId: string;
   match: string;
   venue: string;
-  startTime: string;
+  startTime: string;       // ISO
+  sport: string;           // "afl" | "nrl" | etc
   quarter: number;
   question: string;
   status: QuestionStatus;
@@ -47,74 +48,75 @@ type Comment = {
   createdAt?: string;
 };
 
+const STATUS_LABELS: Record<QuestionStatus, string> = {
+  open: "Open",
+  pending: "Pending",
+  final: "Final",
+  void: "Void",
+};
+
+const STATUS_COLORS: Record<QuestionStatus, string> = {
+  open: "bg-emerald-500/15 text-emerald-300 border border-emerald-500/40",
+  pending: "bg-amber-500/10 text-amber-300 border border-amber-500/40",
+  final: "bg-blue-500/15 text-blue-200 border border-blue-500/40",
+  void: "bg-slate-500/15 text-slate-300 border border-slate-500/40",
+};
+
 export default function PicksClient() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
-  const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
     "open"
   );
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
 
-  // comments state
-  const [commentsOpenFor, setCommentsOpenFor] =
-    useState<QuestionRow | null>(null);
+  // comments
+  const [openCommentsFor, setOpenCommentsFor] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsError, setCommentsError] = useState("");
-  const [commentText, setCommentText] = useState("");
-  const [submittingComment, setSubmittingComment] = useState(false);
+  const [newComment, setNewComment] = useState("");
+  const [commentsError, setCommentsError] = useState<string | null>(null);
 
-  // -------- Date formatting ----------
-  const formatStartDate = (iso: string) => {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return { date: "", time: "" };
-
-    return {
-      date: d.toLocaleDateString("en-AU", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-        timeZone: "Australia/Melbourne",
-      }),
-      time: d.toLocaleTimeString("en-AU", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "Australia/Melbourne",
-      }),
-    };
-  };
-
-  // -------- Load Picks --------
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await fetch("/api/picks");
-        if (!res.ok) throw new Error("API error");
+        setLoading(true);
+        setError(null);
 
-        const data: PicksApiResponse = await res.json();
-        const flat: QuestionRow[] = data.games.flatMap((g) =>
-          g.questions.map((q) => ({
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue,
-            startTime: g.startTime,
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
-          }))
-        );
+        const res = await fetch("/api/picks", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error("Failed to load picks");
+        }
+        const data = (await res.json()) as PicksApiResponse;
+
+        const flat: QuestionRow[] = [];
+        for (const g of data.games) {
+          const sportKey = (g.sport ?? "afl").toLowerCase();
+          for (const q of g.questions) {
+            flat.push({
+              id: q.id,
+              gameId: g.id,
+              match: g.match,
+              venue: g.venue,
+              startTime: g.startTime,
+              sport: sportKey,
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              userPick: q.userPick,
+              yesPercent: q.yesPercent,
+              noPercent: q.noPercent,
+            });
+          }
+        }
 
         setRows(flat);
-        setFilteredRows(flat.filter((r) => r.status === "open"));
-      } catch (e) {
-        console.error(e);
-        setError("Failed to load picks");
+      } catch (err: any) {
+        console.error(err);
+        setError(err?.message ?? "Something went wrong loading picks.");
       } finally {
         setLoading(false);
       }
@@ -123,341 +125,394 @@ export default function PicksClient() {
     load();
   }, []);
 
-  // -------- Filtering --------
-  const applyFilter = (f: QuestionStatus | "all") => {
-    setActiveFilter(f);
-    if (f === "all") setFilteredRows(rows);
-    else setFilteredRows(rows.filter((r) => r.status === f));
+  const handleSearchChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setSearch(e.target.value);
   };
 
-  // -------- Save Pick --------
+  const filteredRows = rows.filter((row) => {
+    if (activeFilter !== "all" && row.status !== activeFilter) return false;
+
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      row.match.toLowerCase().includes(q) ||
+      row.venue.toLowerCase().includes(q) ||
+      row.question.toLowerCase().includes(q)
+    );
+  });
+
+  const formatDate = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("en-AU", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  };
+
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     try {
-      await addDoc(collection(db, "picks"), {
-        gameId: row.gameId,
-        questionId: row.id,
-        pick,
-        match: row.match,
-        question: row.question,
-        quarter: row.quarter,
-        createdAt: serverTimestamp(),
+      setSubmittingId(row.id);
+      setError(null);
+
+      const res = await fetch("/api/user-picks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: row.id,
+          gameId: row.gameId,
+          pick,
+        }),
       });
 
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to submit pick");
+      }
+
+      // Optimistic update
       setRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                userPick: pick,
+              }
+            : r
+        )
       );
-      setFilteredRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
-      );
-    } catch (e) {
-      console.error("Pick save error:", e);
+    } catch (err: any) {
+      console.error(err);
+      setError(err?.message ?? "Failed to submit pick.");
+    } finally {
+      setSubmittingId(null);
     }
   };
 
-  // -------- Status pill styling --------
-  const statusClasses = (status: QuestionStatus) => {
-    switch (status) {
-      case "open":
-        return "bg-green-600";
-      case "pending":
-        return "bg-yellow-500";
-      case "final":
-        return "bg-gray-600";
-      case "void":
-        return "bg-red-600";
-      default:
-        return "bg-gray-600";
-    }
-  };
-
-  // -------- Comment drawer logic --------
-  const openComments = async (row: QuestionRow) => {
-    setCommentsOpenFor(row);
+  // Comments helpers
+  const openComments = async (questionId: string) => {
+    setOpenCommentsFor(questionId);
     setComments([]);
-    setCommentText("");
-    setCommentsError("");
+    setNewComment("");
+    setCommentsError(null);
     setCommentsLoading(true);
 
     try {
-      const res = await fetch(`/api/comments/${row.id}`);
-      if (!res.ok) throw new Error("Failed to load comments");
-
-      const data = await res.json();
-      const list: Comment[] = (data.comments || []).map((c: any) => ({
-        id: c.id,
-        body: c.body,
-        displayName: c.displayName,
-        createdAt: c.createdAt,
-      }));
-      setComments(list);
-    } catch (e) {
-      console.error(e);
-      setCommentsError("Failed to load comments");
+      const res = await fetch(`/api/comments/${questionId}`);
+      if (!res.ok) {
+        throw new Error("Failed to load comments");
+      }
+      const data = (await res.json()) as { comments: Comment[] };
+      setComments(data.comments ?? []);
+    } catch (err: any) {
+      console.error(err);
+      setCommentsError(err?.message ?? "Failed to load comments");
     } finally {
       setCommentsLoading(false);
     }
   };
 
-  const closeComments = () => {
-    setCommentsOpenFor(null);
-    setComments([]);
-    setCommentText("");
-    setCommentsError("");
-  };
-
-  const handleCommentChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    setCommentText(e.target.value);
-  };
-
   const submitComment = async () => {
-    if (!commentsOpenFor || !commentText.trim()) return;
-
-    setSubmittingComment(true);
-    setCommentsError("");
+    if (!openCommentsFor || !newComment.trim()) return;
 
     try {
-      const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
+      setCommentsError(null);
+      const res = await fetch(`/api/comments/${openCommentsFor}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: commentText.trim() }),
+        body: JSON.stringify({ body: newComment.trim() }),
       });
 
-      if (!res.ok) throw new Error("Failed to post comment");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to post comment");
+      }
 
-      const created = await res.json();
-      const newComment: Comment = {
-        id: created.id || Math.random().toString(36),
-        body: commentText.trim(),
-        displayName: created.displayName,
-        createdAt: created.createdAt,
-      };
+      const data = (await res.json()) as { comment: Comment };
 
-      setComments((prev) => [newComment, ...prev]);
-      setCommentText("");
-    } catch (e) {
-      console.error(e);
-      setCommentsError("Failed to post comment");
-    } finally {
-      setSubmittingComment(false);
+      setComments((prev) => [data.comment, ...prev]);
+      setNewComment("");
+    } catch (err: any) {
+      console.error(err);
+      setCommentsError(err?.message ?? "Failed to post comment");
     }
   };
 
-  // -------- Render --------
+  const closeComments = () => {
+    setOpenCommentsFor(null);
+    setComments([]);
+    setNewComment("");
+    setCommentsError(null);
+  };
+
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
-      <h1 className="text-3xl sm:text-4xl font-bold mb-6">Picks</h1>
+    <div className="max-w-5xl mx-auto py-6 md:py-8 px-4 md:px-0">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold text-slate-50 tracking-tight">
+            Make your picks
+          </h1>
+          <p className="text-sm md:text-base text-slate-300/80 mt-1">
+            Answer the questions each quarter to keep your streak alive. Your
+            streak counts towards the global leaderboard and any private leagues
+            you&apos;re in.
+          </p>
+        </div>
 
-      {error && <p className="text-red-500 mb-2">{error}</p>}
+        <div className="flex flex-col gap-2 md:items-end">
+          <div className="flex rounded-full border border-slate-700 bg-slate-900/70 p-1 text-xs md:text-sm">
+            {(["all", "open", "pending", "final", "void"] as const).map(
+              (key) => {
+                const isActive = activeFilter === key;
+                const label =
+                  key === "all"
+                    ? "All"
+                    : STATUS_LABELS[key as QuestionStatus];
 
-      {/* FILTER BUTTONS */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {(["open", "final", "pending", "void", "all"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => applyFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-              activeFilter === f
-                ? "bg-orange-500"
-                : "bg-gray-700 hover:bg-gray-600"
-            }`}
-          >
-            {f.toUpperCase()}
-          </button>
-        ))}
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() =>
+                      setActiveFilter(key as QuestionStatus | "all")
+                    }
+                    className={[
+                      "px-3 py-1 rounded-full transition-colors",
+                      isActive
+                        ? "bg-slate-100 text-slate-900"
+                        : "text-slate-300 hover:bg-slate-800/80",
+                    ].join(" ")}
+                  >
+                    {label}
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          <input
+            value={search}
+            onChange={handleSearchChange}
+            placeholder="Search by team, venue or question…"
+            className="w-full md:w-64 rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:border-emerald-500"
+          />
+        </div>
       </div>
 
-      {/* HEADER ROW (desktop-style like your screenshot) */}
-      <div className="grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
-        <div className="col-span-2">START</div>
-        <div className="col-span-1">STATUS</div>
-        <div className="col-span-3">MATCH • VENUE</div>
-        <div className="col-span-1 text-center">Q#</div>
-        <div className="col-span-3">QUESTION</div>
-        <div className="col-span-2 text-right">PICK • YES% • NO%</div>
-      </div>
+      {loading && (
+        <div className="flex justify-center py-12">
+          <p className="text-slate-300 text-sm">Loading questions…</p>
+        </div>
+      )}
 
-      {loading && <p>Loading…</p>}
+      {!loading && error && (
+        <div className="mb-6 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+          {error}
+        </div>
+      )}
 
-      {/* ROWS – 12-column layout, compact height, orange gradient */}
-      <div className="space-y-2">
+      {!loading && !error && filteredRows.length === 0 && (
+        <div className="py-10 text-center text-slate-300 text-sm">
+          No questions match your filters right now.
+        </div>
+      )}
+
+      <div className="space-y-4">
         {filteredRows.map((row) => {
-          const { date, time } = formatStartDate(row.startTime);
-          const yesSelected = row.userPick === "yes";
-          const noSelected = row.userPick === "no";
+          const formattedDate = formatDate(row.startTime);
+          const statusClass = STATUS_COLORS[row.status];
+          const yesActive = row.userPick === "yes";
+          const noActive = row.userPick === "no";
 
           return (
             <div
               key={row.id}
-              className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
+              className="rounded-2xl border border-slate-700/80 bg-slate-900/80 p-4 md:p-5 shadow-sm shadow-black/40"
             >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white">
-                {/* START */}
-                <div className="col-span-2">
-                  <div className="text-sm font-semibold">{date}</div>
-                  <div className="text-[11px] text-white/80">
-                    {time} AEDT
-                  </div>
-                </div>
-
-                {/* STATUS */}
-                <div className="col-span-1">
-                  <span
-                    className={`${statusClasses(
-                      row.status
-                    )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
-                  >
-                    {row.status.toUpperCase()}
+              {/* Top line: match, venue */}
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs md:text-sm text-slate-300/90">
+                <div className="font-medium text-slate-100">
+                  {row.match}
+                  <span className="ml-2 text-slate-400 text-[11px] md:text-xs">
+                    • {row.venue}
                   </span>
                 </div>
-
-                {/* MATCH + VENUE */}
-                <div className="col-span-3">
-                  <div className="text-sm font-semibold">
-                    {row.match}
-                  </div>
-                  <div className="text-[11px] text-white/80">
-                    {row.venue}
-                  </div>
-                </div>
-
-                {/* Q# */}
-                <div className="col-span-1 text-center text-sm font-bold">
+                <div className="text-[11px] md:text-xs text-slate-400">
                   Q{row.quarter}
                 </div>
+              </div>
 
-                {/* QUESTION + COMMENTS */}
-                <div className="col-span-3">
-                  <div className="text-sm leading-snug font-medium">
-                    {row.question}
-                  </div>
+              {/* Date + SPORT BADGE + Status */}
+              <div className="mt-2 flex items-center justify-between text-[11px] md:text-xs text-slate-300/90 gap-2">
+                <span>{formattedDate}</span>
+
+                <div className="flex items-center gap-2">
+                  {/* SPORT BADGE lives here – between date and status */}
+                  <SportBadge sport={row.sport as any} />
+
+                  <span
+                    className={[
+                      "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] md:text-xs font-medium",
+                      statusClass,
+                    ].join(" ")}
+                  >
+                    {STATUS_LABELS[row.status]}
+                  </span>
+                </div>
+              </div>
+
+              {/* Question text */}
+              <p className="mt-3 text-sm md:text-base text-slate-50 font-medium">
+                {row.question}
+              </p>
+
+              {/* Percentages */}
+              <div className="mt-3 flex items-center gap-3 text-[11px] md:text-xs text-slate-400">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-1.5 w-6 rounded-full bg-emerald-500/70" />
+                  Yes {row.yesPercent ?? 0}%
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-1.5 w-6 rounded-full bg-rose-500/70" />
+                  No {row.noPercent ?? 0}%
+                </span>
+              </div>
+
+              {/* Actions: Yes / No + comments */}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => openComments(row)}
-                    className="text-[11px] text-white/85 mt-0.5 underline"
+                    disabled={submittingId === row.id || row.status !== "open"}
+                    onClick={() => handlePick(row, "yes")}
+                    className={[
+                      "px-4 py-1.5 rounded-full text-sm font-medium border transition-colors",
+                      row.status !== "open"
+                        ? "border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed"
+                        : yesActive
+                        ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                        : "bg-slate-900/80 text-emerald-300 border-emerald-600/70 hover:bg-emerald-500/10",
+                    ].join(" ")}
                   >
-                    Comments (0)
+                    Yes
+                    {submittingId === row.id && yesActive && "…"}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={submittingId === row.id || row.status !== "open"}
+                    onClick={() => handlePick(row, "no")}
+                    className={[
+                      "px-4 py-1.5 rounded-full text-sm font-medium border transition-colors",
+                      row.status !== "open"
+                        ? "border-slate-700 bg-slate-900/70 text-slate-500 cursor-not-allowed"
+                        : noActive
+                        ? "bg-rose-500 text-slate-950 border-rose-400"
+                        : "bg-slate-900/80 text-rose-300 border-rose-600/70 hover:bg-rose-500/10",
+                    ].join(" ")}
+                  >
+                    No
+                    {submittingId === row.id && noActive && "…"}
                   </button>
                 </div>
 
-                {/* PICK / YES / NO */}
-                <div className="col-span-2 flex flex-col items-end">
-                  <div className="flex gap-2 mb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "yes")}
-                      className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                        ${
-                          yesSelected
-                            ? "bg-green-700 ring-2 ring-white"
-                            : "bg-green-600 hover:bg-green-700"
-                        }
-                      `}
-                    >
-                      Yes
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "no")}
-                      className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                        ${
-                          noSelected
-                            ? "bg-red-700 ring-2 ring-white"
-                            : "bg-red-600 hover:bg-red-700"
-                        }
-                      `}
-                    >
-                      No
-                    </button>
-                  </div>
-                  <div className="text-[11px] text-white/85">
-                    Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => openComments(row.id)}
+                  className="text-[11px] md:text-xs inline-flex items-center gap-1 text-slate-300 hover:text-slate-100"
+                >
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-600 text-[10px]">
+                    💬
+                  </span>
+                  Comments
+                </button>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* COMMENT DRAWER */}
-      {commentsOpenFor && (
-        <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
-          <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold mb-1">
-                  Comments – Q{commentsOpenFor.quarter}
-                </h2>
-                <p className="text-sm text-gray-300">
-                  {commentsOpenFor.question}
-                </p>
-              </div>
+      {/* Comments sheet / dialog */}
+      {openCommentsFor && (
+        <div className="fixed inset-0 z-40 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full md:w-[480px] max-h-[85vh] rounded-t-2xl md:rounded-2xl bg-slate-950 border border-slate-700/80 shadow-xl shadow-black/60 flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+              <h2 className="text-sm font-semibold text-slate-50">
+                Comments
+              </h2>
               <button
                 type="button"
                 onClick={closeComments}
-                className="text-sm text-gray-400 hover:text-white"
+                className="text-slate-400 hover:text-slate-100 text-sm"
               >
-                ✕
+                Close
               </button>
             </div>
 
-            {/* New comment */}
-            <div className="mb-4">
-              <textarea
-                value={commentText}
-                onChange={handleCommentChange}
-                rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                placeholder="Add your comment…"
-              />
-              {commentsError && (
-                <p className="text-xs text-red-500 mt-1">{commentsError}</p>
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 text-sm">
+              {commentsLoading && (
+                <p className="text-slate-300 text-xs">Loading comments…</p>
               )}
-              <div className="flex justify-end mt-2">
+
+              {!commentsLoading && commentsError && (
+                <p className="text-rose-300 text-xs">{commentsError}</p>
+              )}
+
+              {!commentsLoading &&
+                !commentsError &&
+                comments.length === 0 && (
+                  <p className="text-slate-400 text-xs">
+                    No comments yet. Be the first to share a take.
+                  </p>
+                )}
+
+              {comments.map((c) => (
+                <div
+                  key={c.id}
+                  className="rounded-xl bg-slate-900/80 border border-slate-800 px-3 py-2"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-slate-200">
+                      {c.displayName ?? "Player"}
+                    </span>
+                    {c.createdAt && (
+                      <span className="text-[10px] text-slate-500">
+                        {new Date(c.createdAt).toLocaleString("en-AU", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-200 whitespace-pre-line">
+                    {c.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-slate-800 px-4 py-3">
+              <div className="flex gap-2">
+                <input
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  placeholder="Drop your thoughts…"
+                  className="flex-1 rounded-lg bg-slate-900/80 border border-slate-700 px-3 py-2 text-xs md:text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:border-emerald-500"
+                />
                 <button
                   type="button"
                   onClick={submitComment}
-                  disabled={submittingComment || !commentText.trim()}
-                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
+                  disabled={!newComment.trim()}
+                  className="px-3 py-2 rounded-lg bg-emerald-500 text-slate-950 text-xs md:text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-400 transition-colors"
                 >
-                  {submittingComment ? "Posting…" : "Post"}
+                  Post
                 </button>
               </div>
-            </div>
-
-            {/* Comment list */}
-            <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
-              {commentsLoading ? (
-                <p className="text-sm text-gray-400">Loading comments…</p>
-              ) : comments.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No comments yet. Be the first!
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {comments.map((c) => (
-                    <li
-                      key={c.id}
-                      className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
-                    >
-                      <div className="flex justify-between mb-1">
-                        <span className="font-semibold">
-                          {c.displayName || "User"}
-                        </span>
-                        {c.createdAt && (
-                          <span className="text-[11px] text-gray-400">
-                            {c.createdAt}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-100">{c.body}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
             </div>
           </div>
         </div>
