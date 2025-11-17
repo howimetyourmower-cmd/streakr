@@ -38,7 +38,7 @@ export default function LeaguesPage() {
         );
 
         const myMemberDocs = membersSnap.docs.filter(
-          (doc) => doc.data().uid === user.uid
+          (doc) => doc.data().uid! === user.uid
         );
 
         const leaguePromises = myMemberDocs.map(async (memberDoc) => {
