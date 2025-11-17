@@ -18,6 +18,9 @@ import {
   deleteDoc,
   setDoc,
   serverTimestamp,
+  query,
+  where,
+  limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
