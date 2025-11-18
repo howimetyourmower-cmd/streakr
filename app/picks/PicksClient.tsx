@@ -8,9 +8,6 @@ import {
   doc,
   setDoc,
   serverTimestamp,
-  query,
-  where,
-  getDocs,
 } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import type { SportType } from "@/lib/sports";
@@ -73,6 +70,9 @@ export default function PicksClient() {
 
   const [currentRound, setCurrentRound] = useState<number | null>(null);
 
+  // 👉 one active streak pick at a time (per player)
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
@@ -133,9 +133,10 @@ export default function PicksClient() {
             quarter: q.quarter,
             question: q.question,
             status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
+            // For this UX, we ignore API yes/no % and treat them as player-only
+            userPick: undefined,
+            yesPercent: 0,
+            noPercent: 0,
             sport: "afl" as SportType,
           }))
         );
@@ -166,39 +167,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  // -------- Recalculate YES/NO % for a single question --------
-  const recalcPercentagesForQuestion = async (questionId: string) => {
-    try {
-      const q = query(
-        collection(db, "picks"),
-        where("questionId", "==", questionId)
-      );
-      const snap = await getDocs(q);
-
-      let yesCount = 0;
-      let noCount = 0;
-
-      snap.forEach((docSnap) => {
-        const d = docSnap.data() as any;
-        if (d.pick === "yes") yesCount++;
-        else if (d.pick === "no") noCount++;
-      });
-
-      const total = yesCount + noCount;
-      const yesPercent = total > 0 ? Math.round((yesCount / total) * 100) : 0;
-      const noPercent = total > 0 ? 100 - yesPercent : 0;
-
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === questionId ? { ...r, yesPercent, noPercent } : r
-        )
-      );
-    } catch (err) {
-      console.error("Failed to recalc percentages", err);
-    }
-  };
-
-  // -------- Save Pick (per-question) --------
+  // -------- Save Pick (per-question) + set active streak pick + local % logic --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       router.push("/auth");
@@ -206,7 +175,7 @@ export default function PicksClient() {
     }
 
     try {
-      // One doc per user + question
+      // One doc per user + question for history
       const docId = `${user.uid}_${row.id}`;
       const picksRef = doc(db, "picks", docId);
 
@@ -225,15 +194,30 @@ export default function PicksClient() {
         { merge: true }
       );
 
-      // Update local userPick only for this question
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, userPick: pick } : r
-        )
-      );
+      // 👉 This question is now the active streak pick
+      setActiveQuestionId(row.id);
 
-      // Recalculate percentages just for this question
-      await recalcPercentagesForQuestion(row.id);
+      // 👉 Percentages are per-player:
+      // Active question: 100/0 or 0/100
+      // All other questions: 0/0, no userPick
+      setRows((prev) =>
+        prev.map((r) => {
+          if (r.id === row.id) {
+            return {
+              ...r,
+              userPick: pick,
+              yesPercent: pick === "yes" ? 100 : 0,
+              noPercent: pick === "no" ? 100 : 0,
+            };
+          }
+          return {
+            ...r,
+            userPick: undefined,
+            yesPercent: 0,
+            noPercent: 0,
+          };
+        })
+      );
     } catch (e) {
       console.error("Pick save error:", e);
     }
@@ -377,13 +361,16 @@ export default function PicksClient() {
       <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
-          const yesSelected = row.userPick === "yes";
-          const noSelected = row.userPick === "no";
+          const isActive = activeQuestionId === row.id;
+          const yesSelected = isActive && row.userPick === "yes";
+          const noSelected = isActive && row.userPick === "no";
 
           return (
             <div
               key={row.id}
-              className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
+              className={`rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm ${
+                isActive ? "ring-2 ring-sky-400" : ""
+              }`}
             >
               <div className="grid grid-cols-12 items-center px-4 py-2 text-white gap-y-2">
                 {/* START */}
@@ -395,7 +382,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* SPORT */}
-                <div className="col-span-3 sm:col-span-1 flex items-center">
+                <div className="col-span-3 sm:col-span-1 flex items-center gap-2">
                   <span className="inline-flex items-center justify-center px-3 py-1 rounded-full border border-white/30 text-[11px] font-semibold bg-black/20">
                     AFL
                   </span>
@@ -423,8 +410,13 @@ export default function PicksClient() {
                 </div>
 
                 {/* Q# */}
-                <div className="col-span-3 sm:col-span-1 text-left sm:text-center text-sm font-bold">
-                  Q{row.quarter}
+                <div className="col-span-3 sm:col-span-1 text-left sm:text-center text-sm font-bold flex items-center gap-2">
+                  <span>Q{row.quarter}</span>
+                  {isActive && (
+                    <span className="hidden sm:inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/40 border border-sky-400/60 text-sky-300">
+                      Your streak pick
+                    </span>
+                  )}
                 </div>
 
                 {/* QUESTION + COMMENTS */}
@@ -432,13 +424,20 @@ export default function PicksClient() {
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openComments(row)}
-                    className="text-[11px] text-white/85 mt-0.5 underline"
-                  >
-                    Comments (0)
-                  </button>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => openComments(row)}
+                      className="text-[11px] text-white/85 underline"
+                    >
+                      Comments (0)
+                    </button>
+                    {isActive && (
+                      <span className="inline-flex sm:hidden text-[10px] font-semibold px-2 py-0.5 rounded-full bg-black/40 border border-sky-400/60 text-sky-300">
+                        Your streak pick
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* PICK / YES / NO */}
