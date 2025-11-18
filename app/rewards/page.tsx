@@ -16,13 +16,13 @@ export default function RewardsPage() {
 
       {/* Prizes summary */}
       <section className="grid gap-4 md:grid-cols-2 mb-8">
-        {/* $1000 main prize */}
+        {/* $750 main prize */}
         <div className="rounded-2xl border border-orange-500/50 bg-gradient-to-br from-orange-500/20 via-orange-500/5 to-transparent px-5 py-4">
           <p className="text-xs font-semibold uppercase text-orange-300 mb-1">
             Round major prize
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight mb-1">
-            $1000 <span className="text-base font-semibold">cash or gift cards</span>
+            $7500 <span className="text-base font-semibold">cash or gift cards</span>
           </h2>
           <p className="text-sm text-gray-200 mb-3">
             Awarded to the player with the{" "}
@@ -36,13 +36,13 @@ export default function RewardsPage() {
           </ul>
         </div>
 
-        {/* $100 most correct prize */}
+        {/* $250 most correct prize */}
         <div className="rounded-2xl border border-white/10 bg-black/30 px-5 py-4">
           <p className="text-xs font-semibold uppercase text-blue-300 mb-1">
             Round side prize
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight mb-1">
-            $100 <span className="text-base font-semibold">gift card</span>
+            $250 <span className="text-base font-semibold">gift card</span>
           </h2>
           <p className="text-sm text-gray-200 mb-3">
             Awarded to the player with the{" "}
