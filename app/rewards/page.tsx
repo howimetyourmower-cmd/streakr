@@ -16,7 +16,7 @@ export default function RewardsPage() {
 
       {/* Cash prizes summary */}
       <section className="grid gap-4 md:grid-cols-2 mb-8">
-        {/* $500 main prize */}
+        {/* $1000 main prize */}
         <div className="rounded-2xl border border-orange-500/50 bg-gradient-to-br from-orange-500/20 via-orange-500/5 to-transparent px-5 py-4">
           <p className="text-xs font-semibold uppercase text-orange-300 mb-1">
             Round major prize
