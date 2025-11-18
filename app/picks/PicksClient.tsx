@@ -58,8 +58,11 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // NEW: currently active streak question (only one at a time)
+  // Which question is the current streak question
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+
+  // NEW: which round is being played (inferred from gameId)
+  const [currentRound, setCurrentRound] = useState<number | null>(null);
 
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
@@ -124,6 +127,15 @@ export default function PicksClient() {
         const firstPicked = flat.find((r) => r.userPick);
         if (firstPicked) {
           setActiveQuestionId(firstPicked.id);
+        }
+
+        // Infer round number from first game id like "round_1_game_0"
+        if (flat.length > 0) {
+          const id = flat[0].gameId;
+          const match = id.match(/round_(\d+)_/);
+          if (match) {
+            setCurrentRound(Number(match[1]));
+          }
         }
       } catch (e) {
         console.error(e);
@@ -275,7 +287,15 @@ export default function PicksClient() {
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
-      <h1 className="text-3xl sm:text-4xl font-bold mb-6">Picks</h1>
+      {/* Page title + round info */}
+      <div className="mb-4">
+        <h1 className="text-3xl sm:text-4xl font-bold mb-1">Picks</h1>
+        {currentRound !== null && (
+          <p className="text-base sm:text-lg font-semibold text-orange-400">
+            Round {currentRound}
+          </p>
+        )}
+      </div>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
