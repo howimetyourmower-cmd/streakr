@@ -99,19 +99,28 @@ export default function HomePage() {
         </div>
 
         {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/75 via-black/45 to-transparent" />
 
         {/* Text content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
+          {/* Prize + meta pills */}
+          <div className="mb-4 flex flex-wrap justify-center gap-3">
+            <div className="rounded-full bg-black/70 border border-orange-400/70 px-4 py-1 text-sm md:text-base font-semibold text-orange-200 shadow-lg">
+              Win a share of $1,000 in prizes every round*
+            </div>
+            <div className="rounded-full bg-white/10 border border-white/25 px-3 py-1 text-[11px] md:text-xs text-white/80 uppercase tracking-wide">
+              Free to play • 18+ • No gambling
+            </div>
+          </div>
+
           <h1 className="text-white text-4xl md:text-6xl font-extrabold mb-4 leading-tight drop-shadow-lg">
             Real <span className="text-orange-500">Streakr</span>’s don’t get
             caught.
           </h1>
 
           <p className="text-white/90 max-w-2xl text-lg md:text-xl mb-8 drop-shadow-md">
-            Free-to-play AFL prediction streaks. Build your streak, top the
-            leaderboard, win prizes.
-            WIN $500 EACH ROUND
+            Pick one AFL moment at a time, build your longest streak, and climb
+            the ladder. Top streaks each round share $1,000 in prizes.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4">
@@ -129,6 +138,10 @@ export default function HomePage() {
               View Leaderboard
             </a>
           </div>
+
+          <p className="mt-3 text-[11px] md:text-xs text-white/60">
+            *Promotional prize pool. Terms & eligibility apply.
+          </p>
         </div>
       </section>
 
@@ -288,44 +301,28 @@ export default function HomePage() {
 
           <div className="flex items-center gap-4">
             {/* Facebook */}
-            <a
-              href="#"
-              aria-label="Streakr on Facebook"
-              className="group"
-            >
+            <a href="#" aria-label="Streakr on Facebook" className="group">
               <div className="w-10 h-10 rounded-full bg-[#1877F2] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
                 <span className="text-white text-xl font-bold">f</span>
               </div>
             </a>
 
             {/* Instagram */}
-            <a
-              href="#"
-              aria-label="Streakr on Instagram"
-              className="group"
-            >
+            <a href="#" aria-label="Streakr on Instagram" className="group">
               <div className="w-10 h-10 rounded-[14px] bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
                 <span className="text-white text-lg font-bold">IG</span>
               </div>
             </a>
 
             {/* TikTok */}
-            <a
-              href="#"
-              aria-label="Streakr on TikTok"
-              className="group"
-            >
+            <a href="#" aria-label="Streakr on TikTok" className="group">
               <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center shadow-lg border border-white/20 group-hover:scale-105 transition-transform">
                 <span className="text-white text-lg font-bold">♬</span>
               </div>
             </a>
 
             {/* YouTube */}
-            <a
-              href="#"
-              aria-label="Streakr on YouTube"
-              className="group"
-            >
+            <a href="#" aria-label="Streakr on YouTube" className="group">
               <div className="w-12 h-8 rounded-lg bg-[#FF0000] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
                 <div className="w-0 h-0 border-t-[7px] border-b-[7px] border-l-[12px] border-t-transparent border-b-transparent border-l-white ml-1" />
               </div>
