@@ -14,7 +14,7 @@ export default function FAQPage() {
 
       {/* Intro */}
       <p className="mt-8 text-white/80">
-        Welcome to <span className="font-semibold">STREAKr AFL</span>. Build a
+        Welcome to <span className="font-semibold">STREAKr</span>. Build a
         winning streak by answering bite-sized AFL questions. Picks lock when a
         game or quarter begins. Results are settled after games finish.
       </p>
