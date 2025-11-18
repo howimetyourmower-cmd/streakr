@@ -9,8 +9,18 @@ export default function HeaderNav() {
   const { user } = useAuth();
 
   const isLoggedIn = !!user;
-  const avatarUrl = (user as any)?.photoURL || "/default-avatar.png";
-  const displayName = (user as any)?.displayName || "Player";
+
+  // Prefer Firestore-style avatarUrl if your auth hook includes it,
+  // then fall back to photoURL from Firebase Auth, then default.
+  const avatarUrl =
+    (user as any)?.avatarUrl ||
+    (user as any)?.photoURL ||
+    "/default-avatar.png";
+
+  const displayName =
+    (user as any)?.username ||
+    (user as any)?.displayName ||
+    "Player";
 
   const toggleMobile = () => setMobileOpen((prev) => !prev);
   const closeMobile = () => setMobileOpen(false);
