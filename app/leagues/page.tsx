@@ -95,9 +95,7 @@ export default function LeaguesPage() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl md:text-3xl font-bold">Leagues</h1>
-            {/* For now the whole site is AFL – later this becomes dynamic */}
-            <SportBadge sport="afl" />
-          </div>
+            </div>
           <p className="mt-1 text-sm text-white/70 max-w-2xl">
             Play Streakr with your mates, work crew or fantasy league. Create a
             private league, invite friends with a code, and battle it out on your
@@ -208,9 +206,7 @@ export default function LeaguesPage() {
                         <span className="font-mono">{selectedLeague.code}</span>
                       </span>
                     </div>
-                    <SportBadge sport="afl" />
-                  </div>
-
+                   
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[11px] uppercase tracking-wide">
                       {selectedLeague.role === "manager"
