@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
+import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebaseClient";
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  setDoc,
+  serverTimestamp,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 import type { SportType } from "@/lib/sports";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -50,6 +60,9 @@ type Comment = {
 };
 
 export default function PicksClient() {
+  const router = useRouter();
+  const { user } = useAuth();
+
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
   const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
@@ -58,10 +71,12 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Which question is the current streak question
-  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+  // single-active-question selection
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(
+    null
+  );
 
-  // Which round is being played
+  // round label
   const [currentRound, setCurrentRound] = useState<number | null>(null);
 
   // comments state
@@ -102,6 +117,18 @@ export default function PicksClient() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
+
+        // Try to infer round from the first game ID (e.g. "round-1_game_0")
+        if (data.games && data.games.length > 0) {
+          const firstId = data.games[0].id ?? "";
+          let match = firstId.match(/round[_-]?(\d+)/i);
+          if (!match) match = firstId.match(/(\d+)/);
+          if (match) {
+            const num = Number(match[1]);
+            if (!Number.isNaN(num)) setCurrentRound(num);
+          }
+        }
+
         const flat: QuestionRow[] = data.games.flatMap((g) =>
           g.questions.map((q) => ({
             id: q.id,
@@ -122,29 +149,6 @@ export default function PicksClient() {
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
-
-        // If user already has a pick, treat the first picked question as active
-        const firstPicked = flat.find((r) => r.userPick);
-        if (firstPicked) {
-          setActiveQuestionId(firstPicked.id);
-        }
-
-        // Try to infer round number from first game's id
-        if (flat.length > 0) {
-          const id = flat[0].gameId ?? ""; // e.g. "round_1_game_0"
-          // First try the "round_1_game_0" pattern
-          let match = id.match(/round[_-]?(\d+)/i);
-          // Fallback: first number sequence in the id
-          if (!match) {
-            match = id.match(/(\d+)/);
-          }
-          if (match) {
-            const roundNum = Number(match[1]);
-            if (!Number.isNaN(roundNum)) {
-              setCurrentRound(roundNum);
-            }
-          }
-        }
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -163,42 +167,97 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // -------- Save Pick (ONE question at a time) --------
-  const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
-    // Only allow changes while question is open
-    if (row.status !== "open") return;
+  // Keep filtered rows in sync if rows change (e.g. after % update)
+  useEffect(() => {
+    applyFilter(activeFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows.length]); // basic sync – good enough for now
 
+  // -------- Recalculate YES/NO % for a question --------
+  const recalcPercentagesForQuestion = async (questionId: string) => {
     try {
-      await addDoc(collection(db, "picks"), {
-        gameId: row.gameId,
-        questionId: row.id,
-        pick,
-        match: row.match,
-        question: row.question,
-        quarter: row.quarter,
-        createdAt: serverTimestamp(),
+      const q = query(
+        collection(db, "picks"),
+        where("questionId", "==", questionId)
+      );
+      const snap = await getDocs(q);
+
+      let yesCount = 0;
+      let noCount = 0;
+
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() as any;
+        if (d.pick === "yes") yesCount++;
+        else if (d.pick === "no") noCount++;
       });
 
-      // This is now the active streak question
-      setActiveQuestionId(row.id);
+      const total = yesCount + noCount;
+      const yesPercent = total > 0 ? Math.round((yesCount / total) * 100) : 0;
+      const noPercent = total > 0 ? 100 - yesPercent : 0;
 
-      // Enforce "one question at a time":
-      // - this row keeps its pick
-      // - all other rows clear userPick
       setRows((prev) =>
         prev.map((r) =>
-          r.id === row.id
-            ? { ...r, userPick: pick }
-            : { ...r, userPick: undefined }
+          r.id === questionId
+            ? { ...r, yesPercent, noPercent }
+            : r
         )
       );
       setFilteredRows((prev) =>
         prev.map((r) =>
-          r.id === row.id
-            ? { ...r, userPick: pick }
-            : { ...r, userPick: undefined }
+          r.id === questionId
+            ? { ...r, yesPercent, noPercent }
+            : r
         )
       );
+    } catch (err) {
+      console.error("Failed to recalc percentages", err);
+    }
+  };
+
+  // -------- Save Pick (single active question per user) --------
+  const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
+    if (!user) {
+      router.push("/auth");
+      return;
+    }
+
+    try {
+      // One pick per user per question
+      const docId = `${user.uid}_${row.id}`;
+      const picksRef = doc(db, "picks", docId);
+
+      await setDoc(
+        picksRef,
+        {
+          userId: user.uid,
+          gameId: row.gameId,
+          questionId: row.id,
+          pick,
+          match: row.match,
+          question: row.question,
+          quarter: row.quarter,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Only one active question at a time
+      setSelectedQuestionId(row.id);
+
+      // Update local userPick
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+        )
+      );
+      setFilteredRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+        )
+      );
+
+      // Recalculate YES/NO percentages for this question
+      await recalcPercentagesForQuestion(row.id);
     } catch (e) {
       console.error("Pick save error:", e);
     }
@@ -295,14 +354,15 @@ export default function PicksClient() {
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
-      {/* Page title + round info */}
-      <div className="mb-4">
-        <h1 className="text-3xl sm:text-4xl font-bold mb-1">Picks</h1>
-        {currentRound !== null && (
-          <p className="text-base sm:text-lg font-semibold text-orange-400">
-            Round {currentRound}
-          </p>
-        )}
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-4">
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
+          {currentRound !== null && (
+            <p className="text-sm text-orange-300 mt-1">
+              Season 2026 • Round {currentRound}
+            </p>
+          )}
+        </div>
       </div>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
@@ -325,7 +385,7 @@ export default function PicksClient() {
       </div>
 
       {/* HEADER ROW (desktop) */}
-      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+      <div className="hidden sm:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
@@ -343,31 +403,33 @@ export default function PicksClient() {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
           const noSelected = row.userPick === "no";
-          const isActive = row.id === activeQuestionId;
+          const isActiveQuestion = selectedQuestionId === row.id;
 
           return (
             <div
               key={row.id}
-              className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
+              className={`rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm ${
+                isActiveQuestion ? "ring-2 ring-sky-400" : ""
+              }`}
             >
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-12 items-center px-4 py-2 text-white">
+              <div className="grid grid-cols-12 items-center px-4 py-2 text-white gap-y-2">
                 {/* START */}
-                <div className="md:col-span-2">
+                <div className="col-span-6 sm:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
                   <div className="text-[11px] text-white/80">
                     {time} AEDT
                   </div>
                 </div>
 
-                {/* SPORT (text pill) */}
-                <div className="md:col-span-1">
-                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-black/30 text-[11px] font-semibold uppercase tracking-wide">
-                    {row.sport === "afl" ? "AFL" : row.sport.toUpperCase()}
+                {/* SPORT */}
+                <div className="col-span-3 sm:col-span-1 flex items-center">
+                  <span className="inline-flex items-center justify-center px-3 py-1 rounded-full border border-white/30 text-[11px] font-semibold bg-black/20">
+                    AFL
                   </span>
                 </div>
 
                 {/* STATUS */}
-                <div className="md:col-span-1">
+                <div className="col-span-3 sm:col-span-1">
                   <span
                     className={`${statusClasses(
                       row.status
@@ -378,7 +440,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE */}
-                <div className="md:col-span-3">
+                <div className="col-span-12 sm:col-span-3">
                   <div className="text-sm font-semibold">
                     {row.match}
                   </div>
@@ -388,12 +450,12 @@ export default function PicksClient() {
                 </div>
 
                 {/* Q# */}
-                <div className="md:col-span-1 text-sm font-bold md:text-center">
+                <div className="col-span-3 sm:col-span-1 text-left sm:text-center text-sm font-bold">
                   Q{row.quarter}
                 </div>
 
                 {/* QUESTION + COMMENTS */}
-                <div className="md:col-span-2">
+                <div className="col-span-9 sm:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
@@ -407,20 +469,17 @@ export default function PicksClient() {
                 </div>
 
                 {/* PICK / YES / NO */}
-                <div className="md:col-span-2 flex flex-col items-end">
-                  <div className="flex gap-2 mb-0.5">
+                <div className="col-span-12 sm:col-span-2 flex flex-col items-stretch sm:items-end">
+                  <div className="flex gap-2 mb-0.5 justify-end">
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
-                      disabled={row.status !== "open"}
                       className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        px-4 py-1.5 rounded-full text-xs font-bold w-20 text-white transition
                         ${
                           yesSelected
-                            ? isActive
-                              ? "bg-sky-500 ring-2 ring-white"         // active streak pick = blue
-                              : "bg-green-700 ring-2 ring-white"
-                            : "bg-green-600 hover:bg-green-700 disabled:bg-green-800/60"
+                            ? "bg-sky-500 ring-2 ring-white"
+                            : "bg-green-600 hover:bg-green-700"
                         }
                       `}
                     >
@@ -430,22 +489,19 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
-                      disabled={row.status !== "open"}
                       className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        px-4 py-1.5 rounded-full text-xs font-bold w-20 text-white transition
                         ${
                           noSelected
-                            ? isActive
-                              ? "bg-sky-500 ring-2 ring-white"         // active streak pick = blue
-                              : "bg-red-700 ring-2 ring-white"
-                            : "bg-red-600 hover:bg-red-700 disabled:bg-red-800/60"
+                            ? "bg-sky-500 ring-2 ring-white"
+                            : "bg-red-600 hover:bg-red-700"
                         }
                       `}
                     >
                       No
                     </button>
                   </div>
-                  <div className="text-[11px] text-white/85">
+                  <div className="text-[11px] text-white/85 text-right">
                     Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
                   </div>
                 </div>
@@ -504,9 +560,7 @@ export default function PicksClient() {
             {/* Comment list */}
             <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
-                <p className="text-sm text-gray-400">
-                  Loading comments…
-                </p>
+                <p className="text-sm text-gray-400">Loading comments…</p>
               ) : comments.length === 0 ? (
                 <p className="text-sm text-gray-400">
                   No comments yet. Be the first!
