@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
+import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
 type LeaderboardEntry = {
@@ -12,10 +14,6 @@ type LeaderboardEntry = {
   longestStreak: number;
 };
 
-type LeaderboardApiResponse = {
-  players: LeaderboardEntry[];
-};
-
 export default function LeaderboardClient() {
   const { user } = useAuth();
 
@@ -23,27 +21,35 @@ export default function LeaderboardClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Load users from /api/leaderboards (server-side, using Admin SDK)
+  // Load users from Firestore ordered by longest streak
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError("");
 
       try {
-        const res = await fetch("/api/leaderboards", {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          cache: "no-store",
+        const q = query(
+          collection(db, "users"),
+          orderBy("longestStreak", "desc"),
+          limit(50)
+        );
+        const snap = await getDocs(q);
+
+        const rows: LeaderboardEntry[] = snap.docs.map((docSnap, index) => {
+          const data = docSnap.data() as any;
+          return {
+            uid: docSnap.id,
+            username: data.username || `Player ${index + 1}`,
+            team: data.team || "",
+            avatarUrl: data.avatarUrl || "",
+            currentStreak:
+              typeof data.currentStreak === "number" ? data.currentStreak : 0,
+            longestStreak:
+              typeof data.longestStreak === "number" ? data.longestStreak : 0,
+          };
         });
 
-        if (!res.ok) {
-          throw new Error("API error");
-        }
-
-        const data: LeaderboardApiResponse = await res.json();
-        setPlayers(data.players || []);
+        setPlayers(rows);
       } catch (err) {
         console.error("Failed to load leaderboards", err);
         setError("Failed to load leaderboards. Please try again later.");
@@ -56,7 +62,8 @@ export default function LeaderboardClient() {
   }, []);
 
   const sortedPlayers = useMemo(() => {
-    // API already returns ordered, but defensively sort again
+    // Firestore already orders by longestStreak desc, but we
+    // defensively sort again in case data changes later.
     return [...players].sort(
       (a, b) => (b.longestStreak ?? 0) - (a.longestStreak ?? 0)
     );
