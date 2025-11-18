@@ -114,7 +114,7 @@ export default function HomePage() {
           </div>
 
           <h1 className="text-white text-4xl md:text-6xl font-extrabold mb-4 leading-tight drop-shadow-lg">
-            Real <span className="text-orange-500">Streakr</span>’s don’t get
+            Real <span className="text-orange-500">Streakr</span>s don’t get
             caught.
           </h1>
 
