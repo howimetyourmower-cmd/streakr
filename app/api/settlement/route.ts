@@ -1,251 +1,313 @@
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 import { Timestamp } from "firebase-admin/firestore";
 
-type QuestionStatus = "open" | "final" | "pending" | "void";
-type Outcome = "yes" | "no" | "void";
-type LockAction = "lock" | "unlock";
+type QuestionStatus = "open" | "pending" | "final" | "void";
 
-type RoundDoc = {
-  season?: number;
-  games?: any[];
+type SettlementQuestion = {
+  id: string;
+  gameId: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  round?: number;
 };
 
 const CURRENT_SEASON = 2026;
 
-// Same ID logic as /api/picks
-function buildQuestionId(
-  roundId: string,
-  gameIndex: number,
-  questionIndex: number,
-  rawQuestion: any
-): string {
-  const gameId = `${roundId}_game_${gameIndex}`;
-  const fallbackId = `${gameId}_q${questionIndex + 1}`;
-  return typeof rawQuestion.id === "string" && rawQuestion.id.trim()
-    ? rawQuestion.id
-    : fallbackId;
+/** Convert Firestore Timestamp | Date | string -> ISO string */
+function toIso(value: any): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (value.toDate) return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const questionId = body?.questionId as string | undefined;
-    const outcome = body?.outcome as Outcome | undefined;
-    const action = body?.action as LockAction | undefined;
-    const adminUid = body?.adminUid as string | undefined;
-    const adminDisplayName = body?.adminDisplayName as string | undefined;
+/** Find a question by its ID inside rounds/games/questions */
+async function findQuestionById(questionId: string) {
+  const roundsSnap = await db
+    .collection("rounds")
+    .where("season", "==", CURRENT_SEASON)
+    .get();
 
-    if (!questionId || typeof questionId !== "string") {
-      return NextResponse.json(
-        { error: "Missing or invalid questionId" },
-        { status: 400 }
-      );
-    }
+  for (const roundDoc of roundsSnap.docs) {
+    const data = roundDoc.data() as any;
+    const games = data.games ?? [];
 
-    const isLockAction = action === "lock" || action === "unlock";
+    for (let gi = 0; gi < games.length; gi++) {
+      const g = games[gi];
+      const questions = g.questions ?? [];
 
-    if (!isLockAction) {
-      if (!outcome || !["yes", "no", "void"].includes(outcome)) {
-        return NextResponse.json(
-          {
-            error:
-              "Missing or invalid outcome (must be 'yes' | 'no' | 'void') when not using a lock action",
-          },
-          { status: 400 }
-        );
+      for (let qi = 0; qi < questions.length; qi++) {
+        const q = questions[qi];
+        const id = q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
+        if (id === questionId) {
+          return {
+            roundDocId: roundDoc.id,
+            roundNumber: data.round ?? null,
+            games,
+            gameIndex: gi,
+            questionIndex: qi,
+            question: { ...q, id },
+          };
+        }
       }
     }
+  }
 
-    // 1) Find the question inside rounds for CURRENT_SEASON
+  return null;
+}
+
+/** GET – list questions to settle for the console */
+export async function GET() {
+  try {
     const roundsSnap = await db
       .collection("rounds")
       .where("season", "==", CURRENT_SEASON)
       .get();
 
-    let targetRoundRef: FirebaseFirestore.DocumentReference | null = null;
-    let targetRoundData: RoundDoc | null = null;
-    let targetGameIndex = -1;
-    let targetQuestionIndex = -1;
-    let originalQuestion: any = null;
+    const questions: SettlementQuestion[] = [];
 
-    for (const roundDoc of roundsSnap.docs) {
-      const data = roundDoc.data() as RoundDoc;
-      const gamesArr = data.games ?? [];
+    roundsSnap.forEach((roundDoc) => {
+      const data = roundDoc.data() as any;
+      const roundNumber: number | undefined = data.round;
+      const games = data.games ?? [];
 
-      for (let gIndex = 0; gIndex < gamesArr.length; gIndex++) {
-        const g = gamesArr[gIndex] ?? {};
-        const questionsArr = g.questions ?? [];
+      games.forEach((g: any, gi: number) => {
+        const gameId = `${roundDoc.id}_game_${gi}`;
+        const match = g.match ?? g.fixture ?? "TBD match";
+        const venue = g.venue ?? "TBD venue";
+        const startTimeIso = toIso(g.startTime ?? g.kickoffTime);
 
-        for (let qIndex = 0; qIndex < questionsArr.length; qIndex++) {
-          const q = questionsArr[qIndex] ?? {};
-          const thisQuestionId = buildQuestionId(
-            roundDoc.id,
-            gIndex,
-            qIndex,
-            q
-          );
+        (g.questions ?? []).forEach((q: any, qi: number) => {
+          const id = q.id ?? `${gameId}_q${qi + 1}`;
+          const status: QuestionStatus =
+            q.status === "pending" ||
+            q.status === "final" ||
+            q.status === "void"
+              ? q.status
+              : "open";
 
-          if (thisQuestionId === questionId) {
-            targetRoundRef = roundDoc.ref;
-            targetRoundData = data;
-            targetGameIndex = gIndex;
-            targetQuestionIndex = qIndex;
-            originalQuestion = q;
-            break;
-          }
-        }
+          questions.push({
+            id,
+            gameId,
+            match,
+            venue,
+            startTime: startTimeIso,
+            quarter: Number(q.quarter ?? 1),
+            question: q.question ?? "",
+            status,
+            round: roundNumber,
+          });
+        });
+      });
+    });
 
-        if (targetRoundRef) break;
-      }
+    // sort by start time then quarter
+    questions.sort((a, b) => {
+      const t = a.startTime.localeCompare(b.startTime);
+      if (t !== 0) return t;
+      return a.quarter - b.quarter;
+    });
 
-      if (targetRoundRef) break;
+    return NextResponse.json({ questions });
+  } catch (err) {
+    console.error("Error in GET /api/settlement:", err);
+    return NextResponse.json(
+      { error: "Failed to load questions for settlement" },
+      { status: 500 }
+    );
+  }
+}
+
+/** POST – lock / settle / void a question and update streaks */
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const questionId: string | undefined = body.questionId;
+    const action: string | undefined = body.action;
+
+    if (!questionId || !action) {
+      return NextResponse.json(
+        { error: "Missing questionId or action" },
+        { status: 400 }
+      );
     }
 
-    if (!targetRoundRef || !targetRoundData) {
+    const found = await findQuestionById(questionId);
+    if (!found) {
       return NextResponse.json(
-        { error: "Question not found in any round for current season" },
+        { error: "Question not found" },
         { status: 404 }
       );
     }
 
-    const roundId = (targetRoundRef as any).id as string;
-    const gamesArr = targetRoundData.games ?? [];
-    const game = gamesArr[targetGameIndex] ?? {};
-    const questionsArr = game.questions ?? [];
-    const gameId = `${roundId}_game_${targetGameIndex}`;
+    const {
+      roundDocId,
+      roundNumber,
+      games,
+      gameIndex,
+      questionIndex,
+      question,
+    } = found;
 
-    const match = game.match ?? "";
-    const quarter = originalQuestion?.quarter ?? null;
-    const questionText = originalQuestion?.question ?? "";
-    const prevStatus: QuestionStatus =
-      (originalQuestion?.status as QuestionStatus) ?? "open";
+    const roundRef = db.collection("rounds").doc(roundDocId);
+    const now = Timestamp.now();
 
-    // ---------------- LOCK / UNLOCK PATH ----------------
-    if (isLockAction) {
-      const newStatus: QuestionStatus =
-        action === "lock" ? "pending" : "open";
-
+    // ---- Handle LOCK only ----
+    if (action === "lock") {
       const updatedQuestion = {
-        ...originalQuestion,
-        status: newStatus,
-        lockedAt: action === "lock" ? Timestamp.now() : null,
+        ...question,
+        status: "pending" as QuestionStatus,
+        lockedAt: now,
       };
 
-      questionsArr[targetQuestionIndex] = updatedQuestion;
-      gamesArr[targetGameIndex] = {
-        ...game,
-        questions: questionsArr,
-      };
+      games[gameIndex].questions[questionIndex] = updatedQuestion;
+      await roundRef.update({ games });
 
-      await targetRoundRef.update({ games: gamesArr });
-
-      // Log lock/unlock
-      await db.collection("settlementLogs").add({
+      // simple history record
+      await db.collection("settlementHistory").add({
         questionId,
-        roundId,
-        gameId,
-        match,
-        quarter,
-        question: questionText,
-        previousStatus: prevStatus,
-        newStatus,
-        action,
-        outcome: null,
-        adminUid: adminUid ?? null,
-        adminDisplayName: adminDisplayName ?? null,
-        createdAt: Timestamp.now(),
+        action: "lock",
+        round: roundNumber ?? null,
+        season: CURRENT_SEASON,
+        lockedAt: now,
       });
 
-      return NextResponse.json({
-        ok: true,
-        mode: action,
-        questionId,
-        status: newStatus,
-      });
+      return NextResponse.json({ ok: true, status: "pending" });
     }
 
-    // ---------------- SETTLEMENT PATH ----------------
-    const status: QuestionStatus = outcome === "void" ? "void" : "final";
+    // ---- Determine outcome for settle / void ----
+    let outcome: "yes" | "no" | "void";
+    if (action === "void") {
+      outcome = "void";
+    } else if (action === "yes" || action === "settleYes") {
+      outcome = "yes";
+    } else if (action === "no" || action === "settleNo") {
+      outcome = "no";
+    } else {
+      return NextResponse.json(
+        { error: "Unknown action" },
+        { status: 400 }
+      );
+    }
+
+    const finalStatus: QuestionStatus =
+      outcome === "void" ? "void" : "final";
 
     const updatedQuestion = {
-      ...originalQuestion,
-      status,
-      correctOutcome: outcome,
-      settledAt: Timestamp.now(),
+      ...question,
+      status: finalStatus,
+      outcome,
+      settledAt: now,
     };
 
-    questionsArr[targetQuestionIndex] = updatedQuestion;
-    gamesArr[targetGameIndex] = {
-      ...game,
-      questions: questionsArr,
-    };
+    games[gameIndex].questions[questionIndex] = updatedQuestion;
+    await roundRef.update({ games });
 
-    // 2) Update the round doc with the modified games array
-    await targetRoundRef.update({
-      games: gamesArr,
-    });
-
-    // 3) Update all picks for this questionId
-    const picksSnap = await db
-      .collection("picks")
-      .where("questionId", "==", questionId)
+    // ---- Update streaks + picks for users whose ACTIVE pick is this question ----
+    const usersSnap = await db
+      .collection("users")
+      .where("activeQuestionId", "==", questionId)
       .get();
 
-    if (!picksSnap.empty) {
-      const batch = db.batch();
-      picksSnap.forEach((pickDoc) => {
-        const data = pickDoc.data() as any;
-        const pick = data.pick as Outcome | undefined;
+    const batch = db.batch();
 
-        let isCorrect: boolean | null = null;
-        if (outcome !== "void") {
-          isCorrect = pick === outcome;
-        }
+    usersSnap.forEach((userDoc) => {
+      const userId = userDoc.id;
+      const data = userDoc.data() as any;
+      const activePick = data.activePick as "yes" | "no" | undefined;
 
-        batch.update(pickDoc.ref, {
-          settled: true,
+      // If they somehow have no activePick, skip
+      if (!activePick) return;
+
+      const win =
+        outcome !== "void" && activePick === outcome;
+
+      let current =
+        typeof data.currentStreak === "number"
+          ? data.currentStreak
+          : 0;
+      let longest =
+        typeof data.longestStreak === "number"
+          ? data.longestStreak
+          : 0;
+
+      if (outcome === "void") {
+        // streak unchanged
+      } else if (win) {
+        current += 1;
+        if (current > longest) longest = current;
+      } else {
+        current = 0;
+      }
+
+      const userRef = db.collection("users").doc(userId);
+      batch.set(
+        userRef,
+        {
+          currentStreak: current,
+          longestStreak: longest,
+          lastResult: outcome === "void" ? "void" : win ? "win" : "loss",
+          lastSettledAt: now,
+          lastSettledRound: roundNumber ?? null,
+          lastSettledQuestionId: questionId,
+          // clear the active pick – next question they pick becomes new streak pick
+          activeQuestionId: null,
+          activePick: null,
+        },
+        { merge: true }
+      );
+
+      // update that player's pick doc with outcome + result
+      const pickId = `${userId}_${questionId}`;
+      const pickRef = db.collection("picks").doc(pickId);
+
+      batch.set(
+        pickRef,
+        {
           outcome,
-          isCorrect,
-          settledAt: Timestamp.now(),
-        });
-      });
-
-      await batch.commit();
-    }
-
-    // 4) Log settlement
-    await db.collection("settlementLogs").add({
-      questionId,
-      roundId,
-      gameId,
-      match,
-      quarter,
-      question: questionText,
-      previousStatus: prevStatus,
-      newStatus: status,
-      action: "settle",
-      outcome,
-      picksUpdated: picksSnap.size,
-      adminUid: adminUid ?? null,
-      adminDisplayName: adminDisplayName ?? null,
-      createdAt: Timestamp.now(),
+          result: outcome === "void" ? "void" : win ? "win" : "loss",
+          settledAt: now,
+          round: roundNumber ?? null,
+          season: CURRENT_SEASON,
+        },
+        { merge: true }
+      );
     });
+
+    // history record for the admin
+    batch.set(db.collection("settlementHistory").doc(), {
+      questionId,
+      outcome,
+      action:
+        outcome === "void"
+          ? "void"
+          : outcome === "yes"
+          ? "settleYes"
+          : "settleNo",
+      round: roundNumber ?? null,
+      season: CURRENT_SEASON,
+      settledAt: now,
+    });
+
+    await batch.commit();
 
     return NextResponse.json({
       ok: true,
-      mode: "settle",
-      questionId,
+      status: finalStatus,
       outcome,
-      status,
-      picksUpdated: picksSnap.size,
     });
   } catch (err) {
-    console.error("Error in /api/settlement:", err);
+    console.error("Error in POST /api/settlement:", err);
     return NextResponse.json(
-      { error: "Failed to process settlement/lock" },
+      { error: "Failed to update settlement" },
       { status: 500 }
     );
   }
