@@ -61,7 +61,7 @@ export default function PicksClient() {
   // Which question is the current streak question
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
 
-  // NEW: which round is being played (inferred from gameId)
+  // Which round is being played
   const [currentRound, setCurrentRound] = useState<number | null>(null);
 
   // comments state
@@ -129,12 +129,20 @@ export default function PicksClient() {
           setActiveQuestionId(firstPicked.id);
         }
 
-        // Infer round number from first game id like "round_1_game_0"
+        // Try to infer round number from first game's id
         if (flat.length > 0) {
-          const id = flat[0].gameId;
-          const match = id.match(/round_(\d+)_/);
+          const id = flat[0].gameId ?? ""; // e.g. "round_1_game_0"
+          // First try the "round_1_game_0" pattern
+          let match = id.match(/round[_-]?(\d+)/i);
+          // Fallback: first number sequence in the id
+          if (!match) {
+            match = id.match(/(\d+)/);
+          }
           if (match) {
-            setCurrentRound(Number(match[1]));
+            const roundNum = Number(match[1]);
+            if (!Number.isNaN(roundNum)) {
+              setCurrentRound(roundNum);
+            }
           }
         }
       } catch (e) {
