@@ -49,15 +49,6 @@ type Comment = {
   createdAt?: string;
 };
 
-function SportPill({ sport }: { sport: SportType }) {
-  const label = (sport || "afl").toUpperCase();
-  return (
-    <span className="inline-flex items-center rounded-full bg-black/40 border border-white/40 px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase">
-      {label}
-    </span>
-  );
-}
-
 export default function PicksClient() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
@@ -145,6 +136,9 @@ export default function PicksClient() {
 
   // -------- Save Pick --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
+    // Front-end guard: only allow picks when status is open
+    if (row.status !== "open") return;
+
     try {
       await addDoc(collection(db, "picks"), {
         gameId: row.gameId,
@@ -279,7 +273,7 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* HEADER ROW – desktop only */}
+      {/* HEADER ROW (desktop) */}
       <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
@@ -298,115 +292,33 @@ export default function PicksClient() {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
           const noSelected = row.userPick === "no";
+          const isLocked = row.status !== "open";
+          const sportLabel =
+            (row.sport && String(row.sport).toUpperCase()) || "AFL";
 
           return (
             <div
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
-              {/* MOBILE LAYOUT (stacked, no horizontal scroll) */}
-              <div className="flex flex-col gap-2 p-3 md:hidden">
-                {/* Start + Sport + Status */}
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <div className="flex flex-col">
-                    <span className="font-semibold">{date}</span>
-                    <span className="text-white/80 text-[11px]">
-                      {time} AEDT
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <SportPill sport={row.sport} />
-                    <span
-                      className={`${statusClasses(
-                        row.status
-                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
-                    >
-                      {row.status.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Match + Venue */}
-                <div className="text-[11px] text-white/90">
-                  <span className="font-semibold">{row.match}</span>
-                  <span className="mx-1">•</span>
-                  <span>{row.venue}</span>
-                </div>
-
-                {/* Question + Q# */}
-                <div className="flex gap-2 items-start">
-                  <div className="text-xs font-bold bg-black/30 px-2 py-0.5 rounded-full mt-0.5">
-                    Q{row.quarter}
-                  </div>
-                  <div className="text-sm leading-snug font-medium">
-                    {row.question}
-                  </div>
-                </div>
-
-                {/* Comments link */}
-                <button
-                  type="button"
-                  onClick={() => openComments(row)}
-                  className="self-start text-[11px] text-white/85 underline"
-                >
-                  Comments (0)
-                </button>
-
-                {/* Picks + percentages */}
-                <div className="flex flex-col gap-1 items-stretch">
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "yes")}
-                      className={`
-                        flex-1 px-4 py-1.5 rounded-full text-xs font-bold text-white transition
-                        ${
-                          yesSelected
-                            ? "bg-green-700 ring-2 ring-white"
-                            : "bg-green-600 hover:bg-green-700"
-                        }
-                      `}
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "no")}
-                      className={`
-                        flex-1 px-4 py-1.5 rounded-full text-xs font-bold text-white transition
-                        ${
-                          noSelected
-                            ? "bg-red-700 ring-2 ring-white"
-                            : "bg-red-600 hover:bg-red-700"
-                        }
-                      `}
-                    >
-                      No
-                    </button>
-                  </div>
-                  <div className="text-[11px] text-white/85 text-right">
-                    Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
-                  </div>
-                </div>
-              </div>
-
-              {/* DESKTOP LAYOUT – original 12-col grid */}
-              <div className="hidden md:grid grid-cols-12 items-center px-4 py-1.5 text-white">
+              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white gap-y-2">
                 {/* START */}
-                <div className="col-span-2">
+                <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
                   <div className="text-[11px] text-white/80">
-                    {time} AEDT
+                    {time && `${time} AEDT`}
                   </div>
                 </div>
 
                 {/* SPORT (text pill) */}
-                <div className="col-span-1 flex items-center">
-                  <SportPill sport={row.sport} />
+                <div className="col-span-6 md:col-span-1 flex items-center">
+                  <span className="inline-flex items-center rounded-full border border-white/25 bg-black/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/85">
+                    {sportLabel}
+                  </span>
                 </div>
 
                 {/* STATUS */}
-                <div className="col-span-1">
+                <div className="col-span-6 md:col-span-1">
                   <span
                     className={`${statusClasses(
                       row.status
@@ -417,22 +329,20 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE */}
-                <div className="col-span-3">
-                  <div className="text-sm font-semibold">
-                    {row.match}
-                  </div>
+                <div className="col-span-12 md:col-span-3">
+                  <div className="text-sm font-semibold">{row.match}</div>
                   <div className="text-[11px] text-white/80">
                     {row.venue}
                   </div>
                 </div>
 
                 {/* Q# */}
-                <div className="col-span-1 text-center text-sm font-bold">
+                <div className="col-span-4 md:col-span-1 text-center text-sm font-bold">
                   Q{row.quarter}
                 </div>
 
                 {/* QUESTION + COMMENTS */}
-                <div className="col-span-2">
+                <div className="col-span-8 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
@@ -446,17 +356,23 @@ export default function PicksClient() {
                 </div>
 
                 {/* PICK / YES / NO */}
-                <div className="col-span-2 flex flex-col items-end">
+                <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           yesSelected
                             ? "bg-green-700 ring-2 ring-white"
                             : "bg-green-600 hover:bg-green-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-50 cursor-not-allowed pointer-events-none"
+                            : ""
                         }
                       `}
                     >
@@ -466,12 +382,18 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           noSelected
                             ? "bg-red-700 ring-2 ring-white"
                             : "bg-red-600 hover:bg-red-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-50 cursor-not-allowed pointer-events-none"
+                            : ""
                         }
                       `}
                     >
