@@ -40,8 +40,8 @@ export default function SettlementPage() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [settleLoadingId, setSettleLoadingId] = useState<string | null>(null);
-  const [settleMessage, setSettleMessage] = useState<string | null>(null);
+  const [workingRowId, setWorkingRowId] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   // --- Helpers ---
   const formatStart = (iso: string) => {
@@ -79,10 +79,9 @@ export default function SettlementPage() {
     const load = async () => {
       setLoading(true);
       setError("");
-      setSettleMessage(null);
+      setMessage(null);
 
       try {
-        // Use the same endpoint as the Picks page
         const res = await fetch("/api/picks");
         if (!res.ok) {
           throw new Error(`API error: ${res.status}`);
@@ -103,7 +102,7 @@ export default function SettlementPage() {
           }))
         );
 
-        // Sort: open first, then by start time
+        // Sort: open first, then pending, then final/void, then by start time
         flat.sort((a, b) => {
           const order: Record<QuestionStatus, number> = {
             open: 0,
@@ -128,7 +127,72 @@ export default function SettlementPage() {
     load();
   }, []);
 
-  // --- Call settlement API ---
+  // --- LOCK / UNLOCK ---
+  const lockQuestion = async (
+    row: QuestionRow,
+    action: "lock" | "unlock"
+  ) => {
+    const confirmText =
+      action === "lock"
+        ? `Lock this question (no more picks)?\n\n"${row.question}"`
+        : `Re-open this question for picks?\n\n"${row.question}"`;
+
+    const confirmed = window.confirm(confirmText);
+    if (!confirmed) return;
+
+    setMessage(null);
+    setError("");
+    setWorkingRowId(row.id);
+
+    try {
+      const res = await fetch("/api/settlement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: row.id,
+          action,
+        }),
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        const msg =
+          payload?.error ||
+          `Lock action failed (${res.status})`;
+        throw new Error(msg);
+      }
+
+      const payload = await res.json();
+      console.log("Lock/unlock response", payload);
+
+      const newStatus: QuestionStatus =
+        action === "lock" ? "pending" : "open";
+
+      setRows((prev) =>
+        prev.map((q) =>
+          q.id === row.id
+            ? {
+                ...q,
+                status: newStatus,
+              }
+            : q
+        )
+      );
+
+      setMessage(
+        action === "lock"
+          ? `Locked question: "${row.question}"`
+          : `Re-opened question: "${row.question}"`
+      );
+    } catch (err: any) {
+      console.error("Error locking/unlocking question", err);
+      setError(err?.message || "Failed to update lock status.");
+    } finally {
+      setWorkingRowId(null);
+    }
+  };
+
+  // --- SETTLE ---
   const settleQuestion = async (row: QuestionRow, outcome: Outcome) => {
     const confirmText =
       outcome === "void"
@@ -138,9 +202,9 @@ export default function SettlementPage() {
     const confirmed = window.confirm(confirmText);
     if (!confirmed) return;
 
-    setSettleMessage(null);
+    setMessage(null);
     setError("");
-    setSettleLoadingId(row.id);
+    setWorkingRowId(row.id);
 
     try {
       const res = await fetch("/api/settlement", {
@@ -154,15 +218,17 @@ export default function SettlementPage() {
 
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        const msg = payload?.error || `Settlement failed (${res.status})`;
+        const msg =
+          payload?.error ||
+          `Settlement failed (${res.status})`;
         throw new Error(msg);
       }
 
       const payload = await res.json();
       console.log("Settlement response", payload);
 
-      // Update local status so the UI reflects the change
-      const newStatus: QuestionStatus = outcome === "void" ? "void" : "final";
+      const newStatus: QuestionStatus =
+        outcome === "void" ? "void" : "final";
 
       setRows((prev) =>
         prev.map((q) =>
@@ -175,14 +241,16 @@ export default function SettlementPage() {
         )
       );
 
-      setSettleMessage(
-        `Settled: "${row.question}" → ${outcome.toUpperCase()} (updated ${payload.picksUpdated ?? 0} picks)`
+      setMessage(
+        `Settled: "${row.question}" → ${outcome.toUpperCase()} (updated ${
+          payload.picksUpdated ?? 0
+        } picks)`
       );
     } catch (err: any) {
       console.error("Error settling question", err);
       setError(err?.message || "Failed to settle question.");
     } finally {
-      setSettleLoadingId(null);
+      setWorkingRowId(null);
     }
   };
 
@@ -203,7 +271,7 @@ export default function SettlementPage() {
       <div>
         <h1 className="text-2xl md:text-3xl font-bold">Settlement console</h1>
         <p className="mt-1 text-sm text-white/70 max-w-2xl">
-          Internal tool to settle Streakr questions. This calls{" "}
+          Internal tool to lock and settle Streakr questions. This calls{" "}
           <code className="px-1 py-0.5 bg-black/40 rounded text-xs">
             /api/settlement
           </code>{" "}
@@ -221,9 +289,9 @@ export default function SettlementPage() {
         </p>
       )}
 
-      {!loading && settleMessage && (
+      {!loading && message && (
         <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-          {settleMessage}
+          {message}
         </p>
       )}
 
@@ -247,26 +315,26 @@ export default function SettlementPage() {
           </div>
 
           {/* Table header */}
-          <div className="hidden md:grid grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),110px] px-4 py-2 text-[11px] text-gray-400 uppercase tracking-wide bg-black/40">
+          <div className="hidden md:grid grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] px-4 py-2 text-[11px] text-gray-400 uppercase tracking-wide bg-black/40">
             <div>Start</div>
             <div>Match</div>
             <div className="text-center">Q#</div>
             <div>Question</div>
-            <div className="text-right">Settle</div>
+            <div className="text-right">Lock / Settle</div>
           </div>
 
           {/* Rows */}
           <div className="divide-y divide-white/5">
             {rows.map((row) => {
               const start = formatStart(row.startTime);
-              const isWorking = settleLoadingId === row.id;
+              const isWorking = workingRowId === row.id;
 
               return (
                 <div
                   key={row.id}
-                  className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),110px] md:items-center bg-black/20 hover:bg-black/30 transition"
+                  className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] md:items-center bg-black/20 hover:bg-black/30 transition"
                 >
-                  {/* Start time (desktop) + status pill */}
+                  {/* Start time + status */}
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-medium text-white/90">
                       {start || "TBD"}
@@ -288,8 +356,6 @@ export default function SettlementPage() {
                     <div className="text-[11px] text-white/70">
                       {row.venue || "Venue"}
                     </div>
-
-                    {/* Mobile-only status + start under match block */}
                     <div className="md:hidden mt-1 flex items-center gap-1 text-[11px] text-white/60">
                       <span>{start || "TBD"}</span>
                     </div>
@@ -310,44 +376,78 @@ export default function SettlementPage() {
                     </div>
                   </div>
 
-                  {/* Settle buttons */}
+                  {/* Lock / Settle buttons */}
                   <div className="flex md:flex-col items-end md:items-end gap-1">
-                    <button
-                      type="button"
-                      disabled={isWorking}
-                      onClick={() => settleQuestion(row, "yes")}
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-20 text-center ${
-                        isWorking
-                          ? "bg-green-900/70 opacity-70"
-                          : "bg-green-600 hover:bg-green-700"
-                      }`}
-                    >
-                      {isWorking ? "Working…" : "Settle YES"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorking}
-                      onClick={() => settleQuestion(row, "no")}
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-20 text-center ${
-                        isWorking
-                          ? "bg-red-900/70 opacity-70"
-                          : "bg-red-600 hover:bg-red-700"
-                      }`}
-                    >
-                      {isWorking ? "Working…" : "Settle NO"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isWorking}
-                      onClick={() => settleQuestion(row, "void")}
-                      className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-20 text-center ${
-                        isWorking
-                          ? "bg-gray-800/80 opacity-70"
-                          : "bg-gray-700 hover:bg-gray-600"
-                      }`}
-                    >
-                      {isWorking ? "Working…" : "Void"}
-                    </button>
+                    {/* Lock / Unlock */}
+                    {row.status === "open" && (
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => lockQuestion(row, "lock")}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
+                          isWorking
+                            ? "bg-yellow-700/70 opacity-70"
+                            : "bg-yellow-500 hover:bg-yellow-600 text-black"
+                        }`}
+                      >
+                        {isWorking ? "Working…" : "Lock"}
+                      </button>
+                    )}
+
+                    {row.status === "pending" && (
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => lockQuestion(row, "unlock")}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
+                          isWorking
+                            ? "bg-gray-700/70 opacity-70"
+                            : "bg-gray-600 hover:bg-gray-500"
+                        }`}
+                      >
+                        {isWorking ? "Working…" : "Re-open"}
+                      </button>
+                    )}
+
+                    {/* Settle */}
+                    <div className="flex md:flex-col items-end gap-1">
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => settleQuestion(row, "yes")}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
+                          isWorking
+                            ? "bg-green-900/70 opacity-70"
+                            : "bg-green-600 hover:bg-green-700"
+                        }`}
+                      >
+                        {isWorking ? "Working…" : "Settle YES"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => settleQuestion(row, "no")}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
+                          isWorking
+                            ? "bg-red-900/70 opacity-70"
+                            : "bg-red-600 hover:bg-red-700"
+                        }`}
+                      >
+                        {isWorking ? "Working…" : "Settle NO"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isWorking}
+                        onClick={() => settleQuestion(row, "void")}
+                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
+                          isWorking
+                            ? "bg-gray-800/80 opacity-70"
+                            : "bg-gray-700 hover:bg-gray-600"
+                        }`}
+                      >
+                        {isWorking ? "Working…" : "Void"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
