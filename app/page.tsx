@@ -111,7 +111,9 @@ export default function HomePage() {
           <p className="text-white/90 max-w-2xl text-lg md:text-xl mb-8 drop-shadow-md">
             Free-to-play AFL prediction streaks. Build your streak, top the
             leaderboard, win prizes.
-            WIN $500 EACH ROUND
+          <h1 className="text-white text-4xl md:text-6xl font-extrabold mb-4 leading-tight drop-shadow-lg">
+            Real <span className="text-orange-500">CHANCE TO WIN $500 EACH ROUND
+          </h1>  
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4">
