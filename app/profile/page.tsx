@@ -13,10 +13,11 @@ import {
   getDoc,
   setDoc,
   collection,
-  getDocs,
   query,
+  where,
   orderBy,
   limit,
+  getDocs,
 } from "firebase/firestore";
 import {
   signOut,
@@ -41,20 +42,18 @@ type UserDoc = {
   avatarUrl?: string;
   currentStreak?: number;
   longestStreak?: number;
+  lastSettledRound?: number | null;
 };
 
 type RecentPick = {
   id: string;
   match: string;
   question: string;
-  quarter: number;
-  pick: "yes" | "no";
-  result?: string; // e.g. "Win", "Loss", "Pending", "Void"
-  createdAtLabel?: string;
-};
-
-type PicksApiResponse = {
-  games: { id: string }[];
+  quarter?: number;
+  pick?: "yes" | "no";
+  result?: "win" | "loss" | "void";
+  settledAt?: Date | null;
+  round?: number | null;
 };
 
 export default function ProfilePage() {
@@ -62,10 +61,7 @@ export default function ProfilePage() {
   const { user, loading } = useAuth();
 
   const [form, setForm] = useState<UserDoc>({});
-  const [loadedForm, setLoadedForm] = useState<UserDoc | null>(null);
   const [initialLoaded, setInitialLoaded] = useState(false);
-
-  const [isEditing, setIsEditing] = useState(false);
 
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(null);
@@ -77,13 +73,12 @@ export default function ProfilePage() {
   const [saveSuccess, setSaveSuccess] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // streak + round context
-  const [currentRound, setCurrentRound] = useState<number | null>(null);
+  const [editMode, setEditMode] = useState(false);
 
-  // recent picks
+  // last 5 settled streak picks
   const [recentPicks, setRecentPicks] = useState<RecentPick[]>([]);
-  const [recentLoading, setRecentLoading] = useState(false);
-  const [recentError, setRecentError] = useState("");
+  const [recentPicksLoading, setRecentPicksLoading] = useState(false);
+  const [recentPicksError, setRecentPicksError] = useState("");
 
   // Redirect if not logged in
   useEffect(() => {
@@ -100,7 +95,7 @@ export default function ProfilePage() {
         const snap = await getDoc(refDoc);
         const data = snap.exists() ? snap.data() : {};
 
-        const nextForm: UserDoc = {
+        setForm({
           uid: user.uid,
           email: user.email ?? "",
           username: (data as any).username ?? "",
@@ -115,10 +110,9 @@ export default function ProfilePage() {
           avatarUrl: (data as any).avatarUrl ?? "",
           currentStreak: (data as any).currentStreak ?? 0,
           longestStreak: (data as any).longestStreak ?? 0,
-        };
+          lastSettledRound: (data as any).lastSettledRound ?? null,
+        });
 
-        setForm(nextForm);
-        setLoadedForm(nextForm);
         setInitialLoaded(true);
       } catch (err) {
         console.error("Failed to load profile", err);
@@ -129,115 +123,65 @@ export default function ProfilePage() {
     if (user && !initialLoaded) load();
   }, [user, initialLoaded]);
 
-  // Fetch current round (same logic as Picks page)
+  // Load last 5 *settled* streak picks
   useEffect(() => {
-    const loadRound = async () => {
-      try {
-        const res = await fetch("/api/picks");
-        if (!res.ok) return;
-        const data: PicksApiResponse = await res.json();
-        if (!data.games || data.games.length === 0) return;
+    if (!user) return;
 
-        const firstId = data.games[0].id ?? "";
-        let match = firstId.match(/round[_-]?(\d+)/i);
-        if (!match) match = firstId.match(/(\d+)/);
-        if (match) {
-          const num = Number(match[1]);
-          if (!Number.isNaN(num)) setCurrentRound(num);
-        }
-      } catch (err) {
-        console.error("Failed to load round for profile", err);
-      }
-    };
-
-    loadRound();
-  }, []);
-
-  // Load recent picks (last 5) for this user
-  useEffect(() => {
-    const loadRecentPicks = async () => {
-      if (!user) return;
-      setRecentLoading(true);
-      setRecentError("");
+    const loadRecent = async () => {
+      setRecentPicksLoading(true);
+      setRecentPicksError("");
 
       try {
         const picksRef = collection(db, "picks");
-
-        // Get latest 30 picks across all users, then filter in code
+        // Only picks that have been settled and have a result
         const q = query(
           picksRef,
-          orderBy("createdAt", "desc"),
-          limit(30)
+          where("userId", "==", user.uid),
+          where("result", "in", ["win", "loss", "void"]),
+          orderBy("settledAt", "desc"),
+          limit(5)
         );
+
         const snap = await getDocs(q);
 
-        const userPicks: RecentPick[] = [];
-        snap.forEach((docSnap) => {
-          const d = docSnap.data() as any;
-          if (d.userId !== user.uid) return;
+        const list: RecentPick[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const ts = data.settledAt;
+          const settledDate: Date | null =
+            ts && typeof ts.toDate === "function" ? ts.toDate() : null;
 
-          const createdAt =
-            d.createdAt && d.createdAt.toDate
-              ? d.createdAt.toDate()
-              : null;
-
-          const createdAtLabel = createdAt
-            ? createdAt.toLocaleString("en-AU", {
-                day: "2-digit",
-                month: "short",
-                hour: "2-digit",
-                minute: "2-digit",
-              })
-            : undefined;
-
-          // Try to infer a friendly result label
-          const rawResult: string | undefined =
-            d.result || d.outcome || d.status;
-
-          let resultLabel: string | undefined;
-          if (!rawResult) {
-            resultLabel = "Pending";
-          } else {
-            const lower = String(rawResult).toLowerCase();
-            if (lower === "win" || lower === "correct" || lower === "yes") {
-              resultLabel = "Win";
-            } else if (
-              lower === "loss" ||
-              lower === "incorrect" ||
-              lower === "no"
-            ) {
-              resultLabel = "Loss";
-            } else if (lower === "void") {
-              resultLabel = "Void";
-            } else if (lower === "pending" || lower === "open") {
-              resultLabel = "Pending";
-            } else {
-              resultLabel = rawResult;
-            }
-          }
-
-          userPicks.push({
+          return {
             id: docSnap.id,
-            match: d.match ?? "Unknown match",
-            question: d.question ?? "",
-            quarter: Number(d.quarter ?? 1),
-            pick: (d.pick === "no" ? "no" : "yes") as "yes" | "no",
-            result: resultLabel,
-            createdAtLabel,
-          });
+            match: data.match ?? "",
+            question: data.question ?? "",
+            quarter:
+              typeof data.quarter === "number" ? data.quarter : undefined,
+            pick:
+              data.pick === "yes" || data.pick === "no"
+                ? data.pick
+                : undefined,
+            result:
+              data.result === "win" ||
+              data.result === "loss" ||
+              data.result === "void"
+                ? data.result
+                : undefined,
+            settledAt: settledDate,
+            round:
+              typeof data.round === "number" ? data.round : undefined,
+          };
         });
 
-        // Take top 5 for this user
-        setRecentPicks(userPicks.slice(0, 5));
+        setRecentPicks(list);
       } catch (err) {
         console.error("Failed to load recent picks", err);
-        setRecentError("Failed to load your recent picks.");
+        setRecentPicksError("Failed to load your recent picks.");
       } finally {
-        setRecentLoading(false);
+        setRecentPicksLoading(false);
       }
     };
 
-    loadRecentPicks();
+    loadRecent();
   }, [user]);
 
   // Avatar preview URL handling
@@ -256,7 +200,7 @@ export default function ProfilePage() {
   const currentAvatarSrc = useMemo(() => {
     if (avatarPreviewUrl) return avatarPreviewUrl;
     if (form.avatarUrl) return form.avatarUrl;
-    return "/default-avatar.png";
+    return "/default-avatar.png"; // your placeholder
   }, [avatarPreviewUrl, form.avatarUrl]);
 
   const update = (key: keyof UserDoc, value: string) => {
@@ -264,8 +208,6 @@ export default function ProfilePage() {
   };
 
   const handleAvatarSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (!isEditing) return;
-
     const file = e.target.files?.[0] || null;
     if (!file) {
       setAvatarFile(null);
@@ -291,27 +233,8 @@ export default function ProfilePage() {
     setAvatarFile(file);
   };
 
-  const handleStartEdit = () => {
-    setSaveError("");
-    setSaveSuccess("");
-    setPassword("");
-    setAvatarFile(null);
-    setAvatarPreviewUrl(null);
-    setIsEditing(true);
-  };
-
-  const handleCancelEdit = () => {
-    setSaveError("");
-    setSaveSuccess("");
-    setPassword("");
-    setAvatarFile(null);
-    setAvatarPreviewUrl(null);
-    if (loadedForm) setForm(loadedForm);
-    setIsEditing(false);
-  };
-
   async function handleSave() {
-    if (!user || !isEditing) return;
+    if (!user) return;
 
     setSaving(true);
     setSaveError("");
@@ -357,18 +280,16 @@ export default function ProfilePage() {
         { merge: true }
       );
 
-      const updated: UserDoc = {
-        ...form,
-        avatarUrl: avatarUrlToSave ?? form.avatarUrl,
-      };
-      setForm(updated);
-      setLoadedForm(updated);
+      setForm((prev) => ({
+        ...prev,
+        avatarUrl: avatarUrlToSave ?? prev.avatarUrl,
+      }));
 
       setSaveSuccess("Profile saved successfully.");
       setPassword("");
       setAvatarFile(null);
       setAvatarPreviewUrl(null);
-      setIsEditing(false);
+      setEditMode(false);
     } catch (err: any) {
       console.error("Save error:", err);
       setSaveError(err?.message || "Failed to save profile. Please try again.");
@@ -377,47 +298,41 @@ export default function ProfilePage() {
     }
   }
 
+  const formatDateTime = (d: Date | null | undefined) => {
+    if (!d) return "";
+    const dateStr = d.toLocaleDateString("en-AU", {
+      day: "2-digit",
+      month: "short",
+    });
+    const timeStr = d.toLocaleTimeString("en-AU", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${dateStr}, ${timeStr}`;
+  };
+
+  const streakRoundText =
+    form.lastSettledRound != null
+      ? `Active in Round ${form.lastSettledRound}`
+      : "Active this season";
+
   if (!user) return null;
 
   return (
     <div className="p-6 max-w-4xl mx-auto text-white">
-      {/* Header row */}
       <div className="flex items-center justify-between mb-6 gap-3">
-        <div>
-          <h1 className="text-4xl font-bold">Profile</h1>
-          {currentRound !== null && (
-            <p className="text-sm text-orange-300 mt-1">
-              Season 2026 • Round {currentRound}
-            </p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          {!isEditing ? (
-            <button
-              onClick={handleStartEdit}
-              className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded font-semibold text-sm"
-            >
-              Edit profile
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={handleCancelEdit}
-                type="button"
-                className="px-4 py-2 bg-black/40 border border-white/20 rounded font-semibold text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 rounded font-semibold text-sm disabled:opacity-60"
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-            </>
-          )}
-        </div>
+        <h1 className="text-4xl font-bold">Profile</h1>
+        <button
+          type="button"
+          onClick={() => {
+            setEditMode((prev) => !prev);
+            setSaveError("");
+            setSaveSuccess("");
+          }}
+          className="px-4 py-2 rounded-full border border-white/20 text-sm hover:border-orange-400 hover:text-orange-400 transition-colors"
+        >
+          {editMode ? "Cancel edit" : "Edit profile"}
+        </button>
       </div>
 
       {/* HEADER: avatar + email */}
@@ -440,7 +355,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* AVATAR UPLOAD (only active in edit mode) */}
+      {/* AVATAR UPLOAD */}
       <div className="mb-8">
         <label className="block text-sm font-medium mb-1">
           Avatar (optional)
@@ -450,7 +365,7 @@ export default function ProfilePage() {
           accept="image/png,image/jpeg"
           onChange={handleAvatarSelect}
           className="text-sm"
-          disabled={!isEditing}
+          disabled={!editMode}
         />
         <p className="text-xs text-gray-400 mt-1">
           JPG/PNG, max 3MB. This will show on leaderboards.
@@ -490,12 +405,10 @@ export default function ProfilePage() {
         <div>
           <label className="block mb-1 text-sm">Surname</label>
           <input
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.surname ?? ""}
             onChange={(e) => update("surname", e.target.value)}
+            disabled={!editMode}
           />
         </div>
 
@@ -514,12 +427,10 @@ export default function ProfilePage() {
         <div>
           <label className="block mb-1 text-sm">Suburb</label>
           <input
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.suburb ?? ""}
             onChange={(e) => update("suburb", e.target.value)}
+            disabled={!editMode}
           />
         </div>
 
@@ -527,12 +438,10 @@ export default function ProfilePage() {
         <div>
           <label className="block mb-1 text-sm">State</label>
           <input
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.state ?? ""}
             onChange={(e) => update("state", e.target.value)}
+            disabled={!editMode}
           />
         </div>
 
@@ -540,12 +449,10 @@ export default function ProfilePage() {
         <div>
           <label className="block mb-1 text-sm">Phone</label>
           <input
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.phone ?? ""}
             onChange={(e) => update("phone", e.target.value)}
+            disabled={!editMode}
           />
         </div>
 
@@ -553,12 +460,10 @@ export default function ProfilePage() {
         <div>
           <label className="block mb-1 text-sm">Gender</label>
           <select
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.gender ?? ""}
             onChange={(e) => update("gender", e.target.value)}
+            disabled={!editMode}
           >
             <option value="">Prefer not to say</option>
             <option value="Male">Male</option>
@@ -571,12 +476,10 @@ export default function ProfilePage() {
         <div className="col-span-2">
           <label className="block mb-1 text-sm">Favourite AFL team</label>
           <select
-            className={`w-full border border-white/10 p-2 rounded ${
-              isEditing ? "bg-black/40" : "bg-black/20 text-gray-400"
-            }`}
-            disabled={!isEditing}
+            className="w-full bg-black/40 border border-white/10 p-2 rounded"
             value={form.team ?? ""}
             onChange={(e) => update("team", e.target.value)}
+            disabled={!editMode}
           >
             <option value="">Select a team</option>
             <option>Adelaide Crows</option>
@@ -606,124 +509,127 @@ export default function ProfilePage() {
         <div className="bg-black/30 p-4 rounded text-center">
           <p className="text-xs text-gray-400 mb-1">CURRENT STREAK</p>
           <p className="text-2xl font-bold">{form.currentStreak ?? 0}</p>
-          {currentRound !== null && (
-            <p className="text-[11px] text-gray-400 mt-1">
-              Active in Round {currentRound}
-            </p>
-          )}
+          <p className="text-[11px] text-gray-400 mt-1">{streakRoundText}</p>
         </div>
         <div className="bg-black/30 p-4 rounded text-center">
           <p className="text-xs text-gray-400 mb-1">LONGEST STREAK</p>
           <p className="text-2xl font-bold">{form.longestStreak ?? 0}</p>
-          {currentRound !== null && (
-            <p className="text-[11px] text-gray-400 mt-1">
-              This season • Round {currentRound}
-            </p>
-          )}
+          <p className="text-[11px] text-gray-400 mt-1">
+            This season{form.lastSettledRound != null
+              ? ` • Round ${form.lastSettledRound}`
+              : ""}
+          </p>
         </div>
       </div>
 
-      {/* PASSWORD + MESSAGES (only when editing) */}
-      {isEditing && (
-        <div className="mb-6">
-          <label className="block mb-1 text-sm">
-            Current password (required to save changes)
-          </label>
-          <div className="flex items-center gap-2">
-            <input
-              type={showPassword ? "text" : "password"}
-              className="flex-1 bg-black/40 border border-white/10 p-2 rounded"
-              placeholder="Enter password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((s) => !s)}
-              className="px-3 py-2 text-xs bg-white/10 rounded border border-white/20"
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
+      {/* PASSWORD + SAVE (only in edit mode) */}
+      {editMode && (
+        <>
+          <div className="mb-6">
+            <label className="block mb-1 text-sm">
+              Current password (required to save changes)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="flex-1 bg-black/40 border border-white/10 p-2 rounded"
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="px-3 py-2 text-xs bg-white/10 rounded border border-white/20"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </div>
-        </div>
+
+          {saveError && <p className="text-red-400 mb-3">{saveError}</p>}
+          {saveSuccess && <p className="text-green-400 mb-3">{saveSuccess}</p>}
+
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded font-semibold disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save profile"}
+          </button>
+        </>
       )}
 
-      {saveError && <p className="text-red-400 mb-3">{saveError}</p>}
-      {saveSuccess && <p className="text-green-400 mb-3">{saveSuccess}</p>}
+      {/* LAST 5 PICKS */}
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold mb-2">Last 5 picks</h2>
 
-      {/* RECENT PICKS */}
-      <div className="mt-8">
-        <h2 className="text-lg font-semibold mb-3">Last 5 picks</h2>
-
-        {recentLoading && (
-          <p className="text-sm text-gray-400">Loading your picks…</p>
-        )}
-
-        {recentError && (
-          <p className="text-sm text-red-400">{recentError}</p>
-        )}
-
-        {!recentLoading && !recentError && recentPicks.length === 0 && (
-          <p className="text-sm text-gray-400">
-            You haven&apos;t made any picks yet. Head to the Picks page to start
-            your streak.
+        {recentPicksLoading ? (
+          <p className="text-sm text-gray-300">
+            Loading your recent picks…
           </p>
-        )}
+        ) : recentPicksError ? (
+          <p className="text-sm text-red-400">{recentPicksError}</p>
+        ) : recentPicks.length === 0 ? (
+          <p className="text-sm text-gray-300">
+            You haven&apos;t had any streak picks settled yet. Once your
+            locked questions are settled, they&apos;ll appear here.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {recentPicks.map((p) => {
+              let resultLabel = "Win";
+              let resultColour = "text-emerald-400";
+              if (p.result === "loss") {
+                resultLabel = "Loss";
+                resultColour = "text-red-400";
+              } else if (p.result === "void") {
+                resultLabel = "Void";
+                resultColour = "text-yellow-300";
+              }
 
-        {!recentLoading && !recentError && recentPicks.length > 0 && (
-          <ul className="space-y-2">
-            {recentPicks.map((p) => (
-              <li
-                key={p.id}
-                className="bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm flex flex-col gap-1"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="font-semibold truncate">
-                    {p.match}{" "}
-                    <span className="text-[11px] text-gray-400 ml-1">
-                      (Q{p.quarter})
-                    </span>
+              const roundText =
+                p.round != null ? `Round ${p.round}` : "This season";
+
+              return (
+                <div
+                  key={p.id}
+                  className="rounded-xl bg-black/30 border border-white/10 px-4 py-3 text-sm"
+                >
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <div className="font-semibold">
+                      {p.match || "Fixture"}
+                      {typeof p.quarter === "number" && (
+                        <span className="ml-1 text-xs text-gray-400">
+                          (Q{p.quarter})
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right text-[11px] text-gray-400">
+                      {formatDateTime(p.settledAt || null)}
+                      <br />
+                      <span className="text-[10px]">{roundText}</span>
+                    </div>
                   </div>
-                  {p.createdAtLabel && (
-                    <span className="text-[11px] text-gray-400">
-                      {p.createdAtLabel}
+                  <p className="text-xs text-white/80 mb-1">
+                    {p.question || "Question"}
+                  </p>
+                  <p className="text-xs">
+                    Your pick{" "}
+                    <span className="font-semibold uppercase">
+                      {p.pick || "—"}
                     </span>
-                  )}
-                </div>
-                <div className="text-[13px] text-gray-200">
-                  {p.question}
-                </div>
-                <div className="flex items-center justify-between gap-2 text-[12px] mt-1">
-                  <span>
-                    Your pick:{" "}
-                    <span
-                      className={
-                        p.pick === "yes" ? "text-emerald-300" : "text-red-300"
-                      }
-                    >
-                      {p.pick.toUpperCase()}
-                    </span>
-                  </span>
-                  <span>
+                  </p>
+                  <p className="text-xs mt-0.5">
                     Result:{" "}
-                    <span
-                      className={
-                        p.result === "Win"
-                          ? "text-emerald-300"
-                          : p.result === "Loss"
-                          ? "text-red-300"
-                          : p.result === "Void"
-                          ? "text-yellow-300"
-                          : "text-gray-300"
-                      }
-                    >
-                      {p.result ?? "Pending"}
+                    <span className={`font-semibold ${resultColour}`}>
+                      {resultLabel}
                     </span>
-                  </span>
+                  </p>
                 </div>
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         )}
       </div>
 
