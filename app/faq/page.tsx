@@ -12,11 +12,6 @@ export default function FAQPage() {
         FAQs
       </h1>
 
-      {/* Sponsor banner */}
-      <div className="mx-auto mt-6 w-full rounded-2xl bg-white/5 p-6 text-center text-sm text-white/70 ring-1 ring-white/10">
-        Sponsor Banner • 970×90
-      </div>
-
       {/* Intro */}
       <p className="mt-8 text-white/80">
         Welcome to <span className="font-semibold">STREAKr AFL</span>. Build a
