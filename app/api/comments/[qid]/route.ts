@@ -1,38 +1,49 @@
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
+import { Timestamp } from "firebase-admin/firestore";
 
-// GET /api/comments/{qid}
-export async function GET(
-  req: Request,
-  { params }: { params: { qid: string } }
-) {
+type RouteParams = {
+  params: { qid: string };
+};
+
+// GET /api/comments/:qid
+export async function GET(_req: NextRequest, { params }: RouteParams) {
+  const questionId = params.qid;
+
+  if (!questionId) {
+    return NextResponse.json({ comments: [] });
+  }
+
   try {
-    const ref = db
+    const snap = await db
       .collection("comments")
-      .doc(params.qid)
-      .collection("items");
+      .where("questionId", "==", questionId)
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
 
-    const snapshot = await ref.orderBy("createdAt", "desc").get();
+    const comments = snap.docs.map((docSnap) => {
+      const data = docSnap.data() as any;
+      const ts = data.createdAt;
+      let createdAt: string | null = null;
 
-    const comments = snapshot.docs.map((doc) => {
-      const data = doc.data() as any;
+      if (ts && typeof ts.toDate === "function") {
+        createdAt = ts.toDate().toISOString();
+      }
+
       return {
-        id: doc.id,
-        uid: data.uid ?? "",
-        displayName: data.displayName ?? "",
-        photoURL: data.photoURL ?? "",
+        id: docSnap.id,
         body: data.body ?? "",
-        createdAt: data.createdAt?.toDate
-          ? data.createdAt.toDate()
-          : null,
+        displayName: data.displayName ?? null,
+        createdAt,
       };
     });
 
-    return NextResponse.json(comments);
-  } catch (error) {
-    console.error("GET /api/comments error", error);
+    return NextResponse.json({ comments });
+  } catch (err) {
+    console.error("Error loading comments", err);
     return NextResponse.json(
       { error: "Failed to load comments" },
       { status: 500 }
@@ -40,36 +51,38 @@ export async function GET(
   }
 }
 
-// POST /api/comments/{qid}
-export async function POST(
-  req: Request,
-  { params }: { params: { qid: string } }
-) {
-  try {
-    const { uid, body, displayName, photoURL } = await req.json();
+// POST /api/comments/:qid
+// Body: { body: string }
+export async function POST(req: NextRequest, { params }: RouteParams) {
+  const questionId = params.qid;
 
-    if (!uid || !body) {
-      return new NextResponse("Bad request", { status: 400 });
+  try {
+    const json = await req.json();
+    const text = (json?.body ?? "").toString().trim();
+
+    if (!text) {
+      return NextResponse.json(
+        { error: "Comment body required" },
+        { status: 400 }
+      );
     }
 
-    const ref = db
-      .collection("comments")
-      .doc(params.qid)
-      .collection("items");
-
-    await ref.add({
-      uid,
-      body: String(body).slice(0, 300),
-      displayName: displayName ?? "",
-      photoURL: photoURL ?? "",
-      createdAt: new Date(),
+    const docRef = await db.collection("comments").add({
+      questionId,
+      body: text,
+      createdAt: Timestamp.now(),
+      // later we can add: userId, displayName, etc.
     });
 
-    return NextResponse.json({ ok: true });
-  } catch (error) {
-    console.error("POST /api/comments error", error);
+    return NextResponse.json({
+      id: docRef.id,
+      body: text,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Error posting comment", err);
     return NextResponse.json(
-      { error: "Failed to add comment" },
+      { error: "Failed to post comment" },
       { status: 500 }
     );
   }
