@@ -6,6 +6,7 @@ import { Timestamp } from "firebase-admin/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type Outcome = "yes" | "no" | "void";
+type LockAction = "lock" | "unlock";
 
 type RoundDoc = {
   season?: number;
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
     const body = await req.json();
     const questionId = body?.questionId as string | undefined;
     const outcome = body?.outcome as Outcome | undefined;
+    const action = body?.action as LockAction | undefined;
 
     if (!questionId || typeof questionId !== "string") {
       return NextResponse.json(
@@ -41,11 +43,18 @@ export async function POST(req: Request) {
       );
     }
 
-    if (!outcome || !["yes", "no", "void"].includes(outcome)) {
-      return NextResponse.json(
-        { error: "Missing or invalid outcome (must be 'yes' | 'no' | 'void')" },
-        { status: 400 }
-      );
+    const isLockAction = action === "lock" || action === "unlock";
+
+    if (!isLockAction) {
+      if (!outcome || !["yes", "no", "void"].includes(outcome)) {
+        return NextResponse.json(
+          {
+            error:
+              "Missing or invalid outcome (must be 'yes' | 'no' | 'void') when not using a lock action",
+          },
+          { status: 400 }
+        );
+      }
     }
 
     // 1) Find the question inside rounds for CURRENT_SEASON
@@ -104,6 +113,34 @@ export async function POST(req: Request) {
     const game = gamesArr[targetGameIndex] ?? {};
     const questionsArr = game.questions ?? [];
 
+    // ---------------- LOCK / UNLOCK PATH ----------------
+    if (isLockAction) {
+      const newStatus: QuestionStatus =
+        action === "lock" ? "pending" : "open";
+
+      const updatedQuestion = {
+        ...originalQuestion,
+        status: newStatus,
+        lockedAt: action === "lock" ? Timestamp.now() : null,
+      };
+
+      questionsArr[targetQuestionIndex] = updatedQuestion;
+      gamesArr[targetGameIndex] = {
+        ...game,
+        questions: questionsArr,
+      };
+
+      await targetRoundRef.update({ games: gamesArr });
+
+      return NextResponse.json({
+        ok: true,
+        mode: action,
+        questionId,
+        status: newStatus,
+      });
+    }
+
+    // ---------------- SETTLEMENT PATH ----------------
     const status: QuestionStatus = outcome === "void" ? "void" : "final";
 
     const updatedQuestion = {
@@ -154,6 +191,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      mode: "settle",
       questionId,
       outcome,
       status,
@@ -162,7 +200,7 @@ export async function POST(req: Request) {
   } catch (err) {
     console.error("Error in /api/settlement:", err);
     return NextResponse.json(
-      { error: "Failed to settle question" },
+      { error: "Failed to process settlement/lock" },
       { status: 500 }
     );
   }
