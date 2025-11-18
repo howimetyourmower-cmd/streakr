@@ -2,6 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import {
+  collection,
+  getDocs,
+  orderBy,
+  limit,
+  query,
+} from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type Outcome = "yes" | "no" | "void";
@@ -34,6 +42,19 @@ type QuestionRow = {
   status: QuestionStatus;
 };
 
+type SettlementLog = {
+  id: string;
+  questionId: string;
+  action: "lock" | "unlock" | "settle";
+  outcome?: Outcome | null;
+  match?: string;
+  question?: string;
+  quarter?: number | null;
+  adminDisplayName?: string | null;
+  createdAt?: string;
+  newStatus?: QuestionStatus;
+};
+
 export default function SettlementPage() {
   const { user } = useAuth();
 
@@ -42,6 +63,10 @@ export default function SettlementPage() {
   const [error, setError] = useState("");
   const [workingRowId, setWorkingRowId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+
+  const [logs, setLogs] = useState<SettlementLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState("");
 
   // --- Helpers ---
   const formatStart = (iso: string) => {
@@ -72,6 +97,41 @@ export default function SettlementPage() {
       default:
         return "bg-gray-600";
     }
+  };
+
+  const formatLogTime = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString("en-AU", {
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Australia/Melbourne",
+    });
+  };
+
+  const actionLabel = (log: SettlementLog) => {
+    if (log.action === "lock") return "Locked";
+    if (log.action === "unlock") return "Re-opened";
+    if (log.action === "settle") {
+      if (!log.outcome || log.outcome === "void") return "Voided";
+      return `Settled ${log.outcome.toUpperCase()}`;
+    }
+    return log.action;
+  };
+
+  const actionColour = (log: SettlementLog) => {
+    if (log.action === "lock") return "bg-yellow-500 text-black";
+    if (log.action === "unlock") return "bg-gray-600";
+    if (log.action === "settle") {
+      if (!log.outcome || log.outcome === "void") return "bg-gray-500";
+      if (log.outcome === "yes") return "bg-green-600";
+      if (log.outcome === "no") return "bg-red-600";
+    }
+    return "bg-gray-600";
   };
 
   // --- Load current questions from existing picks API ---
@@ -127,6 +187,60 @@ export default function SettlementPage() {
     load();
   }, []);
 
+  // --- Load recent logs ---
+  useEffect(() => {
+    if (!user) return;
+
+    const loadLogs = async () => {
+      setLogsLoading(true);
+      setLogsError("");
+
+      try {
+        const q = query(
+          collection(db, "settlementLogs"),
+          orderBy("createdAt", "desc"),
+          limit(20)
+        );
+
+        const snap = await getDocs(q);
+
+        const items: SettlementLog[] = snap.docs.map((docSnap) => {
+          const data: any = docSnap.data() || {};
+          let createdAtIso: string | undefined;
+
+          const createdAt = data.createdAt;
+          if (createdAt && typeof createdAt.toDate === "function") {
+            createdAtIso = createdAt.toDate().toISOString();
+          } else if (typeof createdAt === "string") {
+            createdAtIso = createdAt;
+          }
+
+          return {
+            id: docSnap.id,
+            questionId: data.questionId ?? "",
+            action: data.action ?? "settle",
+            outcome: data.outcome ?? null,
+            match: data.match ?? "",
+            question: data.question ?? "",
+            quarter: data.quarter ?? null,
+            adminDisplayName: data.adminDisplayName ?? null,
+            createdAt: createdAtIso,
+            newStatus: data.newStatus ?? undefined,
+          } as SettlementLog;
+        });
+
+        setLogs(items);
+      } catch (err) {
+        console.error("Failed to load settlement logs", err);
+        setLogsError("Failed to load recent history.");
+      } finally {
+        setLogsLoading(false);
+      }
+    };
+
+    loadLogs();
+  }, [user, message]);
+
   // --- LOCK / UNLOCK ---
   const lockQuestion = async (
     row: QuestionRow,
@@ -151,6 +265,9 @@ export default function SettlementPage() {
         body: JSON.stringify({
           questionId: row.id,
           action,
+          adminUid: user?.uid ?? null,
+          adminDisplayName:
+            (user as any)?.displayName || "Admin",
         }),
       });
 
@@ -213,6 +330,9 @@ export default function SettlementPage() {
         body: JSON.stringify({
           questionId: row.id,
           outcome,
+          adminUid: user?.uid ?? null,
+          adminDisplayName:
+            (user as any)?.displayName || "Admin",
         }),
       });
 
@@ -267,7 +387,7 @@ export default function SettlementPage() {
   }
 
   return (
-    <div className="py-6 md:py-8 space-y-5">
+    <div className="py-6 md:py-8 space-y-6">
       <div>
         <h1 className="text-2xl md:text-3xl font-bold">Settlement console</h1>
         <p className="mt-1 text-sm text-white/70 max-w-2xl">
@@ -302,6 +422,7 @@ export default function SettlementPage() {
         </p>
       )}
 
+      {/* Main questions table */}
       {!loading && rows.length > 0 && (
         <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
           {/* Header */}
@@ -455,6 +576,81 @@ export default function SettlementPage() {
           </div>
         </div>
       )}
+
+      {/* Recent history */}
+      <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
+        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+          <div className="text-sm font-semibold text-orange-300">
+            Recent settlement history
+          </div>
+          <div className="text-[11px] text-gray-400">
+            {logsLoading
+              ? "Loading…"
+              : `Showing last ${Math.min(logs.length, 20)} actions`}
+          </div>
+        </div>
+
+        {logsError && (
+          <div className="px-4 py-3 text-sm text-red-400">
+            {logsError}
+          </div>
+        )}
+
+        {!logsLoading && !logsError && logs.length === 0 && (
+          <div className="px-4 py-3 text-sm text-white/70">
+            No settlement actions logged yet.
+          </div>
+        )}
+
+        {!logsLoading && logs.length > 0 && (
+          <div className="divide-y divide-white/5">
+            {logs.map((log) => (
+              <div
+                key={log.id}
+                className="px-4 py-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${actionColour(
+                        log
+                      )}`}
+                    >
+                      {actionLabel(log)}
+                    </span>
+                    {log.newStatus && (
+                      <span className="text-[11px] text-white/60">
+                        → {log.newStatus.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-[13px] font-medium truncate">
+                    {log.match || "Match"}{" "}
+                    {typeof log.quarter === "number"
+                      ? `(Q${log.quarter})`
+                      : ""}
+                  </div>
+                  <div className="text-[12px] text-white/70 truncate">
+                    {log.question}
+                  </div>
+                  <div className="mt-1 text-[11px] text-white/40 font-mono truncate">
+                    {log.questionId}
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-end gap-1 text-right">
+                  <span className="text-[11px] text-white/60">
+                    {formatLogTime(log.createdAt)}
+                  </span>
+                  <span className="text-[11px] text-white/50">
+                    {log.adminDisplayName || "Admin"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
