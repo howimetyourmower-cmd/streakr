@@ -58,6 +58,9 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // NEW: currently active streak question (only one at a time)
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
@@ -116,6 +119,12 @@ export default function PicksClient() {
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
+
+        // If user already has a pick, treat the first picked question as active
+        const firstPicked = flat.find((r) => r.userPick);
+        if (firstPicked) {
+          setActiveQuestionId(firstPicked.id);
+        }
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -134,9 +143,9 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // -------- Save Pick --------
+  // -------- Save Pick (ONE question at a time) --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
-    // Front-end guard: only allow picks when status is open
+    // Only allow changes while question is open
     if (row.status !== "open") return;
 
     try {
@@ -150,11 +159,25 @@ export default function PicksClient() {
         createdAt: serverTimestamp(),
       });
 
+      // This is now the active streak question
+      setActiveQuestionId(row.id);
+
+      // Enforce "one question at a time":
+      // - this row keeps its pick
+      // - all other rows clear userPick
       setRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+        prev.map((r) =>
+          r.id === row.id
+            ? { ...r, userPick: pick }
+            : { ...r, userPick: undefined }
+        )
       );
       setFilteredRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+        prev.map((r) =>
+          r.id === row.id
+            ? { ...r, userPick: pick }
+            : { ...r, userPick: undefined }
+        )
       );
     } catch (e) {
       console.error("Pick save error:", e);
@@ -292,33 +315,31 @@ export default function PicksClient() {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
           const noSelected = row.userPick === "no";
-          const isLocked = row.status !== "open";
-          const sportLabel =
-            (row.sport && String(row.sport).toUpperCase()) || "AFL";
+          const isActive = row.id === activeQuestionId;
 
           return (
             <div
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white gap-y-2">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12 items-center px-4 py-2 text-white">
                 {/* START */}
-                <div className="col-span-12 md:col-span-2">
+                <div className="md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
                   <div className="text-[11px] text-white/80">
-                    {time && `${time} AEDT`}
+                    {time} AEDT
                   </div>
                 </div>
 
                 {/* SPORT (text pill) */}
-                <div className="col-span-6 md:col-span-1 flex items-center">
-                  <span className="inline-flex items-center rounded-full border border-white/25 bg-black/20 px-2 py-0.5 text-[10px] uppercase tracking-wide text-white/85">
-                    {sportLabel}
+                <div className="md:col-span-1">
+                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-black/30 text-[11px] font-semibold uppercase tracking-wide">
+                    {row.sport === "afl" ? "AFL" : row.sport.toUpperCase()}
                   </span>
                 </div>
 
                 {/* STATUS */}
-                <div className="col-span-6 md:col-span-1">
+                <div className="md:col-span-1">
                   <span
                     className={`${statusClasses(
                       row.status
@@ -329,20 +350,22 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE */}
-                <div className="col-span-12 md:col-span-3">
-                  <div className="text-sm font-semibold">{row.match}</div>
+                <div className="md:col-span-3">
+                  <div className="text-sm font-semibold">
+                    {row.match}
+                  </div>
                   <div className="text-[11px] text-white/80">
                     {row.venue}
                   </div>
                 </div>
 
                 {/* Q# */}
-                <div className="col-span-4 md:col-span-1 text-center text-sm font-bold">
+                <div className="md:col-span-1 text-sm font-bold md:text-center">
                   Q{row.quarter}
                 </div>
 
                 {/* QUESTION + COMMENTS */}
-                <div className="col-span-8 md:col-span-2">
+                <div className="md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
@@ -356,23 +379,20 @@ export default function PicksClient() {
                 </div>
 
                 {/* PICK / YES / NO */}
-                <div className="col-span-12 md:col-span-2 flex flex-col items-end">
+                <div className="md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
-                      disabled={isLocked}
+                      disabled={row.status !== "open"}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           yesSelected
-                            ? "bg-green-700 ring-2 ring-white"
-                            : "bg-green-600 hover:bg-green-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-50 cursor-not-allowed pointer-events-none"
-                            : ""
+                            ? isActive
+                              ? "bg-sky-500 ring-2 ring-white"         // active streak pick = blue
+                              : "bg-green-700 ring-2 ring-white"
+                            : "bg-green-600 hover:bg-green-700 disabled:bg-green-800/60"
                         }
                       `}
                     >
@@ -382,18 +402,15 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
-                      disabled={isLocked}
+                      disabled={row.status !== "open"}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           noSelected
-                            ? "bg-red-700 ring-2 ring-white"
-                            : "bg-red-600 hover:bg-red-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-50 cursor-not-allowed pointer-events-none"
-                            : ""
+                            ? isActive
+                              ? "bg-sky-500 ring-2 ring-white"         // active streak pick = blue
+                              : "bg-red-700 ring-2 ring-white"
+                            : "bg-red-600 hover:bg-red-700 disabled:bg-red-800/60"
                         }
                       `}
                     >
@@ -459,7 +476,9 @@ export default function PicksClient() {
             {/* Comment list */}
             <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
-                <p className="text-sm text-gray-400">Loading comments…</p>
+                <p className="text-sm text-gray-400">
+                  Loading comments…
+                </p>
               ) : comments.length === 0 ? (
                 <p className="text-sm text-gray-400">
                   No comments yet. Be the first!
