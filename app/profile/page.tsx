@@ -15,7 +15,6 @@ import {
   collection,
   getDocs,
   query,
-  where,
   orderBy,
   limit,
 } from "firebase/firestore";
@@ -163,16 +162,20 @@ export default function ProfilePage() {
 
       try {
         const picksRef = collection(db, "picks");
+
+        // Get latest 30 picks across all users, then filter in code
         const q = query(
           picksRef,
-          where("userId", "==", user.uid),
           orderBy("createdAt", "desc"),
-          limit(5)
+          limit(30)
         );
         const snap = await getDocs(q);
 
-        const list: RecentPick[] = snap.docs.map((docSnap) => {
+        const userPicks: RecentPick[] = [];
+        snap.forEach((docSnap) => {
           const d = docSnap.data() as any;
+          if (d.userId !== user.uid) return;
+
           const createdAt =
             d.createdAt && d.createdAt.toDate
               ? d.createdAt.toDate()
@@ -213,7 +216,7 @@ export default function ProfilePage() {
             }
           }
 
-          return {
+          userPicks.push({
             id: docSnap.id,
             match: d.match ?? "Unknown match",
             question: d.question ?? "",
@@ -221,10 +224,11 @@ export default function ProfilePage() {
             pick: (d.pick === "no" ? "no" : "yes") as "yes" | "no",
             result: resultLabel,
             createdAtLabel,
-          };
+          });
         });
 
-        setRecentPicks(list);
+        // Take top 5 for this user
+        setRecentPicks(userPicks.slice(0, 5));
       } catch (err) {
         console.error("Failed to load recent picks", err);
         setRecentError("Failed to load your recent picks.");
