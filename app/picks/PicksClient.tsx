@@ -3,7 +3,6 @@
 import { useEffect, useState, ChangeEvent } from "react";
 import { db } from "@/lib/firebaseClient";
 import { addDoc, collection, serverTimestamp } from "firebase/firestore";
-import SportBadge from "@/components/SportBadge";
 import type { SportType } from "@/lib/sports";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -49,6 +48,15 @@ type Comment = {
   displayName?: string;
   createdAt?: string;
 };
+
+function SportPill({ sport }: { sport: SportType }) {
+  const label = (sport || "afl").toUpperCase();
+  return (
+    <span className="inline-flex items-center rounded-full bg-black/40 border border-white/40 px-2 py-0.5 text-[10px] font-bold tracking-wide uppercase">
+      {label}
+    </span>
+  );
+}
 
 export default function PicksClient() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
@@ -271,8 +279,8 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* HEADER ROW (desktop-style like your screenshot) */}
-      <div className="grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+      {/* HEADER ROW – desktop only */}
+      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
@@ -284,7 +292,7 @@ export default function PicksClient() {
 
       {loading && <p>Loading…</p>}
 
-      {/* ROWS – 12-column layout, compact height, orange gradient */}
+      {/* ROWS */}
       <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
@@ -296,7 +304,94 @@ export default function PicksClient() {
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white">
+              {/* MOBILE LAYOUT (stacked, no horizontal scroll) */}
+              <div className="flex flex-col gap-2 p-3 md:hidden">
+                {/* Start + Sport + Status */}
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-col">
+                    <span className="font-semibold">{date}</span>
+                    <span className="text-white/80 text-[11px]">
+                      {time} AEDT
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <SportPill sport={row.sport} />
+                    <span
+                      className={`${statusClasses(
+                        row.status
+                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
+                    >
+                      {row.status.toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Match + Venue */}
+                <div className="text-[11px] text-white/90">
+                  <span className="font-semibold">{row.match}</span>
+                  <span className="mx-1">•</span>
+                  <span>{row.venue}</span>
+                </div>
+
+                {/* Question + Q# */}
+                <div className="flex gap-2 items-start">
+                  <div className="text-xs font-bold bg-black/30 px-2 py-0.5 rounded-full mt-0.5">
+                    Q{row.quarter}
+                  </div>
+                  <div className="text-sm leading-snug font-medium">
+                    {row.question}
+                  </div>
+                </div>
+
+                {/* Comments link */}
+                <button
+                  type="button"
+                  onClick={() => openComments(row)}
+                  className="self-start text-[11px] text-white/85 underline"
+                >
+                  Comments (0)
+                </button>
+
+                {/* Picks + percentages */}
+                <div className="flex flex-col gap-1 items-stretch">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "yes")}
+                      className={`
+                        flex-1 px-4 py-1.5 rounded-full text-xs font-bold text-white transition
+                        ${
+                          yesSelected
+                            ? "bg-green-700 ring-2 ring-white"
+                            : "bg-green-600 hover:bg-green-700"
+                        }
+                      `}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePick(row, "no")}
+                      className={`
+                        flex-1 px-4 py-1.5 rounded-full text-xs font-bold text-white transition
+                        ${
+                          noSelected
+                            ? "bg-red-700 ring-2 ring-white"
+                            : "bg-red-600 hover:bg-red-700"
+                        }
+                      `}
+                    >
+                      No
+                    </button>
+                  </div>
+                  <div className="text-[11px] text-white/85 text-right">
+                    Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
+                  </div>
+                </div>
+              </div>
+
+              {/* DESKTOP LAYOUT – original 12-col grid */}
+              <div className="hidden md:grid grid-cols-12 items-center px-4 py-1.5 text-white">
                 {/* START */}
                 <div className="col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
@@ -305,9 +400,9 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* SPORT */}
-                <div className="col-span 4 flex items-center">
-                  <SportBadge sport={row.sport} />
+                {/* SPORT (text pill) */}
+                <div className="col-span-1 flex items-center">
+                  <SportPill sport={row.sport} />
                 </div>
 
                 {/* STATUS */}
