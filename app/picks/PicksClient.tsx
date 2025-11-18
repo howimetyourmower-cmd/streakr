@@ -71,12 +71,6 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // single-active-question selection
-  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(
-    null
-  );
-
-  // round label
   const [currentRound, setCurrentRound] = useState<number | null>(null);
 
   // comments state
@@ -118,7 +112,7 @@ export default function PicksClient() {
 
         const data: PicksApiResponse = await res.json();
 
-        // Try to infer round from the first game ID (e.g. "round-1_game_0")
+        // Infer round from first game ID (e.g. round-1_game_0)
         if (data.games && data.games.length > 0) {
           const firstId = data.games[0].id ?? "";
           let match = firstId.match(/round[_-]?(\d+)/i);
@@ -142,7 +136,6 @@ export default function PicksClient() {
             userPick: q.userPick,
             yesPercent: q.yesPercent,
             noPercent: q.noPercent,
-            // For now treat everything as AFL – can come from API later
             sport: "afl" as SportType,
           }))
         );
@@ -167,13 +160,13 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // Keep filtered rows in sync if rows change (e.g. after % update)
+  // Keep filtered rows in sync if rows change
   useEffect(() => {
     applyFilter(activeFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows.length]); // basic sync – good enough for now
+  }, [rows]);
 
-  // -------- Recalculate YES/NO % for a question --------
+  // -------- Recalculate YES/NO % for a single question --------
   const recalcPercentagesForQuestion = async (questionId: string) => {
     try {
       const q = query(
@@ -197,16 +190,7 @@ export default function PicksClient() {
 
       setRows((prev) =>
         prev.map((r) =>
-          r.id === questionId
-            ? { ...r, yesPercent, noPercent }
-            : r
-        )
-      );
-      setFilteredRows((prev) =>
-        prev.map((r) =>
-          r.id === questionId
-            ? { ...r, yesPercent, noPercent }
-            : r
+          r.id === questionId ? { ...r, yesPercent, noPercent } : r
         )
       );
     } catch (err) {
@@ -214,7 +198,7 @@ export default function PicksClient() {
     }
   };
 
-  // -------- Save Pick (single active question per user) --------
+  // -------- Save Pick (per-question) --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       router.push("/auth");
@@ -222,7 +206,7 @@ export default function PicksClient() {
     }
 
     try {
-      // One pick per user per question
+      // One doc per user + question
       const docId = `${user.uid}_${row.id}`;
       const picksRef = doc(db, "picks", docId);
 
@@ -241,22 +225,14 @@ export default function PicksClient() {
         { merge: true }
       );
 
-      // Only one active question at a time
-      setSelectedQuestionId(row.id);
-
-      // Update local userPick
+      // Update local userPick only for this question
       setRows((prev) =>
         prev.map((r) =>
-          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
-        )
-      );
-      setFilteredRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+          r.id === row.id ? { ...r, userPick: pick } : r
         )
       );
 
-      // Recalculate YES/NO percentages for this question
+      // Recalculate percentages just for this question
       await recalcPercentagesForQuestion(row.id);
     } catch (e) {
       console.error("Pick save error:", e);
@@ -403,14 +379,11 @@ export default function PicksClient() {
           const { date, time } = formatStartDate(row.startTime);
           const yesSelected = row.userPick === "yes";
           const noSelected = row.userPick === "no";
-          const isActiveQuestion = selectedQuestionId === row.id;
 
           return (
             <div
               key={row.id}
-              className={`rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm ${
-                isActiveQuestion ? "ring-2 ring-sky-400" : ""
-              }`}
+              className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
               <div className="grid grid-cols-12 items-center px-4 py-2 text-white gap-y-2">
                 {/* START */}
