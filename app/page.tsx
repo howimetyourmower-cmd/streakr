@@ -277,6 +277,62 @@ export default function HomePage() {
           </a>
         </div>
       </section>
+
+      {/* ---------- SOCIAL FOOTER ---------- */}
+      <footer className="border-t border-slate-800 bg-slate-950">
+        <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col md:flex-row items-center justify-between gap-6">
+          <p className="text-sm text-slate-400">
+            Follow <span className="font-semibold text-white">Streakr</span> for
+            updates, prizes and highlight reels.
+          </p>
+
+          <div className="flex items-center gap-4">
+            {/* Facebook */}
+            <a
+              href="#"
+              aria-label="Streakr on Facebook"
+              className="group"
+            >
+              <div className="w-10 h-10 rounded-full bg-[#1877F2] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                <span className="text-white text-xl font-bold">f</span>
+              </div>
+            </a>
+
+            {/* Instagram */}
+            <a
+              href="#"
+              aria-label="Streakr on Instagram"
+              className="group"
+            >
+              <div className="w-10 h-10 rounded-[14px] bg-gradient-to-tr from-[#F58529] via-[#DD2A7B] to-[#8134AF] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                <span className="text-white text-lg font-bold">IG</span>
+              </div>
+            </a>
+
+            {/* TikTok */}
+            <a
+              href="#"
+              aria-label="Streakr on TikTok"
+              className="group"
+            >
+              <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center shadow-lg border border-white/20 group-hover:scale-105 transition-transform">
+                <span className="text-white text-lg font-bold">♬</span>
+              </div>
+            </a>
+
+            {/* YouTube */}
+            <a
+              href="#"
+              aria-label="Streakr on YouTube"
+              className="group"
+            >
+              <div className="w-12 h-8 rounded-lg bg-[#FF0000] flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform">
+                <div className="w-0 h-0 border-t-[7px] border-b-[7px] border-l-[12px] border-t-transparent border-b-transparent border-l-white ml-1" />
+              </div>
+            </a>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }
