@@ -31,7 +31,7 @@ type ApiGame = {
   questions: ApiQuestion[];
 };
 
-type SportType = "afl"; // can expand later
+type SportType = "afl";
 
 type QuestionRow = {
   id: string;
@@ -82,6 +82,9 @@ export default function PicksClient() {
   const [commentsError, setCommentsError] = useState("");
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>(
+    {}
+  );
 
   // single active streak pick per user
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
@@ -173,16 +176,14 @@ export default function PicksClient() {
             userPick: q.userPick,
             yesPercent: q.yesPercent,
             noPercent: q.noPercent,
-            // For now treat everything as AFL – can come from API later
             sport: "afl" as SportType,
           }))
         );
 
-        // Find an existing active pick (if backend ever supplies it)
+        // If backend later gives us which one is active, we could detect here.
         const existingActive = flat.find(
           (r) => r.userPick === "yes" || r.userPick === "no"
         );
-
         if (existingActive) {
           setActiveQuestionId(existingActive.id);
           setActiveQuestionPick(existingActive.userPick ?? null);
@@ -286,6 +287,12 @@ export default function PicksClient() {
         createdAt: c.createdAt,
       }));
       setComments(list);
+
+      // update count for this question
+      setCommentCounts((prev) => ({
+        ...prev,
+        [row.id]: list.length,
+      }));
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
@@ -332,7 +339,14 @@ export default function PicksClient() {
         createdAt: created.createdAt,
       };
 
+      // update local list + count
+      const newLength = comments.length + 1;
       setComments((prev) => [newComment, ...prev]);
+      setCommentCounts((prev) => ({
+        ...prev,
+        [commentsOpenFor.id]: newLength,
+      }));
+
       setCommentText("");
     } catch (e) {
       console.error(e);
@@ -371,7 +385,7 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* HEADER ROW (desktop-style like your screenshot) */}
+      {/* HEADER ROW */}
       <div className="hidden sm:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
@@ -384,7 +398,7 @@ export default function PicksClient() {
 
       {loading && <p>Loading…</p>}
 
-      {/* ROWS – 12-column layout, orange gradient */}
+      {/* ROWS */}
       <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
@@ -403,6 +417,8 @@ export default function PicksClient() {
               : 0
             : 0;
 
+          const count = commentCounts[row.id] ?? 0;
+
           return (
             <div
               key={row.id}
@@ -417,7 +433,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* SPORT (text pill) */}
+                {/* SPORT */}
                 <div className="col-span-3 sm:col-span-1">
                   <span className="inline-flex items-center justify-center rounded-full border border-white/20 bg-black/30 px-3 py-0.5 text-[11px] font-semibold tracking-wide">
                     {row.sport.toUpperCase()}
@@ -467,7 +483,7 @@ export default function PicksClient() {
                     onClick={() => openComments(row)}
                     className="text-[11px] text-white/85 mt-0.5 underline"
                   >
-                    Comments (0)
+                    Comments ({count})
                   </button>
                 </div>
 
