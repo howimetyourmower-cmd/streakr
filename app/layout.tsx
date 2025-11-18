@@ -1,5 +1,3 @@
-"use client";
-
 import "./globals.css";
 import Link from "next/link";
 import { ReactNode, useState } from "react";
