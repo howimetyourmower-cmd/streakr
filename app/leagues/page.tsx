@@ -14,7 +14,6 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
-import SportBadge from "@/components/SportBadge";
 
 type LeagueSummary = {
   id: string;
@@ -86,16 +85,15 @@ export default function LeaguesPage() {
     loadLeagues();
   }, [user]);
 
-  const selectedLeague = leagues.find((l) => l.id === selectedLeagueId) ?? null;
+  const selectedLeague =
+    leagues.find((l) => l.id === selectedLeagueId) ?? null;
 
   return (
     <div className="py-6 md:py-8 space-y-6">
-      {/* Header + sport badge */}
+      {/* Header (no badge now) */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl md:text-3xl font-bold">Leagues</h1>
-            </div>
+          <h1 className="text-2xl md:text-3xl font-bold">Leagues</h1>
           <p className="mt-1 text-sm text-white/70 max-w-2xl">
             Play Streakr with your mates, work crew or fantasy league. Create a
             private league, invite friends with a code, and battle it out on your
@@ -149,7 +147,7 @@ export default function LeaguesPage() {
           </Link>
         </div>
 
-        {/* My leagues – now dropdown + sport badge */}
+        {/* My leagues – dropdown, no badge in the card now */}
         <div className="rounded-2xl bg-white/5 border border-white/10 p-5 flex flex-col">
           <h2 className="text-lg font-semibold mb-3">My leagues</h2>
 
@@ -206,7 +204,8 @@ export default function LeaguesPage() {
                         <span className="font-mono">{selectedLeague.code}</span>
                       </span>
                     </div>
-                   
+                  </div>
+
                   <div className="flex items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1 rounded-full bg-white/5 border border-white/10 px-2 py-1 text-[11px] uppercase tracking-wide">
                       {selectedLeague.role === "manager"
