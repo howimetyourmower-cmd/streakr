@@ -3,12 +3,7 @@
 import { useEffect, useState, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  doc,
-  setDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 import type { SportType } from "@/lib/sports";
 
@@ -70,7 +65,7 @@ export default function PicksClient() {
 
   const [currentRound, setCurrentRound] = useState<number | null>(null);
 
-  // 👉 one active streak pick at a time (per player)
+  // one active streak pick at a time (per player)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
 
   // comments state
@@ -133,7 +128,7 @@ export default function PicksClient() {
             quarter: q.quarter,
             question: q.question,
             status: q.status,
-            // For this UX, we ignore API yes/no % and treat them as player-only
+            // local, per-player % logic only
             userPick: undefined,
             yesPercent: 0,
             noPercent: 0,
@@ -167,7 +162,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  // -------- Save Pick (per-question) + set active streak pick + local % logic --------
+  // -------- Save Pick + store active streak pick on user + local % logic --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       router.push("/auth");
@@ -175,7 +170,7 @@ export default function PicksClient() {
     }
 
     try {
-      // One doc per user + question for history
+      // 1) Store this pick in the picks collection (for history)
       const docId = `${user.uid}_${row.id}`;
       const picksRef = doc(db, "picks", docId);
 
@@ -194,12 +189,25 @@ export default function PicksClient() {
         { merge: true }
       );
 
-      // 👉 This question is now the active streak pick
+      // 2) Store the ACTIVE streak pick on the user document
+      const userRef = doc(db, "users", user.uid);
+      await setDoc(
+        userRef,
+        {
+          activeQuestionId: row.id,
+          activePick: pick,
+          activeGameId: row.gameId,
+          activeMatch: row.match,
+          activeQuarter: row.quarter,
+          activeRound: currentRound ?? null,
+          activeUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // 3) Front-end: mark this as the only active question + set local %s
       setActiveQuestionId(row.id);
 
-      // 👉 Percentages are per-player:
-      // Active question: 100/0 or 0/100
-      // All other questions: 0/0, no userPick
       setRows((prev) =>
         prev.map((r) => {
           if (r.id === row.id) {
