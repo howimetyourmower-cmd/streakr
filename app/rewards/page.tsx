@@ -9,12 +9,12 @@ export default function RewardsPage() {
       <header className="mb-6">
         <h1 className="text-4xl font-bold mb-2">Rewards</h1>
         <p className="text-sm text-gray-300">
-          Every round we give away cash and Streakr gear. Keep your streak alive
+          Every round we give away cash, gift Cards and Streakr gear. Keep your streak alive
           and stack up prizes.
         </p>
       </header>
 
-      {/* Cash prizes summary */}
+      {/* Prizes summary */}
       <section className="grid gap-4 md:grid-cols-2 mb-8">
         {/* $1000 main prize */}
         <div className="rounded-2xl border border-orange-500/50 bg-gradient-to-br from-orange-500/20 via-orange-500/5 to-transparent px-5 py-4">
@@ -22,7 +22,7 @@ export default function RewardsPage() {
             Round major prize
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight mb-1">
-            $500 <span className="text-base font-semibold">cash</span>
+            $1000 <span className="text-base font-semibold">cash or gift cards</span>
           </h2>
           <p className="text-sm text-gray-200 mb-3">
             Awarded to the player with the{" "}
@@ -42,7 +42,7 @@ export default function RewardsPage() {
             Round side prize
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight mb-1">
-            $100 <span className="text-base font-semibold">cash</span>
+            $100 <span className="text-base font-semibold">gift card</span>
           </h2>
           <p className="text-sm text-gray-200 mb-3">
             Awarded to the player with the{" "}
