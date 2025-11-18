@@ -17,29 +17,41 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   }
 
   try {
+    // Simple query – only WHERE. No orderBy so we don't need a composite index.
     const snap = await db
       .collection("comments")
       .where("questionId", "==", questionId)
-      .orderBy("createdAt", "desc")
-      .limit(50)
       .get();
 
-    const comments = snap.docs.map((docSnap) => {
-      const data = docSnap.data() as any;
-      const ts = data.createdAt;
-      let createdAt: string | null = null;
+    const comments = snap.docs
+      .map((docSnap) => {
+        const data = docSnap.data() as any;
+        const ts = data.createdAt;
+        let createdAt: Date | null = null;
 
-      if (ts && typeof ts.toDate === "function") {
-        createdAt = ts.toDate().toISOString();
-      }
+        if (ts && typeof ts.toDate === "function") {
+          createdAt = ts.toDate();
+        }
 
-      return {
-        id: docSnap.id,
-        body: data.body ?? "",
-        displayName: data.displayName ?? null,
-        createdAt,
-      };
-    });
+        return {
+          id: docSnap.id,
+          body: data.body ?? "",
+          displayName: data.displayName ?? null,
+          createdAt,
+        };
+      })
+      // sort newest → oldest in JS
+      .sort(
+        (a, b) =>
+          (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0)
+      )
+      // keep latest 50
+      .slice(0, 50)
+      // convert Date → ISO string for the client
+      .map((c) => ({
+        ...c,
+        createdAt: c.createdAt ? c.createdAt.toISOString() : null,
+      }));
 
     return NextResponse.json({ comments });
   } catch (err) {
@@ -71,7 +83,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       questionId,
       body: text,
       createdAt: Timestamp.now(),
-      // later we can add: userId, displayName, etc.
+      // later: userId, displayName, etc.
     });
 
     return NextResponse.json({
