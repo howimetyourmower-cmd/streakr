@@ -35,6 +35,8 @@ export async function POST(req: Request) {
     const questionId = body?.questionId as string | undefined;
     const outcome = body?.outcome as Outcome | undefined;
     const action = body?.action as LockAction | undefined;
+    const adminUid = body?.adminUid as string | undefined;
+    const adminDisplayName = body?.adminDisplayName as string | undefined;
 
     if (!questionId || typeof questionId !== "string") {
       return NextResponse.json(
@@ -109,9 +111,17 @@ export async function POST(req: Request) {
       );
     }
 
+    const roundId = (targetRoundRef as any).id as string;
     const gamesArr = targetRoundData.games ?? [];
     const game = gamesArr[targetGameIndex] ?? {};
     const questionsArr = game.questions ?? [];
+    const gameId = `${roundId}_game_${targetGameIndex}`;
+
+    const match = game.match ?? "";
+    const quarter = originalQuestion?.quarter ?? null;
+    const questionText = originalQuestion?.question ?? "";
+    const prevStatus: QuestionStatus =
+      (originalQuestion?.status as QuestionStatus) ?? "open";
 
     // ---------------- LOCK / UNLOCK PATH ----------------
     if (isLockAction) {
@@ -131,6 +141,23 @@ export async function POST(req: Request) {
       };
 
       await targetRoundRef.update({ games: gamesArr });
+
+      // Log lock/unlock
+      await db.collection("settlementLogs").add({
+        questionId,
+        roundId,
+        gameId,
+        match,
+        quarter,
+        question: questionText,
+        previousStatus: prevStatus,
+        newStatus,
+        action,
+        outcome: null,
+        adminUid: adminUid ?? null,
+        adminDisplayName: adminDisplayName ?? null,
+        createdAt: Timestamp.now(),
+      });
 
       return NextResponse.json({
         ok: true,
@@ -188,6 +215,24 @@ export async function POST(req: Request) {
 
       await batch.commit();
     }
+
+    // 4) Log settlement
+    await db.collection("settlementLogs").add({
+      questionId,
+      roundId,
+      gameId,
+      match,
+      quarter,
+      question: questionText,
+      previousStatus: prevStatus,
+      newStatus: status,
+      action: "settle",
+      outcome,
+      picksUpdated: picksSnap.size,
+      adminUid: adminUid ?? null,
+      adminDisplayName: adminDisplayName ?? null,
+      createdAt: Timestamp.now(),
+    });
 
     return NextResponse.json({
       ok: true,
