@@ -2,7 +2,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
-import MobileNav from "@/components/MobileNav";
+import MobileNav from "app/components/MobileNav";
 
 export const metadata: Metadata = {
   title: "STREAKr",
