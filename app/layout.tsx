@@ -1,42 +1,66 @@
+// app/layout.tsx
 import "./globals.css";
-import type { ReactNode } from "react";
-import HeaderNav from "./components/HeaderNav";
+import type { Metadata } from "next";
+import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "STREAKr",
+  description: "AFL streak prediction game",
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="bg-[#050816] text-white min-h-screen">
-        {/* ---------- HEADER ---------- */}
-        <HeaderNav />
-
-        {/* ---------- SPONSOR BANNER ---------- */}
-        <div className="border-b border-black/20 bg-[#005AC8]">
-          <div className="max-w-7xl mx-auto px-6 py-2 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div className="bg-[#003F8A] px-2 py-1 rounded-md shadow-sm">
-                <span className="text-[#FFD200] text-xs font-extrabold tracking-wide">
-                  SPONSOR
-                </span>
-              </div>
-              <span className="text-white font-semibold text-sm sm:text-base">
-                Proudly backed by our official partner
+    <html lang="en" className="bg-black">
+      <body className="min-h-screen bg-black text-white antialiased">
+        {/* NAVIGATION BAR */}
+        <header className="w-full border-b border-white/10 bg-black">
+          <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+            {/* LEFT LOGO */}
+            <Link href="/" className="flex items-center gap-2">
+              <img
+                src="/streakrlogo1.jpg"
+                alt="STREAKr"
+                className="h-6 w-auto"
+              />
+              <span className="font-bold text-xl tracking-tight">
+                STREAK<span className="text-orange-400">r</span>
               </span>
+            </Link>
+
+            {/* LINKS */}
+            <div className="flex items-center gap-6 text-sm">
+              <Link href="/picks" className="hover:text-orange-400">
+                Picks
+              </Link>
+              <Link href="/leaderboards" className="hover:text-orange-400">
+                Leaderboards
+              </Link>
+              <Link href="/leagues" className="hover:text-orange-400">
+                Leagues
+              </Link>
+              <Link href="/rewards" className="hover:text-orange-400">
+                Rewards
+              </Link>
+              <Link href="/faq" className="hover:text-orange-400">
+                FAQ
+              </Link>
+
+              <Link
+                href="/profile"
+                className="rounded-full bg-slate-800 px-3 py-1 text-xs hover:bg-slate-700"
+              >
+                Player
+              </Link>
             </div>
+          </nav>
+        </header>
 
-            <span className="text-white/80 text-[10px] sm:text-xs font-medium">
-              Free game of skill • No gambling • 18+ only
-            </span>
-          </div>
-        </div>
-
-        {/* ---------- CONTENT ---------- */}
-        <main className="pt-4 pb-12">
-          <div className="max-w-7xl mx-auto px-6">{children}</div>
-        </main>
+        {/* PAGE CONTENT */}
+        <main className="w-full bg-black">{children}</main>
       </body>
     </html>
   );
