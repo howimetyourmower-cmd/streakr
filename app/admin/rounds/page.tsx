@@ -1,199 +1,226 @@
+// app/admin/rounds/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  runTransaction,
-  doc,
-} from "firebase/firestore";
+import { useEffect, useState, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
+import { ROUND_OPTIONS, RoundKey } from "@/lib/rounds";
 
-type RoundItem = {
-  id: string;
-  round: number;
-  season: number;
-  published: boolean;
-  gameCount: number;
+type SeasonConfig = {
+  currentSeason?: number;
+  currentRoundKey?: RoundKey;
 };
 
-const CURRENT_SEASON = 2026;
+const DEFAULT_SEASON = 2026 as const;
+const DEFAULT_ROUND: RoundKey = "OR";
 
 export default function AdminRoundsPage() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, loading } = useAuth();
 
-  const [rounds, setRounds] = useState<RoundItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [savingRoundId, setSavingRoundId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [currentSeason, setCurrentSeason] = useState<number>(DEFAULT_SEASON);
+  const [currentRoundKey, setCurrentRoundKey] =
+    useState<RoundKey>(DEFAULT_ROUND);
+
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Simple check for admin – for now just require login.
+  // Later we can replace this with a proper isAdmin flag on the user doc.
+  const isAdmin = !!user;
 
   useEffect(() => {
-    const loadRounds = async () => {
-      setLoading(true);
-      setError("");
-      setSuccess("");
+    if (!loading && !user) {
+      // Not logged in → kick to auth
+      router.push("/auth");
+    }
+  }, [user, loading, router]);
 
+  useEffect(() => {
+    const loadConfig = async () => {
+      if (!user || initialLoaded) return;
+
+      setError(null);
       try {
-        const q = query(
-          collection(db, "rounds"),
-          where("season", "==", CURRENT_SEASON),
-          orderBy("round", "asc")
-        );
+        const ref = doc(db, "config", "season");
+        const snap = await getDoc(ref);
 
-        const snap = await getDocs(q);
-
-        const items: RoundItem[] = snap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            id: d.id,
-            round: typeof data.round === "number" ? data.round : 0,
-            season: typeof data.season === "number" ? data.season : CURRENT_SEASON,
-            published: !!data.published,
-            gameCount: Array.isArray(data.games) ? data.games.length : 0,
-          };
-        });
-
-        setRounds(items);
-      } catch (err: any) {
-        console.error("Failed to load rounds", err);
-        setError("Failed to load rounds. Check Vercel logs if this continues.");
-      } finally {
-        setLoading(false);
+        if (snap.exists()) {
+          const data = snap.data() as SeasonConfig;
+          if (data.currentSeason) {
+            setCurrentSeason(data.currentSeason);
+          }
+          if (data.currentRoundKey) {
+            setCurrentRoundKey(data.currentRoundKey);
+          }
+        }
+        setInitialLoaded(true);
+      } catch (err) {
+        console.error("Failed to load season config", err);
+        setError("Failed to load current round. Please refresh.");
       }
     };
 
-    loadRounds();
-  }, []);
+    loadConfig();
+  }, [user, initialLoaded]);
 
-  const setAsCurrentRound = async (roundId: string) => {
-    if (!roundId) return;
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!user || !isAdmin) return;
 
-    setSavingRoundId(roundId);
-    setError("");
-    setSuccess("");
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
 
     try {
-      await runTransaction(db, async (tx) => {
-        // Get all rounds for this season inside the transaction
-        const q = query(
-          collection(db, "rounds"),
-          where("season", "==", CURRENT_SEASON)
-        );
-        const snap = await getDocs(q);
-
-        snap.docs.forEach((docSnap) => {
-          const ref = doc(db, "rounds", docSnap.id);
-          const isTarget = docSnap.id === roundId;
-          tx.update(ref, { published: isTarget });
-        });
-      });
-
-      // Update local state
-      setRounds((prev) =>
-        prev.map((r) => ({
-          ...r,
-          published: r.id === roundId,
-        }))
+      const ref = doc(db, "config", "season");
+      await setDoc(
+        ref,
+        {
+          currentSeason: currentSeason || DEFAULT_SEASON,
+          currentRoundKey,
+          updatedAt: new Date().toISOString(),
+          updatedBy: user.uid,
+        },
+        { merge: true }
       );
 
-      setSuccess("Current round updated. Picks page will now use this round.");
-    } catch (err: any) {
-      console.error("Failed to set current round", err);
-      setError("Failed to set current round. Check Vercel logs for more details.");
+      setSuccess("Season settings updated. Frontend will now treat this as the current round.");
+    } catch (err) {
+      console.error("Failed to save season config", err);
+      setError("Failed to save settings. Please try again.");
     } finally {
-      setSavingRoundId(null);
+      setSaving(false);
     }
   };
 
-  // Simple guard – later we can lock this down to admin only
-  if (!user) {
+  if (!user || !isAdmin) {
     return (
-      <div className="py-8">
-        <h1 className="text-2xl font-bold mb-4">Admin – Rounds</h1>
+      <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center">
         <p className="text-sm text-white/70">
-          You must be logged in to manage rounds.
+          You must be logged in to view the admin rounds console.
         </p>
-      </div>
+      </main>
     );
   }
 
+  const currentRoundLabel =
+    ROUND_OPTIONS.find((r) => r.key === currentRoundKey)?.label ?? "Unknown";
+
   return (
-    <div className="py-8 max-w-4xl mx-auto text-white">
-      <h1 className="text-2xl md:text-3xl font-bold mb-2">
-        Admin – Rounds ({CURRENT_SEASON})
-      </h1>
-      <p className="text-sm text-white/70 mb-6">
-        Set which round is currently published. Only the published round will
-        appear on the Picks page and as the default round on the leaderboard.
-      </p>
-
-      {error && (
-        <p className="mb-3 text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-          {error}
-        </p>
-      )}
-      {success && (
-        <p className="mb-3 text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-          {success}
-        </p>
-      )}
-
-      {loading ? (
-        <p className="text-sm text-white/70">Loading rounds…</p>
-      ) : rounds.length === 0 ? (
-        <p className="text-sm text-white/70">
-          No rounds found for this season yet.
-        </p>
-      ) : (
-        <div className="mt-4 border border-white/10 rounded-2xl overflow-hidden bg-black/40">
-          <div className="grid grid-cols-[80px,1fr,140px,140px] gap-3 px-4 py-2 text-[11px] text-white/60 uppercase tracking-wide border-b border-white/10">
-            <div>Round</div>
-            <div>Games</div>
-            <div>Published</div>
-            <div>Actions</div>
+    <main className="min-h-screen bg-[#020617] text-white">
+      <div className="max-w-4xl mx-auto px-4 py-8 md:py-10 space-y-6">
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold">
+              Admin – Season & Rounds
+            </h1>
+            <p className="mt-1 text-sm text-white/70 max-w-2xl">
+              Set which round the site treats as the{" "}
+              <span className="font-semibold">current round</span>. This value
+              will drive leaderboards, profile streak labels, marketing copy,
+              and future auto-publishing of questions.
+            </p>
           </div>
+        </header>
 
-          {rounds.map((r) => (
-            <div
-              key={r.id}
-              className={`grid grid-cols-[80px,1fr,140px,140px] gap-3 px-4 py-3 text-sm border-t border-white/10 ${
-                r.published ? "bg-orange-500/10" : "bg-black/20"
-              }`}
-            >
-              <div className="font-semibold">R{r.round}</div>
-              <div className="text-white/80">
-                {r.gameCount} game{r.gameCount === 1 ? "" : "s"}
+        {/* Current summary */}
+        <section className="rounded-2xl bg-white/5 border border-white/10 p-5">
+          <h2 className="text-lg font-semibold mb-3">Current settings</h2>
+          <div className="grid gap-4 md:grid-cols-3 text-sm">
+            <div className="bg-black/30 rounded-xl px-4 py-3">
+              <div className="text-xs text-white/60 uppercase tracking-wide mb-1">
+                Season
               </div>
-              <div className="text-white/80">
-                {r.published ? (
-                  <span className="inline-flex items-center rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 text-[11px] font-semibold">
-                    Current round
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center rounded-full bg-white/5 text-white/70 border border-white/20 px-2 py-0.5 text-[11px]">
-                    Draft
-                  </span>
-                )}
-              </div>
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setAsCurrentRound(r.id)}
-                  disabled={savingRoundId === r.id}
-                  className="text-xs rounded-full px-3 py-1 border border-orange-500/60 text-orange-300 hover:bg-orange-500/10 disabled:opacity-60"
-                >
-                  {savingRoundId === r.id ? "Updating…" : "Set as current"}
-                </button>
-              </div>
+              <div className="text-lg font-semibold">{currentSeason}</div>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+            <div className="bg-black/30 rounded-xl px-4 py-3">
+              <div className="text-xs text-white/60 uppercase tracking-wide mb-1">
+                Round key
+              </div>
+              <div className="text-lg font-semibold">{currentRoundKey}</div>
+            </div>
+            <div className="bg-black/30 rounded-xl px-4 py-3">
+              <div className="text-xs text-white/60 uppercase tracking-wide mb-1">
+                Round label
+              </div>
+              <div className="text-lg font-semibold">{currentRoundLabel}</div>
+            </div>
+          </div>
+        </section>
+
+        {/* Form */}
+        <section className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+          <h2 className="text-lg font-semibold">Update season</h2>
+          <p className="text-xs text-white/60 mb-2">
+            Changing these values is safe. We&apos;ll later wire everything so
+            Picks, Leaderboards and Profile page read from this config.
+          </p>
+
+          {error && (
+            <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+              {error}
+            </p>
+          )}
+          {success && (
+            <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
+              {success}
+            </p>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Season year
+              </label>
+              <input
+                type="number"
+                className="w-full md:w-40 rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                value={currentSeason}
+                onChange={(e) =>
+                  setCurrentSeason(Number(e.target.value) || DEFAULT_SEASON)
+                }
+                min={2000}
+                max={2100}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Current round
+              </label>
+              <select
+                className="w-full md:w-64 rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                value={currentRoundKey}
+                onChange={(e) => setCurrentRoundKey(e.target.value as RoundKey)}
+              >
+                {ROUND_OPTIONS.map((opt) => (
+                  <option key={opt.key} value={opt.key}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-white/50 mt-1">
+                Includes <strong>Opening Round</strong>, Rounds 1–23, and{" "}
+                <strong>Finals</strong> (all 5 weeks combined).
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-5 py-2.5 transition disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Save season settings"}
+            </button>
+          </form>
+        </section>
+      </div>
+    </main>
   );
 }
