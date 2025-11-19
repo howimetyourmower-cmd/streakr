@@ -303,7 +303,6 @@ export default function PicksClient() {
 
   // -------- Comment drawer logic --------
   const openComments = async (row: QuestionRow) => {
-    setCommentsOpenFor(row);
     setComments([]);
     setCommentText("");
     setCommentsError("");
@@ -336,9 +335,13 @@ export default function PicksClient() {
           r.id === row.id ? { ...r, commentCount: list.length } : r
         )
       );
+
+      // Also keep commentsOpenFor in sync with the latest count
+      setCommentsOpenFor({ ...row, commentCount: list.length });
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
+      setCommentsOpenFor(row); // at least show the drawer
     } finally {
       setCommentsLoading(false);
     }
@@ -378,10 +381,11 @@ export default function PicksClient() {
         createdAt: created.createdAt,
       };
 
+      // Add to list in the drawer
       setComments((prev) => [newComment, ...prev]);
       setCommentText("");
 
-      // Increment commentCount for this row
+      // Increment commentCount for this row everywhere
       setRows((prev) =>
         prev.map((r) =>
           r.id === commentsOpenFor.id
@@ -396,6 +400,11 @@ export default function PicksClient() {
             : r
         )
       );
+      setCommentsOpenFor((prev) =>
+        prev
+          ? { ...prev, commentCount: (prev.commentCount ?? 0) + 1 }
+          : prev
+      );
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to post comment");
@@ -403,60 +412,6 @@ export default function PicksClient() {
       setSubmittingComment(false);
     }
   };
-
-  // -------- LIVE COMMENT REFRESH WHILE DRAWER OPEN --------
-  useEffect(() => {
-    if (!commentsOpenFor) return;
-    if (typeof window === "undefined") return;
-
-    let cancelled = false;
-
-    const refresh = async () => {
-      try {
-        const res = await fetch(`/api/comments/${commentsOpenFor.id}`);
-        if (!res.ok) return;
-
-        const data = await res.json();
-        const source = data.items || data.comments || [];
-        const list: Comment[] = source.map((c: any) => ({
-          id: c.id,
-          body: c.body,
-          displayName: c.displayName,
-          createdAt: c.createdAt,
-        }));
-
-        if (cancelled) return;
-
-        setComments(list);
-
-        // keep card counter in sync
-        setRows((prev) =>
-          prev.map((r) =>
-            r.id === commentsOpenFor.id
-              ? { ...r, commentCount: list.length }
-              : r
-          )
-        );
-        setFilteredRows((prev) =>
-          prev.map((r) =>
-            r.id === commentsOpenFor.id
-              ? { ...r, commentCount: list.length }
-              : r
-          )
-        );
-      } catch (e) {
-        console.error("Failed to refresh comments", e);
-      }
-    };
-
-    // poll every 5 seconds while drawer is open
-    const intervalId = window.setInterval(refresh, 5000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [commentsOpenFor]);
 
   // -------- Render --------
   return (
