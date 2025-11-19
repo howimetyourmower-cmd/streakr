@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
@@ -55,6 +54,8 @@ type Comment = {
 };
 
 type ActiveOutcome = "yes" | "no" | null;
+
+const LOCAL_STORAGE_KEY = "streakrActivePick";
 
 export default function PicksClient() {
   const { user } = useAuth();
@@ -137,6 +138,15 @@ export default function PicksClient() {
           }))
         );
 
+        // If API already returns a userPick, use that to hydrate active streak
+        const firstWithPick = flat.find(
+          (r) => r.userPick === "yes" || r.userPick === "no"
+        );
+        if (firstWithPick && !activeQuestionId && !activeOutcome) {
+          setActiveQuestionId(firstWithPick.id);
+          setActiveOutcome(firstWithPick.userPick ?? null);
+        }
+
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
       } catch (e) {
@@ -148,14 +158,20 @@ export default function PicksClient() {
     };
 
     load();
+    // we intentionally don't include activeQuestionId/Outcome as deps
+    // to avoid resetting when they change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // -------- Load existing streak pick for this user (persistence) --------
+  // -------- Load existing streak pick for this user (server) --------
   useEffect(() => {
     const loadUserPick = async () => {
       if (!user) {
         setActiveQuestionId(null);
         setActiveOutcome(null);
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+        }
         return;
       }
 
@@ -170,6 +186,17 @@ export default function PicksClient() {
         ) {
           setActiveQuestionId(data.questionId);
           setActiveOutcome(data.outcome);
+
+          // sync to localStorage as well
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(
+              LOCAL_STORAGE_KEY,
+              JSON.stringify({
+                questionId: data.questionId,
+                outcome: data.outcome,
+              })
+            );
+          }
         }
       } catch (err) {
         console.error("Failed to load user pick", err);
@@ -178,6 +205,30 @@ export default function PicksClient() {
 
     loadUserPick();
   }, [user]);
+
+  // -------- Hydrate streak pick from localStorage (fallback) --------
+  useEffect(() => {
+    if (!user) return;
+    if (activeQuestionId || activeOutcome) return;
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as {
+        questionId?: string;
+        outcome?: "yes" | "no";
+      };
+
+      if (parsed.questionId && (parsed.outcome === "yes" || parsed.outcome === "no")) {
+        setActiveQuestionId(parsed.questionId);
+        setActiveOutcome(parsed.outcome);
+      }
+    } catch (e) {
+      console.error("Failed to hydrate streak pick from localStorage", e);
+    }
+  }, [user, activeQuestionId, activeOutcome]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -221,6 +272,14 @@ export default function PicksClient() {
         r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
       )
     );
+
+    // Persist to localStorage
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        LOCAL_STORAGE_KEY,
+        JSON.stringify({ questionId: row.id, outcome: pick })
+      );
+    }
 
     // Then fire API request in background
     try {
@@ -362,13 +421,13 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 bg-white text-slate-900">
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-6">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-slate-600">
             Current Round:{" "}
-            <span className="font-semibold text-orange-400">
+            <span className="font-semibold text-orange-500">
               Round {roundNumber}
             </span>
           </p>
@@ -383,7 +442,7 @@ export default function PicksClient() {
           <button
             key={f}
             onClick={() => applyFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${
               activeFilter === f
                 ? "bg-orange-500"
                 : "bg-gray-700 hover:bg-gray-600"
@@ -395,7 +454,7 @@ export default function PicksClient() {
       </div>
 
       {/* HEADER ROW */}
-      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+      <div className="hidden md:grid grid-cols-12 text-slate-500 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
@@ -552,7 +611,7 @@ export default function PicksClient() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Log in to play</h2>
+              <h2 className="text-lg font-semibold text-white">Log in to play</h2>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
@@ -578,7 +637,7 @@ export default function PicksClient() {
 
               <Link
                 href="/auth?mode=signup&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors text-white"
                 onClick={() => setShowAuthModal(false)}
               >
                 Sign up
@@ -594,7 +653,7 @@ export default function PicksClient() {
           <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="text-lg font-semibold mb-1">
+                <h2 className="text-lg font-semibold mb-1 text-white">
                   Comments – Q{commentsOpenFor.quarter}
                 </h2>
                 <p className="text-sm text-gray-300">
@@ -616,7 +675,7 @@ export default function PicksClient() {
                 value={commentText}
                 onChange={handleCommentChange}
                 rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 placeholder="Add your comment…"
               />
               {commentsError && (
@@ -627,7 +686,7 @@ export default function PicksClient() {
                   type="button"
                   onClick={submitComment}
                   disabled={submittingComment || !commentText.trim()}
-                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
+                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600 text-white"
                 >
                   {submittingComment ? "Posting…" : "Post"}
                 </button>
@@ -650,7 +709,7 @@ export default function PicksClient() {
                       className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
                     >
                       <div className="flex justify-between mb-1">
-                        <span className="font-semibold">
+                        <span className="font-semibold text-white">
                           {c.displayName || "User"}
                         </span>
                         {c.createdAt && (
