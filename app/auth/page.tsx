@@ -1,55 +1,62 @@
+// app/auth/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db } from "@/lib/firebaseClient";
+import { auth } from "@/lib/firebaseClient";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
 } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
 
 type Mode = "login" | "signup";
 
 export default function AuthPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("signup");
 
-  // Shared fields
+  const [mode, setMode] = useState<Mode>("login");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
-  // Profile fields for sign up
-  const [username, setUsername] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [surname, setSurname] = useState("");
-  const [dob, setDob] = useState(""); // yyyy-mm-dd
-  const [suburb, setSuburb] = useState("");
-  const [stateField, setStateField] = useState("");
-  const [phone, setPhone] = useState("");
-  const [gender, setGender] = useState("");
-  const [team, setTeam] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // show / hide toggles
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirm, setShowSignupConfirm] = useState(false);
 
   const resetMessages = () => {
-    setError("");
-    setInfo("");
+    setError(null);
+    setSuccess(null);
   };
 
-  const handleSignup = async () => {
+  const handleLogin = async (e: FormEvent) => {
+    e.preventDefault();
+    resetMessages();
+    setLoading(true);
+
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      router.push("/picks");
+    } catch (err: any) {
+      console.error("Login error", err);
+      setError(err?.message || "Failed to log in. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSignup = async (e: FormEvent) => {
+    e.preventDefault();
     resetMessages();
 
-    if (!email || !password || !confirmPassword || !username || !firstName || !dob) {
-      setError("Please fill in all required fields.");
-      return;
-    }
-
-    if (password !== confirmPassword) {
+    if (signupPassword !== signupPasswordConfirm) {
       setError("Passwords do not match.");
       return;
     }
@@ -57,84 +64,38 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
-      const user = cred.user;
-
-      // Create Firestore user doc
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        email,
-        username,
-        firstName,
-        surname,
-        dob,
-        suburb,
-        state: stateField,
-        phone,
-        gender,
-        team,
-        avatarUrl: "",
-        currentStreak: 0,
-        longestStreak: 0,
-        createdAt: new Date().toISOString(),
-      });
-
-      // Send verification email
-      await sendEmailVerification(user);
-
-      setInfo(
-        "Account created. We’ve sent a verification email – please check your inbox and verify before playing."
+      const userCred = await createUserWithEmailAndPassword(
+        auth,
+        email.trim(),
+        signupPassword
       );
 
-      // optional: redirect to login after a short delay
-      // router.push("/picks");
-    } catch (err: any) {
-      console.error("Sign up error", err);
-      setError(err?.message || "Failed to sign up.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleLogin = async () => {
-    resetMessages();
-    if (!email || !password) {
-      setError("Please enter email and password.");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-
-      if (!cred.user.emailVerified) {
-        setInfo(
-          "You’re logged in, but your email is not verified yet. Please check your inbox and click the verification link."
-        );
+      // Fire off verification email (can fine-tune later)
+      try {
+        await sendEmailVerification(userCred.user);
+      } catch (err) {
+        console.warn("Failed to send verification email", err);
       }
 
-      router.push("/picks");
+      setSuccess(
+        "Account created. Check your inbox for a verification email, then log in."
+      );
+      setMode("login");
+      setPassword("");
+      setSignupPassword("");
+      setSignupPasswordConfirm("");
     } catch (err: any) {
-      console.error("Login error", err);
-      setError(err?.message || "Failed to log in.");
+      console.error("Signup error", err);
+      setError(err?.message || "Failed to sign up. Please try again.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const onSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (mode === "signup") {
-      void handleSignup();
-    } else {
-      void handleLogin();
     }
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#050816] text-white px-4">
-      <div className="w-full max-w-xl bg-black/40 border border-white/10 rounded-2xl p-6 shadow-2xl">
-        {/* Toggle */}
+    <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl bg-black/40 border border-white/10 shadow-2xl px-6 py-8">
+        {/* Tabs */}
         <div className="flex mb-6 border-b border-white/10">
           <button
             type="button"
@@ -142,10 +103,10 @@ export default function AuthPage() {
               setMode("signup");
               resetMessages();
             }}
-            className={`flex-1 py-2 text-sm font-semibold ${
+            className={`flex-1 pb-2 text-center text-sm font-semibold ${
               mode === "signup"
-                ? "border-b-2 border-orange-500 text-orange-400"
-                : "text-gray-400"
+                ? "text-orange-400 border-b-2 border-orange-500"
+                : "text-white/50 border-b-2 border-transparent"
             }`}
           >
             Sign up
@@ -156,191 +117,145 @@ export default function AuthPage() {
               setMode("login");
               resetMessages();
             }}
-            className={`flex-1 py-2 text-sm font-semibold ${
+            className={`flex-1 pb-2 text-center text-sm font-semibold ${
               mode === "login"
-                ? "border-b-2 border-orange-500 text-orange-400"
-                : "text-gray-400"
+                ? "text-orange-400 border-b-2 border-orange-500"
+                : "text-white/50 border-b-2 border-transparent"
             }`}
           >
             Log in
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-4 text-sm">
-          {/* EMAIL + PASSWORD (both modes) */}
-          <div>
-            <label className="block mb-1">Email</label>
-            <input
-              type="email"
-              className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+        {error && (
+          <p className="mb-3 text-sm text-red-400 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
+            {error}
+          </p>
+        )}
+        {success && (
+          <p className="mb-3 text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/40 rounded-md px-3 py-2">
+            {success}
+          </p>
+        )}
 
-          <div>
-            <label className="block mb-1">Password</label>
-            <input
-              type="password"
-              className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
+        {mode === "login" ? (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-sm mb-1">Email</label>
+              <input
+                type="email"
+                autoComplete="email"
+                className="w-full bg-black/40 border border-white/15 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-          {mode === "signup" && (
-            <>
-              <div>
-                <label className="block mb-1">Confirm password</label>
+            <div>
+              <label className="block text-sm mb-1">Password</label>
+              <div className="relative">
                 <input
-                  type="password"
-                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  type={showLoginPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  className="w-full bg-black/40 border border-white/15 rounded-md px-3 py-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword((s) => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] uppercase tracking-wide text-slate-300 bg-white/5 px-2 py-1 rounded-full border border-white/10"
+                >
+                  {showLoginPassword ? "Hide" : "Show"}
+                </button>
               </div>
+            </div>
 
-              {/* Username / First name / Surname */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="block mb-1">Username</label>
-                  <input
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">First name</label>
-                  <input
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-2 bg-orange-500 hover:bg-orange-600 text-black font-semibold rounded-md py-2.5 text-sm transition disabled:opacity-60"
+            >
+              {loading ? "Logging in..." : "Log in"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSignup} className="space-y-4">
+            <div>
+              <label className="block text-sm mb-1">Email</label>
+              <input
+                type="email"
+                autoComplete="email"
+                className="w-full bg-black/40 border border-white/15 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
 
-              <div>
-                <label className="block mb-1">Surname (optional)</label>
+            {/* Password */}
+            <div>
+              <label className="block text-sm mb-1">Password</label>
+              <div className="relative">
                 <input
-                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                  value={surname}
-                  onChange={(e) => setSurname(e.target.value)}
+                  type={showSignupPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  className="w-full bg-black/40 border border-white/15 rounded-md px-3 py-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={signupPassword}
+                  onChange={(e) => setSignupPassword(e.target.value)}
+                  required
+                  minLength={6}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowSignupPassword((s) => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] uppercase tracking-wide text-slate-300 bg-white/5 px-2 py-1 rounded-full border border-white/10"
+                >
+                  {showSignupPassword ? "Hide" : "Show"}
+                </button>
               </div>
-
-              {/* DOB / Suburb / State */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block mb-1">Date of birth</label>
-                  <input
-                    type="date"
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={dob}
-                    onChange={(e) => setDob(e.target.value)}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">Suburb (optional)</label>
-                  <input
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={suburb}
-                    onChange={(e) => setSuburb(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">State (optional)</label>
-                  <input
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={stateField}
-                    onChange={(e) => setStateField(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Phone / Gender / Team */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="block mb-1">Phone (optional)</label>
-                  <input
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block mb-1">Gender (optional)</label>
-                  <select
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value)}
-                  >
-                    <option value="">Prefer not to say</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block mb-1">Favourite team (optional)</label>
-                  <select
-                    className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm"
-                    value={team}
-                    onChange={(e) => setTeam(e.target.value)}
-                  >
-                    <option value="">Select</option>
-                    <option>Adelaide Crows</option>
-                    <option>Brisbane Lions</option>
-                    <option>Carlton</option>
-                    <option>Collingwood</option>
-                    <option>Essendon</option>
-                    <option>Fremantle</option>
-                    <option>Geelong Cats</option>
-                    <option>Gold Coast Suns</option>
-                    <option>GWS Giants</option>
-                    <option>Hawthorn</option>
-                    <option>Melbourne</option>
-                    <option>North Melbourne</option>
-                    <option>Port Adelaide</option>
-                    <option>Richmond</option>
-                    <option>St Kilda</option>
-                    <option>Sydney Swans</option>
-                    <option>West Coast Eagles</option>
-                    <option>Western Bulldogs</option>
-                  </select>
-                </div>
-              </div>
-
-              <p className="text-[11px] text-gray-400 mt-1">
-                We&apos;ll send a verification link to your email before you can
-                start building your streak.
+              <p className="mt-1 text-[11px] text-slate-400">
+                Minimum 6 characters.
               </p>
-            </>
-          )}
+            </div>
 
-          {error && <p className="text-xs text-red-400">{error}</p>}
-          {info && <p className="text-xs text-emerald-400">{info}</p>}
+            {/* Confirm password */}
+            <div>
+              <label className="block text-sm mb-1">Confirm password</label>
+              <div className="relative">
+                <input
+                  type={showSignupConfirm ? "text" : "password"}
+                  autoComplete="new-password"
+                  className="w-full bg-black/40 border border-white/15 rounded-md px-3 py-2 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={signupPasswordConfirm}
+                  onChange={(e) => setSignupPasswordConfirm(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSignupConfirm((s) => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] uppercase tracking-wide text-slate-300 bg-white/5 px-2 py-1 rounded-full border border-white/10"
+                >
+                  {showSignupConfirm ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full mt-2 bg-orange-500 hover:bg-orange-600 disabled:bg-gray-600 text-black font-semibold py-2 rounded-md text-sm"
-          >
-            {loading
-              ? mode === "signup"
-                ? "Creating account…"
-                : "Logging in…"
-              : mode === "signup"
-              ? "Create account"
-              : "Log in"}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full mt-2 bg-orange-500 hover:bg-orange-600 text-black font-semibold rounded-md py-2.5 text-sm transition disabled:opacity-60"
+            >
+              {loading ? "Creating account..." : "Sign up"}
+            </button>
+          </form>
+        )}
+
+        <p className="mt-4 text-[11px] text-slate-400 text-center">
+          Free game of skill • No gambling • 18+ only
+        </p>
       </div>
     </main>
   );
