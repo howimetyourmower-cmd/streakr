@@ -195,7 +195,7 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
-  // -------- Save Pick via /api/user-picks --------
+  // -------- Save Pick via /api/user-picks (optimistic UI) --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     // Not logged in → show auth modal instead of saving
     if (!user) {
@@ -206,6 +206,22 @@ export default function PicksClient() {
     // ❌ Only open questions can be updated (i.e. before quarter starts)
     if (row.status !== "open") return;
 
+    // 🔵 OPTIMISTIC UPDATE: update UI immediately
+    setActiveQuestionId(row.id);
+    setActiveOutcome(pick);
+
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+      )
+    );
+    setFilteredRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+      )
+    );
+
+    // Then fire API request in background
     try {
       const res = await fetch("/api/user-picks", {
         method: "POST",
@@ -218,24 +234,7 @@ export default function PicksClient() {
 
       if (!res.ok) {
         console.error("user-picks error:", await res.text());
-        return;
       }
-
-      // 🔵 Single active streak pick (one at a time)
-      setActiveQuestionId(row.id);
-      setActiveOutcome(pick);
-
-      // Update local rows so only this question shows userPick
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
-        )
-      );
-      setFilteredRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
-        )
-      );
     } catch (e) {
       console.error("Pick save error:", e);
     }
