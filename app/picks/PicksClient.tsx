@@ -67,7 +67,7 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // single active streak pick
+  // 🔵 Single active streak pick
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
 
@@ -149,7 +149,7 @@ export default function PicksClient() {
     load();
   }, []);
 
-  // -------- Load existing streak pick for this user --------
+  // -------- Load existing streak pick for this user (persistence) --------
   useEffect(() => {
     const loadUserPick = async () => {
       if (!user) {
@@ -203,7 +203,7 @@ export default function PicksClient() {
       return;
     }
 
-    // Only open questions can be updated
+    // ❌ Only open questions can be updated (i.e. before quarter starts)
     if (row.status !== "open") return;
 
     try {
@@ -221,7 +221,7 @@ export default function PicksClient() {
         return;
       }
 
-      // single active streak pick
+      // 🔵 Single active streak pick (one at a time)
       setActiveQuestionId(row.id);
       setActiveOutcome(pick);
 
@@ -417,6 +417,8 @@ export default function PicksClient() {
           const isNoActive = isActive && activeOutcome === "no";
           const { yes: yesPct, no: noPct } = getDisplayPercents(row.id);
 
+          const isLocked = row.status !== "open";
+
           return (
             <div
               key={row.id}
@@ -479,7 +481,12 @@ export default function PicksClient() {
                     </button>
                     {isActive && (
                       <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
-                        Your streak pick
+                        Streak Pick
+                      </span>
+                    )}
+                    {isLocked && (
+                      <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                        Locked
                       </span>
                     )}
                   </div>
@@ -491,12 +498,18 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           isYesActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-green-600 hover:bg-green-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+                            : ""
                         }
                       `}
                     >
@@ -506,12 +519,18 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
                           isNoActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-red-600 hover:bg-red-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+                            : ""
                         }
                       `}
                     >
