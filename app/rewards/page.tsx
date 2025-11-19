@@ -22,7 +22,7 @@ export default function RewardsPage() {
             Round major prize
           </p>
           <h2 className="text-3xl font-extrabold tracking-tight mb-1">
-            $7500 <span className="text-base font-semibold">cash or gift cards</span>
+            $750 <span className="text-base font-semibold">cash or gift cards</span>
           </h2>
           <p className="text-sm text-gray-200 mb-3">
             Awarded to the player with the{" "}
