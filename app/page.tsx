@@ -7,16 +7,6 @@ import Image from "next/image";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-type ApiQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-  match: string;
-  venue: string;
-  startTime: string;
-};
-
 type ApiGame = {
   id: string;
   match: string;
@@ -85,7 +75,6 @@ export default function HomePage() {
           setRoundNumber(data.roundNumber);
         }
 
-        // Flatten only OPEN questions and sort by start time, then quarter
         const flat: PreviewRow[] = data.games
           .flatMap((g) =>
             g.questions
@@ -106,7 +95,7 @@ export default function HomePage() {
             return a.quarter - b.quarter;
           });
 
-        setPreviewRows(flat.slice(0, 6)); // top 6 questions
+        setPreviewRows(flat.slice(0, 6));
       } catch (err) {
         console.error(err);
       } finally {
@@ -118,9 +107,9 @@ export default function HomePage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#020617] via-black to-black text-slate-50">
+    <main className="min-h-screen w-full bg-black text-slate-50">
       {/* TOP BAR / SPONSOR STRIP */}
-      <div className="w-full border-b border-white/5 bg-black/60 backdrop-blur">
+      <div className="w-full border-b border-white/5 bg-black/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2 text-xs text-slate-300">
           <span className="inline-flex items-center gap-2">
             <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-400 border border-orange-500/30">
@@ -148,7 +137,7 @@ export default function HomePage() {
 
             <h1 className="text-balance text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl">
               Real{" "}
-              <span className="text-orange-500 drop-shadow-[0_0_12px_rgba(249,115,22,0.6)]">
+              <span className="text-orange-500 drop-shadow-[0_0_14px_rgba(249,115,22,0.7)]">
                 STREAKr
               </span>
               s don&apos;t get caught.
@@ -162,13 +151,13 @@ export default function HomePage() {
 
             {/* Prize pill */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-sm font-semibold text-orange-100 border border-orange-500/40 shadow-[0_0_25px_rgba(249,115,22,0.25)]">
+              <div className="inline-flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-sm font-semibold text-orange-100 border border-orange-500/50 shadow-[0_0_30px_rgba(249,115,22,0.55)]">
                 <span className="rounded-full bg-orange-500 px-2 py-0.5 text-xs font-bold text-black">
                   $1,000
                 </span>
                 in prizes every round*
               </div>
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-slate-500">
                 *Prize structure subject to T&Cs.
               </span>
             </div>
@@ -177,14 +166,14 @@ export default function HomePage() {
             <div className="flex flex-col gap-3 pt-2 sm:flex-row">
               <Link
                 href="/picks"
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-black shadow-[0_12px_40px_rgba(249,115,22,0.5)] transition hover:translate-y-[1px] hover:bg-orange-400"
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-black shadow-[0_14px_45px_rgba(249,115,22,0.7)] transition hover:translate-y-[1px] hover:bg-orange-400"
               >
                 Play now – make your streak pick
               </Link>
 
               <Link
                 href="/faq"
-                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-black/60 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-slate-400 hover:bg-slate-900"
+                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-black/80 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-slate-400 hover:bg-slate-900"
               >
                 How it works
               </Link>
@@ -198,7 +187,7 @@ export default function HomePage() {
 
           {/* RIGHT: HERO IMAGE */}
           <div className="relative flex-1">
-            <div className="relative mx-auto h-64 w-full max-w-md overflow-hidden rounded-3xl border border-slate-700/60 bg-slate-900/60 shadow-[0_25px_60px_rgba(0,0,0,0.8)]">
+            <div className="relative mx-auto h-64 w-full max-w-md overflow-hidden rounded-3xl border border-slate-700 bg-slate-900/70 shadow-[0_28px_70px_rgba(0,0,0,0.95)]">
               <Image
                 src="/mcg-hero.jpg"
                 alt="MCG at night"
@@ -216,7 +205,7 @@ export default function HomePage() {
                   </div>
                   <div className="text-sm font-semibold">MCG, Melbourne</div>
                 </div>
-                <div className="rounded-full bg-black/70 px-3 py-1 text-[11px] font-semibold text-sky-300 border border-sky-500/40">
+                <div className="rounded-full bg-black/80 px-3 py-1 text-[11px] font-semibold text-sky-300 border border-sky-500/50">
                   Live streaks in every game
                 </div>
               </div>
@@ -226,7 +215,7 @@ export default function HomePage() {
       </section>
 
       {/* HOW IT WORKS */}
-      <section className="border-b border-white/5 bg-black/70">
+      <section className="border-b border-white/5 bg-black">
         <div className="mx-auto max-w-6xl px-4 py-10">
           <div className="mb-6 flex items-end justify-between gap-4">
             <div>
@@ -240,32 +229,32 @@ export default function HomePage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 shadow-[0_15px_40px_rgba(0,0,0,0.7)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
                 1 · Make your streak pick
               </div>
-              <p className="text-sm text-slate-200">
+              <p className="text-sm text-blue-50">
                 You can only ride one streak at a time. Choose a single question
                 across all games and lock in a Yes/No pick before the quarter
                 starts.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 shadow-[0_15px_40px_rgba(0,0,0,0.7)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
                 2 · Build the longest run
               </div>
-              <p className="text-sm text-slate-200">
+              <p className="text-sm text-blue-50">
                 Every correct pick adds +1 to your streak. Wrong pick? Back to
                 zero. Your active streak feeds straight into the leaderboard.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4 shadow-[0_15px_40px_rgba(0,0,0,0.7)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
                 3 · Climb the ladder
               </div>
-              <p className="text-sm text-slate-200">
+              <p className="text-sm text-blue-50">
                 Chase the top 10 each round, compare streaks with your mates in
                 private leagues, and compete for a share of $1,000 in prizes.
               </p>
@@ -309,12 +298,12 @@ export default function HomePage() {
                 return (
                   <div
                     key={row.id}
-                    className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 shadow-[0_12px_35px_rgba(0,0,0,0.8)]"
+                    className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] px-4 py-3 shadow-[0_12px_35px_rgba(24,91,255,0.4)]"
                   >
                     <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                       <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span className="rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300 border border-sky-500/40">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-blue-200">
+                          <span className="rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300 border border-sky-500/60">
                             Q{row.quarter}
                           </span>
                           <span>
@@ -325,16 +314,16 @@ export default function HomePage() {
                           <span>•</span>
                           <span>{row.venue}</span>
                         </div>
-                        <p className="mt-1 text-sm font-medium text-slate-100">
+                        <p className="mt-1 text-sm font-medium text-blue-50">
                           {row.question}
                         </p>
                       </div>
                       <div className="mt-2 flex items-center gap-2 md:mt-0">
-                        <span className="text-[11px] text-slate-400">
+                        <span className="text-[11px] text-blue-200/80">
                           Sample view – make your pick on the{" "}
                           <Link
                             href="/picks"
-                            className="text-orange-400 hover:text-orange-300"
+                            className="text-orange-300 hover:text-orange-200"
                           >
                             Picks
                           </Link>{" "}
@@ -351,7 +340,7 @@ export default function HomePage() {
           <div className="mt-6 md:hidden">
             <Link
               href="/picks"
-              className="inline-flex w-full items-center justify-center rounded-full bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(249,115,22,0.5)] transition hover:bg-orange-400"
+              className="inline-flex w-full items-center justify-center rounded-full bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(249,115,22,0.7)] transition hover:bg-orange-400"
             >
               Go to Picks
             </Link>
