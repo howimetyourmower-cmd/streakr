@@ -404,6 +404,60 @@ export default function PicksClient() {
     }
   };
 
+  // -------- LIVE COMMENT REFRESH WHILE DRAWER OPEN --------
+  useEffect(() => {
+    if (!commentsOpenFor) return;
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
+
+    const refresh = async () => {
+      try {
+        const res = await fetch(`/api/comments/${commentsOpenFor.id}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const source = data.items || data.comments || [];
+        const list: Comment[] = source.map((c: any) => ({
+          id: c.id,
+          body: c.body,
+          displayName: c.displayName,
+          createdAt: c.createdAt,
+        }));
+
+        if (cancelled) return;
+
+        setComments(list);
+
+        // keep card counter in sync
+        setRows((prev) =>
+          prev.map((r) =>
+            r.id === commentsOpenFor.id
+              ? { ...r, commentCount: list.length }
+              : r
+          )
+        );
+        setFilteredRows((prev) =>
+          prev.map((r) =>
+            r.id === commentsOpenFor.id
+              ? { ...r, commentCount: list.length }
+              : r
+          )
+        );
+      } catch (e) {
+        console.error("Failed to refresh comments", e);
+      }
+    };
+
+    // poll every 5 seconds while drawer is open
+    const intervalId = window.setInterval(refresh, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [commentsOpenFor]);
+
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 bg-white text-slate-900">
