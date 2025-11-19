@@ -1,14 +1,9 @@
 "use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
+import Link from "next/link";
 import { db } from "@/lib/firebaseClient";
-import {
-  addDoc,
-  collection,
-  serverTimestamp,
-  doc,
-  getDoc,
-} from "firebase/firestore";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -21,6 +16,7 @@ type ApiQuestion = {
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
+  commentCount?: number;
 };
 
 type ApiGame = {
@@ -30,8 +26,6 @@ type ApiGame = {
   startTime: string;
   questions: ApiQuestion[];
 };
-
-type SportType = "afl";
 
 type QuestionRow = {
   id: string;
@@ -45,10 +39,14 @@ type QuestionRow = {
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
-  sport: SportType;
+  sport: string; // text-only, e.g. "AFL"
+  commentCount: number;
 };
 
-type PicksApiResponse = { games: ApiGame[] };
+type PicksApiResponse = {
+  games: ApiGame[];
+  roundNumber?: number;
+};
 
 type Comment = {
   id: string;
@@ -56,12 +54,6 @@ type Comment = {
   displayName?: string;
   createdAt?: string;
 };
-
-type UserProfile = {
-  username?: string;
-};
-
-const CURRENT_ROUND = 1;
 
 export default function PicksClient() {
   const { user } = useAuth();
@@ -73,6 +65,7 @@ export default function PicksClient() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
@@ -82,22 +75,13 @@ export default function PicksClient() {
   const [commentsError, setCommentsError] = useState("");
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
-  const [commentCounts, setCommentCounts] = useState<Record<string, number>>(
-    {}
-  );
 
-  // single active streak pick per user
-  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
-  const [activeQuestionPick, setActiveQuestionPick] = useState<
-    "yes" | "no" | null
-  >(null);
-
-  // basic user profile for comments (username)
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [profileLoaded, setProfileLoaded] = useState(false);
+  // auth modal
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
+    if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
     if (isNaN(d.getTime())) return { date: "", time: "" };
 
@@ -117,44 +101,6 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load basic user profile for username (for comments) --------
-  useEffect(() => {
-    const loadProfile = async () => {
-      if (!user) {
-        setUserProfile(null);
-        setProfileLoaded(true);
-        return;
-      }
-
-      try {
-        const userRef = doc(db, "users", user.uid);
-        const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          const data = snap.data() as any;
-          setUserProfile({
-            username: data.username ?? "",
-          });
-        } else {
-          setUserProfile(null);
-        }
-      } catch (e) {
-        console.error("Failed to load user profile for comments", e);
-        setUserProfile(null);
-      } finally {
-        setProfileLoaded(true);
-      }
-    };
-
-    if (!profileLoaded) {
-      loadProfile();
-    }
-  }, [user, profileLoaded]);
-
-  const displayName =
-    userProfile?.username && userProfile.username.trim() !== ""
-      ? userProfile.username
-      : "User";
-
   // -------- Load Picks --------
   useEffect(() => {
     const load = async () => {
@@ -163,6 +109,11 @@ export default function PicksClient() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
+
+        if (typeof data.roundNumber === "number") {
+          setRoundNumber(data.roundNumber);
+        }
+
         const flat: QuestionRow[] = data.games.flatMap((g) =>
           g.questions.map((q) => ({
             id: q.id,
@@ -176,21 +127,10 @@ export default function PicksClient() {
             userPick: q.userPick,
             yesPercent: q.yesPercent,
             noPercent: q.noPercent,
-            sport: "afl" as SportType,
+            sport: "AFL",
+            commentCount: q.commentCount ?? 0,
           }))
         );
-
-        // If backend later gives us which one is active, we could detect here.
-        const existingActive = flat.find(
-          (r) => r.userPick === "yes" || r.userPick === "no"
-        );
-        if (existingActive) {
-          setActiveQuestionId(existingActive.id);
-          setActiveQuestionPick(existingActive.userPick ?? null);
-        } else {
-          setActiveQuestionId(null);
-          setActiveQuestionPick(null);
-        }
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
@@ -212,38 +152,34 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // -------- Save Pick (single active streak pick) --------
+  // -------- Save Pick --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
+    // Not logged in → show auth modal instead of saving
+    if (!user) {
+      setShowAuthModal(true);
+      return;
+    }
+
     try {
       await addDoc(collection(db, "picks"), {
-        userId: user?.uid ?? null,
         gameId: row.gameId,
         questionId: row.id,
         pick,
         match: row.match,
         question: row.question,
         quarter: row.quarter,
-        round: CURRENT_ROUND,
         createdAt: serverTimestamp(),
       });
 
-      // locally enforce one active question per user
-      setActiveQuestionId(row.id);
-      setActiveQuestionPick(pick);
-
+      // Update local state to reflect this pick
       setRows((prev) =>
         prev.map((r) =>
-          r.id === row.id
-            ? { ...r, userPick: pick }
-            : { ...r, userPick: undefined }
+          r.id === row.id ? { ...r, userPick: pick } : r
         )
       );
-
       setFilteredRows((prev) =>
         prev.map((r) =>
-          r.id === row.id
-            ? { ...r, userPick: pick }
-            : { ...r, userPick: undefined }
+          r.id === row.id ? { ...r, userPick: pick } : r
         )
       );
     } catch (e) {
@@ -286,13 +222,20 @@ export default function PicksClient() {
         displayName: c.displayName,
         createdAt: c.createdAt,
       }));
+
       setComments(list);
 
-      // update count for this question
-      setCommentCounts((prev) => ({
-        ...prev,
-        [row.id]: list.length,
-      }));
+      // Update commentCount for this row based on fetched comments
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id ? { ...r, commentCount: list.length } : r
+        )
+      );
+      setFilteredRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id ? { ...r, commentCount: list.length } : r
+        )
+      );
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
@@ -321,11 +264,7 @@ export default function PicksClient() {
     try {
       const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-uid": user?.uid ?? "",
-          "x-username": displayName,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: commentText.trim() }),
       });
 
@@ -339,15 +278,24 @@ export default function PicksClient() {
         createdAt: created.createdAt,
       };
 
-      // update local list + count
-      const newLength = comments.length + 1;
       setComments((prev) => [newComment, ...prev]);
-      setCommentCounts((prev) => ({
-        ...prev,
-        [commentsOpenFor.id]: newLength,
-      }));
-
       setCommentText("");
+
+      // Increment commentCount for this row
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === commentsOpenFor.id
+            ? { ...r, commentCount: (r.commentCount ?? 0) + 1 }
+            : r
+        )
+      );
+      setFilteredRows((prev) =>
+        prev.map((r) =>
+          r.id === commentsOpenFor.id
+            ? { ...r, commentCount: (r.commentCount ?? 0) + 1 }
+            : r
+        )
+      );
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to post comment");
@@ -359,11 +307,16 @@ export default function PicksClient() {
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-6">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-        <p className="text-sm text-white/70">
-          AFL Season 2026 · Round {CURRENT_ROUND}
-        </p>
+        {roundNumber !== null && (
+          <p className="text-sm text-white/70">
+            Current Round:{" "}
+            <span className="font-semibold text-orange-400">
+              Round {roundNumber}
+            </span>
+          </p>
+        )}
       </div>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
@@ -386,7 +339,7 @@ export default function PicksClient() {
       </div>
 
       {/* HEADER ROW */}
-      <div className="hidden sm:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
@@ -402,46 +355,32 @@ export default function PicksClient() {
       <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
-          const isActive = row.id === activeQuestionId;
-          const yesSelected = isActive && activeQuestionPick === "yes";
-          const noSelected = isActive && activeQuestionPick === "no";
-
-          const yesPercent = isActive
-            ? activeQuestionPick === "yes"
-              ? 100
-              : 0
-            : 0;
-          const noPercent = isActive
-            ? activeQuestionPick === "no"
-              ? 100
-              : 0
-            : 0;
-
-          const count = commentCounts[row.id] ?? 0;
+          const yesSelected = row.userPick === "yes";
+          const noSelected = row.userPick === "no";
 
           return (
             <div
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#ff7a00] via-[#cc5e00] to-[#7a3b00] border border-black/30 shadow-sm"
             >
-              <div className="grid grid-cols-12 gap-y-2 items-center px-4 py-1.5 text-white text-xs sm:text-sm">
+              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white gap-y-2 md:gap-y-0">
                 {/* START */}
-                <div className="col-span-6 sm:col-span-2">
+                <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
                   <div className="text-[11px] text-white/80">
                     {time} AEDT
                   </div>
                 </div>
 
-                {/* SPORT */}
-                <div className="col-span-3 sm:col-span-1">
-                  <span className="inline-flex items-center justify-center rounded-full border border-white/20 bg-black/30 px-3 py-0.5 text-[11px] font-semibold tracking-wide">
-                    {row.sport.toUpperCase()}
+                {/* SPORT (text-only pill) */}
+                <div className="col-span-6 md:col-span-1 flex items-center">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/30 text-[11px] font-semibold uppercase tracking-wide">
+                    {row.sport}
                   </span>
                 </div>
 
                 {/* STATUS */}
-                <div className="col-span-3 sm:col-span-1">
+                <div className="col-span-6 md:col-span-1">
                   <span
                     className={`${statusClasses(
                       row.status
@@ -452,7 +391,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE */}
-                <div className="col-span-12 sm:col-span-3">
+                <div className="col-span-12 md:col-span-3">
                   <div className="text-sm font-semibold">
                     {row.match}
                   </div>
@@ -461,20 +400,13 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* Q# + streak badge */}
-                <div className="col-span-3 sm:col-span-1 flex flex-col items-start sm:items-center gap-1">
-                  <div className="text-sm font-bold">
-                    Q{row.quarter}
-                  </div>
-                  {isActive && (
-                    <span className="inline-flex items-center rounded-full bg-blue-600/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                      Your streak pick
-                    </span>
-                  )}
+                {/* Q# */}
+                <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
+                  Q{row.quarter}
                 </div>
 
                 {/* QUESTION + COMMENTS */}
-                <div className="col-span-9 sm:col-span-2">
+                <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
@@ -483,21 +415,24 @@ export default function PicksClient() {
                     onClick={() => openComments(row)}
                     className="text-[11px] text-white/85 mt-0.5 underline"
                   >
-                    Comments ({count})
+                    Comments ({row.commentCount ?? 0})
                   </button>
                 </div>
 
                 {/* PICK / YES / NO */}
-                <div className="col-span-12 sm:col-span-2 flex flex-col items-end">
+                <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition ${
-                        yesSelected
-                          ? "bg-blue-700 ring-2 ring-white"
-                          : "bg-green-600 hover:bg-green-700"
-                      }`}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        ${
+                          yesSelected
+                            ? "bg-green-700 ring-2 ring-white"
+                            : "bg-green-600 hover:bg-green-700"
+                        }
+                      `}
                     >
                       Yes
                     </button>
@@ -505,17 +440,20 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
-                      className={`px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition ${
-                        noSelected
-                          ? "bg-blue-700 ring-2 ring-white"
-                          : "bg-red-600 hover:bg-red-700"
-                      }`}
+                      className={`
+                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                        ${
+                          noSelected
+                            ? "bg-red-700 ring-2 ring-white"
+                            : "bg-red-600 hover:bg-red-700"
+                        }
+                      `}
                     >
                       No
                     </button>
                   </div>
                   <div className="text-[11px] text-white/85">
-                    Yes: {yesPercent}% • No: {noPercent}%
+                    Yes: {row.yesPercent ?? 0}% • No: {row.noPercent ?? 0}%
                   </div>
                 </div>
               </div>
@@ -523,6 +461,47 @@ export default function PicksClient() {
           );
         })}
       </div>
+
+      {/* AUTH REQUIRED MODAL */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-lg font-semibold">Log in to play</h2>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(false)}
+                className="text-sm text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-white/70 mb-4">
+              You need a free STREAKr account to make picks, build your streak
+              and appear on the leaderboard.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                href="/auth?mode=login&returnTo=/picks"
+                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Login
+              </Link>
+
+              <Link
+                href="/auth?mode=signup&returnTo=/picks"
+                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Sign up
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* COMMENT DRAWER */}
       {commentsOpenFor && (
@@ -556,9 +535,7 @@ export default function PicksClient() {
                 placeholder="Add your comment…"
               />
               {commentsError && (
-                <p className="text-xs text-red-500 mt-1">
-                  {commentsError}
-                </p>
+                <p className="text-xs text-red-500 mt-1">{commentsError}</p>
               )}
               <div className="flex justify-end mt-2">
                 <button
@@ -575,9 +552,7 @@ export default function PicksClient() {
             {/* Comment list */}
             <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
-                <p className="text-sm text-gray-400">
-                  Loading comments…
-                </p>
+                <p className="text-sm text-gray-400">Loading comments…</p>
               ) : comments.length === 0 ? (
                 <p className="text-sm text-gray-400">
                   No comments yet. Be the first!
@@ -591,7 +566,7 @@ export default function PicksClient() {
                     >
                       <div className="flex justify-between mb-1">
                         <span className="font-semibold">
-                          {c.displayName ?? "User"}
+                          {c.displayName || "User"}
                         </span>
                         {c.createdAt && (
                           <span className="text-[11px] text-gray-400">
@@ -599,9 +574,7 @@ export default function PicksClient() {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-gray-100">
-                        {c.body}
-                      </p>
+                      <p className="text-sm text-gray-100">{c.body}</p>
                     </li>
                   ))}
                 </ul>
