@@ -21,6 +21,8 @@ type PicksApiResponse = {
 
 type RoundFilter = "overall" | "OR" | "finals" | number;
 
+const DISPLAY_LIMIT = 10; // 👈 show top 10
+
 export default function LeaderboardClient() {
   const { user } = useAuth();
 
@@ -44,7 +46,7 @@ export default function LeaderboardClient() {
         const q = query(
           collection(db, "users"),
           orderBy("longestStreak", "desc"),
-          limit(50)
+          limit(50) // still fetch up to 50 so we can find user's rank
         );
         const snap = await getDocs(q);
 
@@ -104,7 +106,22 @@ export default function LeaderboardClient() {
 
   const currentUserUid = user?.uid || null;
 
-  // Heading & subtitle change depending on selected round
+  // Top 10 for main display
+  const displayedPlayers = useMemo(
+    () => sortedPlayers.slice(0, DISPLAY_LIMIT),
+    [sortedPlayers]
+  );
+
+  // Find logged in player's rank (within what we fetched)
+  const currentUserIndex = useMemo(
+    () => sortedPlayers.findIndex((p) => p.uid === currentUserUid),
+    [sortedPlayers, currentUserUid]
+  );
+  const currentUserRank =
+    currentUserIndex >= 0 ? currentUserIndex + 1 : null;
+  const currentUserEntry =
+    currentUserIndex >= 0 ? sortedPlayers[currentUserIndex] : null;
+
   const headingLabel = (() => {
     if (selectedRound === "overall") return "Global longest streak";
     if (selectedRound === "OR") return "Opening Round leaderboard";
@@ -113,36 +130,27 @@ export default function LeaderboardClient() {
   })();
 
   const subtitleText = (() => {
+    const baseTop = Math.min(DISPLAY_LIMIT, sortedPlayers.length);
     if (selectedRound === "overall") {
-      return `Showing top ${Math.min(
-        sortedPlayers.length,
-        50
-      )} players (overall season stats).`;
+      return `Showing top ${baseTop} players (overall season stats). If you're logged in, you'll also see your position even if you're outside the top ${DISPLAY_LIMIT}.`;
     }
     if (selectedRound === "OR") {
-      return `Showing top ${Math.min(
-        sortedPlayers.length,
-        50
-      )} players for Opening Round. Streak numbers currently reflect season totals while we wire round-specific stats.`;
+      return `Showing top ${baseTop} players for Opening Round. Streak numbers currently reflect season totals while we wire round-specific stats.`;
     }
     if (selectedRound === "finals") {
-      return `Showing top ${Math.min(
-        sortedPlayers.length,
-        50
-      )} players for Finals (all 5 weeks combined). Streak numbers currently reflect season totals while we wire finals-specific stats.`;
+      return `Showing top ${baseTop} players for Finals (all 5 weeks combined). Streak numbers currently reflect season totals while we wire finals-specific stats.`;
     }
-    return `Showing top ${Math.min(
-      sortedPlayers.length,
-      50
-    )} players for Round ${selectedRound}. Streak numbers currently reflect season totals while we wire round-based stats.`;
+    return `Showing top ${baseTop} players for Round ${selectedRound}. Streak numbers currently reflect season totals while we wire round-based stats.`;
   })();
 
   const roundSelectValue =
-    selectedRound === "overall" || selectedRound === "OR" || selectedRound === "finals"
+    selectedRound === "overall" ||
+    selectedRound === "OR" ||
+    selectedRound === "finals"
       ? selectedRound
       : String(selectedRound);
 
-  const handleRoundChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleRoundChange = (e: any) => {
     const value = e.target.value;
     if (value === "overall" || value === "OR" || value === "finals") {
       setSelectedRound(value);
@@ -199,7 +207,7 @@ export default function LeaderboardClient() {
 
         <div className="flex flex-col items-start sm:items-end gap-2">
           <div className="text-[11px] text-gray-400">
-            Showing top {Math.min(sortedPlayers.length, 50)}
+            Showing top {Math.min(DISPLAY_LIMIT, sortedPlayers.length)}
           </div>
 
           <div className="flex items-center gap-2">
@@ -239,7 +247,9 @@ export default function LeaderboardClient() {
           <div className="text-right">Longest streak</div>
         </div>
 
-        {sortedPlayers.map((p, index) => {
+        {/* Top 10 */}
+        {displayedPlayers.map((p, index) => {
+          const rank = index + 1;
           const isCurrentUser = currentUserUid === p.uid;
           const avatarSrc = p.avatarUrl || "/default-avatar.png";
 
@@ -247,13 +257,13 @@ export default function LeaderboardClient() {
             <div
               key={p.uid}
               className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-[40px,minmax(0,2fr),minmax(0,1.4fr),110px,110px] sm:items-center ${
-                isCurrentUser ? "bg:white/5" : "bg-black/10"
+                isCurrentUser ? "bg-white/5" : "bg-black/10"
               } hover:bg-white/8 transition`}
             >
               {/* Rank */}
               <div className="flex items-center gap-2 sm:block">
                 <span className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-white/10 text-xs font-semibold">
-                  {index + 1}
+                  {rank}
                 </span>
                 <span className="sm:hidden text-[11px] text-gray-400 ml-2">
                   Rank
@@ -317,14 +327,62 @@ export default function LeaderboardClient() {
             </div>
           );
         })}
+
+        {/* "Your position" row if you're outside top 10 but still in fetched list */}
+        {currentUserEntry &&
+          currentUserRank !== null &&
+          currentUserRank > DISPLAY_LIMIT && (
+            <div className="px-4 py-3 border-t border-white/10 bg-sky-500/10">
+              <div className="text-[11px] text-sky-300 mb-1 uppercase tracking-wide">
+                Your position
+              </div>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="inline-flex h-7 min-w-[2rem] items-center justify-center rounded-full bg-sky-500/20 text-xs font-semibold border border-sky-400/60">
+                    {currentUserRank}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">
+                      {currentUserEntry.username}
+                      <span className="ml-2 text-[11px] text-emerald-400">
+                        (You)
+                      </span>
+                    </div>
+                    {currentUserEntry.team && (
+                      <div className="text-[11px] text-gray-300 truncate">
+                        {currentUserEntry.team}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-end text-xs sm:text-sm">
+                  <div>
+                    <span className="text-gray-300">Current: </span>
+                    <span className="font-semibold">
+                      {currentUserEntry.currentStreak ?? 0}
+                    </span>
+                    <span className="text-[11px] text-gray-400 ml-1">
+                      in a row
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-300">Longest: </span>
+                    <span className="font-semibold text-orange-300">
+                      {currentUserEntry.longestStreak ?? 0}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
       </div>
 
       {/* Footer note */}
       <div className="px-4 py-3 border-t border-white/10 text-[11px] text-gray-400">
-        Opening Round (OR), Rounds 1–23 and Finals (all 5 weeks combined) are
-        now selectable. As we wire settlement, this view will show true
-        per-round and finals ladders – for now, streak numbers reflect season
-        totals.
+        Showing the top {Math.min(DISPLAY_LIMIT, sortedPlayers.length)} players.
+        If you&apos;re logged in and outside the top {DISPLAY_LIMIT}, your
+        position still appears below the main table.
       </div>
     </div>
   );
