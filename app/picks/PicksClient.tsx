@@ -73,6 +73,9 @@ export default function PicksClient() {
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
 
+  // Player streak summary
+  const [currentStreak, setCurrentStreak] = useState<number | null>(null);
+
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
@@ -213,6 +216,33 @@ export default function PicksClient() {
     };
 
     loadUserPick();
+  }, [user]);
+
+  // -------- Load player's current streak (profile) --------
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (!user) {
+        setCurrentStreak(null);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/profile");
+        if (!res.ok) {
+          console.warn("profile GET not ok:", res.status);
+          return;
+        }
+
+        const data = await res.json();
+        if (typeof data.currentStreak === "number") {
+          setCurrentStreak(data.currentStreak);
+        }
+      } catch (err) {
+        console.error("Failed to load profile", err);
+      }
+    };
+
+    loadProfile();
   }, [user]);
 
   // -------- Filtering --------
@@ -415,20 +445,33 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 bg-white text-slate-900">
+    // ✅ No bg-white – lets your dark site background show through
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-6">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-        {roundNumber !== null && (
-          <p className="text-sm text-slate-600">
-            Current Round:{" "}
-            <span className="font-semibold text-orange-500">
-              Round {roundNumber}
-            </span>
-          </p>
-        )}
+
+        <div className="flex flex-col items-start sm:items-end gap-1">
+          {roundNumber !== null && (
+            <p className="text-sm text-gray-300">
+              Current Round:{" "}
+              <span className="font-semibold text-orange-400">
+                Round {roundNumber}
+              </span>
+            </p>
+          )}
+
+          {currentStreak !== null && (
+            <p className="text-sm text-gray-300">
+              Your current streak:{" "}
+              <span className="font-semibold text-orange-400">
+                {currentStreak}
+              </span>
+            </p>
+          )}
+        </div>
       </div>
 
-      {error && <p className="text-red-500 mb-2">{error}</p>}
+      {error && <p className="text-red-400 mb-2">{error}</p>}
 
       {/* FILTER BUTTONS */}
       <div className="flex flex-wrap gap-2 mb-6">
@@ -436,10 +479,10 @@ export default function PicksClient() {
           <button
             key={f}
             onClick={() => applyFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
               activeFilter === f
-                ? "bg-orange-500"
-                : "bg-gray-700 hover:bg-gray-600"
+                ? "bg-orange-500 text-black"
+                : "bg-gray-700 hover:bg-gray-600 text-white"
             }`}
           >
             {f.toUpperCase()}
@@ -448,7 +491,7 @@ export default function PicksClient() {
       </div>
 
       {/* HEADER ROW */}
-      <div className="hidden md:grid grid-cols-12 text-slate-500 text-xs mb-2 px-2">
+      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
