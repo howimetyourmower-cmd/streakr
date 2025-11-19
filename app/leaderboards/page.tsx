@@ -1,6 +1,6 @@
 // app/leaderboards/page.tsx
 
-import LeaderboardsClient from "@/LeaderboardsClient";
+import LeaderboardsClient from "./app/leaderboard/LeaderboardsClient";
 
 export default function LeaderboardsPage() {
   return (
