@@ -84,7 +84,7 @@ export default function HomePage() {
   const previewQuestions = questions.slice(0, 6);
 
   return (
-    <main className="min-h-screen bg-white text-slate-900">
+        <main className="min-h-screen bg-[#020617] text-white">
       {/* ---------- HERO SECTION ---------- */}
       <section className="relative w-full overflow-hidden">
         {/* Background image */}
