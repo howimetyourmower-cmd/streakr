@@ -7,17 +7,19 @@ import Image from "next/image";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
+type ApiQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+};
+
 type ApiGame = {
   id: string;
   match: string;
   venue: string;
   startTime: string;
-  questions: {
-    id: string;
-    quarter: number;
-    question: string;
-    status: QuestionStatus;
-  }[];
+  questions: ApiQuestion[];
 };
 
 type PicksApiResponse = {
@@ -108,28 +110,28 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen w-full bg-black text-slate-50">
-      {/* TOP BAR / SPONSOR STRIP */}
-      <div className="w-full border-b border-white/5 bg-black/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2 text-xs text-slate-300">
-          <span className="inline-flex items-center gap-2">
-            <span className="rounded-full bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-400 border border-orange-500/30">
+      {/* SPONSOR STRIP UNDER NAV */}
+      <div className="w-full border-b border-white/5 bg-[#0B0F1A]">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2 text-xs text-slate-200">
+          <div className="inline-flex items-center gap-2">
+            <span className="rounded-full border border-orange-500/60 bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300">
               Sponsor
             </span>
-            Proudly backed by our official partner
-          </span>
+            <span>Proudly backed by our official partner</span>
+          </div>
           <span className="hidden sm:inline text-[11px] text-slate-400">
             Free game of skill • No gambling • 18+ only
           </span>
         </div>
       </div>
 
-      {/* HERO */}
+      {/* HERO SECTION */}
       <section className="border-b border-white/5">
-        <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10 md:flex-row md:items-center md:py-14">
+        <div className="relative mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10 md:flex-row md:items-center md:py-14">
           {/* LEFT: TEXT */}
           <div className="flex-1 space-y-6">
             {roundNumber !== null && (
-              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-300">
+              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-200">
                 AFL Season 2026 • Current Round:{" "}
                 <span className="text-orange-400">Round {roundNumber}</span>
               </div>
@@ -151,7 +153,7 @@ export default function HomePage() {
 
             {/* Prize pill */}
             <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-sm font-semibold text-orange-100 border border-orange-500/50 shadow-[0_0_30px_rgba(249,115,22,0.55)]">
+              <div className="inline-flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-sm font-semibold text-orange-100 border border-orange-500/60 shadow-[0_0_30px_rgba(249,115,22,0.55)]">
                 <span className="rounded-full bg-orange-500 px-2 py-0.5 text-xs font-bold text-black">
                   $1,000
                 </span>
@@ -179,13 +181,12 @@ export default function HomePage() {
               </Link>
             </div>
 
-            {/* Small reassurance line */}
             <p className="text-xs text-slate-500">
               No deposits. No odds. Just your footy IQ and a live streak.
             </p>
           </div>
 
-          {/* RIGHT: HERO IMAGE */}
+          {/* RIGHT: HERO IMAGE CARD */}
           <div className="relative flex-1">
             <div className="relative mx-auto h-64 w-full max-w-md overflow-hidden rounded-3xl border border-slate-700 bg-slate-900/70 shadow-[0_28px_70px_rgba(0,0,0,0.95)]">
               <Image
@@ -196,8 +197,6 @@ export default function HomePage() {
                 priority
               />
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-
-              {/* Overlay label */}
               <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs text-slate-100">
                 <div>
                   <div className="text-[11px] uppercase tracking-wide text-slate-400">
@@ -263,7 +262,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* PREVIEW QUESTIONS */}
+      {/* TONIGHT'S QUESTIONS PREVIEW */}
       <section className="border-b border-white/5 bg-black">
         <div className="mx-auto max-w-6xl px-4 py-10">
           <div className="mb-6 flex items-end justify-between gap-4">
@@ -351,9 +350,7 @@ export default function HomePage() {
       {/* FOOTER */}
       <footer className="border-t border-slate-800 bg-black">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            © {new Date().getFullYear()} STREAKr. All rights reserved.
-          </div>
+          <div>© {new Date().getFullYear()} STREAKr. All rights reserved.</div>
           <div className="flex flex-wrap items-center gap-4">
             <span className="text-[11px]">
               STREAKr is a free game of skill. No gambling. 18+ only.
