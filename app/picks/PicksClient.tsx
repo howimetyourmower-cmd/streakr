@@ -361,13 +361,13 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white">
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 bg-white text-slate-900">
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-6">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
-          <p className="text-sm text-white/70">
+          <p className="text-sm text-slate-600">
             Current Round:{" "}
-            <span className="font-semibold text-orange-400">
+            <span className="font-semibold text-orange-500">
               Round {roundNumber}
             </span>
           </p>
@@ -382,7 +382,7 @@ export default function PicksClient() {
           <button
             key={f}
             onClick={() => applyFilter(f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+            className={`px-4 py-2 rounded-lg text-sm font-semibold text-white transition ${
               activeFilter === f
                 ? "bg-orange-500"
                 : "bg-gray-700 hover:bg-gray-600"
@@ -394,7 +394,7 @@ export default function PicksClient() {
       </div>
 
       {/* HEADER ROW */}
-      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+      <div className="hidden md:grid grid-cols-12 text-slate-500 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
@@ -551,7 +551,7 @@ export default function PicksClient() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Log in to play</h2>
+              <h2 className="text-lg font-semibold text-white">Log in to play</h2>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
@@ -577,7 +577,7 @@ export default function PicksClient() {
 
               <Link
                 href="/auth?mode=signup&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors text-white"
                 onClick={() => setShowAuthModal(false)}
               >
                 Sign up
@@ -593,7 +593,7 @@ export default function PicksClient() {
           <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h2 className="text-lg font-semibold mb-1">
+                <h2 className="text-lg font-semibold mb-1 text-white">
                   Comments – Q{commentsOpenFor.quarter}
                 </h2>
                 <p className="text-sm text-gray-300">
@@ -615,7 +615,7 @@ export default function PicksClient() {
                 value={commentText}
                 onChange={handleCommentChange}
                 rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 placeholder="Add your comment…"
               />
               {commentsError && (
@@ -626,7 +626,7 @@ export default function PicksClient() {
                   type="button"
                   onClick={submitComment}
                   disabled={submittingComment || !commentText.trim()}
-                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
+                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600 text-white"
                 >
                   {submittingComment ? "Posting…" : "Post"}
                 </button>
@@ -649,7 +649,7 @@ export default function PicksClient() {
                       className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
                     >
                       <div className="flex justify-between mb-1">
-                        <span className="font-semibold">
+                        <span className="font-semibold text-white">
                           {c.displayName || "User"}
                         </span>
                         {c.createdAt && (
