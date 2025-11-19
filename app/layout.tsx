@@ -5,7 +5,7 @@ import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "STREAKr",
-  description: "AFL streak prediction game",
+  description: "STREAKr – AFL streak prediction game",
 };
 
 export default function RootLayout({
@@ -16,13 +16,14 @@ export default function RootLayout({
   return (
     <html lang="en" className="bg-black">
       <body className="min-h-screen bg-black text-white antialiased">
-        {/* NAVIGATION BAR */}
+        {/* GLOBAL NAVBAR */}
         <header className="w-full border-b border-white/10 bg-black">
           <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-            {/* LEFT LOGO */}
+            {/* LEFT: LOGO */}
             <Link href="/" className="flex items-center gap-2">
+              {/* Uses /public/streakrlogo.jpg */}
               <img
-                src="/streakrlogo1.jpg"
+                src="/streakrlogo.jpg"
                 alt="STREAKr"
                 className="h-6 w-auto"
               />
@@ -31,7 +32,7 @@ export default function RootLayout({
               </span>
             </Link>
 
-            {/* LINKS */}
+            {/* RIGHT: NAV LINKS + AVATAR */}
             <div className="flex items-center gap-6 text-sm">
               <Link href="/picks" className="hover:text-orange-400">
                 Picks
@@ -49,17 +50,22 @@ export default function RootLayout({
                 FAQ
               </Link>
 
-              <Link
-                href="/profile"
-                className="rounded-full bg-slate-800 px-3 py-1 text-xs hover:bg-slate-700"
-              >
-                Player
+              <Link href="/profile" className="flex items-center gap-2">
+                {/* Uses /public/default-avatar.png */}
+                <img
+                  src="/default-avatar.png"
+                  alt="Player avatar"
+                  className="h-6 w-6 rounded-full border border-slate-700"
+                />
+                <span className="text-xs">Player</span>
               </Link>
             </div>
           </nav>
         </header>
 
         {/* PAGE CONTENT */}
+        {/* If you had extra providers (AuthProvider, Toaster, etc.),
+            wrap <main> or {children} with them here. */}
         <main className="w-full bg-black">{children}</main>
       </body>
     </html>
