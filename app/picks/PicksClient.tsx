@@ -69,7 +69,7 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // 🔵 Single active streak pick
+  // 🔵 Single active streak pick (questionId + outcome)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
 
@@ -84,6 +84,31 @@ export default function PicksClient() {
 
   // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // -------- Hydrate streak pick from localStorage on first mount --------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as {
+        questionId?: string;
+        outcome?: "yes" | "no";
+      };
+
+      if (
+        parsed.questionId &&
+        (parsed.outcome === "yes" || parsed.outcome === "no")
+      ) {
+        setActiveQuestionId(parsed.questionId);
+        setActiveOutcome(parsed.outcome);
+      }
+    } catch (e) {
+      console.error("Failed to hydrate streak pick from localStorage", e);
+    }
+  }, []);
 
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
@@ -138,15 +163,6 @@ export default function PicksClient() {
           }))
         );
 
-        // If API already returns a userPick, use that to hydrate active streak
-        const firstWithPick = flat.find(
-          (r) => r.userPick === "yes" || r.userPick === "no"
-        );
-        if (firstWithPick && !activeQuestionId && !activeOutcome) {
-          setActiveQuestionId(firstWithPick.id);
-          setActiveOutcome(firstWithPick.userPick ?? null);
-        }
-
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
       } catch (e) {
@@ -158,26 +174,19 @@ export default function PicksClient() {
     };
 
     load();
-    // we intentionally don't include activeQuestionId/Outcome as deps
-    // to avoid resetting when they change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // -------- Load existing streak pick for this user (server) --------
+  // -------- Load existing streak pick for this user (from backend) --------
   useEffect(() => {
     const loadUserPick = async () => {
-      if (!user) {
-        setActiveQuestionId(null);
-        setActiveOutcome(null);
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(LOCAL_STORAGE_KEY);
-        }
-        return;
-      }
+      if (!user) return; // don't clear anything here
 
       try {
         const res = await fetch("/api/user-picks", { method: "GET" });
-        if (!res.ok) return; // fine if nothing yet
+        if (!res.ok) {
+          console.warn("user-picks GET not ok:", res.status);
+          return;
+        }
 
         const data = await res.json();
         if (
@@ -187,7 +196,7 @@ export default function PicksClient() {
           setActiveQuestionId(data.questionId);
           setActiveOutcome(data.outcome);
 
-          // sync to localStorage as well
+          // sync to localStorage for SPA navigation persistence
           if (typeof window !== "undefined") {
             window.localStorage.setItem(
               LOCAL_STORAGE_KEY,
@@ -206,30 +215,6 @@ export default function PicksClient() {
     loadUserPick();
   }, [user]);
 
-  // -------- Hydrate streak pick from localStorage (fallback) --------
-  useEffect(() => {
-    if (!user) return;
-    if (activeQuestionId || activeOutcome) return;
-    if (typeof window === "undefined") return;
-
-    try {
-      const raw = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as {
-        questionId?: string;
-        outcome?: "yes" | "no";
-      };
-
-      if (parsed.questionId && (parsed.outcome === "yes" || parsed.outcome === "no")) {
-        setActiveQuestionId(parsed.questionId);
-        setActiveOutcome(parsed.outcome);
-      }
-    } catch (e) {
-      console.error("Failed to hydrate streak pick from localStorage", e);
-    }
-  }, [user, activeQuestionId, activeOutcome]);
-
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
@@ -247,7 +232,7 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
-  // -------- Save Pick via /api/user-picks (optimistic UI) --------
+  // -------- Save Pick via /api/user-picks (optimistic UI + localStorage) --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     // Not logged in → show auth modal instead of saving
     if (!user) {
@@ -255,7 +240,7 @@ export default function PicksClient() {
       return;
     }
 
-    // ❌ Only open questions can be updated (i.e. before quarter starts)
+    // Only open questions can be updated (i.e. before quarter starts)
     if (row.status !== "open") return;
 
     // 🔵 OPTIMISTIC UPDATE: update UI immediately
@@ -273,7 +258,7 @@ export default function PicksClient() {
       )
     );
 
-    // Persist to localStorage
+    // Persist to localStorage for SPA navigation
     if (typeof window !== "undefined") {
       window.localStorage.setItem(
         LOCAL_STORAGE_KEY,
