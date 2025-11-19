@@ -14,12 +14,25 @@ type LeaderboardEntry = {
   longestStreak: number;
 };
 
+type PicksApiResponse = {
+  games: any[];
+  roundNumber?: number;
+};
+
+type RoundFilter = "overall" | "OR" | "finals" | number;
+
 export default function LeaderboardClient() {
   const { user } = useAuth();
 
   const [players, setPlayers] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Round selection
+  const [selectedRound, setSelectedRound] = useState<RoundFilter>("overall");
+  const [currentRoundNumber, setCurrentRoundNumber] = useState<number | null>(
+    null
+  );
 
   // Load users from Firestore ordered by longest streak
   useEffect(() => {
@@ -61,6 +74,26 @@ export default function LeaderboardClient() {
     load();
   }, []);
 
+  // Load current round from /api/picks so we can default the selector
+  useEffect(() => {
+    const loadCurrentRound = async () => {
+      try {
+        const res = await fetch("/api/picks");
+        if (!res.ok) return;
+
+        const data: PicksApiResponse = await res.json();
+        if (typeof data.roundNumber === "number") {
+          setCurrentRoundNumber(data.roundNumber);
+          setSelectedRound(data.roundNumber);
+        }
+      } catch (err) {
+        console.error("Failed to load current round for leaderboard", err);
+      }
+    };
+
+    loadCurrentRound();
+  }, []);
+
   const sortedPlayers = useMemo(() => {
     // Firestore already orders by longestStreak desc, but we
     // defensively sort again in case data changes later.
@@ -70,6 +103,54 @@ export default function LeaderboardClient() {
   }, [players]);
 
   const currentUserUid = user?.uid || null;
+
+  // Heading & subtitle change depending on selected round
+  const headingLabel = (() => {
+    if (selectedRound === "overall") return "Global longest streak";
+    if (selectedRound === "OR") return "Opening Round leaderboard";
+    if (selectedRound === "finals") return "Finals leaderboard";
+    return `Round ${selectedRound} leaderboard`;
+  })();
+
+  const subtitleText = (() => {
+    if (selectedRound === "overall") {
+      return `Showing top ${Math.min(
+        sortedPlayers.length,
+        50
+      )} players (overall season stats).`;
+    }
+    if (selectedRound === "OR") {
+      return `Showing top ${Math.min(
+        sortedPlayers.length,
+        50
+      )} players for Opening Round. Streak numbers currently reflect season totals while we wire round-specific stats.`;
+    }
+    if (selectedRound === "finals") {
+      return `Showing top ${Math.min(
+        sortedPlayers.length,
+        50
+      )} players for Finals (all 5 weeks combined). Streak numbers currently reflect season totals while we wire finals-specific stats.`;
+    }
+    return `Showing top ${Math.min(
+      sortedPlayers.length,
+      50
+    )} players for Round ${selectedRound}. Streak numbers currently reflect season totals while we wire round-based stats.`;
+  })();
+
+  const roundSelectValue =
+    selectedRound === "overall" || selectedRound === "OR" || selectedRound === "finals"
+      ? selectedRound
+      : String(selectedRound);
+
+  const handleRoundChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === "overall" || value === "OR" || value === "finals") {
+      setSelectedRound(value);
+    } else {
+      const n = Number(value);
+      if (!Number.isNaN(n)) setSelectedRound(n);
+    }
+  };
 
   if (loading) {
     return (
@@ -97,13 +178,53 @@ export default function LeaderboardClient() {
 
   return (
     <div className="mt-4 bg-black/30 border border-white/10 rounded-2xl overflow-hidden">
-      {/* Header row */}
-      <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-        <div className="text-sm font-semibold text-orange-300">
-          Global longest streak
+      {/* Header row with round selector */}
+      <div className="px-4 py-3 border-b border-white/10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-orange-300">
+            {headingLabel}
+          </div>
+          {currentRoundNumber !== null && (
+            <div className="text-[11px] text-gray-400 mt-1">
+              Current round:{" "}
+              <span className="font-semibold text-orange-400">
+                Round {currentRoundNumber}
+              </span>
+            </div>
+          )}
+          <div className="text-[11px] text-gray-400 mt-1">
+            {subtitleText}
+          </div>
         </div>
-        <div className="text-[11px] text-gray-400">
-          Showing top {Math.min(sortedPlayers.length, 50)}
+
+        <div className="flex flex-col items-start sm:items-end gap-2">
+          <div className="text-[11px] text-gray-400">
+            Showing top {Math.min(sortedPlayers.length, 50)}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-gray-400 uppercase tracking-wide">
+              View by
+            </span>
+            <select
+              value={roundSelectValue}
+              onChange={handleRoundChange}
+              className="text-xs bg-black/40 border border-white/20 rounded-full px-3 py-1.5 text-white focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+            >
+              <option value="overall">Overall (Season 2026)</option>
+              <option value="OR">Opening Round (OR)</option>
+              {Array.from({ length: 23 }).map((_, i) => {
+                const r = i + 1;
+                const isCurrent = currentRoundNumber === r;
+                return (
+                  <option key={r} value={String(r)}>
+                    {isCurrent ? `Round ${r} (Current)` : `Round ${r}`}
+                  </option>
+                );
+              })}
+              <option value="finals">Finals (All 5 weeks)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -126,7 +247,7 @@ export default function LeaderboardClient() {
             <div
               key={p.uid}
               className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-[40px,minmax(0,2fr),minmax(0,1.4fr),110px,110px] sm:items-center ${
-                isCurrentUser ? "bg-white/5" : "bg-black/10"
+                isCurrentUser ? "bg:white/5" : "bg-black/10"
               } hover:bg-white/8 transition`}
             >
               {/* Rank */}
@@ -200,8 +321,10 @@ export default function LeaderboardClient() {
 
       {/* Footer note */}
       <div className="px-4 py-3 border-t border-white/10 text-[11px] text-gray-400">
-        This is a visual preview. As players build streaks, these stats will
-        update from live data.
+        Opening Round (OR), Rounds 1–23 and Finals (all 5 weeks combined) are
+        now selectable. As we wire settlement, this view will show true
+        per-round and finals ladders – for now, streak numbers reflect season
+        totals.
       </div>
     </div>
   );
