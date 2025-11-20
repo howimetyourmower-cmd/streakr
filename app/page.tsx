@@ -337,7 +337,7 @@ export default function HomePage() {
         </section>
 
         {/* HOW IT WORKS */}
-        <section>
+        <section className="mb-10">
           <h2 className="text-xl sm:text-2xl font-bold mb-4">
             How STREAKr works
           </h2>
@@ -375,6 +375,71 @@ export default function HomePage() {
             </div>
           </div>
         </section>
+
+        {/* SOCIAL + FOOTER */}
+        <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
+          {/* Social bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <p className="text-xs sm:text-sm text-white/60 uppercase tracking-wide">
+              Follow STREAKr
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {/* Instagram */}
+              <a
+                href="https://instagram.com/streakr"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white shadow-[0_0_18px_rgba(221,42,123,0.7)] hover:brightness-110 transition"
+              >
+                Instagram
+              </a>
+
+              {/* TikTok */}
+              <a
+                href="https://www.tiktok.com/@streakr"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold bg-[#010101] text-white border border-white/20 shadow-[0_0_18px_rgba(45,212,191,0.7)] hover:border-cyan-300 transition"
+              >
+                TikTok
+              </a>
+
+              {/* Facebook */}
+              <a
+                href="https://facebook.com/streakr"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold bg-[#1877F2] text-white shadow-[0_0_18px_rgba(24,119,242,0.7)] hover:brightness-110 transition"
+              >
+                Facebook
+              </a>
+
+              {/* YouTube */}
+              <a
+                href="https://www.youtube.com/@streakr"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center rounded-full px-3 py-1.5 text-xs font-semibold bg-[#FF0000] text-white shadow-[0_0_18px_rgba(239,68,68,0.8)] hover:brightness-110 transition"
+              >
+                YouTube
+              </a>
+            </div>
+          </div>
+
+          {/* Legal line / FAQ link */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
+            <p>
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes
+              subject to terms and conditions.
+            </p>
+            <Link
+              href="/faq"
+              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+            >
+              FAQ
+            </Link>
+          </div>
+        </footer>
       </div>
 
       {/* AUTH REQUIRED MODAL (same style as PicksClient) */}
@@ -406,7 +471,7 @@ export default function HomePage() {
                 Login
               </Link>
 
-            <Link
+              <Link
                 href="/auth?mode=signup&returnTo=/picks"
                 className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
                 onClick={() => setShowAuthModal(false)}
