@@ -384,8 +384,9 @@ export default function FAQPage() {
             </section>
           </div>
 
-          {/* RIGHT – CONTACT CARD */}
+          {/* RIGHT – CONTACT + SPONSOR */}
           <aside className="space-y-4 md:space-y-6">
+            {/* Intro box */}
             <div className="rounded-2xl border border-orange-500/50 bg-gradient-to-br from-orange-500/20 via-zinc-900 to-zinc-950 p-5 md:p-6 shadow-[0_0_40px_rgba(248,113,113,0.35)]">
               <h2 className="text-lg font-semibold md:text-xl">
                 Still need help?
@@ -400,6 +401,7 @@ export default function FAQPage() {
               </p>
             </div>
 
+            {/* Contact form */}
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-5 md:p-6 shadow-[0_0_40px_rgba(0,0,0,0.7)]">
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -444,7 +446,9 @@ export default function FAQPage() {
                     <option value="account">Account or login issue</option>
                     <option value="prizes">Prizes &amp; rewards</option>
                     <option value="bugs">Bug or technical issue</option>
-                    <option value="sponsorship">Sponsorship / partnership</option>
+                    <option value="sponsorship">
+                      Sponsorship / partnership
+                    </option>
                     <option value="other">Something else</option>
                   </select>
                 </div>
@@ -486,6 +490,58 @@ export default function FAQPage() {
                   </p>
                 </div>
               </form>
+            </div>
+
+            {/* BLUE SPONSOR BANNER – similar vibe to Sportsbet */}
+            <div className="rounded-2xl bg-gradient-to-r from-sky-700 via-sky-500 to-sky-600 p-[1px] shadow-[0_0_40px_rgba(56,189,248,0.35)]">
+              <div className="flex flex-col gap-4 rounded-2xl bg-sky-600/90 px-4 py-4 md:flex-row md:items-center md:px-6 md:py-5">
+                {/* Text side */}
+                <div className="flex-1">
+                  <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-yellow-400 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-900">
+                    <span className="h-1.5 w-1.5 rounded-full bg-sky-900" />
+                    Official partner
+                  </div>
+                  <h3 className="mt-2 text-xl font-extrabold leading-tight text-white md:text-2xl">
+                    Boost the banter,
+                    <span className="block text-yellow-300">
+                      power up your streak nights.
+                    </span>
+                  </h3>
+                  <p className="mt-2 max-w-md text-xs text-sky-100 md:text-sm">
+                    Our featured partner helps bring more stats, more prizes and
+                    more fun match-day moments to STREAKr players all season
+                    long.
+                  </p>
+
+                  <button className="mt-3 inline-flex items-center rounded-full bg-yellow-300 px-4 py-2 text-xs font-semibold text-sky-900 transition hover:bg-yellow-200 md:text-sm">
+                    Learn more about our partner
+                  </button>
+                </div>
+
+                {/* Right: mock image / phone area */}
+                <div className="flex items-center justify-center md:w-40">
+                  <div className="relative h-28 w-20 rotate-2 rounded-2xl bg-white/95 shadow-[0_10px_25px_rgba(15,23,42,0.5)]">
+                    <div className="absolute inset-1 rounded-xl bg-sky-50/90 p-1 text-[8px] text-sky-900">
+                      <div className="mb-1 flex items-center justify-between text-[7px] font-semibold">
+                        <span>Tonight</span>
+                        <span className="rounded-full bg-sky-600 px-1 py-[1px] text-[7px] text-white">
+                          LIVE
+                        </span>
+                      </div>
+                      <div className="h-[52px] rounded-md bg-gradient-to-br from-sky-200 to-sky-50" />
+                      <div className="mt-1 space-y-[2px]">
+                        <div className="flex items-center justify-between text-[7px]">
+                          <span className="font-semibold">Streak pick</span>
+                          <span className="text-green-600 font-bold">✔</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-sky-200">
+                          <div className="h-1.5 w-2/3 rounded-full bg-sky-500" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </aside>
         </div>
