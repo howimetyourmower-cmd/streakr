@@ -18,7 +18,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-black text-white antialiased">
 
         {/* NAVIGATION */}
-        <Navbar />
+        <NavBar />
 
         {/* PAGE CONTENT */}
         <main className="bg-black w-full">{children}</main>
