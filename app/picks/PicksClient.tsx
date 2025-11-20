@@ -3,6 +3,8 @@
 import { useEffect, useState, ChangeEvent } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -149,6 +151,55 @@ export default function PicksClient() {
     load();
   }, []);
 
+  // -------- Live comment counts from Firestore --------
+  useEffect(() => {
+    if (!rows.length) return;
+
+    const chunkArray = (arr: string[], size: number): string[][] => {
+      const chunks: string[][] = [];
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
+      return chunks;
+    };
+
+    const questionIds = rows.map((r) => r.id);
+    const chunks = chunkArray(questionIds, 10);
+
+    const unsubs = chunks.map((ids) => {
+      const commentsRef = collection(db, "comments"); // adjust name if different
+      const q = query(commentsRef, where("questionId", "in", ids));
+
+      return onSnapshot(q, (snapshot) => {
+        const counts: Record<string, number> = {};
+
+        snapshot.forEach((doc) => {
+          const data = doc.data() as any;
+          const qid = data.questionId as string;
+          counts[qid] = (counts[qid] ?? 0) + 1;
+        });
+
+        setRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            commentCount: counts[r.id] ?? 0,
+          }))
+        );
+
+        setFilteredRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            commentCount: counts[r.id] ?? 0,
+          }))
+        );
+      });
+    });
+
+    return () => {
+      unsubs.forEach((unsub) => unsub());
+    };
+  }, [rows.length]);
+
   // -------- Load existing streak pick for this user (persistence) --------
   useEffect(() => {
     const loadUserPick = async () => {
@@ -277,18 +328,7 @@ export default function PicksClient() {
       }));
 
       setComments(list);
-
-      // Update commentCount for this row based on fetched comments
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, commentCount: list.length } : r
-        )
-      );
-      setFilteredRows((prev) =>
-        prev.map((r) =>
-          r.id === row.id ? { ...r, commentCount: list.length } : r
-        )
-      );
+      // no manual commentCount update here – Firestore listener handles it
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
@@ -334,21 +374,7 @@ export default function PicksClient() {
       setComments((prev) => [newComment, ...prev]);
       setCommentText("");
 
-      // Increment commentCount for this row
-      setRows((prev) =>
-        prev.map((r) =>
-          r.id === commentsOpenFor.id
-            ? { ...r, commentCount: (r.commentCount ?? 0) + 1 }
-            : r
-        )
-      );
-      setFilteredRows((prev) =>
-        prev.map((r) =>
-          r.id === commentsOpenFor.id
-            ? { ...r, commentCount: (r.commentCount ?? 0) + 1 }
-            : r
-        )
-      );
+      // no manual commentCount increment – Firestore listener will update
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to post comment");
