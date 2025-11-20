@@ -5,7 +5,7 @@ import NavBar from "./components/NavBar";
 
 export const metadata: Metadata = {
   title: "STREAKr",
-  description: "STREAKr – AFL streak prediction game",
+  description: "STREAKr – Streak prediction game",
 };
 
 export default function RootLayout({
