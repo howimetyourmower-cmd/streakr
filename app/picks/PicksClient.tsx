@@ -458,7 +458,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* Q# */}
+                {/* QUARTER */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   Q{row.quarter}
                 </div>
