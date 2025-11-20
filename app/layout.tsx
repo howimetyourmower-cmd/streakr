@@ -1,7 +1,7 @@
 // app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
-import NavBar from "./components/NavBar";
+import Navbar from "./components/Navbar";
 
 export const metadata: Metadata = {
   title: "STREAKr",
@@ -16,11 +16,13 @@ export default function RootLayout({
   return (
     <html lang="en" className="bg-black">
       <body className="min-h-screen bg-black text-white antialiased">
-        {/* GLOBAL NAVBAR */}
-        <NavBar />
+
+        {/* NAVIGATION */}
+        <Navbar />
 
         {/* PAGE CONTENT */}
-        <main className="w-full bg-black">{children}</main>
+        <main className="bg-black w-full">{children}</main>
+
       </body>
     </html>
   );
