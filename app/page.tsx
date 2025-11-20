@@ -216,11 +216,7 @@ export default function HomePage() {
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
-                  <p className="text-xs text-white/70 mb-1">Featured venue</p>
-                  <p className="text-sm sm:text-base font-semibold">
-                    MCG, Melbourne
-                  </p>
-                  <p className="text-[11px] text-white/60">
+                                   <p className="text-[11px] text-white/60">
                     Live streaks in every game.
                   </p>
                 </div>
