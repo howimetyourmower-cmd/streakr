@@ -173,7 +173,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Make you Pick, build your longest streak, and
+              Pick one AFL moment at a time, build your longest streak, and
               climb the ladder. One wrong call and it&apos;s back to zero.
             </p>
 
@@ -185,7 +185,7 @@ export default function HomePage() {
                 </span>
               </div>
               <span className="hidden sm:inline text-[11px] text-white/60">
-                Free to play 
+                Free to play • 18+ • No gambling
               </span>
             </div>
 
@@ -207,7 +207,7 @@ export default function HomePage() {
 
             <p className="text-[11px] text-white/50">
               *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
-              gambling. 16+ only.
+              gambling. 18+ only.
             </p>
           </div>
 
@@ -300,11 +300,6 @@ export default function HomePage() {
                       <div className="text-sm sm:text-base font-semibold">
                         {q.question}
                       </div>
-                     
-                          Picks
-                        </Link>{" "}
-                        page.
-                      </p>
                     </div>
 
                     {/* Right: YES / NO buttons (match Picks page style, no glow) */}
