@@ -101,7 +101,6 @@ export default function PicksClient() {
       }),
     };
   };
-"use client";
 
 import { useEffect, useState, ChangeEvent } from "react";
 import Link from "next/link";
