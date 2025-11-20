@@ -31,8 +31,6 @@ export default function FAQPage() {
 
     setSubmitting(true);
 
-    // For now we just simulate success.
-    // Later you can hook this up to an /api/contact endpoint or a tool like Formspree.
     setTimeout(() => {
       setSubmitting(false);
       setSuccess(
@@ -46,367 +44,451 @@ export default function FAQPage() {
   };
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <section className="max-w-5xl mx-auto px-4 py-8 md:py-10">
-        {/* Header */}
-        <header className="mb-8 md:mb-10">
-          <h1 className="text-3xl md:text-4xl font-extrabold mb-3 tracking-tight">
-            Frequently asked questions
-          </h1>
-          <p className="text-white/70 max-w-2xl text-sm md:text-base">
-            New to STREAK<span className="text-orange-500">r</span>? Start
-            here. If you can&apos;t find what you&apos;re looking for, send us a
-            message using the contact form at the bottom of this page.
-          </p>
+    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-zinc-50">
+      <section className="mx-auto max-w-6xl px-4 pb-16 pt-10 md:pb-24 md:pt-16">
+        {/* HERO */}
+        <header className="mb-10 md:mb-14">
+          <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-300">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-500 opacity-70" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-400" />
+            </span>
+            Help centre
+          </div>
+
+          <div className="mt-4 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl lg:text-5xl">
+                Frequently asked questions
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm text-zinc-300 md:text-base">
+                New to STREAK<span className="text-orange-500">r</span>? Start
+                here. If you can&apos;t find what you&apos;re looking for, hit
+                us up using the contact form at the bottom of the page.
+              </p>
+            </div>
+
+            {/* Quick nav */}
+            <nav className="flex flex-wrap gap-2 text-[11px] md:text-xs">
+              {[
+                { href: "#getting-started", label: "Getting started" },
+                { href: "#picks", label: "Picks & streak rules" },
+                { href: "#prizes", label: "Prizes & rewards" },
+                { href: "#leagues", label: "Private leagues" },
+                { href: "#accounts", label: "Accounts & security" },
+              ].map((item) => (
+                <a
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-full border border-zinc-700/80 bg-zinc-900/70 px-3 py-1 font-medium text-zinc-200 transition hover:border-orange-500 hover:text-orange-300"
+                >
+                  {item.label}
+                </a>
+              ))}
+            </nav>
+          </div>
         </header>
 
-        {/* FAQ sections */}
-        <div className="space-y-8 md:space-y-10 mb-10 md:mb-14">
-          {/* Getting started */}
-          <section>
-            <h2 className="text-xl md:text-2xl font-bold mb-3">
-              Getting started
-            </h2>
-            <div className="space-y-4 text-sm md:text-base text-white/80">
-              <div>
-                <h3 className="font-semibold text-white">
-                  How do I create a STREAKr account?
-                </h3>
-                <p className="text-white/70">
-                  Click <span className="font-semibold">Player</span> in the top
-                  navigation, then choose{" "}
-                  <span className="font-semibold">Sign up</span>. You&apos;ll
-                  need a valid email address, a password and a username.
-                  We&apos;ll send you a verification email so we know you&apos;re
-                  real.
+        <div className="grid gap-10 md:grid-cols-[minmax(0,3fr)_minmax(260px,2fr)] md:gap-12">
+          {/* LEFT – FAQ CONTENT */}
+          <div className="space-y-8 md:space-y-10">
+            {/* Getting started */}
+            <section
+              id="getting-started"
+              className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/70 shadow-[0_0_40px_rgba(0,0,0,0.6)]"
+            >
+              <div className="border-b border-zinc-800/80 bg-gradient-to-r from-orange-500/15 via-transparent to-transparent px-5 py-4 md:px-6">
+                <h2 className="text-lg font-semibold md:text-xl">
+                  Getting started
+                </h2>
+                <p className="mt-1 text-xs text-zinc-400 md:text-sm">
+                  The basics of creating an account and jumping into your first
+                  streak.
                 </p>
               </div>
+              <div className="space-y-5 px-5 py-5 text-sm text-zinc-200 md:px-6 md:py-6 md:text-base">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How do I create a STREAKr account?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Click <span className="font-semibold">Player</span> in the
+                    top navigation, then choose{" "}
+                    <span className="font-semibold">Sign up</span>. You&apos;ll
+                    need a valid email address, a password and a username.
+                    We&apos;ll send you a verification email so we know
+                    you&apos;re real.
+                  </p>
+                </div>
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  Is STREAKr free to play?
-                </h3>
-                <p className="text-white/70">
-                  Yes. STREAKr is a{" "}
-                  <span className="font-semibold">free game of skill</span>.
-                  There are no entry fees and no betting. We may award prizes to
-                  top streaks as advertised on the Rewards page.
-                </p>
-              </div>
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    Is STREAKr free to play?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Yes. STREAKr is a{" "}
+                    <span className="font-semibold">free game of skill</span>.
+                    There are no entry fees and no betting. We may award prizes
+                    to top streaks as advertised on the Rewards page.
+                  </p>
+                </div>
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  Is there an age restriction?
-                </h3>
-                <p className="text-white/70">
-                  STREAKr is for{" "}
-                  <span className="font-semibold">18+ only</span>. By creating
-                  an account you confirm you are at least 18 years old.
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    Is there an age restriction?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    STREAKr is for{" "}
+                    <span className="font-semibold">18+ only</span>. By creating
+                    an account you confirm you are at least 18 years old.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Picks & streak rules */}
+            <section
+              id="picks"
+              className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/70 shadow-[0_0_40px_rgba(0,0,0,0.6)]"
+            >
+              <div className="border-b border-zinc-800/80 bg-gradient-to-r from-sky-500/15 via-transparent to-transparent px-5 py-4 md:px-6">
+                <h2 className="text-lg font-semibold md:text-xl">
+                  Picks &amp; streak rules
+                </h2>
+                <p className="mt-1 text-xs text-zinc-400 md:text-sm">
+                  How questions work, what a streak pick is and when things
+                  lock.
                 </p>
               </div>
+              <div className="space-y-5 px-5 py-5 text-sm text-zinc-200 md:px-6 md:py-6 md:text-base">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How do the questions work?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Each question is a{" "}
+                    <span className="font-semibold">Yes / No prediction</span>{" "}
+                    about a real AFL event – for example a player stat or a
+                    match outcome in a specific quarter.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    What is a &quot;streak pick&quot;?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    At any time you can have{" "}
+                    <span className="font-semibold">
+                      exactly one active question
+                    </span>{" "}
+                    as your streak pick. On the Picks page you&apos;ll see a
+                    highlight showing &quot;Your streak pick&quot; on the
+                    question currently counting towards your streak.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    Can I change my pick?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Yes – you can change your streak pick as many times as you
+                    like <span className="font-semibold">until that question
+                    locks</span>. When you switch to another question in the
+                    same game, your previous one is no longer active and goes
+                    back to 0% / 0% for your personal pick stats.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    When do questions lock?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Questions lock shortly before the relevant bounce / quarter
+                    starts. Once locked, you can&apos;t change that pick. When
+                    the outcome is known, the admin team (or automated stats
+                    feed) settles the question as{" "}
+                    <span className="font-semibold">YES</span>,{" "}
+                    <span className="font-semibold">NO</span> or{" "}
+                    <span className="font-semibold">VOID</span>.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How is my streak calculated?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Every time your active streak pick settles as{" "}
+                    <span className="font-semibold">correct</span>, your streak
+                    increases by 1. A single incorrect streak pick resets your
+                    streak back to 0. Void questions do not affect your streak.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Prizes & rewards */}
+            <section
+              id="prizes"
+              className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/70 shadow-[0_0_40px_rgba(0,0,0,0.6)]"
+            >
+              <div className="border-b border-zinc-800/80 bg-gradient-to-r from-emerald-500/15 via-transparent to-transparent px-5 py-4 md:px-6">
+                <h2 className="text-lg font-semibold md:text-xl">
+                  Prizes &amp; rewards
+                </h2>
+                <p className="mt-1 text-xs text-zinc-400 md:text-sm">
+                  What you can win and how we decide the legends.
+                </p>
+              </div>
+              <div className="space-y-5 px-5 py-5 text-sm text-zinc-200 md:px-6 md:py-6 md:text-base">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    What can I win on STREAKr?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Prize details are listed on the{" "}
+                    <span className="font-semibold">Rewards</span> page. For
+                    example, we may advertise a cash or voucher prize pool for
+                    the best streaks in a given round.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How are winners decided?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    At the end of a round, we look at the{" "}
+                    <span className="font-semibold">
+                      longest active streaks
+                    </span>
+                    . Ties and any special sponsor promotions will be handled as
+                    described on the Rewards page and in the game rules.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    What is a sponsored question?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    From time to time you may see a question marked as a{" "}
+                    <span className="font-semibold">sponsor question</span>. If
+                    you select that as your streak pick and it lands correct,
+                    you may go into a separate draw (e.g. a gift card or promo
+                    prize) as advertised on the question and Rewards page.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Private leagues */}
+            <section
+              id="leagues"
+              className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/70 shadow-[0_0_40px_rgba(0,0,0,0.6)]"
+            >
+              <div className="border-b border-zinc-800/80 bg-gradient-to-r from-purple-500/20 via-transparent to-transparent px-5 py-4 md:px-6">
+                <h2 className="text-lg font-semibold md:text-xl">
+                  Private leagues
+                </h2>
+                <p className="mt-1 text-xs text-zinc-400 md:text-sm">
+                  Play with your crew on your own ladder (and still climb the
+                  global one).
+                </p>
+              </div>
+              <div className="space-y-5 px-5 py-5 text-sm text-zinc-200 md:px-6 md:py-6 md:text-base">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    What is a private league?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Private leagues let you play STREAKr with your mates, work
+                    crew or fantasy league on your own ladder. Your streak still
+                    counts towards the global leaderboard at the same time.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How do I create or join a league?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Go to the <span className="font-semibold">Leagues</span>{" "}
+                    page. Create a league to become the League Manager and share
+                    the invite code. If you have a code from a mate, use the{" "}
+                    <span className="font-semibold">Join with a code</span>{" "}
+                    option.
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            {/* Accounts & security */}
+            <section
+              id="accounts"
+              className="overflow-hidden rounded-2xl border border-zinc-800/80 bg-zinc-950/70 shadow-[0_0_40px_rgba(0,0,0,0.6)]"
+            >
+              <div className="border-b border-zinc-800/80 bg-gradient-to-r from-zinc-500/30 via-transparent to-transparent px-5 py-4 md:px-6">
+                <h2 className="text-lg font-semibold md:text-xl">
+                  Accounts, email &amp; security
+                </h2>
+                <p className="mt-1 text-xs text-zinc-400 md:text-sm">
+                  Keeping your account, password and emails under control.
+                </p>
+              </div>
+              <div className="space-y-5 px-5 py-5 text-sm text-zinc-200 md:px-6 md:py-6 md:text-base">
+                <div>
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    I didn&apos;t receive my verification email.
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Check your{" "}
+                    <span className="font-semibold">
+                      spam / junk / promotions
+                    </span>{" "}
+                    folder and search for STREAKr. You can also log in and
+                    request a new verification email from the Player area. To
+                    help avoid spam filtering, add our from-address to your
+                    contacts and mark the email as &quot;Not spam&quot;.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How do I reset my password?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    On the Log in tab, click{" "}
+                    <span className="font-semibold">Forgot password</span> and
+                    follow the instructions. We&apos;ll send a reset link to
+                    your registered email.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    How do I update my profile details?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    Go to the <span className="font-semibold">Player</span> page
+                    while logged in. From there you can update your suburb,
+                    state, favourite team, avatar and more. Some fields like
+                    username, date of birth and email are locked for security
+                    reasons.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* RIGHT – CONTACT CARD */}
+          <aside className="space-y-4 md:space-y-6">
+            <div className="rounded-2xl border border-orange-500/50 bg-gradient-to-br from-orange-500/20 via-zinc-900 to-zinc-950 p-5 md:p-6 shadow-[0_0_40px_rgba(248,113,113,0.35)]">
+              <h2 className="text-lg font-semibold md:text-xl">
+                Still need help?
+              </h2>
+              <p className="mt-2 text-sm text-zinc-100/80 md:text-[15px]">
+                Use the form below to send the STREAKr team a message about
+                account issues, feedback, bug reports or sponsorship enquiries.
+              </p>
+              <p className="mt-3 rounded-xl bg-black/40 px-3 py-2 text-xs text-orange-100/90">
+                Tip: include your browser, device and any error messages if
+                you&apos;re reporting a bug. It helps us squash it faster.
+              </p>
             </div>
-          </section>
 
-          {/* Picks & streak rules */}
-          <section>
-            <h2 className="text-xl md:text-2xl font-bold mb-3">
-              Picks &amp; streak rules
-            </h2>
-            <div className="space-y-4 text-sm md:text-base text-white/80">
-              <div>
-                <h3 className="font-semibold text-white">
-                  How do the questions work?
-                </h3>
-                <p className="text-white/70">
-                  Each question is a{" "}
-                  <span className="font-semibold">Yes / No prediction</span>{" "}
-                  about a real AFL event – for example a player stat or a match
-                  outcome in a specific quarter.
-                </p>
-              </div>
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-5 md:p-6 shadow-[0_0_40px_rgba(0,0,0,0.7)]">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                      Your name *
+                    </label>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
+                      placeholder="e.g. Glenn"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                      Your email *
+                    </label>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                </div>
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  What is a &quot;streak pick&quot;?
-                </h3>
-                <p className="text-white/70">
-                  At any time you can have{" "}
-                  <span className="font-semibold">
-                    exactly one active question
-                  </span>{" "}
-                  as your streak pick. On the Picks page you&apos;ll see a
-                  highlight showing &quot;Your streak pick&quot; on the
-                  question currently counting towards your streak.
-                </p>
-              </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    What&apos;s this about?
+                  </label>
+                  <select
+                    value={category}
+                    onChange={(e) =>
+                      setCategory(e.target.value as ContactCategory)
+                    }
+                    className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
+                  >
+                    <option value="general">General question / feedback</option>
+                    <option value="account">Account or login issue</option>
+                    <option value="prizes">Prizes &amp; rewards</option>
+                    <option value="bugs">Bug or technical issue</option>
+                    <option value="sponsorship">Sponsorship / partnership</option>
+                    <option value="other">Something else</option>
+                  </select>
+                </div>
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  Can I change my pick?
-                </h3>
-                <p className="text-white/70">
-                  Yes – you can change your streak pick as many times as you
-                  like <span className="font-semibold">until that question
-                  locks</span>. When you switch to another question in the same
-                  game, your previous one is no longer active and goes back to
-                  0% / 0% for your personal pick stats.
-                </p>
-              </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400">
+                    Your message *
+                  </label>
+                  <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    rows={5}
+                    className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
+                    placeholder="Tell us what’s happening, including any error messages or screenshots if relevant."
+                  />
+                </div>
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  When do questions lock?
-                </h3>
-                <p className="text-white/70">
-                  Questions lock shortly before the relevant bounce / quarter
-                  starts. Once locked, you can&apos;t change that pick. When the
-                  outcome is known, the admin team (or automated stats feed)
-                  settles the question as{" "}
-                  <span className="font-semibold">YES</span>,{" "}
-                  <span className="font-semibold">NO</span> or{" "}
-                  <span className="font-semibold">VOID</span>.
-                </p>
-              </div>
+                {error && (
+                  <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                    {error}
+                  </p>
+                )}
+                {success && (
+                  <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-300">
+                    {success}
+                  </p>
+                )}
 
-              <div>
-                <h3 className="font-semibold text-white">
-                  How is my streak calculated?
-                </h3>
-                <p className="text-white/70">
-                  Every time your active streak pick settles as{" "}
-                  <span className="font-semibold">correct</span>, your streak
-                  increases by 1. A single incorrect streak pick resets your
-                  streak back to 0. Void questions do not affect your streak.
-                </p>
-              </div>
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="inline-flex items-center justify-center rounded-full bg-orange-500 px-6 py-2.5 text-sm font-semibold text-black transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {submitting ? "Sending..." : "Send message"}
+                  </button>
+                  <p className="max-w-[220px] text-right text-[11px] text-zinc-500">
+                    We aim to respond as soon as possible during AFL season.
+                  </p>
+                </div>
+              </form>
             </div>
-          </section>
-
-          {/* Prizes & rewards */}
-          <section>
-            <h2 className="text-xl md:text-2xl font-bold mb-3">
-              Prizes &amp; rewards
-            </h2>
-            <div className="space-y-4 text-sm md:text-base text-white/80">
-              <div>
-                <h3 className="font-semibold text-white">
-                  What can I win on STREAKr?
-                </h3>
-                <p className="text-white/70">
-                  Prize details are listed on the{" "}
-                  <span className="font-semibold">Rewards</span> page. For
-                  example, we may advertise a cash or voucher prize pool for the
-                  best streaks in a given round.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-white">
-                  How are winners decided?
-                </h3>
-                <p className="text-white/70">
-                  At the end of a round, we look at the{" "}
-                  <span className="font-semibold">longest active streaks</span>.
-                  Ties and any special sponsor promotions will be handled as
-                  described on the Rewards page and in the game rules.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-white">
-                  What is a sponsored question?
-                </h3>
-                <p className="text-white/70">
-                  From time to time you may see a question marked as a{" "}
-                  <span className="font-semibold">sponsor question</span>. If
-                  you select that as your streak pick and it lands correct, you
-                  may go into a separate draw (e.g. a gift card or promo prize)
-                  as advertised on the question and Rewards page.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* Private leagues */}
-          <section>
-            <h2 className="text-xl md:text-2xl font-bold mb-3">
-              Private leagues
-            </h2>
-            <div className="space-y-4 text-sm md:text-base text-white/80">
-              <div>
-                <h3 className="font-semibold text-white">
-                  What is a private league?
-                </h3>
-                <p className="text-white/70">
-                  Private leagues let you play STREAKr with your mates, work
-                  crew or fantasy league on your own ladder. Your streak still
-                  counts towards the global leaderboard at the same time.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-white">
-                  How do I create or join a league?
-                </h3>
-                <p className="text-white/70">
-                  Go to the <span className="font-semibold">Leagues</span> page.
-                  Create a league to become the League Manager and share the
-                  invite code. If you have a code from a mate, use the{" "}
-                  <span className="font-semibold">Join with a code</span> option.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          {/* Accounts & email */}
-          <section>
-            <h2 className="text-xl md:text-2xl font-bold mb-3">
-              Accounts, email &amp; security
-            </h2>
-            <div className="space-y-4 text-sm md:text-base text-white/80">
-              <div>
-                <h3 className="font-semibold text-white">
-                  I didn&apos;t receive my verification email.
-                </h3>
-                <p className="text-white/70">
-                  Check your{" "}
-                  <span className="font-semibold">
-                    spam / junk / promotions
-                  </span>{" "}
-                  folder and search for STREAKr. You can also log in and request
-                  a new verification email from the Player area. To help avoid
-                  spam filtering, add our from-address to your contacts and mark
-                  the email as &quot;Not spam&quot;.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-white">
-                  How do I reset my password?
-                </h3>
-                <p className="text-white/70">
-                  On the Log in tab, click{" "}
-                  <span className="font-semibold">Forgot password</span> and
-                  follow the instructions. We&apos;ll send a reset link to your
-                  registered email.
-                </p>
-              </div>
-
-              <div>
-                <h3 className="font-semibold text-white">
-                  How do I update my profile details?
-                </h3>
-                <p className="text-white/70">
-                  Go to the <span className="font-semibold">Player</span> page
-                  while logged in. From there you can update your suburb, state,
-                  favourite team, avatar and more. Some fields like username,
-                  date of birth and email are locked for security reasons.
-                </p>
-              </div>
-            </div>
-          </section>
+          </aside>
         </div>
-
-        {/* CONTACT US */}
-        <section className="mb-12 md:mb-16">
-          <div className="mb-4">
-            <h2 className="text-xl md:text-2xl font-bold mb-2">
-              Still need help? Contact us
-            </h2>
-            <p className="text-white/70 text-sm md:text-base max-w-2xl">
-              Use the form below to send the STREAKr team a message about
-              account issues, feedback, bug reports or sponsorship enquiries.
-            </p>
-          </div>
-
-          <div className="bg-black/80 border border-white/12 rounded-2xl p-5 md:p-6 max-w-3xl shadow-[0_0_40px_rgba(0,0,0,0.7)]">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-white/80 mb-1">
-                    Your name *
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full rounded-md bg-black border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                    placeholder="e.g. Glenn"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-white/80 mb-1">
-                    Your email *
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full rounded-md bg-black border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                    placeholder="you@example.com"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-white/80 mb-1">
-                  What&apos;s this about?
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) =>
-                    setCategory(e.target.value as ContactCategory)
-                  }
-                  className="w-full rounded-md bg-black border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                >
-                  <option value="general">General question / feedback</option>
-                  <option value="account">Account or login issue</option>
-                  <option value="prizes">Prizes &amp; rewards</option>
-                  <option value="bugs">Bug or technical issue</option>
-                  <option value="sponsorship">Sponsorship / partnership</option>
-                  <option value="other">Something else</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-white/80 mb-1">
-                  Your message *
-                </label>
-                <textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  rows={5}
-                  className="w-full rounded-md bg-black border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                  placeholder="Tell us what’s happening, including any error messages or screenshots if relevant."
-                />
-              </div>
-
-              {error && (
-                <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                  {error}
-                </p>
-              )}
-              {success && (
-                <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-                  {success}
-                </p>
-              )}
-
-              <div className="flex items-center justify-between gap-3">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-6 py-2.5 transition-colors disabled:opacity-60"
-                >
-                  {submitting ? "Sending..." : "Send message"}
-                </button>
-                <p className="text-[11px] text-white/60 max-w-xs text-right">
-                  We aim to respond as soon as possible during AFL season.
-                </p>
-              </div>
-            </form>
-          </div>
-        </section>
       </section>
     </main>
   );
