@@ -1,7 +1,7 @@
 // app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
-import HeaderNav from "@/app/components/HeaderNav";
+import NavBar from "./components/NavBar";
 
 export const metadata: Metadata = {
   title: "STREAKr",
