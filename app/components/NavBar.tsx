@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
-import { useAuth } from "@/hooks/useAuth";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { db, auth } from "@/lib/firebaseClient";
 
 type MinimalUserDoc = {
   avatarUrl?: string;
@@ -13,10 +13,17 @@ type MinimalUserDoc = {
 };
 
 export default function Navbar() {
-  const { user } = useAuth();
-
+  const [user, setUser] = useState<User | null>(null);
   const [profileDoc, setProfileDoc] = useState<MinimalUserDoc | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // 🔹 Keep local auth state in navbar
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+    });
+    return () => unsub();
+  }, []);
 
   // 🔹 Load avatar + username from Firestore users/{uid}
   useEffect(() => {
@@ -28,7 +35,10 @@ export default function Navbar() {
     const load = async () => {
       try {
         const snap = await getDoc(doc(db, "users", user.uid));
-        if (!snap.exists()) return;
+        if (!snap.exists()) {
+          setProfileDoc(null);
+          return;
+        }
         const data = snap.data() as any;
         setProfileDoc({
           avatarUrl: data.avatarUrl ?? "",
@@ -42,7 +52,7 @@ export default function Navbar() {
     load();
   }, [user]);
 
-  // Same avatar logic as ProfilePage
+  // Same avatar logic as Profile: Firestore avatar → auth photoURL → default
   const currentAvatarSrc = useMemo(() => {
     if (profileDoc?.avatarUrl) return profileDoc.avatarUrl;
     if (user?.photoURL) return user.photoURL;
@@ -57,7 +67,7 @@ export default function Navbar() {
   }, [profileDoc?.username, user?.displayName, user?.email]);
 
   const label =
-    profileDoc?.username || user?.displayName || "Player";
+    profileDoc?.username || user?.displayName || (user?.email ?? "Player");
 
   return (
     <header className="w-full border-b border-white/10 bg-black">
@@ -112,7 +122,9 @@ export default function Navbar() {
                 </span>
               )}
             </div>
-            <span className="text-xs">{label}</span>
+            <span className="text-xs truncate max-w-[120px]">
+              {label}
+            </span>
           </Link>
         </div>
 
@@ -166,7 +178,9 @@ export default function Navbar() {
                     <span className="text-xs">{avatarInitial}</span>
                   )}
                 </div>
-                <span className="text-xs">{label}</span>
+                <span className="text-xs truncate max-w-[120px]">
+                  {label}
+                </span>
               </div>
 
               <Link
