@@ -397,7 +397,7 @@ export default function PicksClient() {
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
         <div className="col-span-3">MATCH • VENUE</div>
-        <div className="col-span-1 text-center">Q#</div>
+        <div className="col-span-1 text-center">QUARTER#</div>
         <div className="col-span-2">QUESTION</div>
         <div className="col-span-2 text-right">PICK • YES% • NO%</div>
       </div>
