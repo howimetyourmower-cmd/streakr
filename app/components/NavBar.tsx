@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { db } from "@/lib/firebaseClient";
 import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
 type MinimalUserDoc = {
@@ -18,7 +18,7 @@ export default function Navbar() {
   const [profileDoc, setProfileDoc] = useState<MinimalUserDoc | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Load stored avatar + username
+  // 🔹 Load avatar + username from Firestore users/{uid}
   useEffect(() => {
     if (!user) {
       setProfileDoc(null);
@@ -35,14 +35,14 @@ export default function Navbar() {
           username: data.username ?? "",
         });
       } catch (err) {
-        console.error("Navbar: failed to load avatar", err);
+        console.error("Navbar: failed to load user doc", err);
       }
     };
 
     load();
   }, [user]);
 
-  // Avatar source
+  // Same avatar logic as ProfilePage
   const currentAvatarSrc = useMemo(() => {
     if (profileDoc?.avatarUrl) return profileDoc.avatarUrl;
     if (user?.photoURL) return user.photoURL;
@@ -62,8 +62,7 @@ export default function Navbar() {
   return (
     <header className="w-full border-b border-white/10 bg-black">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-
-        {/* LOGO (double size) */}
+        {/* LOGO */}
         <Link href="/" className="flex items-center gap-3">
           <Image
             src="/streakrlogo.jpg"
@@ -79,18 +78,38 @@ export default function Navbar() {
 
         {/* DESKTOP NAV */}
         <div className="hidden md:flex items-center gap-8 text-sm">
-          <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-          <Link href="/leaderboards" className="hover:text-orange-400">Leaderboards</Link>
-          <Link href="/leagues" className="hover:text-orange-400">Leagues</Link>
-          <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-          <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
+          <Link href="/picks" className="hover:text-orange-400">
+            Picks
+          </Link>
+          <Link href="/leaderboards" className="hover:text-orange-400">
+            Leaderboards
+          </Link>
+          <Link href="/leagues" className="hover:text-orange-400">
+            Leagues
+          </Link>
+          <Link href="/rewards" className="hover:text-orange-400">
+            Rewards
+          </Link>
+          <Link href="/faq" className="hover:text-orange-400">
+            FAQ
+          </Link>
 
-          <Link href={user ? "/profile" : "/auth"} className="flex items-center gap-2">
+          <Link
+            href={user ? "/profile" : "/auth"}
+            className="flex items-center gap-2"
+          >
             <div className="relative h-8 w-8 rounded-full border border-slate-700 overflow-hidden bg-slate-800 flex items-center justify-center">
               {currentAvatarSrc ? (
-                <Image src={currentAvatarSrc} alt="Avatar" fill className="object-cover" />
+                <Image
+                  src={currentAvatarSrc}
+                  alt="Avatar"
+                  fill
+                  className="object-cover"
+                />
               ) : (
-                <span className="text-xs font-semibold">{avatarInitial}</span>
+                <span className="text-xs font-semibold">
+                  {avatarInitial}
+                </span>
               )}
             </div>
             <span className="text-xs">{label}</span>
@@ -101,7 +120,7 @@ export default function Navbar() {
         <div className="md:hidden">
           <button
             type="button"
-            onClick={() => setMenuOpen(!menuOpen)}
+            onClick={() => setMenuOpen((o) => !o)}
             className="rounded border border-white/20 px-3 py-2"
           >
             <div className="space-y-[5px]">
@@ -117,19 +136,32 @@ export default function Navbar() {
       {menuOpen && (
         <div className="md:hidden bg-black/95 border-t border-white/10">
           <div className="mx-auto max-w-6xl px-4 py-4 flex flex-col gap-4 text-sm">
+            <Link href="/picks" onClick={() => setMenuOpen(false)}>
+              Picks
+            </Link>
+            <Link href="/leaderboards" onClick={() => setMenuOpen(false)}>
+              Leaderboards
+            </Link>
+            <Link href="/leagues" onClick={() => setMenuOpen(false)}>
+              Leagues
+            </Link>
+            <Link href="/rewards" onClick={() => setMenuOpen(false)}>
+              Rewards
+            </Link>
+            <Link href="/faq" onClick={() => setMenuOpen(false)}>
+              FAQ
+            </Link>
 
-            <Link href="/picks" onClick={() => setMenuOpen(false)}>Picks</Link>
-            <Link href="/leaderboards" onClick={() => setMenuOpen(false)}>Leaderboards</Link>
-            <Link href="/leagues" onClick={() => setMenuOpen(false)}>Leagues</Link>
-            <Link href="/rewards" onClick={() => setMenuOpen(false)}>Rewards</Link>
-            <Link href="/faq" onClick={() => setMenuOpen(false)}>FAQ</Link>
-
-            {/* MOBILE FOOTER PROFILE */}
             <div className="mt-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="relative h-8 w-8 rounded-full overflow-hidden border border-white/20 bg-slate-800 flex items-center justify-center">
                   {currentAvatarSrc ? (
-                    <Image src={currentAvatarSrc} alt="Avatar" fill className="object-cover" />
+                    <Image
+                      src={currentAvatarSrc}
+                      alt="Avatar"
+                      fill
+                      className="object-cover"
+                    />
                   ) : (
                     <span className="text-xs">{avatarInitial}</span>
                   )}
