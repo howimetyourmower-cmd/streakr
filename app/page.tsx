@@ -140,15 +140,7 @@ export default function HomePage() {
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
           {/* Left text block */}
           <div>
-            {/* Sponsor pill */}
-            <div className="inline-flex items-center gap-2 mb-4">
-              <span className="text-[11px] font-semibold tracking-wide rounded-full border border-orange-400/70 bg-orange-500/10 px-3 py-1 text-orange-200 uppercase">
-                Sponsor
-              </span>
-              <span className="text-xs sm:text-sm text-white/70">
-                Proudly backed by our official partner
-              </span>
-            </div>
+            
 
             {/* Season / round meta */}
             <div className="mb-4">
