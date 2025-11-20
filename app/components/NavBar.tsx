@@ -1,19 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
-import MobileNav from "./MobileNav";
 
 export default function NavBar() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth() as any;
 
-  const avatarUrl = user?.photoURL || "/default-avatar.png";
+  // Try profile avatar first (like your Profile page), then Firebase photoURL, then default
+  const avatarUrl: string =
+    profile?.avatarUrl ||
+    user?.photoURL ||
+    "/default-avatar.png";
 
-  const avatarInitial =
-    user?.displayName?.[0]?.toUpperCase() ??
-    user?.email?.[0]?.toUpperCase() ??
-    "U";
+  const displayName: string =
+    profile?.username ||
+    user?.displayName ||
+    user?.email ||
+    "Player";
+
+  const avatarInitial: string =
+    displayName?.trim()?.[0]?.toUpperCase() ?? "P";
 
   return (
     <header className="w-full border-b border-white/10 bg-black">
@@ -50,43 +56,22 @@ export default function NavBar() {
 
           {/* PROFILE + AVATAR */}
           <Link href="/profile" className="flex items-center gap-2">
-            {user ? (
-              user.photoURL ? (
-                <Image
-                  src={user.photoURL}
-                  alt="Avatar"
-                  width={32}
-                  height={32}
-                  className="h-8 w-8 rounded-full object-cover border border-slate-700"
-                />
-              ) : (
-                <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center border border-slate-700 text-xs font-bold">
-                  {avatarInitial}
-                </div>
-              )
-            ) : (
-              <Image
-                src="/default-avatar.png"
-                alt="Avatar"
-                width={32}
-                height={32}
-                className="h-8 w-8 rounded-full border border-slate-700"
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt={displayName}
+                className="h-8 w-8 rounded-full object-cover border border-slate-700"
               />
+            ) : (
+              <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center border border-slate-700 text-xs font-bold">
+                {avatarInitial}
+              </div>
             )}
 
-            <span className="text-xs">
-              {user?.displayName ?? "Player"}
+            <span className="text-xs truncate max-w-[120px]">
+              {displayName}
             </span>
           </Link>
-        </div>
-
-        {/* MOBILE NAV (burger) */}
-        <div className="md:hidden">
-          <MobileNav
-            user={user}
-            avatarUrl={avatarUrl}
-            avatarInitial={avatarInitial}
-          />
         </div>
       </nav>
     </header>
