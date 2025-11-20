@@ -165,7 +165,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Pick one AFL moment at a time, build your longest streak, and
+              Make your Pick, build your longest streak, and
               climb the ladder. One wrong call and it&apos;s back to zero.
             </p>
 
