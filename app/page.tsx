@@ -1,9 +1,10 @@
-// app/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -12,6 +13,9 @@ type ApiQuestion = {
   quarter: number;
   question: string;
   status: QuestionStatus;
+  match: string;
+  venue: string;
+  startTime: string;
 };
 
 type ApiGame = {
@@ -27,7 +31,7 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-type PreviewRow = {
+type QuestionRow = {
   id: string;
   match: string;
   venue: string;
@@ -36,40 +40,44 @@ type PreviewRow = {
   question: string;
 };
 
-function formatStart(iso: string) {
-  if (!iso) return { date: "", time: "" };
-
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) {
-    return { date: "", time: "" };
-  }
-
-  return {
-    date: d.toLocaleDateString("en-AU", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      timeZone: "Australia/Melbourne",
-    }),
-    time: d.toLocaleTimeString("en-AU", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    }),
-  };
-}
-
 export default function HomePage() {
-  const [roundNumber, setRoundNumber] = useState<number | null>(null);
-  const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
-  const [loadingPreview, setLoadingPreview] = useState(true);
+  const { user } = useAuth();
+  const router = useRouter();
 
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [roundNumber, setRoundNumber] = useState<number | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // -------- Date formatting ----------
+  const formatStartDate = (iso: string) => {
+    if (!iso) return { date: "", time: "" };
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return { date: "", time: "" };
+
+    return {
+      date: d.toLocaleDateString("en-AU", {
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+        timeZone: "Australia/Melbourne",
+      }),
+      time: d.toLocaleTimeString("en-AU", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Australia/Melbourne",
+      }),
+    };
+  };
+
+  // -------- Load a preview of open questions --------
   useEffect(() => {
-    const loadPreview = async () => {
+    const load = async () => {
       try {
         const res = await fetch("/api/picks");
-        if (!res.ok) throw new Error("Failed to load picks");
+        if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
 
@@ -77,293 +85,338 @@ export default function HomePage() {
           setRoundNumber(data.roundNumber);
         }
 
-        const flat: PreviewRow[] = data.games
-          .flatMap((g) =>
-            g.questions
-              .filter((q) => q.status === "open")
-              .map((q) => ({
-                id: q.id,
-                match: g.match,
-                venue: g.venue,
-                startTime: g.startTime,
-                quarter: q.quarter,
-                question: q.question,
-              }))
-          )
-          .sort((a, b) => {
-            const da = new Date(a.startTime).getTime();
-            const db = new Date(b.startTime).getTime();
-            if (da !== db) return da - db;
-            return a.quarter - b.quarter;
-          });
+        const flat: QuestionRow[] = data.games.flatMap((g) =>
+          g.questions
+            .filter((q) => q.status === "open")
+            .map((q) => ({
+              id: q.id,
+              match: g.match,
+              venue: g.venue,
+              startTime: g.startTime,
+              quarter: q.quarter,
+              question: q.question,
+            }))
+        );
 
-        setPreviewRows(flat.slice(0, 6));
-      } catch (err) {
-        console.error(err);
+        // sort by start time then quarter
+        flat.sort((a, b) => {
+          const da = new Date(a.startTime).getTime();
+          const db = new Date(b.startTime).getTime();
+          if (da !== db) return da - db;
+          return a.quarter - b.quarter;
+        });
+
+        setQuestions(flat);
+      } catch (e) {
+        console.error(e);
+        setError("Failed to load preview questions.");
       } finally {
-        setLoadingPreview(false);
+        setLoading(false);
       }
     };
 
-    loadPreview();
+    load();
   }, []);
 
+  const previewQuestions = questions.slice(0, 6);
+
+  // -------- Handle YES / NO clicks on homepage preview --------
+  const handlePreviewPick = (questionId: string, outcome: "yes" | "no") => {
+    if (!user) {
+      // Not logged in → show auth modal encouraging signup/login
+      setShowAuthModal(true);
+      return;
+    }
+
+    // Logged in → send them to Picks page (they'll make the official pick there)
+    router.push("/picks");
+  };
+
   return (
-    <main className="min-h-screen w-full bg-black text-slate-50">
-      {/* SPONSOR STRIP UNDER NAV */}
-      <div className="w-full border-b border-white/5 bg-[#0B0F1A]">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2 text-xs text-slate-200">
-          <div className="inline-flex items-center gap-2">
-            <span className="rounded-full border border-orange-500/60 bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-300">
-              Sponsor
-            </span>
-            <span>Proudly backed by our official partner</span>
-          </div>
-          <span className="hidden sm:inline text-[11px] text-slate-400">
-            Free game of skill • No gambling • 18+ only
-          </span>
-        </div>
-      </div>
+    <main className="min-h-screen bg-black text-white">
+      {/* Page wrapper */}
+      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pb-16 pt-8 sm:pt-10">
+        {/* HERO SECTION */}
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
+          {/* Left text block */}
+          <div>
+            {/* Sponsor pill */}
+            <div className="inline-flex items-center gap-2 mb-4">
+              <span className="text-[11px] font-semibold tracking-wide rounded-full border border-orange-400/70 bg-orange-500/10 px-3 py-1 text-orange-200 uppercase">
+                Sponsor
+              </span>
+              <span className="text-xs sm:text-sm text-white/70">
+                Proudly backed by our official partner
+              </span>
+            </div>
 
-      {/* HERO SECTION */}
-      <section className="border-b border-white/5">
-        <div className="relative mx-auto flex max-w-6xl flex-col gap-10 px-4 py-10 md:flex-row md:items-center md:py-14">
-          {/* LEFT: TEXT */}
-          <div className="flex-1 space-y-6">
-            {roundNumber !== null && (
-              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/40 bg-orange-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-200">
-                AFL Season 2026 • Current Round:{" "}
-                <span className="text-orange-400">Round {roundNumber}</span>
-              </div>
-            )}
+            {/* Season / round meta */}
+            <div className="mb-4">
+              <span className="inline-flex items-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
+                AFL Season 2026
+                {roundNumber !== null && (
+                  <>
+                    <span className="mx-1">•</span>
+                    <span>Current Round: {roundNumber}</span>
+                  </>
+                )}
+              </span>
+            </div>
 
-            <h1 className="text-balance text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl">
+            {/* Main heading */}
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
               Real{" "}
-              <span className="text-orange-500 drop-shadow-[0_0_14px_rgba(249,115,22,0.7)]">
+              <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
                 STREAKr
               </span>
               s don&apos;t get caught.
             </h1>
 
-            <p className="max-w-xl text-base text-slate-300 sm:text-lg">
-              Pick one AFL moment at a time. Each correct pick adds to your
-              streak — one wrong call and it&apos;s back to zero. Build the
-              longest streak each round to climb the leaderboard.
+            <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
+              Pick one AFL moment at a time, build your longest streak, and
+              climb the ladder. One wrong call and it&apos;s back to zero.
             </p>
 
             {/* Prize pill */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="inline-flex items-center gap-2 rounded-full bg-black/80 px-4 py-2 text-sm font-semibold text-orange-100 border border-orange-500/60 shadow-[0_0_30px_rgba(249,115,22,0.55)]">
-                <span className="rounded-full bg-orange-500 px-2 py-0.5 text-xs font-bold text-black">
-                  $1,000
+            <div className="inline-flex items-center gap-3 mb-6">
+              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
+                <span className="text-sm font-semibold text-orange-200">
+                  $1,000 in prizes every round*
                 </span>
-                in prizes every round*
               </div>
-              <span className="text-xs text-slate-500">
-                *Prize structure subject to T&Cs.
+              <span className="hidden sm:inline text-[11px] text-white/60">
+                Free to play • 18+ • No gambling
               </span>
             </div>
 
-            {/* CTA BUTTONS */}
-            <div className="flex flex-col gap-3 pt-2 sm:flex-row">
+            {/* CTA buttons */}
+            <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <Link
                 href="/picks"
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 px-6 py-3 text-sm font-semibold text-black shadow-[0_14px_45px_rgba(249,115,22,0.7)] transition hover:translate-y-[1px] hover:bg-orange-400"
+                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
               >
                 Play now – make your streak pick
               </Link>
-
               <Link
-                href="/faq"
-                className="inline-flex items-center justify-center rounded-full border border-slate-600 bg-black/80 px-6 py-3 text-sm font-semibold text-slate-100 transition hover:border-slate-400 hover:bg-slate-900"
+                href="/leaderboards"
+                className="inline-flex items-center justify-center rounded-full border border-white/25 hover:border-sky-400/80 hover:text-sky-300 px-6 py-3 text-sm sm:text-base text-white/85"
               >
-                How it works
+                View leaderboards
               </Link>
             </div>
 
-            <p className="text-xs text-slate-500">
-              No deposits. No odds. Just your footy IQ and a live streak.
+            <p className="text-[11px] text-white/50">
+              *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
+              gambling. 18+ only.
             </p>
           </div>
 
-          {/* RIGHT: HERO IMAGE CARD */}
-          <div className="relative flex-1">
-            <div className="relative mx-auto h-64 w-full max-w-md overflow-hidden rounded-3xl border border-slate-700 bg-slate-900/70 shadow-[0_28px_70px_rgba(0,0,0,0.95)]">
+          {/* Right hero image card */}
+          <div className="relative">
+            <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
                 src="/mcg-hero.jpg"
                 alt="MCG at night"
                 fill
-                className="object-cover"
+                className="object-cover opacity-80"
                 priority
               />
-              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-              <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs text-slate-100">
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+              <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">
-                    Featured venue
-                  </div>
-                  <div className="text-sm font-semibold">MCG, Melbourne</div>
+                  <p className="text-xs text-white/70 mb-1">Featured venue</p>
+                  <p className="text-sm sm:text-base font-semibold">
+                    MCG, Melbourne
+                  </p>
+                  <p className="text-[11px] text-white/60">
+                    Live streaks in every game.
+                  </p>
                 </div>
-                <div className="rounded-full bg-black/80 px-3 py-1 text-[11px] font-semibold text-sky-300 border border-sky-500/50">
-                  Live streaks in every game
+                <div className="rounded-full bg-sky-500/90 text-black text-xs font-semibold px-3 py-1 shadow-[0_0_24px_rgba(56,189,248,0.9)]">
+                  AFL • Live rounds
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* HOW IT WORKS */}
-      <section className="border-b border-white/5 bg-black">
-        <div className="mx-auto max-w-6xl px-4 py-10">
-          <div className="mb-6 flex items-end justify-between gap-4">
+        {/* TONIGHT'S QUESTIONS PREVIEW */}
+        <section className="mb-12">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">
-                How STREAKr works
-              </h2>
-              <p className="mt-1 text-sm text-slate-400">
-                Simple rules. Pure footy IQ. One active streak at a time.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
-                1 · Make your streak pick
-              </div>
-              <p className="text-sm text-blue-50">
-                You can only ride one streak at a time. Choose a single question
-                across all games and lock in a Yes/No pick before the quarter
-                starts.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
-                2 · Build the longest run
-              </div>
-              <p className="text-sm text-blue-50">
-                Every correct pick adds +1 to your streak. Wrong pick? Back to
-                zero. Your active streak feeds straight into the leaderboard.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] p-4 shadow-[0_12px_30px_rgba(24,91,255,0.35)]">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-200">
-                3 · Climb the ladder
-              </div>
-              <p className="text-sm text-blue-50">
-                Chase the top 10 each round, compare streaks with your mates in
-                private leagues, and compete for a share of $1,000 in prizes.
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* TONIGHT'S QUESTIONS PREVIEW */}
-      <section className="border-b border-white/5 bg-black">
-        <div className="mx-auto max-w-6xl px-4 py-10">
-          <div className="mb-6 flex items-end justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight">
+              <h2 className="text-xl sm:text-2xl font-bold">
                 Tonight&apos;s questions
               </h2>
-              <p className="mt-1 text-sm text-slate-400">
+              <p className="text-sm text-white/70">
                 A preview of some open questions. Jump into Picks to lock in
                 your streak.
               </p>
             </div>
             <Link
               href="/picks"
-              className="hidden text-sm font-semibold text-orange-400 hover:text-orange-300 md:inline-flex"
+              className="text-sm text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
             >
               View all picks →
             </Link>
           </div>
 
-          {loadingPreview ? (
-            <p className="text-sm text-slate-400">Loading questions…</p>
-          ) : previewRows.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No open questions right now. Check back closer to bounce.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {previewRows.map((row) => {
-                const { date, time } = formatStart(row.startTime);
-
-                return (
-                  <div
-                    key={row.id}
-                    className="rounded-2xl border border-[#1E2A55] bg-[#0F1B3D] px-4 py-3 shadow-[0_12px_35px_rgba(24,91,255,0.4)]"
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-blue-200">
-                          <span className="rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-300 border border-sky-500/60">
-                            Q{row.quarter}
-                          </span>
-                          <span>
-                            {date} • {time} AEDT
-                          </span>
-                          <span>•</span>
-                          <span>{row.match}</span>
-                          <span>•</span>
-                          <span>{row.venue}</span>
-                        </div>
-                        <p className="mt-1 text-sm font-medium text-blue-50">
-                          {row.question}
-                        </p>
-                      </div>
-                      <div className="mt-2 flex items-center gap-2 md:mt-0">
-                        <span className="text-[11px] text-blue-200/80">
-                          Sample view – make your pick on the{" "}
-                          <Link
-                            href="/picks"
-                            className="text-orange-300 hover:text-orange-200"
-                          >
-                            Picks
-                          </Link>{" "}
-                          page.
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {error && (
+            <p className="text-sm text-red-400 mb-3">{error}</p>
+          )}
+          {loading && (
+            <p className="text-sm text-white/70">Loading questions…</p>
           )}
 
-          <div className="mt-6 md:hidden">
-            <Link
-              href="/picks"
-              className="inline-flex w-full items-center justify-center rounded-full bg-orange-500 px-5 py-2.5 text-sm font-semibold text-black shadow-[0_10px_30px_rgba(249,115,22,0.7)] transition hover:bg-orange-400"
-            >
-              Go to Picks
-            </Link>
-          </div>
-        </div>
-      </section>
+          {!loading && previewQuestions.length === 0 && !error && (
+            <p className="text-sm text-white/60">
+              No open questions right now. Check back closer to game time.
+            </p>
+          )}
 
-      {/* FOOTER */}
-      <footer className="border-t border-slate-800 bg-black">
-        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <div>© {new Date().getFullYear()} STREAKr. All rights reserved.</div>
-          <div className="flex flex-wrap items-center gap-4">
-            <span className="text-[11px]">
-              STREAKr is a free game of skill. No gambling. 18+ only.
-            </span>
+          <div className="space-y-3">
+            {previewQuestions.map((q) => {
+              const { date, time } = formatStartDate(q.startTime);
+              return (
+                <div
+                  key={q.id}
+                  className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-sky-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
+                >
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    {/* Left: meta + question */}
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
+                        <span className="font-semibold text-white/80">
+                          Q{q.quarter}
+                        </span>
+                        <span>•</span>
+                        <span>
+                          {date} • {time} AEDT
+                        </span>
+                        <span>•</span>
+                        <span>{q.match}</span>
+                        <span>•</span>
+                        <span>{q.venue}</span>
+                      </div>
+                      <div className="text-sm sm:text-base font-semibold">
+                        {q.question}
+                      </div>
+                      <p className="text-[11px] text-white/60 mt-1">
+                        Sample view – your official streak pick is made on the{" "}
+                        <Link
+                          href="/picks"
+                          className="text-sky-300 hover:text-sky-200 underline"
+                        >
+                          Picks
+                        </Link>{" "}
+                        page.
+                      </p>
+                    </div>
+
+                    {/* Right: YES / NO buttons */}
+                    <div className="flex items-center gap-3 md:ml-4 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handlePreviewPick(q.id, "yes")}
+                        className="px-4 py-2 rounded-full text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white shadow-[0_0_20px_rgba(22,163,74,0.7)] transition"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePreviewPick(q.id, "no")}
+                        className="px-4 py-2 rounded-full text-xs sm:text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(239,68,68,0.7)] transition"
+                      >
+                        No
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* HOW IT WORKS */}
+        <section>
+          <h2 className="text-xl sm:text-2xl font-bold mb-4">
+            How STREAKr works
+          </h2>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-sky-300 mb-1">
+                1 · Make your pick
+              </p>
+              <p className="text-sm text-white/80">
+                Each quarter has hand-picked AFL questions. Choose{" "}
+                <span className="font-semibold">Yes</span> or{" "}
+                <span className="font-semibold">No</span> on one question as
+                your active streak pick.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-sky-300 mb-1">
+                2 · Build the streak
+              </p>
+              <p className="text-sm text-white/80">
+                Every correct answer adds <span className="font-semibold">+1</span>{" "}
+                to your streak. One wrong pick and your streak resets to{" "}
+                <span className="font-semibold">0</span>.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-sky-300 mb-1">
+                3 · Climb the ladder
+              </p>
+              <p className="text-sm text-white/80">
+                Chase the top 10 each round, compare streaks with your mates in
+                private leagues, and compete for a share of{" "}
+                <span className="font-semibold">$1,000 in prizes</span>.
+              </p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* AUTH REQUIRED MODAL (same style as PicksClient) */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-lg font-semibold">Log in to play</h2>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(false)}
+                className="text-sm text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-white/70 mb-4">
+              You need a free STREAKr account to make picks, build your streak
+              and appear on the leaderboard.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                href="/auth?mode=login&returnTo=/picks"
+                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Login
+              </Link>
+
             <Link
-              href="/faq"
-              className="text-[11px] text-slate-400 hover:text-slate-200"
-            >
-              FAQ
-            </Link>
+                href="/auth?mode=signup&returnTo=/picks"
+                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Sign up
+              </Link>
+            </div>
           </div>
         </div>
-      </footer>
+      )}
     </main>
   );
 }
