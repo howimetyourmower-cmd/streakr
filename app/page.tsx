@@ -312,19 +312,19 @@ export default function HomePage() {
                       </p>
                     </div>
 
-                    {/* Right: YES / NO buttons */}
+                    {/* Right: YES / NO buttons (match Picks page style, no glow) */}
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
                       <button
                         type="button"
                         onClick={() => handlePreviewPick(q.id, "yes")}
-                        className="px-4 py-2 rounded-full text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white shadow-[0_0_20px_rgba(22,163,74,0.7)] transition"
+                        className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white transition"
                       >
                         Yes
                       </button>
                       <button
                         type="button"
                         onClick={() => handlePreviewPick(q.id, "no")}
-                        className="px-4 py-2 rounded-full text-xs sm:text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow-[0_0_20px_rgba(239,68,68,0.7)] transition"
+                        className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition"
                       >
                         No
                       </button>
