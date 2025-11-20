@@ -1,4 +1,3 @@
-// app/leaderboards/page.tsx
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
@@ -28,7 +27,7 @@ function getScopeLabel(scope: Scope): string {
   return match ? match.label : "Round";
 }
 
-export default function LeaderboardsPage() {
+export default function LeaderboardsClient() {
   const { user } = useAuth();
 
   const [scope, setScope] = useState<Scope>("overall");
@@ -91,18 +90,18 @@ export default function LeaderboardsPage() {
   const isOverall = scope === "overall";
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white">
+    <main className="min-h-screen bg-black text-white">
       <section className="max-w-6xl mx-auto px-4 py-8 md:py-10 space-y-6">
         {/* Header */}
-        <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
               Leaderboards
             </h1>
-            <p className="mt-1 text-sm text-white/70 max-w-xl">
+            <p className="mt-2 text-sm text-white/70 max-w-xl">
               See who&apos;s on a heater. Live streaks pulled from player
-              profiles. Only your active streak counts – one wrong pick and it
-             &apos;s back to zero.
+              profiles. Only your active streak counts – one wrong pick and
+              it&apos;s back to zero.
             </p>
           </div>
 
@@ -114,7 +113,7 @@ export default function LeaderboardsPage() {
             <select
               value={scope}
               onChange={(e) => setScope(e.target.value as Scope)}
-              className="rounded-full bg-black/40 border border-white/15 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+              className="rounded-full bg-black border border-white/20 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
             >
               <option value="overall">Season (overall)</option>
               {ROUND_OPTIONS.map((r) => (
@@ -127,9 +126,9 @@ export default function LeaderboardsPage() {
         </header>
 
         {/* Meta strip */}
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-slate-900/80 via-slate-900/40 to-slate-900/80 px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2 text-xs md:text-sm">
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center rounded-full bg-white/5 border border-white/15 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
+        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black via-slate-900/70 to-black px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs md:text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center rounded-full bg-white/5 border border-white/20 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
               AFL Season {CURRENT_SEASON}
             </span>
             <span className="text-white/80">
@@ -146,8 +145,9 @@ export default function LeaderboardsPage() {
         </div>
 
         {/* Table / content */}
-        <section className="rounded-2xl bg-slate-950/70 border border-white/10 overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-white/60">
+        <section className="rounded-2xl bg-black/80 border border-white/12 overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.7)]">
+          {/* Table header */}
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-white/60 bg-black/80">
             <div className="flex items-center gap-8">
               <span className="w-8 text-left">#</span>
               <span>Player</span>
@@ -171,29 +171,26 @@ export default function LeaderboardsPage() {
             <div className="px-4 py-6 text-sm text-red-400">{error}</div>
           )}
 
-          {!loading &&
-            !error &&
-            topTen.length === 0 && (
-              <div className="px-4 py-6 text-sm text-white/70">
-                No streaks recorded yet for this scope. Once players start
-                hitting picks, they&apos;ll appear here.
-              </div>
-            )}
+          {!loading && !error && topTen.length === 0 && (
+            <div className="px-4 py-6 text-sm text-white/70">
+              No streaks recorded yet for this scope. Once players start
+              hitting picks, they&apos;ll appear here.
+            </div>
+          )}
 
           {!loading && !error && topTen.length > 0 && (
             <>
               {/* Top 10 rows */}
-              <ol className="divide-y divide-white/5">
+              <ol className="divide-y divide-white/8">
                 {topTen.map((entry) => {
-                  const isYou =
-                    user && entry.uid === user.uid;
+                  const isYou = user && entry.uid === user.uid;
                   return (
                     <li
                       key={entry.uid}
-                      className={`px-4 py-3 flex items-center justify-between gap-3 text-sm ${
+                      className={`px-4 py-3 flex items-center justify-between gap-3 text-sm transition-colors ${
                         isYou
-                          ? "bg-orange-500/10 border-l-4 border-l-orange-500"
-                          : "bg-black/10"
+                          ? "bg-orange-500/15 border-l-4 border-l-orange-500"
+                          : "bg-black/40"
                       }`}
                     >
                       <div className="flex items-center gap-4">
@@ -201,7 +198,7 @@ export default function LeaderboardsPage() {
                           {entry.rank}
                         </span>
                         <div className="flex items-center gap-3">
-                          <div className="relative w-9 h-9 rounded-full overflow-hidden border border-white/20 bg-slate-800/80">
+                          <div className="relative w-9 h-9 rounded-full overflow-hidden border border-white/25 bg-slate-900">
                             {entry.avatarUrl ? (
                               <Image
                                 src={entry.avatarUrl}
@@ -248,17 +245,17 @@ export default function LeaderboardsPage() {
 
               {/* Logged-in player's own row if not in top 10 */}
               {extraUserRow && (
-                <div className="border-t border-dashed border-white/15 bg-black/40 px-4 py-3 mt-1">
+                <div className="border-t border-dashed border-white/15 bg-black/70 px-4 py-3 mt-1">
                   <p className="text-xs text-white/60 mb-2">
                     Your position (outside top 10):
                   </p>
-                  <div className="flex items-center justify-between gap-3 text-sm bg-orange-500/10 border border-orange-500/40 rounded-xl px-3 py-2">
+                  <div className="flex items-center justify-between gap-3 text-sm bg-orange-500/12 border border-orange-500/40 rounded-xl px-3 py-2">
                     <div className="flex items-center gap-4">
                       <span className="w-6 text-left font-semibold text-orange-300">
                         {extraUserRow.rank}
                       </span>
                       <div className="flex items-center gap-3">
-                        <div className="relative w-8 h-8 rounded-full overflow-hidden border border-white/30 bg-slate-800/80">
+                        <div className="relative w-8 h-8 rounded-full overflow-hidden border border-white/30 bg-slate-900">
                           {extraUserRow.avatarUrl ? (
                             <Image
                               src={extraUserRow.avatarUrl}
