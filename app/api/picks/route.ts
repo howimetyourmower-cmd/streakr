@@ -1,53 +1,68 @@
 // app/api/picks/route.ts
 import { NextResponse } from "next/server";
+import { db as adminDb } from "@/lib/admin";
 import { CURRENT_SEASON } from "@/lib/rounds";
 
-// ⬇️ Make this line match your seed API (same path + export)
-import { db as adminDb } from "@/lib/admin"; // if your admin file exports "adminDb"
+// Keep this in sync with what you seed into Firestore
+type QuestionStatus = "open" | "pending" | "final" | "void";
+
+type FirestoreQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+};
+
+type FirestoreGame = {
+  id: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  sport: string;
+  questions: FirestoreQuestion[];
+};
 
 type FirestoreRound = {
   season: number;
   roundNumber: number;
   label: string;
-  games: any[];
+  games: FirestoreGame[];
 };
 
 export async function GET() {
   try {
-    const roundsRef = adminDb.collection("rounds");
-
-    // get all rounds for the current season, ordered by roundNumber
-    const snap = await roundsRef
+    // 1) Load all rounds for the current season
+    const roundsSnap = await adminDb
+      .collection("rounds")
       .where("season", "==", CURRENT_SEASON)
-      .orderBy("roundNumber", "asc")
       .get();
 
-    if (snap.empty) {
+    const rounds: FirestoreRound[] = roundsSnap.docs
+      .map((doc) => doc.data() as FirestoreRound)
+      .sort((a, b) => a.roundNumber - b.roundNumber);
+
+    if (rounds.length === 0) {
+      // No data yet
       return NextResponse.json({ games: [], roundNumber: null });
     }
 
-    // pick the first round that actually has games
-    let current: FirestoreRound | null = null;
-
-    snap.forEach((doc) => {
-      const data = doc.data() as FirestoreRound;
-      if (!current && Array.isArray(data.games) && data.games.length > 0) {
-        current = data;
-      }
-    });
+    // 2) Pick the "current" round
+    //    For now: just take the lowest roundNumber (Opening Round = 0)
+    const current: FirestoreRound | undefined = rounds[0];
 
     if (!current) {
       return NextResponse.json({ games: [], roundNumber: null });
     }
 
+    // 3) Return games + roundNumber in the shape your PicksClient expects
     return NextResponse.json({
       games: current.games,
       roundNumber: current.roundNumber,
     });
   } catch (err) {
-    console.error("Error loading picks:", err);
+    console.error("Error in /api/picks:", err);
     return NextResponse.json(
-      { games: [], roundNumber: null, error: "Failed to load picks" },
+      { games: [], error: "Failed to load picks" },
       { status: 500 }
     );
   }
