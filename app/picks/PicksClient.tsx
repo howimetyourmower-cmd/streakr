@@ -136,7 +136,7 @@ export default function PicksClient() {
           setRoundNumber(data.roundNumber);
         }
 
-        cconst flat: QuestionRow[] = data.games.flatMap((g: any) =>
+        const flat: QuestionRow[] = data.games.flatMap((g: any) =>
   g.questions.map((q: any) => ({
     id: q.id,
     gameId: g.id,
