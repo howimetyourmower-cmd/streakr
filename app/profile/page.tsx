@@ -8,16 +8,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  collection,
-  getDocs,
-  query,
-  where,
-  limit,
-} from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import {
   signOut,
   EmailAuthProvider,
@@ -26,6 +17,7 @@ import {
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "@/hooks/useAuth";
 
+/** Firestore user document fields you can edit on this page */
 type UserDoc = {
   uid?: string;
   username?: string;
@@ -43,15 +35,28 @@ type UserDoc = {
   longestStreak?: number;
 };
 
-type RecentPick = {
+/** What /api/profile returns in the stats block */
+type ApiProfileStats = {
+  displayName: string;
+  username: string;
+  favouriteTeam: string;
+  suburb2: string;
+  state?: string;
+  currentStreak: number;
+  bestStreak: number;
+  correctPercentage: number; // 0–100
+  roundsPlayed: number;
+};
+
+/** What /api/profile returns for each recent pick */
+type ApiRecentPick = {
   id: string;
+  round: string | number;
   match: string;
   question: string;
-  quarter?: number;
-  pick?: "yes" | "no";
-  result?: "win" | "loss" | "void";
-  settledAt: Date | null;
-  round?: number;
+  userPick: "yes" | "no";
+  result: "correct" | "wrong" | "pending" | "void";
+  settledAt?: string; // ISO string
 };
 
 export default function ProfilePage() {
@@ -74,9 +79,11 @@ export default function ProfilePage() {
 
   const [currentRound, setCurrentRound] = useState<number | null>(1);
 
-  const [recentPicks, setRecentPicks] = useState<RecentPick[]>([]);
-  const [recentPicksLoading, setRecentPicksLoading] = useState(false);
-  const [recentPicksError, setRecentPicksError] = useState("");
+  // Stats + recent picks from /api/profile
+  const [stats, setStats] = useState<ApiProfileStats | null>(null);
+  const [recentPicks, setRecentPicks] = useState<ApiRecentPick[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState("");
 
   // Redirect if not logged in
   useEffect(() => {
@@ -120,7 +127,7 @@ export default function ProfilePage() {
     if (user && !initialLoaded) load();
   }, [user, initialLoaded]);
 
-  // Load current round (from meta doc, or default to 1)
+  // Load current round from meta doc (for label only)
   useEffect(() => {
     async function loadRound() {
       try {
@@ -142,6 +149,35 @@ export default function ProfilePage() {
 
     loadRound();
   }, []);
+
+  // Load stats + recent picks from /api/profile
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        setStatsLoading(true);
+        setStatsError("");
+
+        const res = await fetch("/api/profile");
+        if (!res.ok) {
+          throw new Error(`API error: ${res.status}`);
+        }
+        const json = await res.json();
+        setStats(json.stats as ApiProfileStats);
+        setRecentPicks(json.recentPicks as ApiRecentPick[]);
+      } catch (err) {
+        console.error("Failed to load profile stats", err);
+        setStatsError("Failed to load your streak stats.");
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+
+    // For now this uses the demo user in the API, so we don't strictly
+    // need `user`, but it's nice to only call when logged in.
+    if (user) {
+      loadStats();
+    }
+  }, [user]);
 
   // Avatar preview URL handling
   useEffect(() => {
@@ -257,81 +293,6 @@ export default function ProfilePage() {
     }
   }
 
-  // Load last 5 *settled* streak picks
-  useEffect(() => {
-    if (!user) return;
-
-    const loadRecent = async () => {
-      setRecentPicksLoading(true);
-      setRecentPicksError("");
-
-      try {
-        const picksRef = collection(db, "picks");
-
-        // Simple query: all picks for this user
-        const q = query(
-          picksRef,
-          where("userId", "==", user.uid),
-          limit(20)
-        );
-
-        const snap = await getDocs(q);
-
-        const allPicks: RecentPick[] = snap.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
-          const ts = data.settledAt;
-          const settledDate: Date | null =
-            ts && typeof ts.toDate === "function" ? ts.toDate() : null;
-
-          return {
-            id: docSnap.id,
-            match: data.match ?? "",
-            question: data.question ?? "",
-            quarter:
-              typeof data.quarter === "number" ? data.quarter : undefined,
-            pick:
-              data.pick === "yes" || data.pick === "no"
-                ? data.pick
-                : undefined,
-            result:
-              data.result === "win" ||
-              data.result === "loss" ||
-              data.result === "void"
-                ? data.result
-                : undefined,
-            settledAt: settledDate,
-            round:
-              typeof data.round === "number" ? data.round : undefined,
-          };
-        });
-
-        // Only keep settled picks, sort by settledAt DESC, take last 5
-        const settled = allPicks
-          .filter(
-            (p) =>
-              p.result === "win" ||
-              p.result === "loss" ||
-              p.result === "void"
-          )
-          .sort(
-            (a, b) =>
-              (b.settledAt?.getTime() ?? 0) -
-              (a.settledAt?.getTime() ?? 0)
-          )
-          .slice(0, 5);
-
-        setRecentPicks(settled);
-      } catch (err) {
-        console.error("Failed to load recent picks", err);
-        setRecentPicksError("Failed to load your recent picks.");
-      } finally {
-        setRecentPicksLoading(false);
-      }
-    };
-
-    loadRecent();
-  }, [user]);
-
   if (!user) return null;
 
   const currentRoundLabel =
@@ -344,43 +305,96 @@ export default function ProfilePage() {
       ? `This season • Round ${currentRound}`
       : "This season";
 
+  const displayCurrentStreak =
+    stats?.currentStreak ?? form.currentStreak ?? 0;
+
+  const displayBestStreak = stats?.bestStreak ?? form.longestStreak ?? 0;
+
+  const formatSettledAt = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleString("en-AU", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const resultClass = (result: ApiRecentPick["result"]) => {
+    switch (result) {
+      case "correct":
+        return "text-emerald-400 font-semibold";
+      case "wrong":
+        return "text-red-400 font-semibold";
+      case "void":
+        return "text-gray-300 font-semibold";
+      case "pending":
+      default:
+        return "text-amber-300 font-semibold";
+    }
+  };
+
   return (
-    <div className="p-6 max-w-4xl mx-auto text-white">
-      <h1 className="text-4xl font-bold mb-6">Profile</h1>
+    <div className="px-4 py-8 sm:px-8 lg:px-16 max-w-5xl mx-auto text-white space-y-8">
+      {/* PAGE TITLE */}
+      <h1 className="text-3xl font-bold tracking-tight mb-2">Profile</h1>
 
       {/* HEADER: avatar + email + edit button */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+      <section className="rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-slate-900/60 border border-slate-700/80 px-5 py-5 sm:px-8 sm:py-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
           <img
             src={currentAvatarSrc}
             alt="Avatar"
-            className="w-20 h-20 rounded-full border border-white/20 object-cover"
+            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border border-white/20 object-cover"
           />
           <div>
-            <p className="text-xs text-gray-400 mb-1">Logged in as</p>
-            <p className="text-sm font-semibold">
-              {form.email ?? user?.email ?? ""}
+            <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-1">
+              Logged in as
             </p>
-            {user?.emailVerified && (
-              <p className="text-[11px] text-emerald-400 mt-1">
-                ● Email verified
-              </p>
-            )}
+            <p className="text-sm font-semibold">
+              {form.username || stats?.username || form.email || user.email}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <span className="text-xs text-slate-300">
+                {form.email ?? user.email}
+              </span>
+              {user.emailVerified && (
+                <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/40">
+                  ● Email verified
+                </span>
+              )}
+              {(form.team || stats?.favouriteTeam) && (
+                <span className="inline-flex items-center rounded-full bg-orange-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-orange-300 border border-orange-500/40">
+                  Favourite team: {form.team || stats?.favouriteTeam}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsEditing((prev) => !prev)}
-          className="self-start px-4 py-2 rounded-full border border-white/20 text-xs sm:text-sm hover:border-orange-400 hover:text-orange-400 transition-colors"
-        >
-          {isEditing ? "Stop editing" : "Edit profile"}
-        </button>
-      </div>
+        <div className="flex items-center gap-3 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => signOut(auth)}
+            className="hidden sm:inline-flex items-center rounded-full border border-slate-600 px-4 py-1.5 text-xs font-semibold text-slate-200 hover:bg-slate-800/80 transition"
+          >
+            Log out
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsEditing((prev) => !prev)}
+            className="inline-flex items-center rounded-full bg-orange-500 px-4 py-1.5 text-xs sm:text-sm font-semibold text-black shadow-sm hover:bg-orange-400 transition"
+          >
+            {isEditing ? "Stop editing" : "Edit profile"}
+          </button>
+        </div>
+      </section>
 
       {/* AVATAR UPLOAD (only when editing) */}
       {isEditing && (
-        <div className="mb-8">
+        <section className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-4 sm:px-7 sm:py-5">
           <label className="block text-sm font-medium mb-1">
             Avatar (optional)
           </label>
@@ -398,316 +412,387 @@ export default function ProfilePage() {
               Selected: {avatarFile.name}
             </p>
           )}
-        </div>
+        </section>
       )}
 
-      {/* FORM GRID */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-        {/* Username */}
-        <div>
-          <label className="block mb-1 text-sm">Username</label>
-          <input
-            className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400"
-            disabled
-            value={form.username ?? ""}
-            readOnly
-          />
-        </div>
+      {/* DETAILS + STATS */}
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.2fr)]">
+        {/* FORM GRID (details card) */}
+        <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-7 sm:py-6">
+          <h2 className="text-sm font-semibold text-slate-100 mb-4">
+            Personal details
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            {/* Username */}
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-slate-400">
+                Username
+              </label>
+              <input
+                className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400 text-sm"
+                disabled
+                value={form.username ?? ""}
+                readOnly
+              />
+            </div>
 
-        {/* First name */}
-        <div>
-          <label className="block mb-1 text-sm">First name</label>
-          <input
-            className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400"
-            disabled
-            value={form.firstName ?? ""}
-            readOnly
-          />
-        </div>
+            {/* First name */}
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-slate-400">
+                First name
+              </label>
+              <input
+                className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400 text-sm"
+                disabled
+                value={form.firstName ?? ""}
+                readOnly
+              />
+            </div>
 
-        {/* Surname */}
-        <div>
-          <label className="block mb-1 text-sm">Surname</label>
-          <input
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.surname ?? ""}
-            onChange={(e) => update("surname", e.target.value)}
-            disabled={!isEditing}
-          />
-        </div>
+            {/* Surname */}
+            <FieldInput
+              label="Surname"
+              value={form.surname ?? ""}
+              editable={isEditing}
+              onChange={(v) => update("surname", v)}
+            />
 
-        {/* DOB */}
-        <div>
-          <label className="block mb-1 text-sm">Date of birth</label>
-          <input
-            className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400"
-            value={form.dob ?? ""}
-            readOnly
-            disabled
-          />
-        </div>
+            {/* DOB */}
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-slate-400">
+                Date of birth
+              </label>
+              <input
+                className="w-full bg-black/20 border border-white/10 p-2 rounded text-gray-400 text-sm"
+                value={form.dob ?? ""}
+                readOnly
+                disabled
+              />
+            </div>
 
-        {/* Suburb */}
-        <div>
-          <label className="block mb-1 text-sm">Suburb</label>
-          <input
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.suburb ?? ""}
-            onChange={(e) => update("suburb", e.target.value)}
-            disabled={!isEditing}
-          />
-        </div>
+            {/* Suburb */}
+            <FieldInput
+              label="Suburb"
+              value={form.suburb ?? ""}
+              editable={isEditing}
+              onChange={(v) => update("suburb", v)}
+            />
 
-        {/* State */}
-        <div>
-          <label className="block mb-1 text-sm">State</label>
-          <input
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.state ?? ""}
-            onChange={(e) => update("state", e.target.value)}
-            disabled={!isEditing}
-          />
-        </div>
+            {/* State */}
+            <FieldInput
+              label="State"
+              value={form.state ?? ""}
+              editable={isEditing}
+              onChange={(v) => update("state", v)}
+            />
 
-        {/* Phone */}
-        <div>
-          <label className="block mb-1 text-sm">Phone</label>
-          <input
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.phone ?? ""}
-            onChange={(e) => update("phone", e.target.value)}
-            disabled={!isEditing}
-          />
-        </div>
+            {/* Phone */}
+            <FieldInput
+              label="Phone"
+              value={form.phone ?? ""}
+              editable={isEditing}
+              onChange={(v) => update("phone", v)}
+            />
 
-        {/* Gender */}
-        <div>
-          <label className="block mb-1 text-sm">Gender</label>
-          <select
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.gender ?? ""}
-            onChange={(e) => update("gender", e.target.value)}
-            disabled={!isEditing}
-          >
-            <option value="">Prefer not to say</option>
-            <option value="Male">Male</option>
-            <option value="Female">Female</option>
-            <option value="Other">Other</option>
-          </select>
-        </div>
+            {/* Gender */}
+            <div>
+              <label className="block mb-1 text-xs font-semibold text-slate-400">
+                Gender
+              </label>
+              <select
+                className={`w-full p-2 rounded border text-sm ${
+                  isEditing
+                    ? "bg-black/40 border-white/10"
+                    : "bg-black/20 border-white/10 text-gray-400"
+                }`}
+                value={form.gender ?? ""}
+                onChange={(e) => update("gender", e.target.value)}
+                disabled={!isEditing}
+              >
+                <option value="">Prefer not to say</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
 
-        {/* Team */}
-        <div className="sm:col-span-2">
-          <label className="block mb-1 text-sm">Favourite AFL team</label>
-          <select
-            className={`w-full p-2 rounded border ${
-              isEditing
-                ? "bg-black/40 border-white/10"
-                : "bg-black/20 border-white/10 text-gray-400"
-            }`}
-            value={form.team ?? ""}
-            onChange={(e) => update("team", e.target.value)}
-            disabled={!isEditing}
-          >
-            <option value="">Select a team</option>
-            <option>Adelaide Crows</option>
-            <option>Brisbane Lions</option>
-            <option>Carlton</option>
-            <option>Collingwood</option>
-            <option>Essendon</option>
-            <option>Fremantle</option>
-            <option>Geelong Cats</option>
-            <option>Gold Coast Suns</option>
-            <option>GWS Giants</option>
-            <option>Hawthorn</option>
-            <option>Melbourne</option>
-            <option>North Melbourne</option>
-            <option>Port Adelaide</option>
-            <option>Richmond</option>
-            <option>St Kilda</option>
-            <option>Sydney Swans</option>
-            <option>West Coast Eagles</option>
-            <option>Western Bulldogs</option>
-          </select>
-        </div>
-      </div>
+            {/* Team */}
+            <div className="sm:col-span-2">
+              <label className="block mb-1 text-xs font-semibold text-slate-400">
+                Favourite AFL team
+              </label>
+              <select
+                className={`w-full p-2 rounded border text-sm ${
+                  isEditing
+                    ? "bg-black/40 border-white/10"
+                    : "bg-black/20 border-white/10 text-gray-400"
+                }`}
+                value={form.team ?? ""}
+                onChange={(e) => update("team", e.target.value)}
+                disabled={!isEditing}
+              >
+                <option value="">Select a team</option>
+                <option>Adelaide Crows</option>
+                <option>Brisbane Lions</option>
+                <option>Carlton</option>
+                <option>Collingwood</option>
+                <option>Essendon</option>
+                <option>Fremantle</option>
+                <option>Geelong Cats</option>
+                <option>Gold Coast Suns</option>
+                <option>GWS Giants</option>
+                <option>Hawthorn</option>
+                <option>Melbourne</option>
+                <option>North Melbourne</option>
+                <option>Port Adelaide</option>
+                <option>Richmond</option>
+                <option>St Kilda</option>
+                <option>Sydney Swans</option>
+                <option>West Coast Eagles</option>
+                <option>Western Bulldogs</option>
+              </select>
+            </div>
+          </div>
 
-      {/* STREAK CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-        <div className="bg-black/30 p-4 rounded text-center">
-          <p className="text-xs text-gray-400 mb-1">CURRENT STREAK</p>
-          <p className="text-2xl font-bold">
-            {form.currentStreak ?? 0}
-          </p>
-          <p className="text-[11px] text-gray-400 mt-1">
-            {currentRoundLabel}
+          <p className="mt-1 text-[11px] text-slate-500">
+            Some fields (like username and date of birth) can&apos;t be changed
+            yet. Contact support if you need updates there.
           </p>
         </div>
-        <div className="bg-black/30 p-4 rounded text-center">
-          <p className="text-xs text-gray-400 mb-1">LONGEST STREAK</p>
-          <p className="text-2xl font-bold">
-            {form.longestStreak ?? 0}
-          </p>
-          <p className="text-[11px] text-gray-400 mt-1">
-            {longestRoundLabel}
-          </p>
+
+        {/* STREAK STATS CARD */}
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-6 sm:py-6">
+            <h2 className="text-sm font-semibold text-slate-100 mb-4">
+              Streak summary
+            </h2>
+
+            {statsLoading && (
+              <p className="text-xs text-slate-300">Loading stats…</p>
+            )}
+
+            {!statsLoading && statsError && (
+              <p className="text-xs text-red-400">{statsError}</p>
+            )}
+
+            {!statsLoading && !statsError && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-slate-800/80 border border-slate-700 px-4 py-4 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-400 mb-1">
+                      Current streak
+                    </p>
+                    <p className="text-2xl font-bold text-white">
+                      {displayCurrentStreak}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {currentRoundLabel}
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-slate-800/80 border border-slate-700 px-4 py-4 text-center">
+                    <p className="text-xs uppercase tracking-wide text-slate-400 mb-1">
+                      Longest streak
+                    </p>
+                    <p className="text-2xl font-bold text-white">
+                      {displayBestStreak}
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      {longestRoundLabel}
+                    </p>
+                  </div>
+                </div>
+
+                {stats && (
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-300">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Correct picks
+                      </p>
+                      <p className="mt-0.5 font-semibold">
+                        {stats.correctPercentage}%
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Rounds played
+                      </p>
+                      <p className="mt-0.5 font-semibold">
+                        {stats.roundsPlayed}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* PASSWORD + SAVE (only when editing) */}
       {isEditing && (
-        <div className="mb-6">
-          <label className="block mb-1 text-sm">
-            Current password (required to save changes)
-          </label>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-            <input
-              type={showPassword ? "text" : "password"}
-              className="flex-1 bg-black/40 border border-white/10 p-2 rounded"
-              placeholder="Enter password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((s) => !s)}
-              className="px-3 py-2 text-xs bg-white/10 rounded border border-white/20"
-            >
-              {showPassword ? "Hide" : "Show"}
-            </button>
+        <section className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-7 sm:py-6 space-y-4">
+          <div>
+            <label className="block mb-1 text-sm">
+              Current password (required to save changes)
+            </label>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <input
+                type={showPassword ? "text" : "password"}
+                className="flex-1 bg-black/40 border border-white/10 p-2 rounded text-sm"
+                placeholder="Enter password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((s) => !s)}
+                className="px-3 py-2 text-xs bg-white/10 rounded border border-white/20"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
 
-      {saveError && <p className="text-red-400 mb-3">{saveError}</p>}
-      {saveSuccess && <p className="text-green-400 mb-3">{saveSuccess}</p>}
+          {saveError && (
+            <p className="text-sm text-red-400">{saveError}</p>
+          )}
+          {saveSuccess && (
+            <p className="text-sm text-emerald-400">{saveSuccess}</p>
+          )}
 
-      {isEditing && (
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded font-semibold disabled:opacity-60"
-        >
-          {saving ? "Saving..." : "Save profile"}
-        </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-6 py-2 bg-orange-500 hover:bg-orange-600 rounded-full font-semibold text-sm disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save profile"}
+          </button>
+        </section>
       )}
 
       {/* LAST 5 PICKS */}
-      <div className="mt-10">
-        <h2 className="text-lg font-semibold mb-2">Last 5 picks</h2>
+      <section className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-7 sm:py-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold">Last 5 picks</h2>
+          {!statsLoading && (
+            <span className="text-[11px] text-slate-400">
+              {recentPicks.length > 0
+                ? `Showing ${recentPicks.length} most recent`
+                : "No settled picks yet"}
+            </span>
+          )}
+        </div>
 
-        {recentPicksLoading && (
-          <p className="text-sm text-gray-300">
+        {statsLoading && (
+          <p className="text-sm text-slate-300">
             Loading your recent picks…
           </p>
         )}
 
-        {!recentPicksLoading && recentPicksError && (
-          <p className="text-sm text-red-400">
-            {recentPicksError}
+        {!statsLoading && !statsError && recentPicks.length === 0 && (
+          <p className="text-sm text-slate-300">
+            You haven&apos;t had any streak picks settled yet. Once your
+            locked questions are settled, they&apos;ll appear here.
           </p>
         )}
 
-        {!recentPicksLoading &&
-          !recentPicksError &&
-          recentPicks.length === 0 && (
-            <p className="text-sm text-gray-300">
-              You haven&apos;t had any streak picks settled yet. Once your
-              locked questions are settled, they&apos;ll appear here.
-            </p>
-          )}
-
-        {!recentPicksLoading &&
-          !recentPicksError &&
-          recentPicks.length > 0 && (
-            <div className="mt-3 space-y-3">
-              {recentPicks.map((p) => (
-                <div
-                  key={p.id}
-                  className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm"
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <div className="font-semibold">
-                      {p.match}
-                      {typeof p.quarter === "number" && (
-                        <span className="ml-1 text-[11px] text-gray-400">
-                          (Q{p.quarter})
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[11px] text-gray-400">
-                      {p.settledAt
-                        ? p.settledAt.toLocaleString("en-AU", {
-                            day: "2-digit",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : ""}
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-300 mb-1">
-                    {p.question}
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span>
-                      Your pick{" "}
-                      <span className="font-semibold">
-                        {p.pick === "yes" ? "YES" : p.pick === "no" ? "NO" : "-"}
+        {!statsLoading && !statsError && recentPicks.length > 0 && (
+          <div className="mt-3 space-y-3">
+            {recentPicks.map((p) => (
+              <div
+                key={p.id}
+                className="rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <div className="font-semibold">
+                    {p.match}
+                    {p.round && (
+                      <span className="ml-1 text-[11px] text-gray-400">
+                        (Round {p.round})
                       </span>
-                    </span>
-                    <span>
-                      Result:{" "}
-                      <span
-                        className={
-                          p.result === "win"
-                            ? "text-emerald-400 font-semibold"
-                            : p.result === "loss"
-                            ? "text-red-400 font-semibold"
-                            : "text-gray-300 font-semibold"
-                        }
-                      >
-                        {p.result
-                          ? p.result.toUpperCase()
-                          : "Pending"}
-                      </span>
-                    </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-gray-400">
+                    {formatSettledAt(p.settledAt)}
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
-      </div>
+                <div className="text-xs text-gray-300 mb-1">
+                  {p.question}
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span>
+                    Your pick{" "}
+                    <span className="font-semibold">
+                      {p.userPick === "yes"
+                        ? "YES"
+                        : p.userPick === "no"
+                        ? "NO"
+                        : "-"}
+                    </span>
+                  </span>
+                  <span>
+                    Result:{" "}
+                    <span className={resultClass(p.result)}>
+                      {p.result === "correct"
+                        ? "WIN"
+                        : p.result === "wrong"
+                        ? "LOSS"
+                        : p.result === "void"
+                        ? "VOID"
+                        : "PENDING"}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-      {/* LOG OUT */}
-      <div className="mt-10">
+        {!statsLoading && statsError && (
+          <p className="text-sm text-red-400">{statsError}</p>
+        )}
+      </section>
+
+      {/* LOG OUT (mobile / fallback) */}
+      <div className="mt-4 sm:hidden">
         <button
           onClick={() => signOut(auth)}
-          className="px-6 py-2 bg-red-600 hover:bg-red-700 rounded font-semibold"
+          className="w-full px-6 py-2 bg-red-600 hover:bg-red-700 rounded-full font-semibold text-sm"
         >
           Log out
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Small helper for editable / read-only inputs */
+function FieldInput({
+  label,
+  value,
+  editable,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  editable: boolean;
+  onChange: (val: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block mb-1 text-xs font-semibold text-slate-400">
+        {label}
+      </label>
+      <input
+        className={`w-full p-2 rounded border text-sm ${
+          editable
+            ? "bg-black/40 border-white/10"
+            : "bg-black/20 border-white/10 text-gray-400"
+        }`}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!editable}
+      />
     </div>
   );
 }
