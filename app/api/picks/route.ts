@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { CURRENT_SEASON } from "@/lib/rounds";
 
 // ⬇️ Make this line match your seed API (same path + export)
-import { Db as adminDb } from "@/lib/admin"; // if your admin file exports "adminDb"
+import { db as adminDb } from "@/lib/admin"; // if your admin file exports "adminDb"
 
 type FirestoreRound = {
   season: number;
