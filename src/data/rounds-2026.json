@@ -4,7 +4,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+    "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Charlie Curnow (Syd) kick 1 or more goals in the 1st quarter?",
     "Quarter": 1,
     "Status": "Open"
@@ -14,7 +14,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+    "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Patrick Cripps (Car) have 6 or more disposals in the 1st quarter?",
     "Quarter": 1,
     "Status": "Open"
@@ -24,7 +24,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+  "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Errol Gulden  (Syd) have 7 or more disposals in the 1st quarter?",
     "Quarter": 1,
     "Status": "Open"
@@ -34,7 +34,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+    "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Joel Amartey (Syd) kick 1 or more goals in the 2nd quarter?",
     "Quarter": 2,
     "Status": "Open"
@@ -44,7 +44,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+   "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Isaac Heeney  (Syd) have 7 or more disposals in the 2nd quarter?",
     "Quarter": 2,
     "Status": "Open"
@@ -54,7 +54,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+    "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will 5 goals or more be kick in total in th 2nd quarter?",
     "Quarter": 2,
     "Status": "Open"
@@ -64,7 +64,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Tom Papley (Syd) kick 1 or more goals in the 3rd quarter?",
     "Quarter": 3,
     "Status": "Open"
@@ -74,7 +74,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Sam Walsh (Car) have 6 or more disposals in the 3rd quarter?",
     "Quarter": 3,
     "Status": "Open"
@@ -84,7 +84,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Will Hayward (Car) kick 1 or more goals in the 3rd quarter?",
     "Quarter": 3,
     "Status": "Open"
@@ -94,7 +94,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Nick Blakey (Syd) have 5 disposals or less in the 4th quarter?",
     "Quarter": 4,
     "Status": "Open"
@@ -104,7 +104,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Chad Warner (Syd) have  5 or more disposals in the 4th quarter?",
     "Quarter": 4,
     "Status": "Open"
@@ -114,7 +114,7 @@
     "Game": 1,
     "Match": "Sydney vs Carlton",
     "Venue": "SCG, Sydney",
-    "StartTime": "2026-03-05T19.30:00+11:00",
+     "StartTime": "2026-03-05T19:30:00+11:00",
     "Question": "Will Adam Cerra (Car) have 6 or more disposals in the 4th quarter?",
     "Quarter": 4,
     "Status": "Open"
