@@ -136,23 +136,25 @@ export default function PicksClient() {
           setRoundNumber(data.roundNumber);
         }
 
-        const flat: QuestionRow[] = data.games.flatMap((g) =>
-          g.questions.map((q) => ({
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue,
-            startTime: g.startTime,
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
-            sport: "AFL",
-            commentCount: q.commentCount ?? 0,
-          }))
-        );
+        cconst flat: QuestionRow[] = data.games.flatMap((g: any) =>
+  g.questions.map((q: any) => ({
+    id: q.id,
+    gameId: g.id,
+    match: g.match,
+    // fall back to question-level venue/startTime/sport if needed
+    venue: g.venue ?? q.venue ?? "",
+    startTime: g.startTime ?? q.startTime ?? "",
+    quarter: q.quarter,
+    question: q.question,
+    status: q.status,
+    userPick: q.userPick,
+    yesPercent: q.yesPercent,
+    noPercent: q.noPercent,
+    sport: q.sport ?? g.sport ?? "AFL",
+    commentCount: q.commentCount ?? 0,
+  }))
+);
+
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
