@@ -1,6 +1,6 @@
 // app/api/seed-rounds-2026/route.ts
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "../../lib/firebaseAdmin";
 import rows from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
