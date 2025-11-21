@@ -4,7 +4,17 @@ import { useEffect, useState, ChangeEvent } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  getDoc,
+  getDocs,
+  doc,
+  orderBy,
+  limit,
+} from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -84,6 +94,12 @@ export default function PicksClient() {
 
   // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // streak progress tracker
+  const [userStreak, setUserStreak] = useState<number | null>(null);
+  const [leaderStreak, setLeaderStreak] = useState<number | null>(null);
+  const [streakLoading, setStreakLoading] = useState(false);
+  const [streakError, setStreakError] = useState("");
 
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
@@ -173,8 +189,8 @@ export default function PicksClient() {
       return onSnapshot(q, (snapshot) => {
         const counts: Record<string, number> = {};
 
-        snapshot.forEach((doc) => {
-          const data = doc.data() as any;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
           const qid = data.questionId as string;
           counts[qid] = (counts[qid] ?? 0) + 1;
         });
@@ -227,6 +243,53 @@ export default function PicksClient() {
     };
 
     loadUserPick();
+  }, [user]);
+
+  // -------- Load streak progress (user vs leader) --------
+  useEffect(() => {
+    const loadStreaks = async () => {
+      try {
+        setStreakLoading(true);
+        setStreakError("");
+
+        // Leader streak (highest currentStreak in users collection)
+        const usersRef = collection(db, "users");
+        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
+        const topSnap = await getDocs(topQ);
+
+        let leaderVal: number | null = null;
+        topSnap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const val =
+            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          leaderVal = val;
+        });
+        setLeaderStreak(leaderVal);
+
+        // Current user's streak
+        if (user) {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data() as any;
+            const myVal =
+              typeof data.currentStreak === "number" ? data.currentStreak : 0;
+            setUserStreak(myVal);
+          } else {
+            setUserStreak(0);
+          }
+        } else {
+          setUserStreak(null);
+        }
+      } catch (err) {
+        console.error("Failed to load streak progress", err);
+        setStreakError("Could not load streak tracker.");
+      } finally {
+        setStreakLoading(false);
+      }
+    };
+
+    loadStreaks();
   }, [user]);
 
   // -------- Filtering --------
@@ -328,7 +391,7 @@ export default function PicksClient() {
       }));
 
       setComments(list);
-      // no manual commentCount update here – Firestore listener handles it
+      // live commentCount handled by Firestore listener
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
@@ -373,8 +436,7 @@ export default function PicksClient() {
 
       setComments((prev) => [newComment, ...prev]);
       setCommentText("");
-
-      // no manual commentCount increment – Firestore listener will update
+      // commentCount updates via listener
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to post comment");
@@ -383,10 +445,17 @@ export default function PicksClient() {
     }
   };
 
+  // --- helper for progress ratio ---
+  const progressRatio = (() => {
+    if (!leaderStreak || leaderStreak <= 0) return 0;
+    const my = userStreak ?? 0;
+    return Math.max(0, Math.min(my / leaderStreak, 1));
+  })();
+
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white min-h-screen bg-black">
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
           <p className="text-sm text-white/70">
@@ -396,6 +465,71 @@ export default function PicksClient() {
             </span>
           </p>
         )}
+      </div>
+
+      {/* STREAK PROGRESS TRACKER */}
+      <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-white/60">
+              Streak progress
+            </p>
+            <p className="text-xs sm:text-sm text-white/80 max-w-md">
+              {user
+                ? "See how your active streak stacks up against the ladder leader this round."
+                : "Log in to start your streak and see how you compare to the leaders."}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-4 text-xs sm:text-sm">
+            <div className="text-right">
+              <p className="text-[11px] text-white/60">Your streak</p>
+              <p className="text-lg sm:text-xl font-bold text-orange-400">
+                {user ? userStreak ?? 0 : "-"}
+              </p>
+            </div>
+            <div className="h-8 w-px bg-white/10" />
+            <div>
+              <p className="text-[11px] text-white/60">Leader streak</p>
+              <p className="text-lg sm:text-xl font-bold text-sky-300">
+                {leaderStreak ?? "-"}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-1">
+          <div className="relative h-2 rounded-full bg-slate-900 overflow-hidden">
+            {/* gradient track */}
+            {leaderStreak && leaderStreak > 0 && (
+              <div className="absolute inset-0 bg-gradient-to-r from-sky-500 via-purple-500 to-orange-500 opacity-70" />
+            )}
+
+            {/* your marker */}
+            {leaderStreak && leaderStreak > 0 && (
+              <div
+                className="absolute -top-1 h-4 w-[2px] bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
+                style={{ left: `${progressRatio * 100}%` }}
+              />
+            )}
+          </div>
+          <div className="mt-1 flex justify-between text-[10px] text-white/50">
+            <span>0</span>
+            {leaderStreak && leaderStreak > 0 ? (
+              <span>{leaderStreak}+ leader</span>
+            ) : (
+              <span>Waiting for streaks…</span>
+            )}
+          </div>
+          {streakLoading && (
+            <p className="mt-1 text-[10px] text-white/50">
+              Loading streak data…
+            </p>
+          )}
+          {streakError && (
+            <p className="mt-1 text-[10px] text-red-400">{streakError}</p>
+          )}
+        </div>
       </div>
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
@@ -423,7 +557,7 @@ export default function PicksClient() {
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
         <div className="col-span-3">MATCH • VENUE</div>
-        <div className="col-span-1 text-center">QUARTER#</div>
+        <div className="col-span-1 text-center">QUARTER</div>
         <div className="col-span-2">QUESTION</div>
         <div className="col-span-2 text-right">PICK • YES% • NO%</div>
       </div>
