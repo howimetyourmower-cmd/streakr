@@ -461,7 +461,7 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white min-h-screen bg-black">
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
@@ -563,9 +563,9 @@ export default function PicksClient() {
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
-        <div className="col-span-3">MATCH • VENUE</div>
+        <div className="col-span-2">MATCH • VENUE</div>
         <div className="col-span-1 text-center">QUARTER</div>
-        <div className="col-span-2">QUESTION</div>
+        <div className="col-span-3">QUESTION</div>
         <div className="col-span-2 text-right">PICK • YES% • NO%</div>
       </div>
 
@@ -616,7 +616,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE */}
-                <div className="col-span-12 md:col-span-3">
+                <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">
                     {row.match}
                   </div>
@@ -631,7 +631,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* QUESTION + COMMENTS + streak pill */}
-                <div className="col-span-9 md:col-span-2">
+                <div className="col-span-9 md:col-span-3">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
