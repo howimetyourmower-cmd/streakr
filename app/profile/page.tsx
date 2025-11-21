@@ -1,4 +1,4 @@
-"use client";
+     "use client";
 
 import {
   useEffect,
@@ -670,6 +670,44 @@ export default function ProfilePage() {
         </section>
       )}
 
+      {/* SPONSOR BANNER – between profile info and Last 5 picks */}
+      <section className="mt-2">
+        <div className="rounded-2xl bg-gradient-to-r from-sky-700 via-sky-500 to-sky-600 p-[1px] shadow-[0_0_40px_rgba(56,189,248,0.35)]">
+          <div className="flex flex-col gap-4 rounded-2xl bg-sky-600/90 px-4 py-4 md:flex-row md:items-center md:px-6 md:py-5">
+            {/* Text side */}
+            <div className="flex-1">
+              <div className="mb-1 inline-flex items-center gap-2 rounded-full bg-yellow-400 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-900">
+                <span className="h-1.5 w-1.5 rounded-full bg-sky-900" />
+                Official Partner
+              </div>
+              <h3 className="mt-2 text-xl font-extrabold leading-tight text-white md:text-2xl">
+                Boost the banter,
+                <span className="block text-yellow-300">
+                  power up your streak nights.
+                </span>
+              </h3>
+              <p className="mt-2 max-w-md text-xs text-sky-100 md:text-sm">
+                Our featured partner helps bring more stats, more prizes and
+                more fun match-day moments to STREAKr players all season long.
+              </p>
+
+              <button className="mt-3 inline-flex items-center rounded-full bg-yellow-300 px-4 py-2 text-xs font-semibold text-sky-900 transition hover:bg-yellow-200 md:text-sm">
+                Learn more about our partner
+              </button>
+            </div>
+
+            {/* Optional logo side */}
+            <div className="flex justify-center md:justify-end">
+              <img
+                src="/sponsor-placeholder.png" // replace with real logo when ready
+                alt="Sponsor logo"
+                className="w-28 opacity-90 md:w-32"
+              />
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* LAST 5 PICKS */}
       <section className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-7 sm:py-6">
         <div className="flex items-center justify-between mb-3">
@@ -794,6 +832,5 @@ function FieldInput({
         disabled={!editable}
       />
     </div>
-    
   );
 }
