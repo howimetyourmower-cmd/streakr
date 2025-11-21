@@ -414,7 +414,7 @@ export default function FAQPage() {
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
-                      placeholder="e.g. Glenn"
+                      placeholder="e.g. Simon and username"
                     />
                   </div>
                   <div>
@@ -462,7 +462,7 @@ export default function FAQPage() {
                     onChange={(e) => setMessage(e.target.value)}
                     rows={5}
                     className="w-full rounded-md border border-zinc-700 bg-black/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/40 focus:border-orange-400 focus:ring-2"
-                    placeholder="Tell us what’s happening, including any error messages or screenshots if relevant."
+                    placeholder="Tell us what’s happening."
                   />
                 </div>
 
