@@ -1,6 +1,6 @@
 // app/api/seed-rounds-2026/route.ts
 import { NextResponse } from "next/server";
-import { db } from "../../lib/firebaseAdmin";
+import { db } from "@/lib/admin";
 import rows from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -34,6 +34,8 @@ type RawRow = {
 
 const SEASON = 2026;
 
+// ---------- helpers ----------
+
 function normKey(k: string) {
   return k.toLowerCase().replace(/[\s_.]/g, "");
 }
@@ -50,6 +52,7 @@ function roundLabelToNumber(labelRaw: any): number {
   const label = String(labelRaw ?? "").trim();
   const up = label.toUpperCase();
   if (up === "OR" || up === "OPENING" || up === "OPENING ROUND") return 0;
+
   const n = Number(label);
   return Number.isFinite(n) ? n : 0;
 }
@@ -61,6 +64,8 @@ function slugifyMatch(match: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
+// ---------- handler ----------
+
 export async function GET() {
   if (!Array.isArray(rows) || rows.length === 0) {
     return NextResponse.json(
@@ -69,10 +74,9 @@ export async function GET() {
     );
   }
 
-  const roundMap = new Map<
-    string,
-    RoundDoc & { _gameIndex: Map<string, Game> }
-  >();
+  type RoundInternal = RoundDoc & { _gameIndex: Map<string, Game> };
+
+  const roundMap = new Map<string, RoundInternal>();
 
   for (const row of rows as RawRow[]) {
     const roundLabel = get(row, "Round");
@@ -84,11 +88,12 @@ export async function GET() {
     const venue = String(get(row, "Venue") ?? "").trim();
     const startTime = String(get(row, "StartTime") ?? "").trim();
     const questionText = String(get(row, "Question") ?? "").trim();
-    const quarterVal = Number(get(row, "Quarter") ?? 1);
+    const quarterRaw = get(row, "Quarter");
+    const quarterVal = Number(quarterRaw ?? 1);
     const statusRaw = String(get(row, "Status") ?? "open").toLowerCase();
 
     if (!roundLabel || !gameNo || !match || !questionText || !startTime) {
-      console.log("Skipping incomplete:", row);
+      console.log("Skipping incomplete row:", row);
       continue;
     }
 
@@ -99,6 +104,7 @@ export async function GET() {
         ? (statusRaw as QuestionStatus)
         : "open";
 
+    // get or create round
     let round = roundMap.get(roundKey);
     if (!round) {
       round = {
@@ -106,11 +112,12 @@ export async function GET() {
         roundNumber,
         label: roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`,
         games: [],
-        _gameIndex: new Map(),
+        _gameIndex: new Map<string, Game>(),
       };
       roundMap.set(roundKey, round);
     }
 
+    // get or create game within round
     let game = round._gameIndex.get(gameNo);
     if (!game) {
       game = {
@@ -126,7 +133,6 @@ export async function GET() {
     }
 
     const quarter = quarterVal > 0 ? quarterVal : 1;
-
     const questionId = `${game.id}-q${quarter}-${game.questions.length + 1}`;
 
     game.questions.push({
@@ -137,6 +143,7 @@ export async function GET() {
     });
   }
 
+  // write to Firestore in a batch
   const batch = db.batch();
   const roundsCol = db.collection("rounds");
 
