@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, ChangeEvent } from "react";
+import { useEffect, useState, useMemo, ChangeEvent } from "react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
@@ -168,8 +168,12 @@ export default function PicksClient() {
   }, []);
 
   // -------- Live comment counts from Firestore --------
+
+  // derive stable list of question IDs so effect re-runs when IDs truly change
+  const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
+
   useEffect(() => {
-    if (!rows.length) return;
+    if (!questionIds.length) return;
 
     const chunkArray = (arr: string[], size: number): string[][] => {
       const chunks: string[][] = [];
@@ -179,14 +183,14 @@ export default function PicksClient() {
       return chunks;
     };
 
-    const questionIds = rows.map((r) => r.id);
     const chunks = chunkArray(questionIds, 10);
 
     const unsubs = chunks.map((ids) => {
-      const commentsRef = collection(db, "comments"); // adjust name if different
-      const q = query(commentsRef, where("questionId", "in", ids));
+      const commentsRef = collection(db, "comments");
+      const qRef = query(commentsRef, where("questionId", "in", ids));
 
-      return onSnapshot(q, (snapshot) => {
+      return onSnapshot(qRef, (snapshot) => {
+        // count comments per questionId just for this chunk
         const counts: Record<string, number> = {};
 
         snapshot.forEach((docSnap) => {
@@ -195,18 +199,21 @@ export default function PicksClient() {
           counts[qid] = (counts[qid] ?? 0) + 1;
         });
 
+        // only update rows that belong to this chunk; leave others alone
         setRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            commentCount: counts[r.id] ?? 0,
-          }))
+          prev.map((r) =>
+            counts[r.id] !== undefined
+              ? { ...r, commentCount: counts[r.id] }
+              : r
+          )
         );
 
         setFilteredRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            commentCount: counts[r.id] ?? 0,
-          }))
+          prev.map((r) =>
+            counts[r.id] !== undefined
+              ? { ...r, commentCount: counts[r.id] }
+              : r
+          )
         );
       });
     });
@@ -214,7 +221,7 @@ export default function PicksClient() {
     return () => {
       unsubs.forEach((unsub) => unsub());
     };
-  }, [rows.length]);
+  }, [questionIds]);
 
   // -------- Load existing streak pick for this user (persistence) --------
   useEffect(() => {
