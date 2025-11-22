@@ -1,33 +1,39 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseAdmin";
+import { db } from "@/lib/admin";
 import { doc, getDoc } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
-    // 1. Load config
+    // 1. Load config document
     const configRef = doc(db, "config", "season-2026");
     const configSnap = await getDoc(configRef);
-    if (!configSnap.exists()) {
+
+    if (!configSnap.exists) {
       throw new Error("Config doc missing");
     }
 
-    const config = configSnap.data();
-    const roundId = config.activeRoundId; // MUST be 2026-0, 2026-1 etc.
+    const config = configSnap.data() as {
+      activeRoundId?: string;
+      activeRoundKey?: string;
+      activeRoundNumber?: number;
+    };
+
+    const roundId = config.activeRoundId;
 
     if (!roundId) {
       return NextResponse.json({
         games: [],
         roundNumber: 0,
         roundKey: "",
-        error: "No active round ID",
+        error: "No activeRoundId set",
       });
     }
 
-    // 2. Load round by ID (correct)
+    // 2. Load the active round by ID from "rounds" collection
     const roundRef = doc(db, "rounds", roundId);
     const roundSnap = await getDoc(roundRef);
 
-    if (!roundSnap.exists()) {
+    if (!roundSnap.exists) {
       return NextResponse.json({
         games: [],
         roundNumber: 0,
@@ -36,27 +42,35 @@ export async function GET() {
       });
     }
 
-    const data = roundSnap.data();
+    const round = roundSnap.data() as {
+      games?: any[];
+      roundNumber?: number;
+      roundKey?: string;
+      published?: boolean;
+    };
 
-    // 3. If unpublished → hide games
-    if (data.published === false) {
+    // 3. If round is not published yet, return empty games
+    if (round.published === false) {
       return NextResponse.json({
         games: [],
-        roundNumber: data.roundNumber,
-        roundKey: data.roundKey,
+        roundNumber: round.roundNumber ?? 0,
+        roundKey: round.roundKey ?? "",
       });
     }
 
-    // 4. Build games array
-    const games = Array.isArray(data.games) ? data.games : [];
-
+    // 4. Return games
     return NextResponse.json({
-      games,
-      roundNumber: data.roundNumber,
-      roundKey: data.roundKey,
+      games: Array.isArray(round.games) ? round.games : [],
+      roundNumber: round.roundNumber ?? 0,
+      roundKey: round.roundKey ?? "",
     });
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ games: [], error: "internal" });
+  } catch (error) {
+    console.error("Error in /api/picks:", error);
+    return NextResponse.json({
+      games: [],
+      roundNumber: 0,
+      roundKey: "",
+      error: "Server error",
+    });
   }
 }
