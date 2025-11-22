@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { QuestionStatus } from "@/types/questions"; // if you don't have this, see note below
+import { QuestionStatus } from "../../../types/questions"; // if you don't have this, see note below
 import clsx from "clsx";
 
 type Outcome = "yes" | "no";
