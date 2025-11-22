@@ -1,76 +1,84 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/admin"; // Firestore (admin SDK) instance
+import { db } from "@/lib/admin";
+import { CURRENT_SEASON } from "@/lib/rounds";
+
+type FirestoreRound = {
+  season: number;
+  roundNumber: number;
+  roundKey: string;
+  label: string;
+  published?: boolean;
+  games?: any[];
+};
+
+type SeasonConfig = {
+  currentRoundNumber?: number;
+  currentRoundKey?: string;
+};
 
 export async function GET() {
   try {
-    // 1. Load config document from admin Firestore
-    // Admin SDK uses db.doc("collection/docId"), not doc(db, ...)
-    const configRef = db.doc("config/season-2026");
+    // 1. Load season config to find which round is currently live
+    const configRef = db.collection("config").doc(`season-${CURRENT_SEASON}`);
     const configSnap = await configRef.get();
 
     if (!configSnap.exists) {
-      throw new Error("Config doc missing");
-    }
-
-    const config = configSnap.data() as {
-      activeRoundId?: string;
-      activeRoundKey?: string;
-      activeRoundNumber?: number;
-    };
-
-    const roundId = config.activeRoundId;
-
-    if (!roundId) {
+      // No config yet – just return empty but with sensible defaults
       return NextResponse.json({
         games: [],
         roundNumber: 0,
-        roundKey: "",
-        error: "No activeRoundId set",
+        roundKey: "OR",
       });
     }
 
-    // 2. Load the active round by ID from "rounds" collection
-    const roundRef = db.doc(`rounds/${roundId}`);
+    const config = configSnap.data() as SeasonConfig;
+
+    const roundNumber = config.currentRoundNumber ?? 0;
+    const roundKey = config.currentRoundKey ?? "OR";
+
+    // 2. Load that round from the "rounds" collection
+    const roundId = `${CURRENT_SEASON}-${roundNumber}`; // e.g. "2026-0"
+    const roundRef = db.collection("rounds").doc(roundId);
     const roundSnap = await roundRef.get();
 
     if (!roundSnap.exists) {
+      // Round doc missing – again, return empty but keep round info
       return NextResponse.json({
+        games: [],
+        roundNumber,
+        roundKey,
+      });
+    }
+
+    const roundData = roundSnap.data() as FirestoreRound;
+
+    // 3. Respect the "published" flag
+    if (!roundData.published) {
+      return NextResponse.json({
+        games: [],
+        roundNumber,
+        roundKey,
+      });
+    }
+
+    // 4. Finally, send games back to the Picks page
+    const games = Array.isArray(roundData.games) ? roundData.games : [];
+
+    return NextResponse.json({
+      games,
+      roundNumber,
+      roundKey,
+    });
+  } catch (err) {
+    console.error("Error in /api/picks", err);
+    return NextResponse.json(
+      {
         games: [],
         roundNumber: 0,
-        roundKey: "",
-        error: "Round not found",
-      });
-    }
-
-    const round = roundSnap.data() as {
-      games?: any[];
-      roundNumber?: number;
-      roundKey?: string;
-      published?: boolean;
-    };
-
-    // 3. If round is not published yet, return empty games
-    if (round.published === false) {
-      return NextResponse.json({
-        games: [],
-        roundNumber: round.roundNumber ?? 0,
-        roundKey: round.roundKey ?? "",
-      });
-    }
-
-    // 4. Return games
-    return NextResponse.json({
-      games: Array.isArray(round.games) ? round.games : [],
-      roundNumber: round.roundNumber ?? 0,
-      roundKey: round.roundKey ?? "",
-    });
-  } catch (error) {
-    console.error("Error in /api/picks:", error);
-    return NextResponse.json({
-      games: [],
-      roundNumber: 0,
-      roundKey: "",
-      error: "Server error",
-    });
+        roundKey: "OR",
+        error: "internal_error",
+      },
+      { status: 500 }
+    );
   }
 }
