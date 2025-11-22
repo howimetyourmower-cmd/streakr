@@ -3,6 +3,7 @@ export const runtime = "nodejs";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 import { Timestamp } from "firebase-admin/firestore";
+import { CURRENT_SEASON } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "pending" | "final" | "void";
 
@@ -18,8 +19,6 @@ type SettlementQuestion = {
   round?: number;
 };
 
-const CURRENT_SEASON = 2026;
-
 /** Convert Firestore Timestamp | Date | string -> ISO string */
 function toIso(value: any): string {
   if (!value) return "";
@@ -29,7 +28,11 @@ function toIso(value: any): string {
   return "";
 }
 
-/** Find a question by its ID inside rounds/games/questions */
+/**
+ * Find a question by its ID inside rounds/games/questions
+ * Looks through ALL rounds for CURRENT_SEASON (published or not),
+ * since settlement might need to adjust older data.
+ */
 async function findQuestionById(questionId: string) {
   const roundsSnap = await db
     .collection("rounds")
@@ -50,7 +53,7 @@ async function findQuestionById(questionId: string) {
         if (id === questionId) {
           return {
             roundDocId: roundDoc.id,
-            roundNumber: data.round ?? null,
+            roundNumber: data.roundNumber ?? null,
             games,
             gameIndex: gi,
             questionIndex: qi,
@@ -67,16 +70,18 @@ async function findQuestionById(questionId: string) {
 /** GET – list questions to settle for the console */
 export async function GET() {
   try {
+    // Only show questions from PUBLISHED rounds for this season
     const roundsSnap = await db
       .collection("rounds")
       .where("season", "==", CURRENT_SEASON)
+      .where("published", "==", true)
       .get();
 
     const questions: SettlementQuestion[] = [];
 
     roundsSnap.forEach((roundDoc) => {
       const data = roundDoc.data() as any;
-      const roundNumber: number | undefined = data.round;
+      const roundNumber: number | undefined = data.roundNumber;
       const games = data.games ?? [];
 
       games.forEach((g: any, gi: number) => {
@@ -227,8 +232,7 @@ export async function POST(req: NextRequest) {
       // If they somehow have no activePick, skip
       if (!activePick) return;
 
-      const win =
-        outcome !== "void" && activePick === outcome;
+      const win = outcome !== "void" && activePick === outcome;
 
       let current =
         typeof data.currentStreak === "number"
