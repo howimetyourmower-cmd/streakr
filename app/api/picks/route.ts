@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/admin";
-import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebaseAdmin";
+import { doc, getDoc } from "firebase-admin/firestore";
 
 export async function GET() {
   try {
