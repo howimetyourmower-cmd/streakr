@@ -1,234 +1,259 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 import {
   collection,
-  getDocs,
   doc,
+  getDocs,
+  orderBy,
+  query,
+  setDoc,
   updateDoc,
+  serverTimestamp,
 } from "firebase/firestore";
-import {
-  CURRENT_SEASON,
-  ROUND_OPTIONS,
-  type RoundKey,
-} from "@/lib/rounds";
+import { db } from "@/lib/firebaseClient";
 
-type RoundRow = {
-  id: string;              // Firestore doc id (e.g. "2026-0")
-  roundKey: RoundKey;      // "OR", "R1" etc
-  roundNumber: number;     // 0–23
-  label: string;           // Opening Round, Round 1, etc.
+type RoundMeta = {
+  id: string;
+  label: string;
+  season: number;
+  roundNumber: number;
+  roundKey: string;
   gamesCount: number;
   questionsCount: number;
   published: boolean;
 };
 
-const ADMIN_EMAIL_FALLBACK = "howimetyourmower@gmail.com"; // change if needed
-
 export default function AdminRoundsPage() {
-  const { user, loading: authLoading } = useAuth();
-  const isAdmin =
-    !!user &&
-    (user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL ||
-      user.email === ADMIN_EMAIL_FALLBACK);
+  const { user, isAdmin, loading } = useAuth();
 
-  const [rounds, setRounds] = useState<RoundRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [busyRoundId, setBusyRoundId] = useState<string | null>(null);
+  const [rounds, setRounds] = useState<RoundMeta[]>([]);
+  const [roundsLoading, setRoundsLoading] = useState(true);
+  const [savingRoundId, setSavingRoundId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // ---- load rounds from Firestore ----
-  async function loadRounds() {
-    setLoading(true);
-    try {
-      const snap = await getDocs(collection(db, "rounds"));
-      const list: RoundRow[] = [];
+  // Load all rounds for all seasons
+  useEffect(() => {
+    if (!user || !isAdmin) return;
 
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        if (data.season !== CURRENT_SEASON) return;
+    async function loadRounds() {
+      try {
+        setRoundsLoading(true);
+        setError(null);
 
-        const games = (data.games || []) as any[];
-        const gamesCount = games.length;
-        const questionsCount = games.reduce(
-          (sum, g) => sum + ((g.questions || []).length as number),
-          0
+        const q = query(
+          collection(db, "rounds"),
+          orderBy("season", "asc"),
+          orderBy("roundNumber", "asc")
         );
 
-        const roundKey = (data.roundKey ?? "OR") as RoundKey;
-        const fromOptions =
-          ROUND_OPTIONS.find((r) => r.key === roundKey)?.label ?? d.id;
+        const snap = await getDocs(q);
 
-        list.push({
-          id: d.id,
-          roundKey,
-          roundNumber: (data.roundNumber ?? 0) as number,
-          label: (data.label ?? fromOptions) as string,
-          gamesCount,
-          questionsCount,
-          published: !!data.published,
+        const loaded: RoundMeta[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+
+          const games = Array.isArray(data.games) ? data.games : [];
+          const questionsCount = games.reduce((total: number, game: any) => {
+            const qs = Array.isArray(game.questions) ? game.questions : [];
+            return total + qs.length;
+          }, 0);
+
+          return {
+            id: docSnap.id,
+            label: data.label ?? "",
+            season: data.season ?? 0,
+            roundNumber: data.roundNumber ?? 0,
+            roundKey: data.roundKey ?? "",
+            gamesCount: games.length,
+            questionsCount,
+            published: Boolean(data.published),
+          };
         });
-      });
 
-      // order 0..23
-      list.sort((a, b) => a.roundNumber - b.roundNumber);
-      setRounds(list);
-    } finally {
-      setLoading(false);
+        setRounds(loaded);
+      } catch (err) {
+        console.error("Failed to load rounds", err);
+        setError("Failed to load rounds.");
+      } finally {
+        setRoundsLoading(false);
+      }
     }
-  }
 
-  // ---- publish / unpublish (PERSIST) ----
-  async function setPublished(roundId: string, value: boolean) {
-    setBusyRoundId(roundId);
+    loadRounds();
+  }, [user, isAdmin]);
+
+  async function handlePublishRound(round: RoundMeta) {
     try {
-      const ref = doc(db, "rounds", roundId);
-      await updateDoc(ref, { published: value });
+      setSavingRoundId(round.id);
+      setError(null);
 
-      // update local state so UI responds instantly
-      setRounds((old) =>
-        old.map((r) =>
-          r.id === roundId ? { ...r, published: value } : r
+      // 1) Mark round as published
+      const roundRef = doc(db, "rounds", round.id);
+      await updateDoc(roundRef, { published: true });
+
+      // 2) Update the config document for this season
+      const configRef = doc(db, "config", `season-${round.season}`);
+      await setDoc(
+        configRef,
+        {
+          season: round.season,
+          currentRoundId: round.id,
+          currentRoundKey: round.roundKey,
+          currentRoundLabel: round.label,
+          currentRoundNumber: round.roundNumber,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // 3) Update local UI state
+      setRounds((prev) =>
+        prev.map((r) =>
+          r.id === round.id ? { ...r, published: true } : r
         )
       );
     } catch (err) {
-      console.error(err);
-      alert("Error saving publish state. Check console / logs.");
+      console.error("Failed to publish round", err);
+      setError("Failed to publish round.");
     } finally {
-      setBusyRoundId(null);
+      setSavingRoundId(null);
     }
   }
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user || !isAdmin) return;
-    void loadRounds();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user, isAdmin]);
+  async function handleUnpublishRound(round: RoundMeta) {
+    try {
+      setSavingRoundId(round.id);
+      setError(null);
 
-  if (authLoading) {
+      const roundRef = doc(db, "rounds", round.id);
+      await updateDoc(roundRef, { published: false });
+
+      setRounds((prev) =>
+        prev.map((r) =>
+          r.id === round.id ? { ...r, published: false } : r
+        )
+      );
+    } catch (err) {
+      console.error("Failed to unpublish round", err);
+      setError("Failed to unpublish round.");
+    } finally {
+      setSavingRoundId(null);
+    }
+  }
+
+  if (loading || roundsLoading) {
     return (
-      <main className="max-w-5xl mx-auto px-4 py-10 text-slate-200">
-        <p>Checking admin access…</p>
+      <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+        <h1 className="text-3xl font-bold mb-4">Rounds</h1>
+        <p>Loading…</p>
       </main>
     );
   }
 
   if (!user || !isAdmin) {
     return (
-      <main className="max-w-5xl mx-auto px-4 py-10 text-slate-200">
-        <h1 className="text-3xl font-bold mb-4">Rounds &amp; publishing</h1>
-        <p className="text-sm text-slate-400">
-          You must be an admin to access this page.
-        </p>
+      <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+        <h1 className="text-3xl font-bold mb-4">Rounds</h1>
+        <p>You must be an admin to view this page.</p>
       </main>
     );
   }
 
   return (
-    <main className="max-w-6xl mx-auto px-4 py-8 text-slate-100 space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold">Rounds &amp; publishing</h1>
-        <p className="text-sm text-slate-400 max-w-2xl">
-          Load all rounds in advance, then control when each round&apos;s
-          questions become visible on the Picks page. Unpublished rounds always
-          return an empty list of games to players.
-        </p>
-      </header>
+    <main className="max-w-5xl mx-auto px-4 py-10 text-white">
+      <h1 className="text-3xl font-bold mb-6">Rounds</h1>
 
-      <section className="rounded-2xl bg-slate-900/70 border border-slate-700/70 overflow-hidden">
-        <div className="grid grid-cols-[1.4fr,0.9fr,0.9fr,0.9fr,0.9fr,1.1fr] gap-2 px-4 py-2 text-[11px] font-semibold tracking-wide uppercase text-slate-400 border-b border-slate-800/80">
-          <div>Round</div>
-          <div className="text-right">Games</div>
-          <div className="text-right">Questions</div>
-          <div className="text-center">Season</div>
-          <div className="text-center">Published</div>
-          <div className="text-right">Actions</div>
+      <p className="mb-4 text-sm text-slate-300">
+        Use this page to control which round is live on the Picks page.
+        Clicking <span className="font-semibold">Publish round</span> will:
+        <br />
+        1) set the round&apos;s <code>published</code> flag to{" "}
+        <code>true</code>, and
+        <br />
+        2) update the <code>config / season-YYYY</code> document that the
+        Picks API reads.
+      </p>
+
+      {error && (
+        <div className="mb-4 text-sm text-red-400 bg-red-900/40 border border-red-500/40 rounded px-3 py-2">
+          {error}
         </div>
+      )}
 
-        {loading ? (
-          <div className="px-4 py-6 text-sm text-slate-400">
-            Loading rounds…
-          </div>
-        ) : rounds.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-400">
-            No rounds found for season {CURRENT_SEASON}.
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-800/80">
-            {rounds.map((r) => (
-              <div
-                key={r.id}
-                className="grid grid-cols-[1.4fr,0.9fr,0.9fr,0.9fr,0.9fr,1.1fr] gap-2 px-4 py-3 text-sm"
+      <div className="overflow-x-auto rounded-lg border border-slate-700 bg-slate-900/60">
+        <table className="min-w-full text-sm">
+          <thead className="bg-slate-800/70">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold">Season</th>
+              <th className="px-4 py-3 text-left font-semibold">Round</th>
+              <th className="px-4 py-3 text-left font-semibold">Label</th>
+              <th className="px-4 py-3 text-left font-semibold">Games</th>
+              <th className="px-4 py-3 text-left font-semibold">
+                Questions
+              </th>
+              <th className="px-4 py-3 text-left font-semibold">Status</th>
+              <th className="px-4 py-3 text-left font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rounds.map((round) => (
+              <tr
+                key={round.id}
+                className="border-t border-slate-800 hover:bg-slate-800/60"
               >
-                <div className="space-y-0.5">
-                  <div className="font-semibold">{r.label}</div>
-                  <div className="text-[11px] text-slate-400 flex gap-2">
-                    <span className="font-mono">{r.roundKey}</span>
-                    <span>Doc: {r.id}</span>
-                  </div>
-                </div>
-
-                <div className="text-right text-sm">
-                  {r.gamesCount.toLocaleString()}
-                </div>
-
-                <div className="text-right text-sm">
-                  {r.questionsCount.toLocaleString()}
-                </div>
-
-                <div className="text-center text-xs text-slate-400">
-                  {CURRENT_SEASON}
-                </div>
-
-                <div className="flex items-center justify-center">
-                  {r.published ? (
-                    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
-                      Live
+                <td className="px-4 py-3">{round.season}</td>
+                <td className="px-4 py-3">{round.roundNumber}</td>
+                <td className="px-4 py-3">{round.label}</td>
+                <td className="px-4 py-3">{round.gamesCount}</td>
+                <td className="px-4 py-3">{round.questionsCount}</td>
+                <td className="px-4 py-3">
+                  {round.published ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-600/80 px-3 py-1 text-xs font-semibold">
+                      PUBLISHED
                     </span>
                   ) : (
-                    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase bg-slate-700/50 text-slate-100 border border-slate-500/60">
-                      Draft
+                    <span className="inline-flex items-center rounded-full bg-slate-600/80 px-3 py-1 text-xs font-semibold">
+                      DRAFT
                     </span>
                   )}
-                </div>
-
-                <div className="flex items-center justify-end gap-2 text-[11px]">
+                </td>
+                <td className="px-4 py-3 space-x-2">
                   <button
-                    disabled={busyRoundId === r.id}
-                    onClick={() => setPublished(r.id, true)}
-                    className={`px-3 py-1 rounded-full font-semibold ${
-                      r.published
-                        ? "bg-emerald-700/30 text-emerald-200 border border-emerald-500/40"
-                        : "bg-emerald-500 text-slate-900 border border-transparent"
-                    } disabled:opacity-60`}
+                    onClick={() => handlePublishRound(round)}
+                    disabled={savingRoundId === round.id}
+                    className="inline-flex items-center rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1 text-xs font-semibold text-black"
                   >
-                    Publish round
+                    {savingRoundId === round.id && round.published === false
+                      ? "Publishing..."
+                      : "Publish round"}
                   </button>
                   <button
-                    disabled={busyRoundId === r.id}
-                    onClick={() => setPublished(r.id, false)}
-                    className={`px-3 py-1 rounded-full font-semibold ${
-                      !r.published
-                        ? "bg-slate-700/60 text-slate-200 border border-slate-500/60"
-                        : "bg-slate-800 text-slate-100 border border-slate-600"
-                    } disabled:opacity-60`}
+                    onClick={() => handleUnpublishRound(round)}
+                    disabled={savingRoundId === round.id}
+                    className="inline-flex items-center rounded-full bg-slate-600 hover:bg-slate-500 disabled:opacity-60 disabled:cursor-not-allowed px-4 py-1 text-xs font-semibold"
                   >
-                    Unpublish
+                    {savingRoundId === round.id && round.published === true
+                      ? "Unpublishing..."
+                      : "Unpublish"}
                   </button>
-                </div>
-              </div>
+                </td>
+              </tr>
             ))}
-          </div>
-        )}
-      </section>
 
-      <p className="text-[11px] text-slate-500 max-w-3xl">
-        Note: the Picks API should only return games where
-        <span className="font-mono"> published === true </span> on the round
-        document. This page is the single source of truth for that flag.
-      </p>
+            {rounds.length === 0 && (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="px-4 py-6 text-center text-slate-400"
+                >
+                  No rounds found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </main>
   );
 }
