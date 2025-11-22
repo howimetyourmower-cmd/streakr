@@ -1,88 +1,94 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  limit,
-  query,
-  where,
-} from "firebase/firestore";
+import { db } from "@/lib/firebaseAdmin";
 
-const SEASON = 2026;
-const CONFIG_DOC_ID = `season-${SEASON}`;
+type QuestionStatus = "open" | "final" | "pending" | "void";
 
-// Response shape used by the Picks page
-type PicksApiResponse = {
-  games: any[];
-  roundNumber: number;
-  roundKey: string;
+type RoundConfig = {
+  currentRoundId?: string;
+  currentRoundKey?: string;
+  currentRoundNumber?: number;
+  season?: number;
+};
+
+type RoundDoc = {
+  games?: any[];
+  roundKey?: string;
+  roundNumber?: number;
 };
 
 export async function GET() {
   try {
-    // 1) Load config to find the current round key
-    const configRef = doc(db, "config", CONFIG_DOC_ID);
-    const configSnap = await getDoc(configRef);
+    // 1) Read the config doc that your Publish button updates
+    const configSnap = await db.collection("config").doc("season-2026").get();
 
-    if (!configSnap.exists()) {
-      console.error("[/api/picks] Config doc missing");
-      const empty: PicksApiResponse = { games: [], roundNumber: 0, roundKey: "" };
-      return NextResponse.json(empty);
+    if (!configSnap.exists) {
+      return NextResponse.json(
+        {
+          games: [],
+          roundNumber: 0,
+          roundKey: "",
+          error: "config/season-2026 not found",
+        },
+        { status: 200 }
+      );
     }
 
-    const configData = configSnap.data() as {
-      currentRoundKey?: string;
-    };
+    const config = configSnap.data() as RoundConfig;
 
-    const currentRoundKey = configData.currentRoundKey || "OR";
+    const roundId = config.currentRoundId;
+    const roundKeyFromConfig = config.currentRoundKey ?? "";
+    const roundNumberFromConfig = config.currentRoundNumber ?? 0;
 
-    // 2) Find the published round for this season + roundKey
-    const roundsRef = collection(db, "rounds");
-    const roundsQuery = query(
-      roundsRef,
-      where("season", "==", SEASON),
-      where("roundKey", "==", currentRoundKey),
-      where("published", "==", true),
-      limit(1)
+    if (!roundId) {
+      return NextResponse.json(
+        {
+          games: [],
+          roundNumber: roundNumberFromConfig,
+          roundKey: roundKeyFromConfig,
+          error: "currentRoundId missing in config",
+        },
+        { status: 200 }
+      );
+    }
+
+    // 2) Load the round document, e.g. rounds/2026-0
+    const roundSnap = await db.collection("rounds").doc(roundId).get();
+
+    if (!roundSnap.exists) {
+      return NextResponse.json(
+        {
+          games: [],
+          roundNumber: roundNumberFromConfig,
+          roundKey: roundKeyFromConfig,
+          error: `rounds/${roundId} not found`,
+        },
+        { status: 200 }
+      );
+    }
+
+    const roundData = roundSnap.data() as RoundDoc;
+
+    const games = roundData.games ?? [];
+    const roundKey = roundKeyFromConfig || roundData.roundKey || "";
+    const roundNumber = roundNumberFromConfig || roundData.roundNumber || 0;
+
+    return NextResponse.json(
+      {
+        games,
+        roundNumber,
+        roundKey,
+      },
+      { status: 200 }
     );
-
-    const roundsSnap = await getDocs(roundsQuery);
-
-    if (roundsSnap.empty) {
-      console.warn("[/api/picks] No published round found for", {
-        season: SEASON,
-        currentRoundKey,
-      });
-
-      const empty: PicksApiResponse = {
+  } catch (err: any) {
+    return NextResponse.json(
+      {
         games: [],
         roundNumber: 0,
-        roundKey: currentRoundKey,
-      };
-      return NextResponse.json(empty);
-    }
-
-    const roundDoc = roundsSnap.docs[0];
-    const roundData = roundDoc.data() as {
-      games?: any[];
-      roundNumber?: number;
-      roundKey?: string;
-    };
-
-    const games = Array.isArray(roundData.games) ? roundData.games : [];
-
-    const response: PicksApiResponse = {
-      games,
-      roundNumber: roundData.roundNumber ?? 0,
-      roundKey: roundData.roundKey ?? currentRoundKey,
-    };
-
-    return NextResponse.json(response);
-  } catch (error) {
-    console.error("[/api/picks] Error loading picks:", error);
-    const empty: PicksApiResponse = { games: [], roundNumber: 0, roundKey: "" };
-    return NextResponse.json(empty, { status: 500 });
+        roundKey: "",
+        error: err?.message ?? "Unknown error",
+      },
+      { status: 500 }
+    );
   }
 }
