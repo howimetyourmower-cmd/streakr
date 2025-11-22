@@ -1,234 +1,372 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  collection,
-  getDocs,
-  doc,
-  updateDoc,
-} from "firebase/firestore";
-import {
-  CURRENT_SEASON,
-  ROUND_OPTIONS,
-  type RoundKey,
-} from "@/lib/rounds";
+import { QuestionStatus } from "@/types/questions"; // if you don't have this, see note below
+import clsx from "clsx";
 
-type RoundRow = {
-  id: string;              // Firestore doc id (e.g. "2026-0")
-  roundKey: RoundKey;      // "OR", "R1" etc
-  roundNumber: number;     // 0–23
-  label: string;           // Opening Round, Round 1, etc.
-  gamesCount: number;
-  questionsCount: number;
-  published: boolean;
+type Outcome = "yes" | "no";
+
+type ActionType = "lock" | "settle" | "void" | "reopen";
+
+type ApiQuestion = {
+  id: string;                // e.g. "sydney-vs-carlton-q1-1"
+  gameId: string;            // optional – keep if you already use it
+  match: string;             // "Sydney vs Carlton"
+  venue: string;             // "SCG, Sydney"
+  startTime: string;         // ISO string
+  quarter: number;           // 1–4
+  question: string;          // full text
+  status: QuestionStatus;    // "open" | "pending" | "final" | "void"
+  sport: string;             // "AFL"
 };
 
-const ADMIN_EMAIL_FALLBACK = "howimetyourmower@gmail.com"; // change if needed
+type SettlementApiResponse = {
+  questions: ApiQuestion[];
+  roundKey: string;   // "OR", "R1" etc
+  roundLabel: string; // "Opening Round", "Round 1" etc
+};
 
-export default function AdminRoundsPage() {
+function formatKickoff(dateStr: string) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return { date: "-", time: "-" };
+
+  return {
+    date: d.toLocaleDateString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "Australia/Melbourne",
+    }),
+    time: d.toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Australia/Melbourne",
+    }),
+  };
+}
+
+export default function SettlementPage() {
   const { user, loading: authLoading } = useAuth();
-  const isAdmin =
-    !!user &&
-    (user.email === process.env.NEXT_PUBLIC_ADMIN_EMAIL ||
-      user.email === ADMIN_EMAIL_FALLBACK);
 
-  const [rounds, setRounds] = useState<RoundRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [busyRoundId, setBusyRoundId] = useState<string | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // ---- load rounds from Firestore ----
-  async function loadRounds() {
-    setLoading(true);
-    try {
-      const snap = await getDocs(collection(db, "rounds"));
-      const list: RoundRow[] = [];
+  const [questions, setQuestions] = useState<ApiQuestion[]>([]);
+  const [roundLabel, setRoundLabel] = useState<string>("");
 
-      snap.forEach((d) => {
-        const data = d.data() as any;
-        if (data.season !== CURRENT_SEASON) return;
+  const [statusFilter, setStatusFilter] = useState<QuestionStatus | "all">(
+    "open"
+  );
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
 
-        const games = (data.games || []) as any[];
-        const gamesCount = games.length;
-        const questionsCount = games.reduce(
-          (sum, g) => sum + ((g.questions || []).length as number),
-          0
-        );
-
-        const roundKey = (data.roundKey ?? "OR") as RoundKey;
-        const fromOptions =
-          ROUND_OPTIONS.find((r) => r.key === roundKey)?.label ?? d.id;
-
-        list.push({
-          id: d.id,
-          roundKey,
-          roundNumber: (data.roundNumber ?? 0) as number,
-          label: (data.label ?? fromOptions) as string,
-          gamesCount,
-          questionsCount,
-          published: !!data.published,
+  // Fetch questions for current round from API
+  useEffect(() => {
+    const load = async () => {
+      setDataLoading(true);
+      setError(null);
+      try {
+        const res = await fetch("/api/settlement?round=current", {
+          cache: "no-store",
         });
+
+        if (!res.ok) {
+          throw new Error(`API error: ${res.status}`);
+        }
+
+        const json: SettlementApiResponse = await res.json();
+        setQuestions(json.questions);
+        setRoundLabel(json.roundLabel);
+      } catch (err: any) {
+        console.error(err);
+        setError(err.message ?? "Failed to load questions");
+      } finally {
+        setDataLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
+  const filteredQuestions =
+    statusFilter === "all"
+      ? questions
+      : questions.filter((q) => q.status === statusFilter);
+
+  async function handleAction(
+    q: ApiQuestion,
+    action: ActionType,
+    outcome?: Outcome
+  ) {
+    try {
+      setSubmittingId(q.id);
+      setError(null);
+
+      const res = await fetch("/api/settlement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: q.id,
+          action,
+          outcome: outcome ?? null,
+        }),
       });
 
-      // order 0..23
-      list.sort((a, b) => a.roundNumber - b.roundNumber);
-      setRounds(list);
-    } finally {
-      setLoading(false);
-    }
-  }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Settlement API error: ${res.status}`);
+      }
 
-  // ---- publish / unpublish (PERSIST) ----
-  async function setPublished(roundId: string, value: boolean) {
-    setBusyRoundId(roundId);
-    try {
-      const ref = doc(db, "rounds", roundId);
-      await updateDoc(ref, { published: value });
+      // Optimistic UI update
+      setQuestions((prev) =>
+        prev.map((item) => {
+          if (item.id !== q.id) return item;
 
-      // update local state so UI responds instantly
-      setRounds((old) =>
-        old.map((r) =>
-          r.id === roundId ? { ...r, published: value } : r
-        )
+          if (action === "lock") {
+            return { ...item, status: "pending" as QuestionStatus };
+          }
+
+          if (action === "void") {
+            return { ...item, status: "void" as QuestionStatus };
+          }
+
+          if (action === "reopen") {
+            return { ...item, status: "open" as QuestionStatus };
+          }
+
+          if (action === "settle") {
+            return { ...item, status: "final" as QuestionStatus };
+          }
+
+          return item;
+        })
       );
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Error saving publish state. Check console / logs.");
+      setError(err.message ?? "Something went wrong");
     } finally {
-      setBusyRoundId(null);
+      setSubmittingId(null);
     }
   }
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!user || !isAdmin) return;
-    void loadRounds();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user, isAdmin]);
-
-  if (authLoading) {
+  if (authLoading || dataLoading) {
     return (
-      <main className="max-w-5xl mx-auto px-4 py-10 text-slate-200">
-        <p>Checking admin access…</p>
+      <main className="mx-auto max-w-6xl px-4 py-10 text-slate-100">
+        <h1 className="mb-4 text-3xl font-bold tracking-tight">
+          Settlement console
+        </h1>
+        <p className="text-sm text-slate-300">Loading…</p>
       </main>
     );
   }
 
-  if (!user || !isAdmin) {
+  if (!user) {
     return (
-      <main className="max-w-5xl mx-auto px-4 py-10 text-slate-200">
-        <h1 className="text-3xl font-bold mb-4">Rounds &amp; publishing</h1>
-        <p className="text-sm text-slate-400">
-          You must be an admin to access this page.
+      <main className="mx-auto max-w-6xl px-4 py-10 text-slate-100">
+        <h1 className="mb-4 text-3xl font-bold tracking-tight">
+          Settlement console
+        </h1>
+        <p className="text-sm text-slate-300">
+          You must be logged in to access the admin settlement console.
         </p>
       </main>
     );
   }
 
   return (
-    <main className="max-w-6xl mx-auto px-4 py-8 text-slate-100 space-y-8">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold">Rounds &amp; publishing</h1>
-        <p className="text-sm text-slate-400 max-w-2xl">
-          Load all rounds in advance, then control when each round&apos;s
-          questions become visible on the Picks page. Unpublished rounds always
-          return an empty list of games to players.
-        </p>
-      </header>
-
-      <section className="rounded-2xl bg-slate-900/70 border border-slate-700/70 overflow-hidden">
-        <div className="grid grid-cols-[1.4fr,0.9fr,0.9fr,0.9fr,0.9fr,1.1fr] gap-2 px-4 py-2 text-[11px] font-semibold tracking-wide uppercase text-slate-400 border-b border-slate-800/80">
-          <div>Round</div>
-          <div className="text-right">Games</div>
-          <div className="text-right">Questions</div>
-          <div className="text-center">Season</div>
-          <div className="text-center">Published</div>
-          <div className="text-right">Actions</div>
+    <main className="mx-auto max-w-6xl px-4 py-8 text-slate-100">
+      <header className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Settlement console</h1>
+          <p className="mt-1 text-sm text-slate-300">
+            Internal tool to lock and settle STREAKr questions for{" "}
+            <span className="font-semibold text-orange-300">
+              {roundLabel || "current round"}
+            </span>
+            . Use carefully – these actions update player streaks.
+          </p>
         </div>
 
-        {loading ? (
-          <div className="px-4 py-6 text-sm text-slate-400">
-            Loading rounds…
-          </div>
-        ) : rounds.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-400">
-            No rounds found for season {CURRENT_SEASON}.
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-800/80">
-            {rounds.map((r) => (
-              <div
-                key={r.id}
-                className="grid grid-cols-[1.4fr,0.9fr,0.9fr,0.9fr,0.9fr,1.1fr] gap-2 px-4 py-3 text-sm"
-              >
-                <div className="space-y-0.5">
-                  <div className="font-semibold">{r.label}</div>
-                  <div className="text-[11px] text-slate-400 flex gap-2">
-                    <span className="font-mono">{r.roundKey}</span>
-                    <span>Doc: {r.id}</span>
-                  </div>
-                </div>
-
-                <div className="text-right text-sm">
-                  {r.gamesCount.toLocaleString()}
-                </div>
-
-                <div className="text-right text-sm">
-                  {r.questionsCount.toLocaleString()}
-                </div>
-
-                <div className="text-center text-xs text-slate-400">
-                  {CURRENT_SEASON}
-                </div>
-
-                <div className="flex items-center justify-center">
-                  {r.published ? (
-                    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase bg-emerald-500/15 text-emerald-300 border border-emerald-500/40">
-                      Live
-                    </span>
-                  ) : (
-                    <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase bg-slate-700/50 text-slate-100 border border-slate-500/60">
-                      Draft
-                    </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Filter by status
+          </span>
+          <div className="flex overflow-hidden rounded-full bg-slate-800/70">
+            {(["open", "pending", "final", "void", "all"] as const).map(
+              (status) => (
+                <button
+                  key={status}
+                  onClick={() =>
+                    setStatusFilter(
+                      status === "all" ? "all" : (status as QuestionStatus)
+                    )
+                  }
+                  className={clsx(
+                    "px-3 py-1 text-xs font-semibold",
+                    statusFilter === status
+                      ? "bg-orange-500 text-slate-900"
+                      : "text-slate-300"
                   )}
-                </div>
-
-                <div className="flex items-center justify-end gap-2 text-[11px]">
-                  <button
-                    disabled={busyRoundId === r.id}
-                    onClick={() => setPublished(r.id, true)}
-                    className={`px-3 py-1 rounded-full font-semibold ${
-                      r.published
-                        ? "bg-emerald-700/30 text-emerald-200 border border-emerald-500/40"
-                        : "bg-emerald-500 text-slate-900 border border-transparent"
-                    } disabled:opacity-60`}
-                  >
-                    Publish round
-                  </button>
-                  <button
-                    disabled={busyRoundId === r.id}
-                    onClick={() => setPublished(r.id, false)}
-                    className={`px-3 py-1 rounded-full font-semibold ${
-                      !r.published
-                        ? "bg-slate-700/60 text-slate-200 border border-slate-500/60"
-                        : "bg-slate-800 text-slate-100 border border-slate-600"
-                    } disabled:opacity-60`}
-                  >
-                    Unpublish
-                  </button>
-                </div>
-              </div>
-            ))}
+                >
+                  {status.toUpperCase()}
+                </button>
+              )
+            )}
           </div>
-        )}
-      </section>
+        </div>
+      </header>
 
-      <p className="text-[11px] text-slate-500 max-w-3xl">
-        Note: the Picks API should only return games where
-        <span className="font-mono"> published === true </span> on the round
-        document. This page is the single source of truth for that flag.
-      </p>
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      <section className="rounded-2xl bg-slate-900/60 shadow-lg ring-1 ring-slate-800/80">
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3 text-xs uppercase tracking-wide text-slate-400">
+          <span>
+            Showing {filteredQuestions.length} question
+            {filteredQuestions.length === 1 ? "" : "s"}
+          </span>
+          <span className="font-semibold text-slate-300">
+            LOCK / SETTLE / VOID / REOPEN
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-900/80 text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="px-4 py-3 text-left">Start</th>
+                <th className="px-4 py-3 text-left">Qtr</th>
+                <th className="px-4 py-3 text-left">Match</th>
+                <th className="px-4 py-3 text-left">Question</th>
+                <th className="px-4 py-3 text-left">Status</th>
+                <th className="px-4 py-3 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredQuestions.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={6}
+                    className="px-4 py-6 text-center text-sm text-slate-400"
+                  >
+                    No questions found for this filter.
+                  </td>
+                </tr>
+              ) : (
+                filteredQuestions.map((q) => {
+                  const kickoff = formatKickoff(q.startTime);
+                  return (
+                    <tr
+                      key={q.id}
+                      className="border-t border-slate-800/70 odd:bg-slate-900/40 even:bg-slate-900/20"
+                    >
+                      <td className="px-4 py-3 align-top text-xs text-slate-300">
+                        <div className="font-semibold text-slate-100">
+                          {kickoff.date}
+                        </div>
+                        <div className="text-xs text-slate-300">
+                          {kickoff.time} AEDT
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-xs font-semibold text-slate-100">
+                        Q{q.quarter}
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-xs text-slate-200">
+                        <div className="font-semibold">{q.match}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {q.venue}
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3 align-top text-sm text-slate-100">
+                        {q.question}
+                      </td>
+
+                      <td className="px-4 py-3 align-top">
+                        <span
+                          className={clsx(
+                            "inline-flex rounded-full px-3 py-1 text-xs font-semibold",
+                            q.status === "open" && "bg-emerald-500/15 text-emerald-300",
+                            q.status === "pending" && "bg-amber-500/15 text-amber-300",
+                            q.status === "final" && "bg-sky-500/15 text-sky-300",
+                            q.status === "void" && "bg-slate-600/40 text-slate-200"
+                          )}
+                        >
+                          {q.status.toUpperCase()}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 align-top">
+                        <div className="flex flex-wrap gap-2">
+
+                          {/* Lock */}
+                          <button
+                            disabled={
+                              submittingId === q.id || q.status !== "open"
+                            }
+                            onClick={() => handleAction(q, "lock")}
+                            className="rounded-full px-3 py-1 text-xs font-semibold bg-amber-500/90 text-slate-900 disabled:opacity-40"
+                          >
+                            Lock
+                          </button>
+
+                          {/* Settle YES */}
+                          <button
+                            disabled={
+                              submittingId === q.id ||
+                              (q.status !== "pending" && q.status !== "open")
+                            }
+                            onClick={() => handleAction(q, "settle", "yes")}
+                            className="rounded-full px-3 py-1 text-xs font-semibold bg-emerald-500 text-slate-900 disabled:opacity-40"
+                          >
+                            Settle YES
+                          </button>
+
+                          {/* Settle NO */}
+                          <button
+                            disabled={
+                              submittingId === q.id ||
+                              (q.status !== "pending" && q.status !== "open")
+                            }
+                            onClick={() => handleAction(q, "settle", "no")}
+                            className="rounded-full px-3 py-1 text-xs font-semibold bg-rose-500 text-slate-50 disabled:opacity-40"
+                          >
+                            Settle NO
+                          </button>
+
+                          {/* Void */}
+                          <button
+                            disabled={submittingId === q.id}
+                            onClick={() => handleAction(q, "void")}
+                            className="rounded-full px-3 py-1 text-xs font-semibold bg-slate-600 text-slate-50 disabled:opacity-40"
+                          >
+                            Void
+                          </button>
+
+                          {/* Reopen */}
+                          <button
+                            disabled={submittingId === q.id}
+                            onClick={() => handleAction(q, "reopen")}
+                            className="rounded-full px-3 py-1 text-xs font-semibold bg-blue-500 text-slate-900 disabled:opacity-40"
+                          >
+                            Reopen
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </main>
   );
 }
