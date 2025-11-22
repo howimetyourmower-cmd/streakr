@@ -3,18 +3,22 @@ import { NextResponse } from "next/server";
 import { db as adminDb } from "@/lib/admin";
 import { CURRENT_SEASON, type RoundKey } from "@/lib/rounds";
 
+type QuestionStatus = "open" | "final" | "pending" | "void";
+
+type FirestoreQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+};
+
 type FirestoreGame = {
   id: string;
   match: string;
   venue: string;
-  startTime: string; // "2026-03-05T19:30:00+11:00"
+  startTime: string;
   sport: string;
-  questions: {
-    id: string;
-    quarter: number;
-    question: string;
-    status: "open" | "final" | "pending" | "void";
-  }[];
+  questions: FirestoreQuestion[];
 };
 
 type FirestoreRound = {
@@ -28,11 +32,8 @@ type FirestoreRound = {
 
 export async function GET() {
   try {
-    // 1) Read current round from config: config/season-2026
-    const cfgRef = adminDb
-      .collection("config")
-      .doc(`season-${CURRENT_SEASON}`);
-
+    // 1) Get current round from config/season-2026
+    const cfgRef = adminDb.collection("config").doc(`season-${CURRENT_SEASON}`);
     const cfgSnap = await cfgRef.get();
 
     let currentRoundKey: RoundKey = "OR";
@@ -44,37 +45,41 @@ export async function GET() {
         currentRoundKey = data.currentRoundKey as RoundKey;
       }
       if (typeof data.currentRoundNumber === "number") {
-        currentRoundNumber = data.currentRoundNumber as number;
+        currentRoundNumber = data.currentRoundNumber;
       }
     }
 
-    // 2) Find the round doc that is published and matches this season + roundKey
-    const roundsRef = adminDb.collection("rounds");
+    // 2) Read the round document directly by ID: "2026-0", "2026-1", etc
+    const roundDocId = `${CURRENT_SEASON}-${currentRoundNumber}`;
+    const roundRef = adminDb.collection("rounds").doc(roundDocId);
+    const roundSnap = await roundRef.get();
 
-    const roundsSnap = await roundsRef
-      .where("season", "==", CURRENT_SEASON)
-      .where("roundKey", "==", currentRoundKey)
-      .where("published", "==", true)
-      .limit(1)
-      .get();
-
-    let roundKey: RoundKey = currentRoundKey;
-    let roundNumber = currentRoundNumber;
-    let games: FirestoreGame[] = [];
-
-    if (!roundsSnap.empty) {
-      const docSnap = roundsSnap.docs[0];
-      const data = docSnap.data() as FirestoreRound;
-
-      roundKey = data.roundKey ?? currentRoundKey;
-      roundNumber = data.roundNumber ?? currentRoundNumber;
-      games = (data.games ?? []) as FirestoreGame[];
+    if (!roundSnap.exists) {
+      // No round doc – return empty but with key/number so UI still works
+      return NextResponse.json({
+        games: [],
+        roundNumber: currentRoundNumber,
+        roundKey: currentRoundKey,
+      });
     }
+
+    const data = roundSnap.data() as FirestoreRound;
+
+    // 3) Respect the published flag – if not published, hide all questions
+    if (!data.published) {
+      return NextResponse.json({
+        games: [],
+        roundNumber: data.roundNumber ?? currentRoundNumber,
+        roundKey: data.roundKey ?? currentRoundKey,
+      });
+    }
+
+    const games = (data.games ?? []) as FirestoreGame[];
 
     return NextResponse.json({
       games,
-      roundNumber,
-      roundKey,
+      roundNumber: data.roundNumber ?? currentRoundNumber,
+      roundKey: data.roundKey ?? currentRoundKey,
     });
   } catch (err) {
     console.error("Error in /api/picks:", err);
