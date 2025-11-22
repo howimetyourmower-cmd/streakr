@@ -221,14 +221,14 @@ export default function HomePage() {
                   </p>
                 </div>
                 <div className="rounded-full bg-sky-500/90 text-black text-xs font-semibold px-3 py-1 shadow-[0_0_24px_rgba(56,189,248,0.9)]">
-                  AFL • Live rounds
+                  Make your Picks
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* TONIGHT'S QUESTIONS PREVIEW */}
+        {/* NEXT QUESTIONS PREVIEW */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
