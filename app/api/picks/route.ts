@@ -1,107 +1,85 @@
 // app/api/picks/route.ts
 import { NextResponse } from "next/server";
-import { db } from "@/lib/admin";
-import { CURRENT_SEASON, RoundKey } from "@/lib/rounds";
-
-type QuestionStatus = "open" | "final" | "pending" | "void";
-
-type FirestoreQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-};
+import { db as adminDb } from "@/lib/admin";
+import { CURRENT_SEASON, type RoundKey } from "@/lib/rounds";
 
 type FirestoreGame = {
   id: string;
   match: string;
   venue: string;
-  startTime: string;
+  startTime: string; // "2026-03-05T19:30:00+11:00"
   sport: string;
-  questions: FirestoreQuestion[];
+  questions: {
+    id: string;
+    quarter: number;
+    question: string;
+    status: "open" | "final" | "pending" | "void";
+  }[];
 };
 
 type FirestoreRound = {
   season: number;
-  roundKey: RoundKey;
   roundNumber: number;
+  roundKey: RoundKey;
   label: string;
   published: boolean;
   games: FirestoreGame[];
 };
 
-// Turn a round key (OR, R1, R2, …) into the rounds doc ID
-function roundKeyToDocId(key: RoundKey): string {
-  if (key === "OR") return `${CURRENT_SEASON}-0`;
-  if (key === "FINALS") return `${CURRENT_SEASON}-24`; // placeholder for later
-
-  const match = key.match(/^R(\d{1,2})$/);
-  if (match) {
-    const n = parseInt(match[1], 10); // e.g. R1 -> 1, R2 -> 2
-    return `${CURRENT_SEASON}-${n}`;
-  }
-
-  // Fallback – should never really hit this
-  return `${CURRENT_SEASON}-0`;
-}
-
 export async function GET() {
   try {
-    // 1) Read current round key from config/season-2026
-    const configSnap = await db
+    // 1) Read current round from config: config/season-2026
+    const cfgRef = adminDb
       .collection("config")
-      .doc(`season-${CURRENT_SEASON}`)
+      .doc(`season-${CURRENT_SEASON}`);
+
+    const cfgSnap = await cfgRef.get();
+
+    let currentRoundKey: RoundKey = "OR";
+    let currentRoundNumber = 0;
+
+    if (cfgSnap.exists) {
+      const data = cfgSnap.data() as any;
+      if (data.currentRoundKey) {
+        currentRoundKey = data.currentRoundKey as RoundKey;
+      }
+      if (typeof data.currentRoundNumber === "number") {
+        currentRoundNumber = data.currentRoundNumber as number;
+      }
+    }
+
+    // 2) Find the round doc that is published and matches this season + roundKey
+    const roundsRef = adminDb.collection("rounds");
+
+    const roundsSnap = await roundsRef
+      .where("season", "==", CURRENT_SEASON)
+      .where("roundKey", "==", currentRoundKey)
+      .where("published", "==", true)
+      .limit(1)
       .get();
 
-    if (!configSnap.exists) {
-      console.warn("No config doc for season", CURRENT_SEASON);
-      return NextResponse.json({
-        games: [],
-        roundNumber: 0,
-        roundKey: "OR" as RoundKey,
-      });
-    }
+    let roundKey: RoundKey = currentRoundKey;
+    let roundNumber = currentRoundNumber;
+    let games: FirestoreGame[] = [];
 
-    const configData = configSnap.data() as {
-      currentRound?: RoundKey;
-    };
+    if (!roundsSnap.empty) {
+      const docSnap = roundsSnap.docs[0];
+      const data = docSnap.data() as FirestoreRound;
 
-    const currentRoundKey = configData.currentRound ?? ("OR" as RoundKey);
-
-    // 2) Use that key to build the doc ID, e.g. "2026-0" for OR, "2026-1" for R1, etc.
-    const docId = roundKeyToDocId(currentRoundKey);
-
-    const roundSnap = await db.collection("rounds").doc(docId).get();
-
-    if (!roundSnap.exists) {
-      console.warn("Round doc not found for ID", docId);
-      return NextResponse.json({
-        games: [],
-        roundNumber: 0,
-        roundKey: currentRoundKey,
-      });
-    }
-
-    const roundData = roundSnap.data() as FirestoreRound;
-
-    // Extra safety: if not published, hide it
-    if (!roundData.published) {
-      return NextResponse.json({
-        games: [],
-        roundNumber: roundData.roundNumber ?? 0,
-        roundKey: roundData.roundKey ?? currentRoundKey,
-      });
+      roundKey = data.roundKey ?? currentRoundKey;
+      roundNumber = data.roundNumber ?? currentRoundNumber;
+      games = (data.games ?? []) as FirestoreGame[];
     }
 
     return NextResponse.json({
-      games: roundData.games ?? [],
-      roundNumber: roundData.roundNumber ?? 0,
-      roundKey: roundData.roundKey ?? currentRoundKey,
+      games,
+      roundNumber,
+      roundKey,
     });
   } catch (err) {
     console.error("Error in /api/picks:", err);
     return NextResponse.json(
-      { games: [], roundNumber: 0, roundKey: "OR" as RoundKey },
+      { error: "Failed to load picks", games: [], roundNumber: 0, roundKey: "OR" },
       { status: 500 }
     );
   }
