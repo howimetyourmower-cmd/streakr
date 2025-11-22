@@ -1,3 +1,4 @@
+// app/admin/settlement/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -5,652 +6,440 @@ import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   orderBy,
-  limit,
   query,
+  updateDoc,
+  where,
 } from "firebase/firestore";
+import { CURRENT_SEASON, ROUND_OPTIONS, RoundKey } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type Outcome = "yes" | "no" | "void";
 
-type ApiQuestion = {
+type RoundMeta = {
+  id: string; // Firestore doc id, e.g. "2026-0"
+  label: string;
+  roundKey: RoundKey;
+  roundNumber: number;
+  published: boolean;
+  gameCount: number;
+  questionCount: number;
+};
+
+type SettlementQuestion = {
   id: string;
+  roundDocId: string;
+  gameIndex: number;
+  questionIndex: number;
+
+  match: string;
+  venue: string;
+  sport: string;
+  startTime: string;
+
   quarter: number;
   question: string;
   status: QuestionStatus;
-};
-
-type ApiGame = {
-  id: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  questions: ApiQuestion[];
-};
-
-type PicksApiResponse = { games: ApiGame[] };
-
-type QuestionRow = {
-  id: string;
-  gameId: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-};
-
-type SettlementLog = {
-  id: string;
-  questionId: string;
-  action: "lock" | "unlock" | "settle";
-  outcome?: Outcome | null;
-  match?: string;
-  question?: string;
-  quarter?: number | null;
-  adminDisplayName?: string | null;
-  createdAt?: string;
-  newStatus?: QuestionStatus;
 };
 
 export default function SettlementPage() {
-  const { user } = useAuth();
+  const { user, isAdmin, loading: authLoading } = useAuth();
 
-  const [rows, setRows] = useState<QuestionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [workingRowId, setWorkingRowId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [rounds, setRounds] = useState<RoundMeta[]>([]);
+  const [selectedRoundId, setSelectedRoundId] = useState<string | null>(null);
 
-  const [logs, setLogs] = useState<SettlementLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState("");
+  const [questions, setQuestions] = useState<SettlementQuestion[]>([]);
+  const [loadingRounds, setLoadingRounds] = useState(true);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // --- Helpers ---
-  const formatStart = (iso: string) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-AU", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    });
-  };
-
-  const statusColour = (status: QuestionStatus) => {
-    switch (status) {
-      case "open":
-        return "bg-green-600";
-      case "pending":
-        return "bg-yellow-500";
-      case "final":
-        return "bg-gray-600";
-      case "void":
-        return "bg-red-600";
-      default:
-        return "bg-gray-600";
-    }
-  };
-
-  const formatLogTime = (iso?: string) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-AU", {
-      day: "2-digit",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    });
-  };
-
-  const actionLabel = (log: SettlementLog) => {
-    if (log.action === "lock") return "Locked";
-    if (log.action === "unlock") return "Re-opened";
-    if (log.action === "settle") {
-      if (!log.outcome || log.outcome === "void") return "Voided";
-      return `Settled ${log.outcome.toUpperCase()}`;
-    }
-    return log.action;
-  };
-
-  const actionColour = (log: SettlementLog) => {
-    if (log.action === "lock") return "bg-yellow-500 text-black";
-    if (log.action === "unlock") return "bg-gray-600";
-    if (log.action === "settle") {
-      if (!log.outcome || log.outcome === "void") return "bg-gray-500";
-      if (log.outcome === "yes") return "bg-green-600";
-      if (log.outcome === "no") return "bg-red-600";
-    }
-    return "bg-gray-600";
-  };
-
-  // --- Load current questions from existing picks API ---
+  // 1) Load all rounds for the current season
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setError("");
-      setMessage(null);
-
+    async function loadRounds() {
       try {
-        const res = await fetch("/api/picks");
-        if (!res.ok) {
-          throw new Error(`API error: ${res.status}`);
-        }
+        setLoadingRounds(true);
+        setError(null);
 
-        const data: PicksApiResponse = await res.json();
-
-        const flat: QuestionRow[] = data.games.flatMap((g) =>
-          (g.questions || []).map((q) => ({
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue,
-            startTime: g.startTime,
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-          }))
-        );
-
-        // Sort: open first, then pending, then final/void, then by start time
-        flat.sort((a, b) => {
-          const order: Record<QuestionStatus, number> = {
-            open: 0,
-            pending: 1,
-            final: 2,
-            void: 3,
-          };
-          const diff = order[a.status] - order[b.status];
-          if (diff !== 0) return diff;
-          return a.startTime.localeCompare(b.startTime);
-        });
-
-        setRows(flat);
-      } catch (err) {
-        console.error("Failed to load questions for settlement", err);
-        setError("Failed to load questions. Check /api/picks and try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
-  }, []);
-
-  // --- Load recent logs ---
-  useEffect(() => {
-    if (!user) return;
-
-    const loadLogs = async () => {
-      setLogsLoading(true);
-      setLogsError("");
-
-      try {
         const q = query(
-          collection(db, "settlementLogs"),
-          orderBy("createdAt", "desc"),
-          limit(20)
+          collection(db, "rounds"),
+          where("season", "==", CURRENT_SEASON),
+          orderBy("roundNumber", "asc")
         );
 
         const snap = await getDocs(q);
 
-        const items: SettlementLog[] = snap.docs.map((docSnap) => {
-          const data: any = docSnap.data() || {};
-          let createdAtIso: string | undefined;
+        const roundList: RoundMeta[] = [];
+        snap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const games = (data.games || []) as any[];
 
-          const createdAt = data.createdAt;
-          if (createdAt && typeof createdAt.toDate === "function") {
-            createdAtIso = createdAt.toDate().toISOString();
-          } else if (typeof createdAt === "string") {
-            createdAtIso = createdAt;
-          }
+          const questionCount = games.reduce(
+            (acc, g) => acc + (g.questions ? g.questions.length : 0),
+            0
+          );
 
-          return {
+          roundList.push({
             id: docSnap.id,
-            questionId: data.questionId ?? "",
-            action: data.action ?? "settle",
-            outcome: data.outcome ?? null,
-            match: data.match ?? "",
-            question: data.question ?? "",
-            quarter: data.quarter ?? null,
-            adminDisplayName: data.adminDisplayName ?? null,
-            createdAt: createdAtIso,
-            newStatus: data.newStatus ?? undefined,
-          } as SettlementLog;
+            label: data.label ?? `Round ${data.roundNumber}`,
+            roundKey: data.roundKey as RoundKey,
+            roundNumber: data.roundNumber ?? 0,
+            published: Boolean(data.published),
+            gameCount: games.length,
+            questionCount,
+          });
         });
 
-        setLogs(items);
-      } catch (err) {
-        console.error("Failed to load settlement logs", err);
-        setLogsError("Failed to load recent history.");
+        setRounds(roundList);
+
+        // Default to the first round if nothing selected yet
+        if (!selectedRoundId && roundList.length > 0) {
+          setSelectedRoundId(roundList[0].id);
+        }
+      } catch (err: any) {
+        console.error(err);
+        setError("Failed to load rounds.");
       } finally {
-        setLogsLoading(false);
+        setLoadingRounds(false);
       }
-    };
+    }
 
-    loadLogs();
-  }, [user, message]);
+    loadRounds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // --- LOCK / UNLOCK ---
-  const lockQuestion = async (
-    row: QuestionRow,
-    action: "lock" | "unlock"
-  ) => {
-    const confirmText =
-      action === "lock"
-        ? `Lock this question (no more picks)?\n\n"${row.question}"`
-        : `Re-open this question for picks?\n\n"${row.question}"`;
+  // 2) Load questions for the selected round
+  useEffect(() => {
+    if (!selectedRoundId) return;
 
-    const confirmed = window.confirm(confirmText);
-    if (!confirmed) return;
+    async function loadQuestions() {
+      try {
+        setLoadingQuestions(true);
+        setError(null);
 
-    setMessage(null);
-    setError("");
-    setWorkingRowId(row.id);
+        const roundRef = doc(db, "rounds", selectedRoundId);
+        const roundSnap = await getDoc(roundRef);
 
+        if (!roundSnap.exists()) {
+          setQuestions([]);
+          return;
+        }
+
+        const data = roundSnap.data() as any;
+        const games = (data.games || []) as any[];
+
+        const flat: SettlementQuestion[] = [];
+
+        games.forEach((game, gameIndex) => {
+          const qs = (game.questions || []) as any[];
+          qs.forEach((q: any, questionIndex: number) => {
+            flat.push({
+              id: q.id,
+              roundDocId: roundSnap.id,
+              gameIndex,
+              questionIndex,
+              match: game.match,
+              venue: game.venue,
+              sport: game.sport ?? "AFL",
+              startTime: game.startTime ?? "",
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status as QuestionStatus,
+            });
+          });
+        });
+
+        // Show newest / highest quarter first feels nice
+        flat.sort((a, b) => {
+          if (a.match === b.match) {
+            return a.quarter - b.quarter;
+          }
+          return a.match.localeCompare(b.match);
+        });
+
+        setQuestions(flat);
+      } catch (err: any) {
+        console.error(err);
+        setError("Failed to load questions for this round.");
+      } finally {
+        setLoadingQuestions(false);
+      }
+    }
+
+    loadQuestions();
+  }, [selectedRoundId]);
+
+  // 3) Update a single nested question (status + outcome) in Firestore
+  async function updateQuestion(
+    q: SettlementQuestion,
+    newStatus: QuestionStatus,
+    outcome?: Outcome
+  ) {
     try {
-      const res = await fetch("/api/settlement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionId: row.id,
-          action,
-          adminUid: user?.uid ?? null,
-          adminDisplayName:
-            (user as any)?.displayName || "Admin",
-        }),
-      });
+      setSavingId(q.id + "-" + newStatus);
+      setError(null);
 
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        const msg =
-          payload?.error ||
-          `Lock action failed (${res.status})`;
-        throw new Error(msg);
+      const roundRef = doc(db, "rounds", q.roundDocId);
+
+      const pathBase = `games.${q.gameIndex}.questions.${q.questionIndex}`;
+      const updatePayload: any = {
+        [`${pathBase}.status`]: newStatus,
+      };
+
+      if (typeof outcome === "string") {
+        updatePayload[`${pathBase}.outcome`] = outcome;
+      } else {
+        // Clear any previous outcome when reopening or locking
+        updatePayload[`${pathBase}.outcome`] = null;
       }
 
-      const payload = await res.json();
-      console.log("Lock/unlock response", payload);
+      await updateDoc(roundRef, updatePayload);
 
-      const newStatus: QuestionStatus =
-        action === "lock" ? "pending" : "open";
-
-      setRows((prev) =>
-        prev.map((q) =>
-          q.id === row.id
-            ? {
-                ...q,
-                status: newStatus,
-              }
-            : q
+      // Update local state so UI reflects instantly
+      setQuestions((prev) =>
+        prev.map((item) =>
+          item.roundDocId === q.roundDocId &&
+          item.gameIndex === q.gameIndex &&
+          item.questionIndex === q.questionIndex
+            ? { ...item, status: newStatus }
+            : item
         )
       );
-
-      setMessage(
-        action === "lock"
-          ? `Locked question: "${row.question}"`
-          : `Re-opened question: "${row.question}"`
-      );
     } catch (err: any) {
-      console.error("Error locking/unlocking question", err);
-      setError(err?.message || "Failed to update lock status.");
+      console.error(err);
+      setError("Failed to update question. Please try again.");
     } finally {
-      setWorkingRowId(null);
+      setSavingId(null);
     }
-  };
+  }
 
-  // --- SETTLE ---
-  const settleQuestion = async (row: QuestionRow, outcome: Outcome) => {
-    const confirmText =
-      outcome === "void"
-        ? `Void this question?\n\n"${row.question}"`
-        : `Settle this question as '${outcome.toUpperCase()}'?\n\n"${row.question}"`;
+  // Button handlers
+  const handleLock = (q: SettlementQuestion) =>
+    updateQuestion(q, "pending");
+  const handleSettleYes = (q: SettlementQuestion) =>
+    updateQuestion(q, "final", "yes");
+  const handleSettleNo = (q: SettlementQuestion) =>
+    updateQuestion(q, "final", "no");
+  const handleVoid = (q: SettlementQuestion) =>
+    updateQuestion(q, "void", "void");
+  const handleReopen = (q: SettlementQuestion) =>
+    updateQuestion(q, "open");
 
-    const confirmed = window.confirm(confirmText);
-    if (!confirmed) return;
+  // Convenience
+  const selectedRound = rounds.find((r) => r.id === selectedRoundId);
+  const showingCount = questions.length;
 
-    setMessage(null);
-    setError("");
-    setWorkingRowId(row.id);
-
-    try {
-      const res = await fetch("/api/settlement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionId: row.id,
-          outcome,
-          adminUid: user?.uid ?? null,
-          adminDisplayName:
-            (user as any)?.displayName || "Admin",
-        }),
-      });
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        const msg =
-          payload?.error ||
-          `Settlement failed (${res.status})`;
-        throw new Error(msg);
-      }
-
-      const payload = await res.json();
-      console.log("Settlement response", payload);
-
-      const newStatus: QuestionStatus =
-        outcome === "void" ? "void" : "final";
-
-      setRows((prev) =>
-        prev.map((q) =>
-          q.id === row.id
-            ? {
-                ...q,
-                status: newStatus,
-              }
-            : q
-        )
-      );
-
-      setMessage(
-        `Settled: "${row.question}" → ${outcome.toUpperCase()} (updated ${
-          payload.picksUpdated ?? 0
-        } picks)`
-      );
-    } catch (err: any) {
-      console.error("Error settling question", err);
-      setError(err?.message || "Failed to settle question.");
-    } finally {
-      setWorkingRowId(null);
-    }
-  };
-
-  // --- Render ---
-  if (!user) {
+  if (authLoading) {
     return (
-      <div className="py-6 md:py-8">
-        <h1 className="text-2xl md:text-3xl font-bold mb-2">Settlement (admin)</h1>
-        <p className="text-sm text-white/70">
-          You must be logged in to use the settlement console.
-        </p>
-      </div>
+      <main className="max-w-6xl mx-auto px-4 py-8 text-white">
+        <p>Checking admin access…</p>
+      </main>
+    );
+  }
+
+  if (!user || !isAdmin) {
+    return (
+      <main className="max-w-6xl mx-auto px-4 py-8 text-white">
+        <h1 className="text-2xl font-bold mb-2">Settlement console</h1>
+        <p>You must be an admin to access this page.</p>
+      </main>
     );
   }
 
   return (
-    <div className="py-6 md:py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold">Settlement console</h1>
-        <p className="mt-1 text-sm text-white/70 max-w-2xl">
-          Internal tool to lock and settle Streakr questions. This calls{" "}
-          <code className="px-1 py-0.5 bg-black/40 rounded text-xs">
-            /api/settlement
-          </code>{" "}
-          and updates picks and question status. Use carefully.
+    <main className="max-w-6xl mx-auto px-4 py-8 text-white">
+      <header className="mb-6">
+        <h1 className="text-2xl md:text-3xl font-bold mb-2">
+          Settlement console
+        </h1>
+        <p className="text-sm md:text-base text-gray-300">
+          Internal tool to lock and settle STREAKr questions. This writes
+          directly to Firestore. Use carefully.
         </p>
+      </header>
+
+      {/* Round selector + summary */}
+      <section className="mb-6 rounded-xl bg-gradient-to-r from-slate-900 to-slate-800 border border-slate-700 p-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-gray-400 mb-1">
+            Round
+          </p>
+          <select
+            className="bg-slate-900 border border-slate-600 rounded-md px-3 py-2 text-sm"
+            value={selectedRoundId ?? ""}
+            onChange={(e) => setSelectedRoundId(e.target.value)}
+            disabled={loadingRounds}
+          >
+            {rounds.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.label} ({r.questionCount} questions)
+              </option>
+            ))}
+          </select>
+          {selectedRound && (
+            <p className="mt-1 text-xs text-gray-400">
+              Season {CURRENT_SEASON} ·{" "}
+              {selectedRound.published ? "PUBLISHED" : "DRAFT"} ·{" "}
+              {selectedRound.gameCount} games /{" "}
+              {selectedRound.questionCount} questions
+            </p>
+          )}
+        </div>
+
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-wide text-gray-400">
+            Showing
+          </p>
+          <p className="text-lg font-semibold">
+            {loadingQuestions ? "…" : showingCount} questions
+          </p>
+        </div>
+      </section>
+
+      {error && (
+        <div className="mb-4 rounded-md bg-red-900/40 border border-red-500 px-3 py-2 text-sm text-red-100">
+          {error}
+        </div>
+      )}
+
+      {/* Table header */}
+      <div className="hidden md:grid grid-cols-[1.5fr,3fr,2fr] gap-4 px-2 pb-2 text-xs uppercase tracking-wide text-gray-400">
+        <div>Game / time</div>
+        <div>Q · Question</div>
+        <div className="text-right pr-6">Lock / settle</div>
       </div>
 
-      {loading && (
-        <p className="text-sm text-white/70">Loading questions…</p>
-      )}
+      {/* Question list */}
+      <section className="space-y-3">
+        {loadingQuestions && (
+          <div className="text-sm text-gray-300">Loading questions…</div>
+        )}
 
-      {!loading && error && (
-        <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-          {error}
-        </p>
-      )}
-
-      {!loading && message && (
-        <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-          {message}
-        </p>
-      )}
-
-      {!loading && rows.length === 0 && !error && (
-        <p className="text-sm text-white/70">
-          No questions found. Check that your <code>rounds</code> collection for
-          the 2026 season has games and questions.
-        </p>
-      )}
-
-      {/* Main questions table */}
-      {!loading && rows.length > 0 && (
-        <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
-          {/* Header */}
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <div className="text-sm font-semibold text-orange-300">
-              Questions to settle
-            </div>
-            <div className="text-[11px] text-gray-400">
-              Showing {rows.length} questions
-            </div>
-          </div>
-
-          {/* Table header */}
-          <div className="hidden md:grid grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] px-4 py-2 text-[11px] text-gray-400 uppercase tracking-wide bg-black/40">
-            <div>Start</div>
-            <div>Match</div>
-            <div className="text-center">Q#</div>
-            <div>Question</div>
-            <div className="text-right">Lock / Settle</div>
-          </div>
-
-          {/* Rows */}
-          <div className="divide-y divide-white/5">
-            {rows.map((row) => {
-              const start = formatStart(row.startTime);
-              const isWorking = workingRowId === row.id;
-
-              return (
-                <div
-                  key={row.id}
-                  className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] md:items-center bg-black/20 hover:bg-black/30 transition"
-                >
-                  {/* Start time + status */}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-white/90">
-                      {start || "TBD"}
-                    </span>
-                    <span
-                      className={`inline-flex w-max items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${statusColour(
-                        row.status
-                      )}`}
-                    >
-                      {row.status.toUpperCase()}
-                    </span>
-                  </div>
-
-                  {/* Match + venue */}
-                  <div>
-                    <div className="text-sm font-semibold">
-                      {row.match || "Match"}
-                    </div>
-                    <div className="text-[11px] text-white/70">
-                      {row.venue || "Venue"}
-                    </div>
-                    <div className="md:hidden mt-1 flex items-center gap-1 text-[11px] text-white/60">
-                      <span>{start || "TBD"}</span>
-                    </div>
-                  </div>
-
-                  {/* Q# */}
-                  <div className="md:text-center text-sm font-bold">
-                    Q{row.quarter}
-                  </div>
-
-                  {/* Question text */}
-                  <div className="text-sm leading-snug">
-                    {row.question}
-                    <div className="mt-1 text-[11px] text-white/50 break-all">
-                      <span className="font-mono text-white/60">
-                        ID: {row.id}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Lock / Settle buttons */}
-                  <div className="flex md:flex-col items-end md:items-end gap-1">
-                    {/* Lock / Unlock */}
-                    {row.status === "open" && (
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => lockQuestion(row, "lock")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-yellow-700/70 opacity-70"
-                            : "bg-yellow-500 hover:bg-yellow-600 text-black"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Lock"}
-                      </button>
-                    )}
-
-                    {row.status === "pending" && (
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => lockQuestion(row, "unlock")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-gray-700/70 opacity-70"
-                            : "bg-gray-600 hover:bg-gray-500"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Re-open"}
-                      </button>
-                    )}
-
-                    {/* Settle */}
-                    <div className="flex md:flex-col items-end gap-1">
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "yes")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-green-900/70 opacity-70"
-                            : "bg-green-600 hover:bg-green-700"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Settle YES"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "no")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-red-900/70 opacity-70"
-                            : "bg-red-600 hover:bg-red-700"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Settle NO"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "void")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-gray-800/80 opacity-70"
-                            : "bg-gray-700 hover:bg-gray-600"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Void"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Recent history */}
-      <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="text-sm font-semibold text-orange-300">
-            Recent settlement history
-          </div>
-          <div className="text-[11px] text-gray-400">
-            {logsLoading
-              ? "Loading…"
-              : `Showing last ${Math.min(logs.length, 20)} actions`}
-          </div>
-        </div>
-
-        {logsError && (
-          <div className="px-4 py-3 text-sm text-red-400">
-            {logsError}
+        {!loadingQuestions && questions.length === 0 && (
+          <div className="text-sm text-gray-300">
+            No questions found for this round.
           </div>
         )}
 
-        {!logsLoading && !logsError && logs.length === 0 && (
-          <div className="px-4 py-3 text-sm text-white/70">
-            No settlement actions logged yet.
-          </div>
-        )}
+        {questions.map((q) => {
+          const isSavingLock = savingId === q.id + "-pending";
+          const isSavingYes = savingId === q.id + "-final";
+          const isSavingNo = savingId === q.id + "-finalno"; // we don’t distinguish in savingId, but harmless
+          const isSavingVoid = savingId === q.id + "-void";
+          const isSavingReopen = savingId === q.id + "-open";
 
-        {!logsLoading && logs.length > 0 && (
-          <div className="divide-y divide-white/5">
-            {logs.map((log) => (
-              <div
-                key={log.id}
-                className="px-4 py-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${actionColour(
-                        log
-                      )}`}
-                    >
-                      {actionLabel(log)}
-                    </span>
-                    {log.newStatus && (
-                      <span className="text-[11px] text-white/60">
-                        → {log.newStatus.toUpperCase()}
+          const disabled = Boolean(savingId);
+
+          return (
+            <div
+              key={`${q.roundDocId}-${q.gameIndex}-${q.questionIndex}`}
+              className="rounded-xl bg-slate-900/70 border border-slate-700 px-3 py-3 md:px-4 md:py-3 flex flex-col md:grid md:grid-cols-[1.5fr,3fr,2fr] gap-3 md:gap-4"
+            >
+              {/* Game / time */}
+              <div className="text-xs md:text-sm">
+                <div className="font-semibold">{q.match}</div>
+                <div className="text-gray-400">
+                  {q.venue}
+                  {q.startTime && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <span className="uppercase">
+                        {q.startTime}
                       </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[13px] font-medium truncate">
-                    {log.match || "Match"}{" "}
-                    {typeof log.quarter === "number"
-                      ? `(Q${log.quarter})`
-                      : ""}
-                  </div>
-                  <div className="text-[12px] text-white/70 truncate">
-                    {log.question}
-                  </div>
-                  <div className="mt-1 text-[11px] text-white/40 font-mono truncate">
-                    {log.questionId}
-                  </div>
+                    </>
+                  )}
                 </div>
-
-                <div className="flex flex-col items-end gap-1 text-right">
-                  <span className="text-[11px] text-white/60">
-                    {formatLogTime(log.createdAt)}
+                <div className="mt-1 inline-flex items-center gap-2 text-[11px] text-gray-300">
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5">
+                    {q.sport}
                   </span>
-                  <span className="text-[11px] text-white/50">
-                    {log.adminDisplayName || "Admin"}
+                  <span
+                    className={`rounded-full px-2 py-0.5 ${
+                      q.status === "open"
+                        ? "bg-emerald-700 text-white"
+                        : q.status === "pending"
+                        ? "bg-amber-600 text-black"
+                        : q.status === "final"
+                        ? "bg-sky-700 text-white"
+                        : "bg-slate-700 text-gray-100"
+                    }`}
+                  >
+                    {q.status.toUpperCase()}
+                  </span>
+                  <span className="rounded-full bg-slate-800 px-2 py-0.5">
+                    Q{q.quarter}
                   </span>
                 </div>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+
+              {/* Question text */}
+              <div className="text-xs md:text-sm flex items-center">
+                <p>{q.question}</p>
+              </div>
+
+              {/* Matrix buttons */}
+              <div className="flex md:justify-end">
+                <div className="flex flex-col gap-1 text-[11px] md:text-xs">
+                  {/* Row 1: Lock | YES */}
+                  <div className="flex gap-1">
+                    <button
+                      className={`flex-1 rounded-full px-3 py-1 font-semibold ${
+                        q.status === "pending"
+                          ? "bg-amber-500 text-black"
+                          : "bg-amber-600 hover:bg-amber-500 text-black"
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                      onClick={() => handleLock(q)}
+                      disabled={disabled || q.status !== "open"}
+                    >
+                      {isSavingLock ? "Locking…" : "Lock"}
+                    </button>
+                    <button
+                      className="flex-1 rounded-full px-3 py-1 font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => handleSettleYes(q)}
+                      disabled={disabled || q.status === "final"}
+                    >
+                      {isSavingYes ? "Saving…" : "Yes"}
+                    </button>
+                  </div>
+
+                  {/* Row 2: Reopen | NO */}
+                  <div className="flex gap-1">
+                    <button
+                      className="flex-1 rounded-full px-3 py-1 font-semibold bg-slate-600 hover:bg-slate-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => handleReopen(q)}
+                      disabled={disabled || q.status === "open"}
+                    >
+                      {isSavingReopen ? "Reopening…" : "Reopen"}
+                    </button>
+                    <button
+                      className="flex-1 rounded-full px-3 py-1 font-semibold bg-rose-600 hover:bg-rose-500 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => handleSettleNo(q)}
+                      disabled={disabled || q.status === "final"}
+                    >
+                      {isSavingNo ? "Saving…" : "No"}
+                    </button>
+                  </div>
+
+                  {/* Row 3: Void */}
+                  <div className="flex gap-1">
+                    <button
+                      className="flex-1 rounded-full px-3 py-1 font-semibold bg-slate-500 hover:bg-slate-400 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                      onClick={() => handleVoid(q)}
+                      disabled={disabled}
+                    >
+                      {isSavingVoid ? "Voiding…" : "Void"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </section>
+    </main>
   );
 }
