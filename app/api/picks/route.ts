@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/admin";
-import { doc, getDoc } from "firebase-admin/firestore";
+import { db } from "@/lib/admin"; // Firestore (admin SDK) instance
 
 export async function GET() {
   try {
-    // 1. Load config document
-    const configRef = doc(db, "config", "season-2026");
-    const configSnap = await getDoc(configRef);
+    // 1. Load config document from admin Firestore
+    // Admin SDK uses db.doc("collection/docId"), not doc(db, ...)
+    const configRef = db.doc("config/season-2026");
+    const configSnap = await configRef.get();
 
     if (!configSnap.exists) {
       throw new Error("Config doc missing");
@@ -30,8 +30,8 @@ export async function GET() {
     }
 
     // 2. Load the active round by ID from "rounds" collection
-    const roundRef = doc(db, "rounds", roundId);
-    const roundSnap = await getDoc(roundRef);
+    const roundRef = db.doc(`rounds/${roundId}`);
+    const roundSnap = await roundRef.get();
 
     if (!roundSnap.exists) {
       return NextResponse.json({
