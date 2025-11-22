@@ -1,21 +1,22 @@
 // app/api/picks/route.ts
 import { NextResponse } from "next/server";
-import { db as adminDb } from "@/lib/admin"; // firebase-admin Firestore
-import { CURRENT_SEASON } from "@/lib/rounds";
+import { db } from "@/lib/admin";              // Firebase Admin (server side)
+import { CURRENT_SEASON, RoundKey } from "@/lib/rounds";
 
 type FirestoreQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: "open" | "final" | "pending" | "void";
+  sport?: string;
 };
 
 type FirestoreGame = {
   id: string;
   match: string;
   venue: string;
-  startTime: string;
-  sport: string;
+  startTime: string; // ISO string
+  sport?: string;
   questions: FirestoreQuestion[];
 };
 
@@ -23,69 +24,68 @@ type FirestoreRoundDoc = {
   season: number;
   roundNumber: number;
   label: string;
+  games: FirestoreGame[];
   published?: boolean;
-  games?: FirestoreGame[];
 };
+
+function roundKeyToNumber(key: RoundKey): number {
+  if (key === "OR") return 0;
+  if (key === "FINALS") return 99;
+  const m = key.match(/^R(\d+)$/);
+  return m ? Number(m[1]) : 0;
+}
 
 export async function GET() {
   try {
-    // 1) Read season config to find the current round
-    const configRef = adminDb.collection("config").doc(`season-${CURRENT_SEASON}`);
+    // 1) Read current round from config/season-2026 (set on /admin/settings)
+    const configRef = db.collection("config").doc(`season-${CURRENT_SEASON}`);
     const configSnap = await configRef.get();
 
-    let currentRoundNumber = 0; // default to Opening Round
+    let currentRoundKey: RoundKey = "OR";
+
     if (configSnap.exists) {
       const data = configSnap.data() as any;
-      if (typeof data.currentRoundNumber === "number") {
-        currentRoundNumber = data.currentRoundNumber;
+      if (data?.currentRoundKey) {
+        currentRoundKey = data.currentRoundKey as RoundKey;
       }
     }
 
-    const roundDocId = `${CURRENT_SEASON}-${currentRoundNumber}`;
+    const currentRoundNumber = roundKeyToNumber(currentRoundKey);
 
-    // 2) Load that round from Firestore
-    const roundRef = adminDb.collection("rounds").doc(roundDocId);
-    const roundSnap = await roundRef.get();
+    // 2) Fetch the round doc for this season + roundNumber that is published
+    const roundsRef = db.collection("rounds");
+    const q = roundsRef
+      .where("season", "==", CURRENT_SEASON)
+      .where("roundNumber", "==", currentRoundNumber)
+      .where("published", "==", true)
+      .limit(1);
 
-    if (!roundSnap.exists) {
-      return NextResponse.json(
-        {
-          games: [],
-          roundNumber: currentRoundNumber,
-          reason: "round-not-found",
-        },
-        { status: 200 }
-      );
+    const snap = await q.get();
+
+    if (snap.empty) {
+      // No published round found – just return empty, client shows no picks
+      return NextResponse.json({
+        games: [],
+        roundNumber: currentRoundNumber,
+        roundKey: currentRoundKey,
+      });
     }
 
-    const roundData = roundSnap.data() as FirestoreRoundDoc;
+    const roundDoc = snap.docs[0].data() as FirestoreRoundDoc;
 
-    // 3) Only expose if published === true
-    if (!roundData.published) {
-      return NextResponse.json(
-        {
-          games: [],
-          roundNumber: roundData.roundNumber ?? currentRoundNumber,
-          reason: "round-not-published",
-        },
-        { status: 200 }
-      );
-    }
+    // 3) Shape response for PicksClient
+    const games = Array.isArray(roundDoc.games) ? roundDoc.games : [];
 
-    const games = Array.isArray(roundData.games) ? roundData.games : [];
-
-    return NextResponse.json(
-      {
-        games,
-        roundNumber: roundData.roundNumber,
-        label: roundData.label,
-      },
-      { status: 200 }
-    );
-  } catch (err) {
+    return NextResponse.json({
+      games,
+      roundNumber: roundDoc.roundNumber,
+      roundKey: currentRoundKey,
+      roundLabel: roundDoc.label,
+    });
+  } catch (err: any) {
     console.error("Error in /api/picks:", err);
     return NextResponse.json(
-      { games: [], error: "Internal server error" },
+      { error: "Failed to load picks", games: [] },
       { status: 500 }
     );
   }
