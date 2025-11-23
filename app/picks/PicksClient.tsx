@@ -251,6 +251,9 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
+  // share button status
+  const [shareStatus, setShareStatus] = useState<string>("");
+
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
@@ -321,7 +324,6 @@ export default function PicksClient() {
 
   // -------- Live comment counts from Firestore --------
 
-  // derive stable list of question IDs so effect re-runs when IDs truly change
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   useEffect(() => {
@@ -342,7 +344,6 @@ export default function PicksClient() {
       const qRef = query(commentsRef, where("questionId", "in", ids));
 
       return onSnapshot(qRef, (snapshot) => {
-        // count comments per questionId just for this chunk
         const counts: Record<string, number> = {};
 
         snapshot.forEach((docSnap) => {
@@ -351,7 +352,6 @@ export default function PicksClient() {
           counts[qid] = (counts[qid] ?? 0) + 1;
         });
 
-        // only update rows that belong to this chunk; leave others alone
         setRows((prev) =>
           prev.map((r) =>
             counts[r.id] !== undefined
@@ -386,7 +386,7 @@ export default function PicksClient() {
 
       try {
         const res = await fetch("/api/user-picks", { method: "GET" });
-        if (!res.ok) return; // fine if nothing yet
+        if (!res.ok) return;
 
         const data = await res.json();
         if (
@@ -411,7 +411,6 @@ export default function PicksClient() {
         setStreakLoading(true);
         setStreakError("");
 
-        // Leader streak (highest currentStreak in users collection)
         const usersRef = collection(db, "users");
         const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
         const topSnap = await getDocs(topQ);
@@ -425,7 +424,6 @@ export default function PicksClient() {
         });
         setLeaderStreak(leaderVal);
 
-        // Current user's streak
         if (user) {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
@@ -470,16 +468,13 @@ export default function PicksClient() {
 
   // -------- Save Pick via /api/user-picks (optimistic UI) --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
-    // Not logged in → show auth modal instead of saving
     if (!user) {
       setShowAuthModal(true);
       return;
     }
 
-    // Only open questions can be updated (before quarter starts)
     if (row.status !== "open") return;
 
-    // Optimistic update
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -550,7 +545,6 @@ export default function PicksClient() {
       }));
 
       setComments(list);
-      // live commentCount handled by Firestore listener
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to load comments");
@@ -595,7 +589,6 @@ export default function PicksClient() {
 
       setComments((prev) => [newComment, ...prev]);
       setCommentText("");
-      // commentCount updates via listener
     } catch (e) {
       console.error(e);
       setCommentsError("Failed to post comment");
@@ -616,6 +609,41 @@ export default function PicksClient() {
     [rows]
   );
 
+  // -------- Share handler --------
+  const handleShare = async () => {
+    try {
+      const shareUrl =
+        typeof window !== "undefined"
+          ? window.location.href
+          : "https://streakr.com.au";
+
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({
+          title: "STREAKr – How long can you last?",
+          text: "I’m playing STREAKr. See if you can beat my streak!",
+          url: shareUrl,
+        });
+        setShareStatus("Shared!");
+      } else if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        navigator.clipboard.writeText
+      ) {
+        await navigator.clipboard.writeText(shareUrl);
+        setShareStatus("Link copied to clipboard.");
+      } else {
+        setShareStatus("Share not supported in this browser.");
+      }
+    } catch (err) {
+      console.error("Share error", err);
+      setShareStatus("Could not share right now.");
+    }
+
+    if (shareStatus) {
+      setTimeout(() => setShareStatus(""), 3000);
+    }
+  };
+
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
@@ -631,7 +659,7 @@ export default function PicksClient() {
         )}
       </div>
 
-      {/* STREAK PROGRESS TRACKER */}
+      {/* STREAK PROGRESS TRACKER + SHARE */}
       <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div>
@@ -645,31 +673,39 @@ export default function PicksClient() {
             </p>
           </div>
 
-          <div className="flex items-center gap-4 text-xs sm:text-sm">
-            <div className="text-right">
-              <p className="text-[11px] text-white/60">Your streak</p>
-              <p className="text-lg sm:text-xl font-bold text-orange-400">
-                {user ? userStreak ?? 0 : "-"}
-              </p>
+          <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
+            <div className="flex items-center gap-4">
+              <div className="text-right">
+                <p className="text-[11px] text-white/60">Your streak</p>
+                <p className="text-lg sm:text-xl font-bold text-orange-400">
+                  {user ? userStreak ?? 0 : "-"}
+                </p>
+              </div>
+              <div className="h-8 w-px bg-white/10" />
+              <div>
+                <p className="text-[11px] text-white/60">Leader streak</p>
+                <p className="text-lg sm:text-xl font-bold text-sky-300">
+                  {leaderStreak ?? "-"}
+                </p>
+              </div>
             </div>
-            <div className="h-8 w-px bg-white/10" />
-            <div>
-              <p className="text-[11px] text-white/60">Leader streak</p>
-              <p className="text-lg sm:text-xl font-bold text-sky-300">
-                {leaderStreak ?? "-"}
-              </p>
-            </div>
+
+            <button
+              type="button"
+              onClick={handleShare}
+              className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
+            >
+              Share my streak
+            </button>
           </div>
         </div>
 
         <div className="mt-1">
           <div className="relative h-2 rounded-full bg-slate-900 overflow-hidden">
-            {/* gradient track */}
             {leaderStreak && leaderStreak > 0 && (
               <div className="absolute inset-0 bg-gradient-to-r from-sky-500 via-purple-500 to-orange-500 opacity-70" />
             )}
 
-            {/* your marker */}
             {leaderStreak && leaderStreak > 0 && (
               <div
                 className="absolute -top-1 h-4 w-[2px] bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
@@ -692,6 +728,9 @@ export default function PicksClient() {
           )}
           {streakError && (
             <p className="mt-1 text-[10px] text-red-400">{streakError}</p>
+          )}
+          {shareStatus && (
+            <p className="mt-1 text-[10px] text-sky-300">{shareStatus}</p>
           )}
         </div>
       </div>
@@ -735,10 +774,8 @@ export default function PicksClient() {
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
-        {/* MATCH gets more width now */}
         <div className="col-span-3">MATCH • VENUE</div>
         <div className="col-span-1 text-center">QUARTER</div>
-        {/* QUESTION slightly reduced */}
         <div className="col-span-2">QUESTION</div>
         <div className="col-span-2 text-right">PICK • YES% • NO%</div>
       </div>
@@ -758,7 +795,6 @@ export default function PicksClient() {
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
 
-          // AFL team logos (only for AFL rows)
           const parsed =
             row.sport.toUpperCase() === "AFL"
               ? parseAflMatchTeams(row.match)
@@ -789,7 +825,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* SPORT (text-only pill) */}
+                {/* SPORT */}
                 <div className="col-span-6 md:col-span-1 flex items-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
                     {row.sport}
@@ -807,7 +843,7 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* MATCH + VENUE (AFL layout: Logo + Team vs Team + Logo) */}
+                {/* MATCH + VENUE */}
                 <div className="col-span-12 md:col-span-3">
                   {useAflLayout ? (
                     <>
@@ -862,7 +898,7 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER – mobile shows "Quarter 1", desktop shows "Q1" */}
+                {/* QUARTER – mobile: "Quarter 1", desktop: "Q1" */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   <span className="block md:hidden">
                     Quarter {row.quarter}
@@ -1027,7 +1063,6 @@ export default function PicksClient() {
               </button>
             </div>
 
-            {/* New comment */}
             <div className="mb-4">
               <textarea
                 value={commentText}
@@ -1051,7 +1086,6 @@ export default function PicksClient() {
               </div>
             </div>
 
-            {/* Comment list */}
             <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
               {commentsLoading ? (
                 <p className="text-sm text-gray-400">Loading comments…</p>
