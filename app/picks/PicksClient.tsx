@@ -27,6 +27,7 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+  isSponsorQuestion?: boolean;
 };
 
 type ApiGame = {
@@ -51,6 +52,7 @@ type QuestionRow = {
   noPercent?: number;
   sport: string; // text-only, e.g. "AFL"
   commentCount: number;
+  isSponsorQuestion?: boolean;
 };
 
 type PicksApiResponse = {
@@ -137,24 +139,24 @@ export default function PicksClient() {
         }
 
         const flat: QuestionRow[] = data.games.flatMap((g: any) =>
-  g.questions.map((q: any) => ({
-    id: q.id,
-    gameId: g.id,
-    match: g.match,
-    // fall back to question-level venue/startTime/sport if needed
-    venue: g.venue ?? q.venue ?? "",
-    startTime: g.startTime ?? q.startTime ?? "",
-    quarter: q.quarter,
-    question: q.question,
-    status: q.status,
-    userPick: q.userPick,
-    yesPercent: q.yesPercent,
-    noPercent: q.noPercent,
-    sport: q.sport ?? g.sport ?? "AFL",
-    commentCount: q.commentCount ?? 0,
-  }))
-);
-
+          g.questions.map((q: any) => ({
+            id: q.id,
+            gameId: g.id,
+            match: g.match,
+            // fall back to question-level venue/startTime/sport if needed
+            venue: g.venue ?? q.venue ?? "",
+            startTime: g.startTime ?? q.startTime ?? "",
+            quarter: q.quarter,
+            question: q.question,
+            status: q.status,
+            userPick: q.userPick,
+            yesPercent: q.yesPercent,
+            noPercent: q.noPercent,
+            sport: q.sport ?? g.sport ?? "AFL",
+            commentCount: q.commentCount ?? 0,
+            isSponsorQuestion: !!q.isSponsorQuestion,
+          }))
+        );
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
@@ -461,6 +463,11 @@ export default function PicksClient() {
     return Math.max(0, Math.min(my / leaderStreak, 1));
   })();
 
+  const hasSponsorQuestion = useMemo(
+    () => rows.some((r) => r.isSponsorQuestion),
+    [rows]
+  );
+
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
@@ -541,6 +548,21 @@ export default function PicksClient() {
         </div>
       </div>
 
+      {/* SPONSOR QUESTION INFO STRIP */}
+      {hasSponsorQuestion && (
+        <div className="mb-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+          <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
+            Sponsor Question
+          </span>
+          <span className="text-[12px] sm:text-[13px]">
+            Look for the{" "}
+            <span className="font-semibold">Sponsor Question</span> tag. Get it
+            right to go into the draw for this round&apos;s $100 sponsor gift
+            card.*
+          </span>
+        </div>
+      )}
+
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
       {/* FILTER BUTTONS */}
@@ -584,6 +606,7 @@ export default function PicksClient() {
           const { yes: yesPct, no: noPct } = getDisplayPercents(row.id);
 
           const isLocked = row.status !== "open";
+          const isSponsor = !!row.isSponsorQuestion;
 
           return (
             <div
@@ -632,7 +655,7 @@ export default function PicksClient() {
                   Q{row.quarter}
                 </div>
 
-                {/* QUESTION + COMMENTS + streak pill */}
+                {/* QUESTION + COMMENTS + pills */}
                 <div className="col-span-9 md:col-span-3">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -655,7 +678,18 @@ export default function PicksClient() {
                         Locked
                       </span>
                     )}
+                    {isSponsor && (
+                      <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                        Sponsor Question
+                      </span>
+                    )}
                   </div>
+                  {isSponsor && (
+                    <p className="mt-0.5 text-[11px] text-amber-200/90">
+                      Get this one right to go into the draw for this
+                      round&apos;s $100 sponsor gift card.*
+                    </p>
+                  )}
                 </div>
 
                 {/* PICK / YES / NO */}
