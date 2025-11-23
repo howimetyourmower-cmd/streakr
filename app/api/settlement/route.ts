@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
     const finalStatus: QuestionStatus =
       outcome === "void" ? "void" : "final";
 
-    const updatedQuestion = {
+    const updatedQuestion: any = {
       ...question,
       status: finalStatus,
       outcome,
@@ -216,6 +216,10 @@ export async function POST(req: NextRequest) {
     games[gameIndex].questions[questionIndex] = updatedQuestion;
     await roundRef.update({ games });
 
+    // Is this the sponsor question for this round?
+    const isSponsorQuestion =
+      updatedQuestion && updatedQuestion.isSponsorQuestion === true;
+
     // ---- Update streaks + picks for users whose ACTIVE pick is this question ----
     const usersSnap = await db
       .collection("users")
@@ -223,6 +227,9 @@ export async function POST(req: NextRequest) {
       .get();
 
     const batch = db.batch();
+
+    // Track sponsor draw winners (if applicable)
+    const sponsorWinners: string[] = [];
 
     usersSnap.forEach((userDoc) => {
       const userId = userDoc.id;
@@ -284,7 +291,37 @@ export async function POST(req: NextRequest) {
         },
         { merge: true }
       );
+
+      // --- Sponsor draw: collect winners for this sponsor question ---
+      if (isSponsorQuestion && outcome !== "void" && win) {
+        sponsorWinners.push(userId);
+      }
     });
+
+    // --- Sponsor draw entries write (in same batch) ---
+    if (isSponsorQuestion && outcome !== "void" && sponsorWinners.length > 0) {
+      const sponsorRoundRef = db
+        .collection("sponsorDrawEntries")
+        .doc(roundDocId);
+
+      sponsorWinners.forEach((userId) => {
+        const entryRef = sponsorRoundRef.collection("entries").doc(userId);
+        batch.set(
+          entryRef,
+          {
+            uid: userId,
+            roundId: roundDocId,
+            roundNumber: roundNumber ?? null,
+            questionId,
+            outcome,
+            season: CURRENT_SEASON,
+            // server timestamp from admin SDK
+            createdAt: now,
+          },
+          { merge: true }
+        );
+      });
+    }
 
     // history record for the admin
     batch.set(db.collection("settlementHistory").doc(), {
@@ -299,6 +336,8 @@ export async function POST(req: NextRequest) {
       round: roundNumber ?? null,
       season: CURRENT_SEASON,
       settledAt: now,
+      isSponsorQuestion: !!isSponsorQuestion,
+      sponsorWinnerCount: isSponsorQuestion ? sponsorWinners.length : 0,
     });
 
     await batch.commit();
