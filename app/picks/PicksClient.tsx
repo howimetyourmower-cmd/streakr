@@ -780,7 +780,7 @@ export default function PicksClient() {
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
             >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 text-white gap-y-2 md:gap-y-0">
+              <div className="grid grid-cols-12 items-center px-4 py-1.5 text:white gap-y-2 md:gap-y-0 text-white">
                 {/* START */}
                 <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
@@ -862,9 +862,14 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER */}
+                {/* QUARTER – mobile shows "Quarter 1", desktop shows "Q1" */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                  Q{row.quarter}
+                  <span className="block md:hidden">
+                    Quarter {row.quarter}
+                  </span>
+                  <span className="hidden md:inline">
+                    Q{row.quarter}
+                  </span>
                 </div>
 
                 {/* QUESTION + COMMENTS + pills */}
