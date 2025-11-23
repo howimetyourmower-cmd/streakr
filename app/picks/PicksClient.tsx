@@ -730,14 +730,16 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* HEADER ROW */}
+      {/* HEADER ROW (desktop) */}
       <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
         <div className="col-span-1">STATUS</div>
-        <div className="col-span-2">MATCH • VENUE</div>
+        {/* MATCH gets more width now */}
+        <div className="col-span-3">MATCH • VENUE</div>
         <div className="col-span-1 text-center">QUARTER</div>
-        <div className="col-span-3">QUESTION</div>
+        {/* QUESTION slightly reduced */}
+        <div className="col-span-2">QUESTION</div>
         <div className="col-span-2 text-right">PICK • YES% • NO%</div>
       </div>
 
@@ -806,7 +808,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* MATCH + VENUE (AFL layout: Logo + Team vs Team + Logo) */}
-                <div className="col-span-12 md:col-span-2">
+                <div className="col-span-12 md:col-span-3">
                   {useAflLayout ? (
                     <>
                       <div className="flex items-center gap-3">
@@ -866,7 +868,7 @@ export default function PicksClient() {
                 </div>
 
                 {/* QUESTION + COMMENTS + pills */}
-                <div className="col-span-9 md:col-span-3">
+                <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
                   </div>
