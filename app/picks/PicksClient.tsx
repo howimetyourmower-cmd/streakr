@@ -796,38 +796,36 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* MATCH + VENUE + AFL logos */}
+                {/* MATCH + VENUE + AFL logos (logo home – match – logo away) */}
                 <div className="col-span-12 md:col-span-2 flex items-center gap-2">
-                  {(homeTeam || awayTeam) && (
-                    <div className="flex items-center gap-1 mr-1">
-                      {homeTeam && (
-                        <Image
-                          src={homeTeam.logo}
-                          alt={homeTeam.name}
-                          width={24}
-                          height={24}
-                          className="rounded-full border border-white/20 bg-black/60"
-                        />
-                      )}
-                      {awayTeam && (
-                        <Image
-                          src={awayTeam.logo}
-                          alt={awayTeam.name}
-                          width={24}
-                          height={24}
-                          className="rounded-full border border-white/20 bg-black/60 -ml-1"
-                        />
-                      )}
-                    </div>
+                  {homeTeam && (
+                    <Image
+                      src={homeTeam.logo}
+                      alt={homeTeam.name}
+                      width={24}
+                      height={24}
+                      className="rounded-full border border-white/20 bg-black/60"
+                    />
                   )}
+
                   <div>
-                    <div className="text-sm font-semibold">
-                      {row.match}
+                    <div className="text-sm font-semibold flex items-center gap-1">
+                      <span>{row.match}</span>
                     </div>
                     <div className="text-[11px] text-white/80">
                       {row.venue}
                     </div>
                   </div>
+
+                  {awayTeam && (
+                    <Image
+                      src={awayTeam.logo}
+                      alt={awayTeam.name}
+                      width={24}
+                      height={24}
+                      className="rounded-full border border-white/20 bg-black/60"
+                    />
+                  )}
                 </div>
 
                 {/* QUARTER */}
