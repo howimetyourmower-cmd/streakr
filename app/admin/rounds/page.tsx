@@ -9,6 +9,7 @@ import {
   doc,
   updateDoc,
   setDoc,
+  getDoc,
 } from "firebase/firestore";
 import dayjs from "dayjs";
 
@@ -38,6 +39,8 @@ export default function RoundsAdminPage() {
     const loadRounds = async () => {
       try {
         setError(null);
+
+        // 1) Load all rounds for this season
         const snap = await getDocs(collection(db, "rounds"));
 
         const list: RoundMeta[] = [];
@@ -52,7 +55,7 @@ export default function RoundsAdminPage() {
             roundKey: data.roundKey ?? "",
             label: data.label ?? "",
             games: data.games ?? [],
-            published: !!data.published,
+            published: !!data.published, // temporary, refined below
           });
         });
 
@@ -62,7 +65,29 @@ export default function RoundsAdminPage() {
             : a.roundNumber - b.roundNumber
         );
 
-        setRounds(list);
+        // 2) Load config/season-2026 to see which round is actually live
+        const configRef = doc(db, "config", `season-${SEASON}`);
+        const configSnap = await getDoc(configRef);
+
+        let currentRoundId: string | null = null;
+        if (configSnap.exists()) {
+          const cfg = configSnap.data() as any;
+          currentRoundId = cfg.currentRoundId ?? null;
+        }
+
+        // 3) Derive "published" state from config as the source of truth.
+        const withPublished = list.map((round) => {
+          if (currentRoundId) {
+            return {
+              ...round,
+              published: round.id === currentRoundId,
+            };
+          }
+          // Fallback if config doc doesn't exist yet
+          return round;
+        });
+
+        setRounds(withPublished);
       } catch (err) {
         console.error("Failed to load rounds", err);
         setError("Failed to load rounds.");
@@ -79,7 +104,7 @@ export default function RoundsAdminPage() {
       setSavingId(round.id);
       setError(null);
 
-      // 1) Mark this round as published
+      // 1) Mark this round as published (optional, mainly for debugging / other tools)
       await updateDoc(doc(db, "rounds", round.id), {
         published: true,
       });
@@ -99,11 +124,12 @@ export default function RoundsAdminPage() {
         { merge: true }
       );
 
-      // 3) Update local state
+      // 3) Update local state – only this round is treated as "published"
       setRounds((prev) =>
-        prev.map((r) =>
-          r.id === round.id ? { ...r, published: true } : r
-        )
+        prev.map((r) => ({
+          ...r,
+          published: r.id === round.id,
+        }))
       );
     } catch (err) {
       console.error("Error publishing round", err);
@@ -118,6 +144,9 @@ export default function RoundsAdminPage() {
       setSavingId(round.id);
       setError(null);
 
+      // Clear the flag on the round itself. We leave the config doc alone
+      // so that Picks keeps pointing to the last published round unless
+      // you explicitly change it.
       await updateDoc(doc(db, "rounds", round.id), {
         published: false,
       });
@@ -127,9 +156,6 @@ export default function RoundsAdminPage() {
           r.id === round.id ? { ...r, published: false } : r
         )
       );
-
-      // Note: we leave config/season-2026 alone so currentRound
-      // keeps pointing at the last published round.
     } catch (err) {
       console.error("Error unpublishing round", err);
       setError("Failed to unpublish that round.");
@@ -154,7 +180,7 @@ export default function RoundsAdminPage() {
         Clicking <strong>Publish round</strong> will:
         <br />
         1) set the round&apos;s <code>published</code> flag to{" "}
-        <code>true</code>, and
+        <code>true</code> (for admin visibility), and
         <br />
         2) update the <code>config / season-{SEASON}</code> document
         that the Picks API and Settlement console read.
