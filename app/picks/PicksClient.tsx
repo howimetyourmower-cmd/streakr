@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo, ChangeEvent } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import {
@@ -68,6 +69,146 @@ type Comment = {
 };
 
 type ActiveOutcome = "yes" | "no" | null;
+
+// ---------- AFL team logo helpers ----------
+
+type AflTeamKey =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "gold-coast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "north-melbourne"
+  | "port-adelaide"
+  | "richmond"
+  | "st-kilda"
+  | "sydney"
+  | "west-coast"
+  | "western-bulldogs";
+
+const AFL_TEAM_LOGOS: Record<
+  AflTeamKey,
+  { name: string; logo: string }
+> = {
+  "adelaide": { name: "Adelaide Crows", logo: "/afl-logos/adelaide.jpeg" },
+  "brisbane": { name: "Brisbane Lions", logo: "/afl-logos/brisbane.jpeg" },
+  "carlton": { name: "Carlton", logo: "/afl-logos/carlton.jpeg" },
+  "collingwood": {
+    name: "Collingwood",
+    logo: "/afl-logos/collingwood.jpeg",
+  },
+  "essendon": { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
+  "fremantle": {
+    name: "Fremantle Dockers",
+    logo: "/afl-logos/fremantle.jpeg",
+  },
+  "geelong": { name: "Geelong Cats", logo: "/afl-logos/geelong.jpeg" },
+  "gold-coast": {
+    name: "Gold Coast Suns",
+    logo: "/afl-logos/gold-coast.jpeg",
+  },
+  "gws": {
+    name: "GWS Giants",
+    logo: "/afl-logos/gws.jpeg",
+  },
+  "hawthorn": { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
+  "melbourne": {
+    name: "Melbourne Demons",
+    logo: "/afl-logos/melbourne.jpeg",
+  },
+  "north-melbourne": {
+    name: "North Melbourne Kangaroos",
+    logo: "/afl-logos/north-melbourne.jpeg",
+  },
+  "port-adelaide": {
+    name: "Port Adelaide Power",
+    logo: "/afl-logos/port-adelaide.jpeg",
+  },
+  "richmond": {
+    name: "Richmond Tigers",
+    logo: "/afl-logos/richmond.jpeg",
+  },
+  "st-kilda": {
+    name: "St Kilda Saints",
+    logo: "/afl-logos/st-kilda.jpeg",
+  },
+  "sydney": { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
+  "west-coast": {
+    name: "West Coast Eagles",
+    logo: "/afl-logos/west-coast.jpeg",
+  },
+  "western-bulldogs": {
+    name: "Western Bulldogs",
+    logo: "/afl-logos/western-bulldogs.jpeg",
+  },
+};
+
+function normaliseSegment(seg: string) {
+  return seg.trim().toLowerCase();
+}
+
+function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
+  const s = normaliseSegment(seg);
+
+  if (s.includes("adelaide")) return "adelaide";
+  if (s.includes("brisbane")) return "brisbane";
+  if (s.includes("carlton")) return "carlton";
+  if (s.includes("collingwood") || s === "pies") return "collingwood";
+  if (s.includes("essendon") || s.includes("bombers")) return "essendon";
+  if (s.includes("fremantle") || s.includes("dockers")) return "fremantle";
+  if (s.includes("geelong")) return "geelong";
+  if (s.includes("gold coast") || s.includes("gc")) return "gold-coast";
+  if (s.includes("gws") || s.includes("giants")) return "gws";
+  if (s.includes("hawthorn") || s.includes("hawks")) return "hawthorn";
+  if (s.includes("melbourne") && !s.includes("north"))
+    return "melbourne";
+  if (s.includes("north melbourne") || s.includes("kangaroos"))
+    return "north-melbourne";
+  if (s.includes("port adelaide") || s.includes("power"))
+    return "port-adelaide";
+  if (s.includes("richmond") || s.includes("tigers")) return "richmond";
+  if (s.includes("st kilda") || s.includes("stkilda"))
+    return "st-kilda";
+  if (s.includes("sydney") || s.includes("swans")) return "sydney";
+  if (s.includes("west coast") || s.includes("eagles"))
+    return "west-coast";
+  if (s.includes("western bulldogs") || s.includes("bulldogs"))
+    return "western-bulldogs";
+
+  return null;
+}
+
+function parseAflMatchTeams(match: string): {
+  homeKey: AflTeamKey | null;
+  awayKey: AflTeamKey | null;
+} {
+  const lower = match.toLowerCase();
+  let parts: string[] = [];
+
+  if (lower.includes(" vs ")) {
+    parts = match.split(/vs/i);
+  } else if (lower.includes(" v ")) {
+    parts = match.split(/ v /i);
+  } else if (lower.includes(" - ")) {
+    parts = match.split(" - ");
+  }
+
+  const homeSeg = parts[0] ?? "";
+  const awaySeg = parts[1] ?? "";
+
+  const homeKey = getAflTeamKeyFromSegment(homeSeg);
+  const awayKey = getAflTeamKeyFromSegment(awaySeg);
+
+  return { homeKey, awayKey };
+}
+
+// --------------------------------------------------
 
 export default function PicksClient() {
   const { user } = useAuth();
@@ -608,6 +749,21 @@ export default function PicksClient() {
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
 
+          // AFL team logos (only for AFL rows)
+          const { homeKey, awayKey } =
+            row.sport.toUpperCase() === "AFL"
+              ? parseAflMatchTeams(row.match)
+              : { homeKey: null, awayKey: null };
+
+          const homeTeam =
+            homeKey && AFL_TEAM_LOGOS[homeKey as AflTeamKey]
+              ? AFL_TEAM_LOGOS[homeKey as AflTeamKey]
+              : null;
+          const awayTeam =
+            awayKey && AFL_TEAM_LOGOS[awayKey as AflTeamKey]
+              ? AFL_TEAM_LOGOS[awayKey as AflTeamKey]
+              : null;
+
           return (
             <div
               key={row.id}
@@ -640,13 +796,37 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* MATCH + VENUE */}
-                <div className="col-span-12 md:col-span-2">
-                  <div className="text-sm font-semibold">
-                    {row.match}
-                  </div>
-                  <div className="text-[11px] text-white/80">
-                    {row.venue}
+                {/* MATCH + VENUE + AFL logos */}
+                <div className="col-span-12 md:col-span-2 flex items-center gap-2">
+                  {(homeTeam || awayTeam) && (
+                    <div className="flex items-center gap-1 mr-1">
+                      {homeTeam && (
+                        <Image
+                          src={homeTeam.logo}
+                          alt={homeTeam.name}
+                          width={24}
+                          height={24}
+                          className="rounded-full border border-white/20 bg-black/60"
+                        />
+                      )}
+                      {awayTeam && (
+                        <Image
+                          src={awayTeam.logo}
+                          alt={awayTeam.name}
+                          width={24}
+                          height={24}
+                          className="rounded-full border border-white/20 bg-black/60 -ml-1"
+                        />
+                      )}
+                    </div>
+                  )}
+                  <div>
+                    <div className="text-sm font-semibold">
+                      {row.match}
+                    </div>
+                    <div className="text-[11px] text-white/80">
+                      {row.venue}
+                    </div>
                   </div>
                 </div>
 
