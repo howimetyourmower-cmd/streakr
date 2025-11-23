@@ -187,6 +187,8 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
 function parseAflMatchTeams(match: string): {
   homeKey: AflTeamKey | null;
   awayKey: AflTeamKey | null;
+  homeLabel: string | null;
+  awayLabel: string | null;
 } {
   const lower = match.toLowerCase();
   let parts: string[] = [];
@@ -199,13 +201,18 @@ function parseAflMatchTeams(match: string): {
     parts = match.split(" - ");
   }
 
-  const homeSeg = parts[0] ?? "";
-  const awaySeg = parts[1] ?? "";
+  const homeSeg = (parts[0] ?? "").trim();
+  const awaySeg = (parts[1] ?? "").trim();
 
   const homeKey = getAflTeamKeyFromSegment(homeSeg);
   const awayKey = getAflTeamKeyFromSegment(awaySeg);
 
-  return { homeKey, awayKey };
+  return {
+    homeKey,
+    awayKey,
+    homeLabel: homeSeg || null,
+    awayLabel: awaySeg || null,
+  };
 }
 
 // --------------------------------------------------
@@ -750,19 +757,21 @@ export default function PicksClient() {
           const isSponsor = !!row.isSponsorQuestion;
 
           // AFL team logos (only for AFL rows)
-          const { homeKey, awayKey } =
+          const parsed =
             row.sport.toUpperCase() === "AFL"
               ? parseAflMatchTeams(row.match)
-              : { homeKey: null, awayKey: null };
+              : null;
 
           const homeTeam =
-            homeKey && AFL_TEAM_LOGOS[homeKey as AflTeamKey]
-              ? AFL_TEAM_LOGOS[homeKey as AflTeamKey]
+            parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
+              ? AFL_TEAM_LOGOS[parsed.homeKey]
               : null;
           const awayTeam =
-            awayKey && AFL_TEAM_LOGOS[awayKey as AflTeamKey]
-              ? AFL_TEAM_LOGOS[awayKey as AflTeamKey]
+            parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
+              ? AFL_TEAM_LOGOS[parsed.awayKey]
               : null;
+
+          const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
           return (
             <div
@@ -796,35 +805,58 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* MATCH + VENUE + AFL logos (logo home – match – logo away) */}
-                <div className="col-span-12 md:col-span-2 flex items-center gap-2">
-                  {homeTeam && (
-                    <Image
-                      src={homeTeam.logo}
-                      alt={homeTeam.name}
-                      width={24}
-                      height={24}
-                      className="rounded-full border border-white/20 bg-black/60"
-                    />
-                  )}
+                {/* MATCH + VENUE (AFL layout: Logo + Team vs Team + Logo) */}
+                <div className="col-span-12 md:col-span-2">
+                  {useAflLayout ? (
+                    <>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1 min-w-0">
+                          {homeTeam && (
+                            <Image
+                              src={homeTeam.logo}
+                              alt={homeTeam.name}
+                              width={32}
+                              height={32}
+                              className="rounded-full border border-white/20 bg-black/60"
+                            />
+                          )}
+                          <span className="text-sm font-semibold truncate">
+                            {parsed?.homeLabel || homeTeam?.name || ""}
+                          </span>
+                        </div>
 
-                  <div>
-                    <div className="text-sm font-semibold flex items-center gap-1">
-                      <span>{row.match}</span>
-                    </div>
-                    <div className="text-[11px] text-white/80">
-                      {row.venue}
-                    </div>
-                  </div>
+                        <span className="text-xs uppercase tracking-wide text-white/70">
+                          vs
+                        </span>
 
-                  {awayTeam && (
-                    <Image
-                      src={awayTeam.logo}
-                      alt={awayTeam.name}
-                      width={24}
-                      height={24}
-                      className="rounded-full border border-white/20 bg-black/60"
-                    />
+                        <div className="flex items-center gap-1 min-w-0">
+                          <span className="text-sm font-semibold truncate">
+                            {parsed?.awayLabel || awayTeam?.name || ""}
+                          </span>
+                          {awayTeam && (
+                            <Image
+                              src={awayTeam.logo}
+                              alt={awayTeam.name}
+                              width={32}
+                              height={32}
+                              className="rounded-full border border-white/20 bg-black/60"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-white/80 mt-0.5">
+                        {row.venue}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm font-semibold">
+                        {row.match}
+                      </div>
+                      <div className="text-[11px] text-white/80">
+                        {row.venue}
+                      </div>
+                    </>
                   )}
                 </div>
 
