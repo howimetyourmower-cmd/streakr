@@ -28,6 +28,15 @@ export default function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [username, setUsername] = useState("");
 
+  const [firstName, setFirstName] = useState("");
+  const [surname, setSurname] = useState("");
+  const [dob, setDob] = useState("");
+  const [suburb, setSuburb] = useState("");
+  const [stateValue, setStateValue] = useState("");
+  const [phone, setPhone] = useState("");
+  const [gender, setGender] = useState("");
+  const [team, setTeam] = useState("");
+
   // Show/Hide passwords
   const [showPasswordSignup, setShowPasswordSignup] = useState(false);
   const [showPasswordLogin, setShowPasswordLogin] = useState(false);
@@ -53,6 +62,11 @@ export default function AuthPage() {
     e.preventDefault();
     resetMessages();
 
+    // Basic validation
+    if (!username.trim()) {
+      setError("Please choose a username.");
+      return;
+    }
     if (!email || !password) {
       setError("Please enter an email and password.");
       return;
@@ -65,15 +79,42 @@ export default function AuthPage() {
       setError("Passwords do not match.");
       return;
     }
-    if (!username.trim()) {
-      setError("Please choose a username.");
+
+    if (!firstName.trim()) {
+      setError("Please enter your first name.");
       return;
     }
+    if (!surname.trim()) {
+      setError("Please enter your surname.");
+      return;
+    }
+    if (!dob) {
+      setError("Please enter your date of birth.");
+      return;
+    }
+    if (!suburb.trim()) {
+      setError("Please enter your suburb.");
+      return;
+    }
+    if (!stateValue.trim()) {
+      setError("Please select your state.");
+      return;
+    }
+    if (!phone.trim()) {
+      setError("Please enter your phone number.");
+      return;
+    }
+    if (!team.trim()) {
+      setError("Please select your favourite AFL team.");
+      return;
+    }
+    // Gender left optional on purpose – easy to make required if you want
 
     setSubmitting(true);
     try {
       // Check if username is already taken (simple, non-indexed check)
-      const usernameDocRef = doc(db, "usernames", username.trim().toLowerCase());
+      const cleanUsername = username.trim().toLowerCase();
+      const usernameDocRef = doc(db, "usernames", cleanUsername);
       const usernameSnap = await getDoc(usernameDocRef);
       if (usernameSnap.exists()) {
         setError("That username is already taken. Please choose another.");
@@ -84,15 +125,27 @@ export default function AuthPage() {
       // Create auth account
       const cred = await createUserWithEmailAndPassword(auth, email, password);
 
-      // Firestore user profile
-      const userRef = doc(db, "users", cred.user.uid);
+      const uid = cred.user.uid;
+      const nowIso = new Date().toISOString();
+
+      // Firestore user profile – this matches the Profile page fields
+      const userRef = doc(db, "users", uid);
       await setDoc(
         userRef,
         {
-          uid: cred.user.uid,
+          uid,
           email: email.toLowerCase(),
           username: username.trim(),
-          createdAt: new Date().toISOString(),
+          firstName: firstName.trim(),
+          surname: surname.trim(),
+          dob,
+          suburb: suburb.trim(),
+          state: stateValue.trim(),
+          phone: phone.trim(),
+          gender: gender || "",
+          team: team, // what Profile uses
+          favouriteTeam: team, // what /api/profile reads
+          createdAt: nowIso,
           currentStreak: 0,
           longestStreak: 0,
         },
@@ -100,7 +153,7 @@ export default function AuthPage() {
       );
 
       // Reserve username -> uid mapping
-      await setDoc(usernameDocRef, { uid: cred.user.uid });
+      await setDoc(usernameDocRef, { uid });
 
       // Send verification email
       await sendEmailVerification(cred.user, {
@@ -200,6 +253,7 @@ export default function AuthPage() {
         {/* SIGN UP FORM */}
         {isSignup && (
           <form onSubmit={handleSignUp} className="space-y-4">
+            {/* Username */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-white/70">
                 Username
@@ -213,6 +267,144 @@ export default function AuthPage() {
               />
             </div>
 
+            {/* First name & Surname */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  First name
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Surname
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={surname}
+                  onChange={(e) => setSurname(e.target.value)}
+                />
+              </div>
+            </div>
+
+            {/* DOB */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Date of birth
+              </label>
+              <input
+                type="date"
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+              />
+            </div>
+
+            {/* Suburb & State */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Suburb
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={suburb}
+                  onChange={(e) => setSuburb(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  State
+                </label>
+                <select
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={stateValue}
+                  onChange={(e) => setStateValue(e.target.value)}
+                >
+                  <option value="">Select</option>
+                  <option value="VIC">VIC</option>
+                  <option value="NSW">NSW</option>
+                  <option value="QLD">QLD</option>
+                  <option value="SA">SA</option>
+                  <option value="WA">WA</option>
+                  <option value="TAS">TAS</option>
+                  <option value="ACT">ACT</option>
+                  <option value="NT">NT</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Phone */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Phone
+              </label>
+              <input
+                type="tel"
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                placeholder="04xx xxx xxx"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+
+            {/* Gender & Favourite team */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Gender
+                </label>
+                <select
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                >
+                  <option value="">Prefer not to say</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Favourite AFL team
+                </label>
+                <select
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={team}
+                  onChange={(e) => setTeam(e.target.value)}
+                >
+                  <option value="">Select a team</option>
+                  <option>Adelaide Crows</option>
+                  <option>Brisbane Lions</option>
+                  <option>Carlton</option>
+                  <option>Collingwood</option>
+                  <option>Essendon</option>
+                  <option>Fremantle</option>
+                  <option>Geelong Cats</option>
+                  <option>Gold Coast Suns</option>
+                  <option>GWS Giants</option>
+                  <option>Hawthorn</option>
+                  <option>Melbourne</option>
+                  <option>North Melbourne</option>
+                  <option>Port Adelaide</option>
+                  <option>Richmond</option>
+                  <option>St Kilda</option>
+                  <option>Sydney Swans</option>
+                  <option>West Coast Eagles</option>
+                  <option>Western Bulldogs</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Email */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-white/70">
                 Email
@@ -226,6 +418,7 @@ export default function AuthPage() {
               />
             </div>
 
+            {/* Password + confirm */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-white/70">
                 Password
@@ -239,9 +432,7 @@ export default function AuthPage() {
                 />
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowPasswordSignup((v) => !v)
-                  }
+                  onClick={() => setShowPasswordSignup((v) => !v)}
                   className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
                 >
                   {showPasswordSignup ? "Hide" : "Show"}
@@ -305,9 +496,7 @@ export default function AuthPage() {
                 />
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowPasswordLogin((v) => !v)
-                  }
+                  onClick={() => setShowPasswordLogin((v) => !v)}
                   className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
                 >
                   {showPasswordLogin ? "Hide" : "Show"}
