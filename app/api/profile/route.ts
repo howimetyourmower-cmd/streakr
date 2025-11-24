@@ -1,22 +1,67 @@
 export const runtime = "nodejs";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 import { Timestamp } from "firebase-admin/firestore";
 
-// GET /api/profile
-export async function GET() {
-  try {
-    // TEMP — replace' demo-user' once auth is wired in
-    const userId = "demo-user";
+type ProfileStats = {
+  displayName: string;
+  username: string;
+  favouriteTeam: string;
+  suburb2: string;
+  state?: string;
+  currentStreak: number;
+  bestStreak: number;
+  correctPercentage: number; // 0–100
+  roundsPlayed: number;
+};
 
+type RecentPick = {
+  id: string;
+  round: string | number;
+  match: string;
+  question: string;
+  userPick: "yes" | "no";
+  result: "correct" | "wrong" | "pending" | "void";
+  settledAt?: string; // ISO string
+};
+
+type InternalPick = {
+  id: string;
+  round: string | number;
+  match: string;
+  question: string;
+  userPick: string;
+  result: "correct" | "wrong" | "pending" | "void" | string;
+  settledAt?: Timestamp | Date;
+};
+
+// GET /api/profile?uid=USER_ID
+export async function GET(req: NextRequest) {
+  try {
+    // 1) Read uid from query string
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get("uid");
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: "Missing uid parameter" },
+        { status: 400 }
+      );
+    }
+
+    // 2) Load user profile
     const userDoc = await db.collection("users").doc(userId).get();
     if (!userDoc.exists) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 }
+      );
     }
 
     const userData = userDoc.data() as any;
 
+    // 3) Load this user's picks for the season
     const picksSnap = await db
       .collection("picks")
       .where("userID", "==", userId)
@@ -24,38 +69,58 @@ export async function GET() {
       .orderBy("settledAt", "desc")
       .get();
 
-    const picks = picksSnap.docs.map((doc) => {
-      const data = doc.data() as any;
+    const picks: InternalPick[] = picksSnap.docs.map((docSnap) => {
+      const data = docSnap.data() as any;
       return {
-        id: doc.id,
+        id: docSnap.id,
         round: data.round ?? "",
         match: data.match ?? "",
         question: data.question ?? "",
         userPick: (data.answer ?? "").toString(),
-        result: data.result ?? "pending",
-        settledAt: data.settledAt ?? undefined,
+        result: (data.result ?? "pending") as
+          | "correct"
+          | "wrong"
+          | "pending"
+          | "void"
+          | string,
+        settledAt: (data.settledAt ?? undefined) as
+          | Timestamp
+          | Date
+          | undefined,
       };
     });
 
-    const total = picks.length;
-    const correct = picks.filter((p) => p.result === "correct").length;
+    // 4) Compute stats
+    const totalPicks = picks.length;
+    const correctPicks = picks.filter((p) => p.result === "correct").length;
+    const roundsPlayedSet = new Set(picks.map((p) => String(p.round ?? "")));
 
+    // Current streak = from most recent until first non-correct
     let currentStreak = 0;
     for (const p of picks) {
-      if (p.result === "correct") currentStreak++;
-      else if (p.result === "wrong") break;
+      if (p.result === "correct") {
+        currentStreak++;
+      } else if (p.result === "wrong") {
+        break;
+      }
     }
 
+    // Best streak = max consecutive correct
     let bestStreak = 0;
     let running = 0;
     for (const p of [...picks].reverse()) {
       if (p.result === "correct") {
         running++;
-        bestStreak = Math.max(bestStreak, running);
-      } else running = 0;
+        if (running > bestStreak) bestStreak = running;
+      } else if (p.result === "wrong") {
+        running = 0;
+      }
     }
 
-    const stats = {
+    const correctPercentage =
+      totalPicks > 0 ? Math.round((correctPicks / totalPicks) * 100) : 0;
+
+    const stats: ProfileStats = {
       displayName: userData.displayName ?? "Player",
       username: userData.username ?? "",
       favouriteTeam: userData.favouriteTeam ?? "",
@@ -63,25 +128,48 @@ export async function GET() {
       state: userData.state ?? "",
       currentStreak,
       bestStreak,
-      correctPercentage: total ? Math.round((correct / total) * 100) : 0,
-      roundsPlayed: new Set(picks.map((p) => p.round)).size,
+      correctPercentage,
+      roundsPlayed: roundsPlayedSet.size,
     };
 
-    const recentPicks = picks.slice(0, 5).map((p) => ({
-      ...p,
-      settledAt:
-        p.settledAt instanceof Timestamp
-          ? p.settledAt.toDate().toISOString()
-          : p.settledAt,
-      userPick: p.userPick === "yes" ? "yes" : "no",
-      result: ["correct", "wrong", "pending", "void"].includes(p.result)
-        ? p.result
-        : "pending",
-    }));
+    // 5) Last 5 settled picks
+    const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => {
+      // normalise settledAt -> ISO
+      let settledAt: string | undefined;
+      if (p.settledAt) {
+        const value: any = p.settledAt;
+        const date: Date = value.toDate ? value.toDate() : value;
+        settledAt = date.toISOString();
+      }
+
+      const rawUserPick = p.userPick ?? "";
+      const lower = rawUserPick.toLowerCase();
+
+      const normalisedUserPick: "yes" | "no" =
+        lower === "yes" ? "yes" : "no";
+
+      const normalisedResult =
+        p.result === "correct" ||
+        p.result === "wrong" ||
+        p.result === "pending" ||
+        p.result === "void"
+          ? p.result
+          : "pending";
+
+      return {
+        id: p.id,
+        round: p.round ?? "",
+        match: p.match ?? "",
+        question: p.question ?? "",
+        userPick: normalisedUserPick,
+        result: normalisedResult,
+        settledAt,
+      };
+    });
 
     return NextResponse.json({ stats, recentPicks });
-  } catch (err) {
-    console.error("Error in /api/profile:", err);
+  } catch (error) {
+    console.error("Error in /api/profile:", error);
     return NextResponse.json(
       { error: "Failed to load profile" },
       { status: 500 }
