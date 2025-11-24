@@ -1,171 +1,300 @@
-export const runtime = "nodejs";
+// app/admin/marketing/page.tsx
+"use client";
 
-import { NextResponse } from "next/server";
-import { db } from "@/lib/admin";
-import { Timestamp } from "firebase-admin/firestore";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { db } from "@/lib/firebaseClient";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 
-type ProfileStats = {
-  displayName: string;
-  username: string;
-  favouriteTeam: string;
-  suburb2: string;
+type MarketingUser = {
+  id: string;
+  email: string;
+  username?: string;
+  firstName?: string;
+  surname?: string;
+  team?: string;
   state?: string;
-  currentStreak: number;
-  bestStreak: number;
-  correctPercentage: number; // 0–100
-  roundsPlayed: number;
+  suburb?: string;
+  createdAt?: string;
 };
 
-type RecentPick = {
-  id: string;
-  round: string | number;
-  match: string;
-  question: string;
-  userPick: "yes" | "no";
-  result: "correct" | "wrong" | "pending" | "void";
-  settledAt?: string; // ISO string
-};
+export default function MarketingAdminPage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
 
-type InternalPick = {
-  id: string;
-  round: string | number;
-  match: string;
-  question: string;
-  userPick: string;
-  result: "correct" | "wrong" | "pending" | "void" | string;
-  settledAt?: Timestamp | Date;
-};
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [users, setUsers] = useState<MarketingUser[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
 
-// GET /api/profile
-export async function GET() {
-  try {
-    // For MVP we're hard-coding a demo user
-    const userId = "demo-user";
+  // 1) Auth redirect + admin check
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (loading) return;
 
-    // 1) Load user profile
-    const userDoc = await db.collection("users").doc(userId).get();
-    if (!userDoc.exists) {
-      return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
-    }
-
-    const userData = userDoc.data() as any;
-
-    // 2) Load this user's picks for the season
-    const picksSnap = await db
-      .collection("picks")
-      .where("userID", "==", userId)
-      .where("season", "==", 2026)
-      .orderBy("settledAt", "desc")
-      .get();
-
-    const picks: InternalPick[] = picksSnap.docs.map((doc) => {
-      const data = doc.data() as any;
-      return {
-        id: doc.id,
-        round: data.round ?? "",
-        match: data.match ?? "",
-        question: data.question ?? "",
-        // raw answer as string, we'll normalise later
-        userPick: (data.answer ?? "").toString(),
-        result: (data.result ?? "pending") as
-          | "correct"
-          | "wrong"
-          | "pending"
-          | "void"
-          | string,
-        settledAt: (data.settledAt ?? undefined) as
-          | Timestamp
-          | Date
-          | undefined,
-      };
-    });
-
-    // 3) Compute stats
-    const totalPicks = picks.length;
-    const correctPicks = picks.filter((p) => p.result === "correct").length;
-    const roundsPlayedSet = new Set(picks.map((p) => String(p.round ?? "")));
-
-    // Current streak = count from most recent until first non-correct
-    let currentStreak = 0;
-    for (const p of picks) {
-      if (p.result === "correct") {
-        currentStreak++;
-      } else if (p.result === "wrong") {
-        break;
+      if (!user) {
+        // Not logged in – send to auth
+        router.push("/auth");
+        return;
       }
-    }
 
-    // Best streak = max streak of consecutive correct results
-    let bestStreak = 0;
-    let running = 0;
-    for (const p of [...picks].reverse()) {
-      if (p.result === "correct") {
-        running++;
-        if (running > bestStreak) bestStreak = running;
-      } else if (p.result === "wrong") {
-        running = 0;
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+
+        if (!snap.exists()) {
+          setIsAdmin(false);
+          return;
+        }
+
+        const data = snap.data() as any;
+        // Use whatever flag you prefer: isAdmin === true OR role === "admin"
+        const adminFlag =
+          data.isAdmin === true || data.role === "admin" || data.admin === true;
+
+        setIsAdmin(adminFlag);
+      } catch (err) {
+        console.error("Admin check failed", err);
+        setIsAdmin(false);
       }
-    }
-
-    const correctPercentage =
-      totalPicks > 0 ? Math.round((correctPicks / totalPicks) * 100) : 0;
-
-    const stats: ProfileStats = {
-      displayName: userData.displayName ?? "Player",
-      username: userData.username ?? "",
-      favouriteTeam: userData.favouriteTeam ?? "",
-      suburb2: userData.suburb ?? "",
-      state: userData.state ?? "",
-      currentStreak,
-      bestStreak,
-      correctPercentage,
-      roundsPlayed: roundsPlayedSet.size,
     };
 
-    // 4) Last 5 settled picks (normalising userPick & settledAt safely)
-    const recentPicks: RecentPick[] = picks.slice(0, 5).map((p) => {
-      // normalise settledAt (Timestamp | Date | undefined) -> ISO string
-      let settledAt: string | undefined;
-      if (p.settledAt) {
-        const value: any = p.settledAt;
-        const date: Date = value.toDate ? value.toDate() : value;
-        settledAt = date.toISOString();
+    checkAdmin();
+  }, [user, loading, router]);
+
+  // 2) Load marketing users once we know it's an admin
+  useEffect(() => {
+    const load = async () => {
+      if (isAdmin !== true) return;
+
+      try {
+        setLoadingUsers(true);
+        setError("");
+
+        const usersRef = collection(db, "users");
+        const qRef = query(
+          usersRef,
+          where("marketingOptIn", "==", true),
+          orderBy("email", "asc")
+        );
+
+        const snap = await getDocs(qRef);
+
+        const list: MarketingUser[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            email: data.email ?? "",
+            username: data.username ?? "",
+            firstName: data.firstName ?? "",
+            surname: data.surname ?? "",
+            team: data.team ?? "",
+            state: data.state ?? "",
+            suburb: data.suburb ?? "",
+            createdAt: data.createdAt ?? "",
+          };
+        });
+
+        setUsers(list);
+      } catch (err) {
+        console.error("Failed to load marketing users", err);
+        setError("Failed to load marketing list.");
+      } finally {
+        setLoadingUsers(false);
       }
+    };
 
-      const rawUserPick = p.userPick ?? "";
-      const lower = rawUserPick.toLowerCase();
+    if (isAdmin === true) {
+      load();
+    }
+  }, [isAdmin]);
 
-      const normalisedUserPick: "yes" | "no" =
-        lower === "yes" ? "yes" : "no";
+  const handleExportCsv = () => {
+    try {
+      setExporting(true);
+      const header = [
+        "email",
+        "username",
+        "firstName",
+        "surname",
+        "team",
+        "state",
+        "suburb",
+        "createdAt",
+      ];
 
-      const normalisedResult =
-        p.result === "correct" ||
-        p.result === "wrong" ||
-        p.result === "pending" ||
-        p.result === "void"
-          ? p.result
-          : "pending";
+      const rows = users.map((u) => [
+        u.email,
+        u.username ?? "",
+        u.firstName ?? "",
+        u.surname ?? "",
+        u.team ?? "",
+        u.state ?? "",
+        u.suburb ?? "",
+        u.createdAt ?? "",
+      ]);
 
-      return {
-        id: p.id,
-        round: p.round ?? "",
-        match: p.match ?? "",
-        question: p.question ?? "",
-        userPick: normalisedUserPick,
-        result: normalisedResult,
-        settledAt,
-      };
-    });
+      const csvLines = [
+        header.join(","),
+        ...rows.map((r) =>
+          r
+            .map((field) => {
+              const value = (field ?? "").toString().replace(/"/g, '""');
+              return `"${value}"`;
+            })
+            .join(",")
+        ),
+      ];
 
-    return NextResponse.json({ stats, recentPicks });
-  } catch (error) {
-    console.error("Error in /api/profile:", error);
-    return NextResponse.json(
-      { error: "Failed to load profile" },
-      { status: 500 }
+      const blob = new Blob([csvLines.join("\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "streakr-marketing-optin.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("CSV export error", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // -------------- RENDER STATES -------------- //
+
+  // Still checking auth/admin
+  if (loading || isAdmin === null) {
+    return (
+      <main className="min-h-screen bg-black text-white px-4 py-8 sm:px-8">
+        <div className="max-w-6xl mx-auto">
+          <p className="text-sm text-white/70">Checking access…</p>
+        </div>
+      </main>
     );
   }
+
+  // Logged in but not admin
+  if (isAdmin === false) {
+    return (
+      <main className="min-h-screen bg-black text-white px-4 py-8 sm:px-8">
+        <div className="max-w-2xl mx-auto">
+          <h1 className="text-2xl font-bold mb-2">No access</h1>
+          <p className="text-sm text-white/70">
+            This page is for STREAKr admins only. If you think this is a
+            mistake, contact the site owner.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  // Admin view
+  return (
+    <main className="min-h-screen bg-black text-white px-4 py-8 sm:px-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Marketing opt-in list
+            </h1>
+            <p className="text-sm text-white/70">
+              All players who have opted in to receive STREAKr news and
+              promotions.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={exporting || users.length === 0}
+            className="inline-flex items-center rounded-full bg-orange-500 px-4 py-2 text-xs sm:text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-50"
+          >
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+        </header>
+
+        {loadingUsers && (
+          <p className="text-sm text-white/70">Loading players…</p>
+        )}
+        {error && (
+          <p className="text-sm text-red-400">
+            {error}
+          </p>
+        )}
+
+        {!loadingUsers && !error && users.length === 0 && (
+          <p className="text-sm text-white/70">
+            No players have opted in to marketing yet.
+          </p>
+        )}
+
+        {!loadingUsers && !error && users.length > 0 && (
+          <div className="overflow-x-auto rounded-2xl border border-white/10 bg-slate-900/80">
+            <table className="min-w-full text-left text-xs sm:text-sm">
+              <thead className="bg-slate-800/80 text-white/80">
+                <tr>
+                  <th className="px-4 py-2">Email</th>
+                  <th className="px-4 py-2">Username</th>
+                  <th className="px-4 py-2">Name</th>
+                  <th className="px-4 py-2">Team</th>
+                  <th className="px-4 py-2">Suburb / State</th>
+                  <th className="px-4 py-2">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u, idx) => (
+                  <tr
+                    key={u.id}
+                    className={
+                      idx % 2 === 0 ? "bg-slate-900" : "bg-slate-900/60"
+                    }
+                  >
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {u.email}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {u.username || "—"}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {u.firstName || u.surname
+                        ? `${u.firstName ?? ""} ${u.surname ?? ""}`.trim()
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {u.team || "—"}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {u.suburb || u.state
+                        ? `${u.suburb ?? ""}${
+                            u.suburb && u.state ? ", " : ""
+                          }${u.state ?? ""}`
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap text-white/70">
+                      {u.createdAt || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </main>
+  );
 }
