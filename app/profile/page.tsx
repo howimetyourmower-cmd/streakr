@@ -1,4 +1,4 @@
-     "use client";
+"use client";
 
 import {
   useEffect,
@@ -33,6 +33,7 @@ type UserDoc = {
   avatarUrl?: string;
   currentStreak?: number;
   longestStreak?: number;
+  marketingOptIn?: boolean; // 👈 NEW
 };
 
 /** What /api/profile returns in the stats block */
@@ -115,6 +116,7 @@ export default function ProfilePage() {
           avatarUrl: (data as any).avatarUrl ?? "",
           currentStreak: (data as any).currentStreak ?? 0,
           longestStreak: (data as any).longestStreak ?? 0,
+          marketingOptIn: (data as any).marketingOptIn ?? false, // 👈 NEW
         });
 
         setInitialLoaded(true);
@@ -172,8 +174,6 @@ export default function ProfilePage() {
       }
     };
 
-    // For now this uses the demo user in the API, so we don't strictly
-    // need `user`, but it's nice to only call when logged in.
     if (user) {
       loadStats();
     }
@@ -271,6 +271,7 @@ export default function ProfilePage() {
           gender: form.gender ?? "",
           team: form.team ?? "",
           avatarUrl: avatarUrlToSave ?? "",
+          marketingOptIn: form.marketingOptIn ?? false, // 👈 NEW
         },
         { merge: true }
       );
@@ -554,7 +555,32 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <p className="mt-1 text-[11px] text-slate-500">
+          {/* EMAIL PREFERENCES – marketing opt in/out */}
+          <div className="mt-4 border-t border-slate-700/80 pt-4">
+            <p className="text-xs font-semibold text-slate-300 mb-2">
+              Email preferences
+            </p>
+            <label className="flex items-start gap-2 text-[11px] text-slate-200">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
+                checked={!!form.marketingOptIn}
+                disabled={!isEditing}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    marketingOptIn: e.target.checked,
+                  }))
+                }
+              />
+              <span>
+                Send me STREAKr news, tips and prize updates. You can opt out
+                any time from this profile page.
+              </span>
+            </label>
+          </div>
+
+          <p className="mt-2 text-[11px] text-slate-500">
             Some fields (like username and date of birth) can&apos;t be changed
             yet. Contact support if you need updates there.
           </p>
