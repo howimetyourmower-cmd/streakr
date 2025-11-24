@@ -37,6 +37,10 @@ export default function AuthPage() {
   const [gender, setGender] = useState("");
   const [team, setTeam] = useState("");
 
+  // New: consent checkboxes
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [marketingOptIn, setMarketingOptIn] = useState(true); // pre-ticked
+
   // Show/Hide passwords
   const [showPasswordSignup, setShowPasswordSignup] = useState(false);
   const [showPasswordLogin, setShowPasswordLogin] = useState(false);
@@ -108,7 +112,12 @@ export default function AuthPage() {
       setError("Please select your favourite AFL team.");
       return;
     }
-    // Gender left optional on purpose – easy to make required if you want
+
+    // NEW: must accept T&Cs to proceed
+    if (!acceptTerms) {
+      setError("You must accept the Terms & Conditions to create an account.");
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -128,7 +137,7 @@ export default function AuthPage() {
       const uid = cred.user.uid;
       const nowIso = new Date().toISOString();
 
-      // Firestore user profile – this matches the Profile page fields
+      // Firestore user profile – matches Profile page fields + consent
       const userRef = doc(db, "users", uid);
       await setDoc(
         userRef,
@@ -143,11 +152,15 @@ export default function AuthPage() {
           state: stateValue.trim(),
           phone: phone.trim(),
           gender: gender || "",
-          team: team, // what Profile uses
-          favouriteTeam: team, // what /api/profile reads
+          team: team,
+          favouriteTeam: team,
           createdAt: nowIso,
           currentStreak: 0,
           longestStreak: 0,
+          // NEW: consent fields
+          acceptedTerms: true,
+          acceptedTermsAt: nowIso,
+          marketingOptIn: !!marketingOptIn,
         },
         { merge: true }
       );
@@ -452,15 +465,40 @@ export default function AuthPage() {
               />
             </div>
 
-            <p className="text-[11px] text-white/50">
-              By creating an account you confirm you&apos;re 18+ and agree to
-              our Terms and Privacy Policy.
-            </p>
+            {/* NEW: consent checkboxes */}
+            <div className="mt-2 space-y-2 text-[11px] text-white/80">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
+                />
+                <span>
+                  I confirm I&apos;m 18+ and agree to the{" "}
+                  <span className="underline">Terms &amp; Conditions</span> and{" "}
+                  <span className="underline">Privacy Policy</span>.
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={marketingOptIn}
+                  onChange={(e) => setMarketingOptIn(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
+                />
+                <span>
+                  Send me STREAKr news, tips and prize updates. You can opt out
+                  any time.
+                </span>
+              </label>
+            </div>
 
             <button
               type="submit"
               disabled={submitting}
-              className="mt-2 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
+              className="mt-3 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
             >
               {submitting ? "Creating account…" : "Sign up"}
             </button>
