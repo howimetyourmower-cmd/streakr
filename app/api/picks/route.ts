@@ -1,29 +1,52 @@
+// app/api/picks/route.ts
+export const runtime = "nodejs";
+
 import { NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+
+type RawQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  userPick?: "yes" | "no";
+  yesPercent?: number;
+  noPercent?: number;
+  commentCount?: number;
+  sport?: string;
+  venue?: string;
+  startTime?: string;
+};
+
+type RawGame = {
+  id: string;
+  match: string;
+  venue?: string;
+  startTime?: string;
+  sport?: string;
+  questions?: RawQuestion[];
+};
 
 type RoundConfig = {
   currentRoundId?: string;
   currentRoundKey?: string;
   currentRoundNumber?: number;
   season?: number;
-  // optional sponsor fields – shape is flexible, we read them defensively
-  sponsorQuestionId?: string;
-  sponsorQuestion?: any;
 };
 
 type RoundDoc = {
-  games?: any[];
+  games?: RawGame[];
   roundKey?: string;
   roundNumber?: number;
+  sponsorQuestionId?: string; // 👈 where admin UI writes the chosen sponsor Q
 };
 
 export async function GET() {
   try {
-    // 1) Read the config doc that your Publish button updates
-    const configRef = db.collection("config").doc("season-2026");
-    const configSnap = await configRef.get();
+    // 1) Load config/season-2026 to find current round
+    const configSnap = await db.collection("config").doc("season-2026").get();
 
     if (!configSnap.exists) {
       return NextResponse.json(
@@ -37,19 +60,10 @@ export async function GET() {
       );
     }
 
-    const rawConfig = configSnap.data() as RoundConfig & Record<string, any>;
-    const config: RoundConfig = rawConfig;
-
+    const config = configSnap.data() as RoundConfig;
     const roundId = config.currentRoundId;
     const roundKeyFromConfig = config.currentRoundKey ?? "";
     const roundNumberFromConfig = config.currentRoundNumber ?? 0;
-
-    // Try to derive a sponsor question id from a few possible shapes
-    const sponsorQuestionId: string | null =
-      rawConfig.sponsorQuestionId ??
-      rawConfig.sponsorQuestion?.id ??
-      rawConfig.sponsorQuestion?.questionId ??
-      null;
 
     if (!roundId) {
       return NextResponse.json(
@@ -80,44 +94,52 @@ export async function GET() {
 
     const roundData = roundSnap.data() as RoundDoc;
 
-    const games = roundData.games ?? [];
+    const rawGames = roundData.games ?? [];
     const roundKey = roundKeyFromConfig || roundData.roundKey || "";
     const roundNumber = roundNumberFromConfig || roundData.roundNumber || 0;
 
-    // 3) If we have a sponsorQuestionId, decorate that question in the games array
-    const gamesWithSponsorFlag =
-      sponsorQuestionId
-        ? games.map((game: any) => {
-            const questions = Array.isArray(game.questions)
-              ? game.questions.map((q: any) => {
-                  // Preserve existing flag if you already store it on the question
-                  const alreadySponsor = !!q.isSponsorQuestion;
-                  const isSponsor =
-                    alreadySponsor || q.id === sponsorQuestionId;
+    const sponsorQuestionId = roundData.sponsorQuestionId || "";
 
-                  return isSponsor
-                    ? { ...q, isSponsorQuestion: true }
-                    : q;
-                })
-              : game.questions;
+    // 3) Map games + questions and tag the sponsor question
+    const games = rawGames.map((g) => {
+      const baseGameSport = g.sport ?? "AFL";
 
-            return {
-              ...game,
-              questions,
-            };
-          })
-        : games;
+      const questions = (g.questions ?? []).map((q) => ({
+        id: q.id,
+        quarter: q.quarter,
+        question: q.question,
+        status: q.status,
+        userPick: q.userPick,
+        yesPercent: q.yesPercent,
+        noPercent: q.noPercent,
+        commentCount: q.commentCount ?? 0,
+        sport: q.sport ?? baseGameSport,
+        venue: g.venue ?? q.venue ?? "",
+        startTime: g.startTime ?? q.startTime ?? "",
+        // 👇 THIS is the important bit
+        isSponsorQuestion: sponsorQuestionId === q.id,
+      }));
+
+      return {
+        id: g.id,
+        match: g.match,
+        venue: g.venue ?? "",
+        startTime: g.startTime ?? "",
+        sport: baseGameSport,
+        questions,
+      };
+    });
 
     return NextResponse.json(
       {
-        games: gamesWithSponsorFlag,
+        games,
         roundNumber,
         roundKey,
       },
       { status: 200 }
     );
   } catch (err: any) {
-    console.error("Error in GET /api/picks:", err);
+    console.error("Error in /api/picks:", err);
     return NextResponse.json(
       {
         games: [],
