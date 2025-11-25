@@ -129,6 +129,17 @@ export async function GET() {
         questions,
       };
     });
+// inside something like questionsSnap.docs.map(...)
+const data = qDoc.data() as any;
+
+questions.push({
+  id: qDoc.id,
+  quarter: data.quarter,
+  question: data.question,
+  status: data.status,
+  // ...other fields...
+  isSponsorQuestion: data.isSponsorQuestion === true, // 👈 ADD THIS LINE
+});
 
     return NextResponse.json(
       {
