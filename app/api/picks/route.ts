@@ -3,161 +3,149 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/admin";
+import { Timestamp } from "firebase-admin/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-type RawQuestion = {
+type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
-  userPick?: "yes" | "no";
+  userPick?: "yes" | "no"; // (not used yet, but kept for type-compat)
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+  isSponsorQuestion?: boolean;
   sport?: string;
   venue?: string;
   startTime?: string;
 };
 
-type RawGame = {
+type ApiGame = {
   id: string;
   match: string;
-  venue?: string;
-  startTime?: string;
+  venue: string;
+  startTime: string;
   sport?: string;
-  questions?: RawQuestion[];
+  questions: ApiQuestion[];
 };
 
-type RoundConfig = {
-  currentRoundId?: string;
-  currentRoundKey?: string;
-  currentRoundNumber?: number;
-  season?: number;
-};
-
-type RoundDoc = {
-  games?: RawGame[];
-  roundKey?: string;
+type PicksApiResponse = {
+  games: ApiGame[];
   roundNumber?: number;
-  sponsorQuestionId?: string; // 👈 where admin UI writes the chosen sponsor Q
 };
 
+// Helper to normalise Firestore Timestamp/Date/string to ISO string
+function toIso(val: any): string | undefined {
+  if (!val) return undefined;
+  if (val instanceof Timestamp) {
+    return val.toDate().toISOString();
+  }
+  if (val instanceof Date) {
+    return val.toISOString();
+  }
+  if (typeof val === "string") {
+    const d = new Date(val);
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return undefined;
+}
+
+// GET /api/picks
 export async function GET() {
   try {
-    // 1) Load config/season-2026 to find current round
-    const configSnap = await db.collection("config").doc("season-2026").get();
+    // 1) Find current season + round from meta/currentSeason
+    const metaSnap = await db.collection("meta").doc("currentSeason").get();
 
-    if (!configSnap.exists) {
+    if (!metaSnap.exists) {
       return NextResponse.json(
-        {
-          games: [],
-          roundNumber: 0,
-          roundKey: "",
-          error: "config/season-2026 not found",
-        },
-        { status: 200 }
+        { error: "currentSeason meta document not found" },
+        { status: 500 }
       );
     }
 
-    const config = configSnap.data() as RoundConfig;
-    const roundId = config.currentRoundId;
-    const roundKeyFromConfig = config.currentRoundKey ?? "";
-    const roundNumberFromConfig = config.currentRoundNumber ?? 0;
+    const meta = metaSnap.data() as any;
+    const seasonId: string = meta.seasonId || "season-2026";
+    const currentRound: number =
+      typeof meta.currentRound === "number" ? meta.currentRound : 0;
 
-    if (!roundId) {
-      return NextResponse.json(
-        {
-          games: [],
-          roundNumber: roundNumberFromConfig,
-          roundKey: roundKeyFromConfig,
-          error: "currentRoundId missing in config",
-        },
-        { status: 200 }
-      );
-    }
+    // 2) Load games for that season + round
+    const seasonRef = db.collection("config").doc(seasonId);
+    const roundRef = seasonRef.collection("rounds").doc(String(currentRound));
 
-    // 2) Load the round document, e.g. rounds/2026-0
-    const roundSnap = await db.collection("rounds").doc(roundId).get();
-
+    const roundSnap = await roundRef.get();
     if (!roundSnap.exists) {
       return NextResponse.json(
-        {
-          games: [],
-          roundNumber: roundNumberFromConfig,
-          roundKey: roundKeyFromConfig,
-          error: `rounds/${roundId} not found`,
-        },
-        { status: 200 }
+        { error: "Round config not found for current round" },
+        { status: 500 }
       );
     }
 
-    const roundData = roundSnap.data() as RoundDoc;
+    const gamesSnap = await roundRef.collection("games").get();
 
-    const rawGames = roundData.games ?? [];
-    const roundKey = roundKeyFromConfig || roundData.roundKey || "";
-    const roundNumber = roundNumberFromConfig || roundData.roundNumber || 0;
+    const games: ApiGame[] = [];
 
-    const sponsorQuestionId = roundData.sponsorQuestionId || "";
+    for (const gameDoc of gamesSnap.docs) {
+      const gData = gameDoc.data() as any;
 
-    // 3) Map games + questions and tag the sponsor question
-    const games = rawGames.map((g) => {
-      const baseGameSport = g.sport ?? "AFL";
+      const match: string =
+        gData.match ||
+        `${gData.homeTeam ?? "Home"} vs ${gData.awayTeam ?? "Away"}`;
 
-      const questions = (g.questions ?? []).map((q) => ({
-        id: q.id,
-        quarter: q.quarter,
-        question: q.question,
-        status: q.status,
-        userPick: q.userPick,
-        yesPercent: q.yesPercent,
-        noPercent: q.noPercent,
-        commentCount: q.commentCount ?? 0,
-        sport: q.sport ?? baseGameSport,
-        venue: g.venue ?? q.venue ?? "",
-        startTime: g.startTime ?? q.startTime ?? "",
-        // 👇 THIS is the important bit
-        isSponsorQuestion: sponsorQuestionId === q.id,
-      }));
+      const venue: string = gData.venue ?? "";
+      const sport: string = gData.sport ?? "AFL";
+      const startTimeIso: string =
+        toIso(gData.startTime) ?? new Date().toISOString();
 
-      return {
-        id: g.id,
-        match: g.match,
-        venue: g.venue ?? "",
-        startTime: g.startTime ?? "",
-        sport: baseGameSport,
+      // 3) Load questions for each game
+      const questionsSnap = await gameDoc.ref.collection("questions").get();
+      const questions: ApiQuestion[] = [];
+
+      questionsSnap.forEach((qDoc) => {
+        const data = qDoc.data() as any;
+
+        const status: QuestionStatus =
+          (data.status as QuestionStatus) ?? "open";
+
+        questions.push({
+          id: qDoc.id,
+          quarter: typeof data.quarter === "number" ? data.quarter : 1,
+          question: data.question ?? "",
+          status,
+          yesPercent:
+            typeof data.yesPercent === "number" ? data.yesPercent : 0,
+          noPercent:
+            typeof data.noPercent === "number" ? data.noPercent : 0,
+          commentCount:
+            typeof data.commentCount === "number" ? data.commentCount : 0,
+          isSponsorQuestion: !!data.isSponsorQuestion,
+          sport: data.sport ?? sport,
+          venue: data.venue ?? venue,
+          startTime: toIso(data.startTime) ?? startTimeIso,
+        });
+      });
+
+      games.push({
+        id: gameDoc.id,
+        match,
+        venue,
+        startTime: startTimeIso,
+        sport,
         questions,
-      };
-    });
-// inside something like questionsSnap.docs.map(...)
-const data = qDoc.data() as any;
+      });
+    }
 
-questions.push({
-  id: qDoc.id,
-  quarter: data.quarter,
-  question: data.question,
-  status: data.status,
-  // ...other fields...
-  isSponsorQuestion: data.isSponsorQuestion === true, // 👈 ADD THIS LINE
-});
+    const response: PicksApiResponse = {
+      games,
+      roundNumber: currentRound,
+    };
 
-    return NextResponse.json(
-      {
-        games,
-        roundNumber,
-        roundKey,
-      },
-      { status: 200 }
-    );
-  } catch (err: any) {
+    return NextResponse.json(response);
+  } catch (err) {
     console.error("Error in /api/picks:", err);
     return NextResponse.json(
-      {
-        games: [],
-        roundNumber: 0,
-        roundKey: "",
-        error: err?.message ?? "Unknown error",
-      },
+      { error: "Failed to load picks" },
       { status: 500 }
     );
   }
