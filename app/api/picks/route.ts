@@ -1,10 +1,11 @@
+// app/api/picks/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/admin";
-
-// JSON seed for all 2026 rounds
 import rounds2026 from "@/data/rounds-2026.json";
+
+// --- Types that match what PicksClient expects ---
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -17,6 +18,7 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+  sport?: string;
   isSponsorQuestion?: boolean;
 };
 
@@ -25,7 +27,7 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
-  sport: string;
+  sport?: string;
   questions: ApiQuestion[];
 };
 
@@ -34,20 +36,32 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-// Shape of each row in data/rounds-2026.json
-type JsonRow = {
-  Round: string;        // e.g. "OR", "R1"
-  Game: number;         // 1..9
+// --- JSON row type (from data/rounds-2026.json) ---
+
+type RawRow = {
+  Round: string;        // e.g. "OR", "R1", "R2"
+  Game: number;         // 1..9 etc
   Match: string;        // "Sydney vs Carlton"
   Venue: string;        // "SCG, Sydney"
   StartTime: string;    // ISO-ish string
   Question: string;
   Quarter: number;
-  Status: string;       // "Open" | "Final" | ...
-  Sport?: string;       // optional, default "AFL"
+  Status: string;       // "Open", "Final", "Pending", "Void"
+  Sport?: string;       // "AFL" etc (optional)
+  // if you later add "IsSponsor": true to JSON, we can also use that
 };
 
-function normaliseStatus(raw: string | undefined): QuestionStatus {
+// --- Helpers ---
+
+function slugifyMatch(match: string): string {
+  return match
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normaliseStatus(raw: string): QuestionStatus {
   const s = (raw || "").toLowerCase();
   if (s === "final") return "final";
   if (s === "pending") return "pending";
@@ -55,25 +69,20 @@ function normaliseStatus(raw: string | undefined): QuestionStatus {
   return "open";
 }
 
-function slugify(str: string) {
-  return str
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
+// --- GET handler ---
 
 export async function GET() {
   try {
-    // 1) Get current round meta from Firestore
-    const seasonDocRef = db.collection("config").doc("season-2026");
-    const seasonSnap = await seasonDocRef.get();
+    // 1) Load current round config from Firestore
+    //    doc: config/season-2026
+    const configSnap = await db.collection("config").doc("season-2026").get();
 
-    let currentRoundKey = "OR";
+    let currentRoundKey = "OR"; // matches "Round" in JSON
     let currentRoundNumber = 0;
-    let currentRoundId = "2026-0";
+    let currentRoundId: string | undefined;
 
-    if (seasonSnap.exists) {
-      const data = seasonSnap.data() as any;
+    if (configSnap.exists) {
+      const data = configSnap.data() as any;
       if (typeof data.currentRoundKey === "string") {
         currentRoundKey = data.currentRoundKey;
       }
@@ -85,90 +94,99 @@ export async function GET() {
       }
     }
 
-    // 2) Load sponsor question(s) for this round from Firestore
-    //    We look through rounds/{currentRoundId}.games[].questions[].isSponsorQuestion
-    const sponsorQuestionTexts = new Set<string>();
-
-    const roundDocRef = db.collection("rounds").doc(currentRoundId);
-    const roundSnap = await roundDocRef.get();
-    if (roundSnap.exists) {
-      const roundData = roundSnap.data() as any;
-      const games = Array.isArray(roundData?.games) ? roundData.games : [];
-
-      for (const g of games) {
-        const qs = Array.isArray(g?.questions) ? g.questions : [];
-        for (const q of qs) {
-          if (q && q.isSponsorQuestion && typeof q.question === "string") {
-            sponsorQuestionTexts.add(q.question);
-          }
-        }
-      }
-    }
-
-    // 3) Filter JSON rows for the current round key
-    const allRows = rounds2026 as JsonRow[];
-    const rowsForRound = allRows.filter(
-      (r) => (r.Round || "").toUpperCase() === currentRoundKey.toUpperCase()
+    // 2) Filter JSON rows for the active round
+    const allRows = rounds2026 as RawRow[];
+    const roundRows = allRows.filter(
+      (row) => (row.Round || "").toString() === currentRoundKey
     );
 
-    if (!rowsForRound.length) {
-      // No data for this round in JSON – return empty but with round number
-      return NextResponse.json(
-        { games: [], roundNumber: currentRoundNumber } as PicksApiResponse
-      );
+    if (!roundRows.length) {
+      // No questions for this round in JSON – return empty but with roundNumber
+      return NextResponse.json<PicksApiResponse>({
+        games: [],
+        roundNumber: currentRoundNumber,
+      });
     }
 
-    // 4) Group JSON rows by game (Round + Game number is unique within season)
+    // 3) Build game + question structures from JSON
     const gamesMap = new Map<string, ApiGame>();
+    const questionCounters: Record<string, number> = {};
 
-    for (const row of rowsForRound) {
-      const sport = row.Sport || "AFL";
-      const gameKey = `${row.Round}-${row.Game}`;
-      let game = gamesMap.get(gameKey);
+    for (const row of roundRows) {
+      const match = row.Match;
+      const matchSlug = slugifyMatch(match);
+      const sport = row.Sport ?? "AFL";
 
+      // ensure game entry
+      let game = gamesMap.get(matchSlug);
       if (!game) {
-        const gameId = `${row.Round}-${row.Game}-${slugify(row.Match)}`;
         game = {
-          id: gameId,
-          match: row.Match,
+          id: matchSlug,
+          match,
           venue: row.Venue,
           startTime: row.StartTime,
           sport,
           questions: [],
         };
-        gamesMap.set(gameKey, game);
+        gamesMap.set(matchSlug, game);
       }
 
-      const isSponsor = sponsorQuestionTexts.has(row.Question);
+      const quarterNum = Number(row.Quarter) || 0;
+      const status = normaliseStatus(row.Status);
 
-      const questionId = `${game.id}-q${row.Quarter}-${game.questions.length + 1}`;
+      // Build a stable questionId that matches your existing scheme:
+      // e.g. "sydney-vs-carlton-q1-1"
+      const qKey = `${matchSlug}-q${quarterNum}`;
+      const indexWithinQuarter = (questionCounters[qKey] ?? 0) + 1;
+      questionCounters[qKey] = indexWithinQuarter;
 
-      const q: ApiQuestion = {
+      const questionId = `${matchSlug}-q${quarterNum}-${indexWithinQuarter}`;
+
+      const apiQuestion: ApiQuestion = {
         id: questionId,
-        quarter: row.Quarter,
+        quarter: quarterNum,
         question: row.Question,
-        status: normaliseStatus(row.Status),
+        status,
         yesPercent: 0,
         noPercent: 0,
         commentCount: 0,
-        isSponsorQuestion: isSponsor,
+        sport,
       };
 
-      game.questions.push(q);
+      game.questions.push(apiQuestion);
     }
 
-    const games = Array.from(gamesMap.values());
+    const games: ApiGame[] = Array.from(gamesMap.values());
 
-    const response: PicksApiResponse = {
+    // 4) Fetch sponsorQuestionId from Firestore for this round
+    if (currentRoundId) {
+      const roundSnap = await db.collection("rounds").doc(currentRoundId).get();
+      if (roundSnap.exists) {
+        const roundData = roundSnap.data() as any;
+        const sponsorId: string | undefined = roundData?.sponsorQuestionId;
+
+        if (sponsorId) {
+          // mark the matching question
+          for (const g of games) {
+            for (const q of g.questions) {
+              if (q.id === sponsorId) {
+                q.isSponsorQuestion = true;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 5) Return response
+    return NextResponse.json<PicksApiResponse>({
       games,
       roundNumber: currentRoundNumber,
-    };
-
-    return NextResponse.json(response);
+    });
   } catch (err) {
     console.error("Error in /api/picks:", err);
     return NextResponse.json(
-      { games: [], roundNumber: 0, error: "Failed to load picks" },
+      { error: "Failed to load picks" },
       { status: 500 }
     );
   }
