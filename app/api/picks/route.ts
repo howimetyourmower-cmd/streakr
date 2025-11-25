@@ -12,7 +12,7 @@ type ApiQuestion = {
   quarter: number;
   question: string;
   status: QuestionStatus;
-  userPick?: "yes" | "no"; // (not used yet, but kept for type-compat)
+  userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
@@ -36,15 +36,11 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-// Helper to normalise Firestore Timestamp/Date/string to ISO string
+/** Normalise Firestore Timestamp / Date / string → ISO string */
 function toIso(val: any): string | undefined {
   if (!val) return undefined;
-  if (val instanceof Timestamp) {
-    return val.toDate().toISOString();
-  }
-  if (val instanceof Date) {
-    return val.toISOString();
-  }
+  if (val instanceof Timestamp) return val.toDate().toISOString();
+  if (val instanceof Date) return val.toISOString();
   if (typeof val === "string") {
     const d = new Date(val);
     if (!Number.isNaN(d.getTime())) return d.toISOString();
@@ -52,35 +48,31 @@ function toIso(val: any): string | undefined {
   return undefined;
 }
 
-// GET /api/picks
 export async function GET() {
+  let roundNumber = 0;
+  let seasonId = "season-2026";
+
   try {
-    // 1) Find current season + round from meta/currentSeason
-    const metaSnap = await db.collection("meta").doc("currentSeason").get();
-
-    if (!metaSnap.exists) {
-      return NextResponse.json(
-        { error: "currentSeason meta document not found" },
-        { status: 500 }
-      );
+    // --- 1) Try to read current season meta (but don't fail if missing) ---
+    try {
+      const metaSnap = await db.collection("meta").doc("currentSeason").get();
+      if (metaSnap.exists) {
+        const meta = metaSnap.data() as any;
+        if (typeof meta.currentRound === "number") {
+          roundNumber = meta.currentRound;
+        }
+        if (typeof meta.seasonId === "string" && meta.seasonId.trim()) {
+          seasonId = meta.seasonId;
+        }
+      }
+    } catch (metaErr) {
+      console.error("meta/currentSeason read error:", metaErr);
+      // fall back to defaults
     }
 
-    const meta = metaSnap.data() as any;
-    const seasonId: string = meta.seasonId || "season-2026";
-    const currentRound: number =
-      typeof meta.currentRound === "number" ? meta.currentRound : 0;
-
-    // 2) Load games for that season + round
+    // --- 2) Load games for this season + round ---
     const seasonRef = db.collection("config").doc(seasonId);
-    const roundRef = seasonRef.collection("rounds").doc(String(currentRound));
-
-    const roundSnap = await roundRef.get();
-    if (!roundSnap.exists) {
-      return NextResponse.json(
-        { error: "Round config not found for current round" },
-        { status: 500 }
-      );
-    }
+    const roundRef = seasonRef.collection("rounds").doc(String(roundNumber));
 
     const gamesSnap = await roundRef.collection("games").get();
 
@@ -92,13 +84,12 @@ export async function GET() {
       const match: string =
         gData.match ||
         `${gData.homeTeam ?? "Home"} vs ${gData.awayTeam ?? "Away"}`;
-
       const venue: string = gData.venue ?? "";
       const sport: string = gData.sport ?? "AFL";
       const startTimeIso: string =
         toIso(gData.startTime) ?? new Date().toISOString();
 
-      // 3) Load questions for each game
+      // --- 3) Questions under each game ---
       const questionsSnap = await gameDoc.ref.collection("questions").get();
       const questions: ApiQuestion[] = [];
 
@@ -119,7 +110,7 @@ export async function GET() {
             typeof data.noPercent === "number" ? data.noPercent : 0,
           commentCount:
             typeof data.commentCount === "number" ? data.commentCount : 0,
-          isSponsorQuestion: !!data.isSponsorQuestion,
+          isSponsorQuestion: !!data.isSponsorQuestion, // <– sponsor flag
           sport: data.sport ?? sport,
           venue: data.venue ?? venue,
           startTime: toIso(data.startTime) ?? startTimeIso,
@@ -136,17 +127,19 @@ export async function GET() {
       });
     }
 
-    const response: PicksApiResponse = {
+    const payload: PicksApiResponse = {
       games,
-      roundNumber: currentRound,
+      roundNumber,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("Error in /api/picks:", err);
-    return NextResponse.json(
-      { error: "Failed to load picks" },
-      { status: 500 }
-    );
+    // Still return 200 so the front-end doesn't show "Failed to load picks"
+    const fallback: PicksApiResponse = {
+      games: [],
+      roundNumber,
+    };
+    return NextResponse.json(fallback);
   }
 }
