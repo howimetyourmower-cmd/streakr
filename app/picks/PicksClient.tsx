@@ -63,7 +63,6 @@ type QuestionRow = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  sponsorQuestionId?: string; // optional
 };
 
 type Comment = {
@@ -219,6 +218,9 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
+// localStorage key for persistence
+const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
+
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -291,14 +293,11 @@ export default function PicksClient() {
           setRoundNumber(data.roundNumber);
         }
 
-        const sponsorQuestionId = data.sponsorQuestionId ?? null;
-
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
           g.questions.map((q: ApiQuestion) => ({
             id: q.id,
             gameId: g.id,
             match: g.match,
-            // fall back to question-level venue/startTime/sport if needed
             venue: g.venue ?? q.venue ?? "",
             startTime: g.startTime ?? q.startTime ?? "",
             quarter: q.quarter,
@@ -309,15 +308,18 @@ export default function PicksClient() {
             noPercent: q.noPercent,
             sport: q.sport ?? g.sport ?? "AFL",
             commentCount: q.commentCount ?? 0,
-            // handle either explicit flag or round-level sponsorQuestionId
-            isSponsorQuestion:
-              !!q.isSponsorQuestion ||
-              (sponsorQuestionId !== null && q.id === sponsorQuestionId),
+            isSponsorQuestion: !!q.isSponsorQuestion,
           }))
         );
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
+
+        // DEBUG: see if any sponsor questions are coming through at all
+        console.log(
+          "[PicksClient] Sponsor rows from API:",
+          flat.filter((r) => r.isSponsorQuestion)
+        );
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -328,40 +330,6 @@ export default function PicksClient() {
 
     load();
   }, []);
-
-  // -------- ALSO mark sponsor question from Firestore meta/currentSeason --------
-  useEffect(() => {
-    const markSponsorFromMeta = async () => {
-      if (!rows.length) return;
-
-      try {
-        const metaRef = doc(db, "meta", "currentSeason");
-        const snap = await getDoc(metaRef);
-        if (!snap.exists()) return;
-
-        const data = snap.data() as any;
-        const sponsorId: string | undefined = data?.sponsorQuestionId;
-        if (!sponsorId) return;
-
-        setRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            isSponsorQuestion: r.isSponsorQuestion || r.id === sponsorId,
-          }))
-        );
-        setFilteredRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            isSponsorQuestion: r.isSponsorQuestion || r.id === sponsorId,
-          }))
-        );
-      } catch (err) {
-        console.error("Failed to load sponsorQuestionId from meta", err);
-      }
-    };
-
-    markSponsorFromMeta();
-  }, [rows.length]);
 
   // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
@@ -415,9 +383,48 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // -------- Load existing streak pick for this user (stronger persistence) --------
+  // -------- Local persistence from localStorage --------
   useEffect(() => {
-    const loadUserPick = async () => {
+    if (typeof window === "undefined") return;
+    if (!rows.length) return;
+
+    try {
+      const raw = window.localStorage.getItem(ACTIVE_PICK_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      const questionId: string | undefined = parsed?.questionId;
+      const outcome: "yes" | "no" | undefined = parsed?.outcome;
+
+      if (
+        questionId &&
+        (outcome === "yes" || outcome === "no") &&
+        rows.some((r) => r.id === questionId)
+      ) {
+        setActiveQuestionId(questionId);
+        setActiveOutcome(outcome);
+
+        setRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            userPick: r.id === questionId ? outcome : undefined,
+          }))
+        );
+        setFilteredRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            userPick: r.id === questionId ? outcome : undefined,
+          }))
+        );
+      }
+    } catch (err) {
+      console.error("Failed to restore pick from localStorage", err);
+    }
+  }, [rows.length]);
+
+  // -------- Optional: also try to load from /api/user-picks, but localStorage is primary --------
+  useEffect(() => {
+    const loadServerPick = async () => {
       if (!user) {
         setActiveQuestionId(null);
         setActiveOutcome(null);
@@ -434,7 +441,11 @@ export default function PicksClient() {
         const questionId: string | undefined = data?.questionId;
         const outcome: "yes" | "no" | undefined = data?.outcome;
 
-        if (questionId && (outcome === "yes" || outcome === "no")) {
+        if (
+          questionId &&
+          (outcome === "yes" || outcome === "no") &&
+          rows.some((r) => r.id === questionId)
+        ) {
           setActiveQuestionId(questionId);
           setActiveOutcome(outcome);
 
@@ -450,20 +461,14 @@ export default function PicksClient() {
               userPick: r.id === questionId ? outcome : undefined,
             }))
           );
-        } else {
-          setActiveQuestionId(null);
-          setActiveOutcome(null);
         }
       } catch (err) {
-        console.error("Failed to load user pick", err);
+        console.error("Failed to load user pick from API", err);
       }
     };
 
     if (user) {
-      loadUserPick();
-    } else {
-      setActiveQuestionId(null);
-      setActiveOutcome(null);
+      loadServerPick();
     }
   }, [user, rows.length]);
 
@@ -529,7 +534,7 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
-  // -------- Save Pick via /api/user-picks (optimistic UI) --------
+  // -------- Save Pick via /api/user-picks + localStorage --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
@@ -538,6 +543,7 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
+    // local UI selection
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -552,6 +558,19 @@ export default function PicksClient() {
       )
     );
 
+    // persist to localStorage
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          ACTIVE_PICK_KEY,
+          JSON.stringify({ questionId: row.id, outcome: pick })
+        );
+      }
+    } catch (err) {
+      console.error("Failed to save pick to localStorage", err);
+    }
+
+    // best-effort save to API
     try {
       const res = await fetch("/api/user-picks", {
         method: "POST",
@@ -771,7 +790,7 @@ export default function PicksClient() {
 
             {leaderStreak && leaderStreak > 0 && (
               <div
-                className="absolute -top-1 h-4 w-[2px] bg:white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
+                className="absolute -top-1 h-4 w-[2px] bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
                 style={{ left: `${progressRatio * 100}%` }}
               />
             )}
@@ -879,7 +898,7 @@ export default function PicksClient() {
               key={row.id}
               className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
             >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 text:white gap-y-2 md:gap-y-0 text-white">
+              <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
                 {/* START */}
                 <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
@@ -945,7 +964,7 @@ export default function PicksClient() {
                           )}
                         </div>
                       </div>
-                      <div className="text-[11px] text:white/80 mt-0.5">
+                      <div className="text-[11px] text-white/80 mt-0.5">
                         {row.venue}
                       </div>
                     </>
@@ -954,7 +973,7 @@ export default function PicksClient() {
                       <div className="text-sm font-semibold">
                         {row.match}
                       </div>
-                      <div className="text-[11px] text:white/80">
+                      <div className="text-[11px] text-white/80">
                         {row.venue}
                       </div>
                     </>
@@ -1120,7 +1139,7 @@ export default function PicksClient() {
               <button
                 type="button"
                 onClick={closeComments}
-                className="text-sm text-gray-400 hover:text:white"
+                className="text-sm text-gray-400 hover:text-white"
               >
                 ✕
               </button>
