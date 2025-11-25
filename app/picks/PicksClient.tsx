@@ -29,6 +29,9 @@ type ApiQuestion = {
   noPercent?: number;
   commentCount?: number;
   isSponsorQuestion?: boolean;
+  sport?: string;
+  venue?: string;
+  startTime?: string;
 };
 
 type ApiGame = {
@@ -36,6 +39,7 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
+  sport?: string;
   questions: ApiQuestion[];
 };
 
@@ -59,6 +63,7 @@ type QuestionRow = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  sponsorQuestionId?: string; // <— NEW, optional
 };
 
 type Comment = {
@@ -96,29 +101,29 @@ const AFL_TEAM_LOGOS: Record<
   AflTeamKey,
   { name: string; logo: string }
 > = {
-  "adelaide": { name: "Adelaide Crows", logo: "/afl-logos/adelaide.jpeg" },
-  "brisbane": { name: "Brisbane Lions", logo: "/afl-logos/brisbane.jpeg" },
-  "carlton": { name: "Carlton", logo: "/afl-logos/carlton.jpeg" },
-  "collingwood": {
+  adelaide: { name: "Adelaide Crows", logo: "/afl-logos/adelaide.jpeg" },
+  brisbane: { name: "Brisbane Lions", logo: "/afl-logos/brisbane.jpeg" },
+  carlton: { name: "Carlton", logo: "/afl-logos/carlton.jpeg" },
+  collingwood: {
     name: "Collingwood",
     logo: "/afl-logos/collingwood.jpeg",
   },
-  "essendon": { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
-  "fremantle": {
+  essendon: { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
+  fremantle: {
     name: "Fremantle Dockers",
     logo: "/afl-logos/fremantle.jpeg",
   },
-  "geelong": { name: "Geelong Cats", logo: "/afl-logos/geelong.jpeg" },
+  geelong: { name: "Geelong Cats", logo: "/afl-logos/geelong.jpeg" },
   "gold-coast": {
     name: "Gold Coast Suns",
     logo: "/afl-logos/gold-coast.jpeg",
   },
-  "gws": {
+  gws: {
     name: "GWS Giants",
     logo: "/afl-logos/gws.jpeg",
   },
-  "hawthorn": { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
-  "melbourne": {
+  hawthorn: { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
+  melbourne: {
     name: "Melbourne Demons",
     logo: "/afl-logos/melbourne.jpeg",
   },
@@ -130,7 +135,7 @@ const AFL_TEAM_LOGOS: Record<
     name: "Port Adelaide Power",
     logo: "/afl-logos/port-adelaide.jpeg",
   },
-  "richmond": {
+  richmond: {
     name: "Richmond Tigers",
     logo: "/afl-logos/richmond.jpeg",
   },
@@ -138,7 +143,7 @@ const AFL_TEAM_LOGOS: Record<
     name: "St Kilda Saints",
     logo: "/afl-logos/st-kilda.jpeg",
   },
-  "sydney": { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
+  sydney: { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
   "west-coast": {
     name: "West Coast Eagles",
     logo: "/afl-logos/west-coast.jpeg",
@@ -166,18 +171,15 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("gold coast") || s.includes("gc")) return "gold-coast";
   if (s.includes("gws") || s.includes("giants")) return "gws";
   if (s.includes("hawthorn") || s.includes("hawks")) return "hawthorn";
-  if (s.includes("melbourne") && !s.includes("north"))
-    return "melbourne";
+  if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
   if (s.includes("north melbourne") || s.includes("kangaroos"))
     return "north-melbourne";
   if (s.includes("port adelaide") || s.includes("power"))
     return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
-  if (s.includes("st kilda") || s.includes("stkilda"))
-    return "st-kilda";
+  if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
-  if (s.includes("west coast") || s.includes("eagles"))
-    return "west-coast";
+  if (s.includes("west coast") || s.includes("eagles")) return "west-coast";
   if (s.includes("western bulldogs") || s.includes("bulldogs"))
     return "western-bulldogs";
 
@@ -289,8 +291,10 @@ export default function PicksClient() {
           setRoundNumber(data.roundNumber);
         }
 
-        const flat: QuestionRow[] = data.games.flatMap((g: any) =>
-          g.questions.map((q: any) => ({
+        const sponsorQuestionId = data.sponsorQuestionId ?? null;
+
+        const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
+          g.questions.map((q: ApiQuestion) => ({
             id: q.id,
             gameId: g.id,
             match: g.match,
@@ -305,7 +309,10 @@ export default function PicksClient() {
             noPercent: q.noPercent,
             sport: q.sport ?? g.sport ?? "AFL",
             commentCount: q.commentCount ?? 0,
-            isSponsorQuestion: !!q.isSponsorQuestion,
+            // NEW: handle either explicit flag or round-level sponsorQuestionId
+            isSponsorQuestion:
+              !!q.isSponsorQuestion ||
+              (sponsorQuestionId !== null && q.id === sponsorQuestionId),
           }))
         );
 
@@ -323,7 +330,6 @@ export default function PicksClient() {
   }, []);
 
   // -------- Live comment counts from Firestore --------
-
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   useEffect(() => {
@@ -375,7 +381,7 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // -------- Load existing streak pick for this user (persistence) --------
+  // -------- Load existing streak pick for this user (stronger persistence) --------
   useEffect(() => {
     const loadUserPick = async () => {
       if (!user) {
@@ -384,25 +390,51 @@ export default function PicksClient() {
         return;
       }
 
+      // wait until we actually have questions, otherwise mapping does nothing
+      if (!rows.length) return;
+
       try {
         const res = await fetch("/api/user-picks", { method: "GET" });
         if (!res.ok) return;
 
         const data = await res.json();
-        if (
-          data?.questionId &&
-          (data.outcome === "yes" || data.outcome === "no")
-        ) {
-          setActiveQuestionId(data.questionId);
-          setActiveOutcome(data.outcome);
+        const questionId: string | undefined = data?.questionId;
+        const outcome: "yes" | "no" | undefined = data?.outcome;
+
+        if (questionId && (outcome === "yes" || outcome === "no")) {
+          setActiveQuestionId(questionId);
+          setActiveOutcome(outcome);
+
+          // sync into row state so buttons stay selected after reload / re-login
+          setRows((prev) =>
+            prev.map((r) => ({
+              ...r,
+              userPick: r.id === questionId ? outcome : undefined,
+            }))
+          );
+          setFilteredRows((prev) =>
+            prev.map((r) => ({
+              ...r,
+              userPick: r.id === questionId ? outcome : undefined,
+            }))
+          );
+        } else {
+          setActiveQuestionId(null);
+          setActiveOutcome(null);
         }
       } catch (err) {
         console.error("Failed to load user pick", err);
       }
     };
 
-    loadUserPick();
-  }, [user]);
+    if (user) {
+      loadUserPick();
+    } else {
+      setActiveQuestionId(null);
+      setActiveOutcome(null);
+    }
+    // depend on rows.length so we re-run once after questions arrive
+  }, [user, rows.length]);
 
   // -------- Load streak progress (user vs leader) --------
   useEffect(() => {
@@ -475,6 +507,7 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
+    // optimistic selection
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -940,7 +973,7 @@ export default function PicksClient() {
                   {isSponsor && (
                     <p className="mt-0.5 text-[11px] text-amber-200/90">
                       Get this one right to go into the draw for this
-                      round&apos;s $100 sponsor gift card.*
+                      round&apos;s $100 sponsor gift card.* {/* explanatory copy */}
                     </p>
                   )}
                 </div>
