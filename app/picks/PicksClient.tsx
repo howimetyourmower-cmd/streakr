@@ -63,7 +63,7 @@ type QuestionRow = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  sponsorQuestionId?: string; // <— NEW, optional
+  sponsorQuestionId?: string; // optional
 };
 
 type Comment = {
@@ -309,7 +309,7 @@ export default function PicksClient() {
             noPercent: q.noPercent,
             sport: q.sport ?? g.sport ?? "AFL",
             commentCount: q.commentCount ?? 0,
-            // NEW: handle either explicit flag or round-level sponsorQuestionId
+            // handle either explicit flag or round-level sponsorQuestionId
             isSponsorQuestion:
               !!q.isSponsorQuestion ||
               (sponsorQuestionId !== null && q.id === sponsorQuestionId),
@@ -328,6 +328,40 @@ export default function PicksClient() {
 
     load();
   }, []);
+
+  // -------- ALSO mark sponsor question from Firestore meta/currentSeason --------
+  useEffect(() => {
+    const markSponsorFromMeta = async () => {
+      if (!rows.length) return;
+
+      try {
+        const metaRef = doc(db, "meta", "currentSeason");
+        const snap = await getDoc(metaRef);
+        if (!snap.exists()) return;
+
+        const data = snap.data() as any;
+        const sponsorId: string | undefined = data?.sponsorQuestionId;
+        if (!sponsorId) return;
+
+        setRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            isSponsorQuestion: r.isSponsorQuestion || r.id === sponsorId,
+          }))
+        );
+        setFilteredRows((prev) =>
+          prev.map((r) => ({
+            ...r,
+            isSponsorQuestion: r.isSponsorQuestion || r.id === sponsorId,
+          }))
+        );
+      } catch (err) {
+        console.error("Failed to load sponsorQuestionId from meta", err);
+      }
+    };
+
+    markSponsorFromMeta();
+  }, [rows.length]);
 
   // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
@@ -390,7 +424,6 @@ export default function PicksClient() {
         return;
       }
 
-      // wait until we actually have questions, otherwise mapping does nothing
       if (!rows.length) return;
 
       try {
@@ -405,7 +438,6 @@ export default function PicksClient() {
           setActiveQuestionId(questionId);
           setActiveOutcome(outcome);
 
-          // sync into row state so buttons stay selected after reload / re-login
           setRows((prev) =>
             prev.map((r) => ({
               ...r,
@@ -433,7 +465,6 @@ export default function PicksClient() {
       setActiveQuestionId(null);
       setActiveOutcome(null);
     }
-    // depend on rows.length so we re-run once after questions arrive
   }, [user, rows.length]);
 
   // -------- Load streak progress (user vs leader) --------
@@ -507,7 +538,6 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
-    // optimistic selection
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -741,7 +771,7 @@ export default function PicksClient() {
 
             {leaderStreak && leaderStreak > 0 && (
               <div
-                className="absolute -top-1 h-4 w-[2px] bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
+                className="absolute -top-1 h-4 w-[2px] bg:white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
                 style={{ left: `${progressRatio * 100}%` }}
               />
             )}
@@ -915,7 +945,7 @@ export default function PicksClient() {
                           )}
                         </div>
                       </div>
-                      <div className="text-[11px] text-white/80 mt-0.5">
+                      <div className="text-[11px] text:white/80 mt-0.5">
                         {row.venue}
                       </div>
                     </>
@@ -924,7 +954,7 @@ export default function PicksClient() {
                       <div className="text-sm font-semibold">
                         {row.match}
                       </div>
-                      <div className="text-[11px] text-white/80">
+                      <div className="text-[11px] text:white/80">
                         {row.venue}
                       </div>
                     </>
@@ -973,7 +1003,7 @@ export default function PicksClient() {
                   {isSponsor && (
                     <p className="mt-0.5 text-[11px] text-amber-200/90">
                       Get this one right to go into the draw for this
-                      round&apos;s $100 sponsor gift card.* {/* explanatory copy */}
+                      round&apos;s $100 sponsor gift card.*
                     </p>
                   )}
                 </div>
@@ -1090,7 +1120,7 @@ export default function PicksClient() {
               <button
                 type="button"
                 onClick={closeComments}
-                className="text-sm text-gray-400 hover:text-white"
+                className="text-sm text-gray-400 hover:text:white"
               >
                 ✕
               </button>
