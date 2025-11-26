@@ -4,22 +4,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
 
+// If Next/Vercel ever complains about DYNAMIC_SERVER_USAGE, uncomment this:
+// export const dynamic = "force-dynamic";
+
 // ─────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-// This matches the flat rows in rounds-2026.json
+// This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
-  Round: string;      // e.g. "OR", "R1", "R2"
+  Round: string;      // "OR", "R1", "R2", ...
   Game: number;       // 1, 2, 3...
   Match: string;      // "Sydney vs Carlton"
   Venue: string;      // "SCG, Sydney"
-  StartTime: string;  // ISO-ish string
+  StartTime: string;  // "2026-03-05T19:30:00+11:00"
   Question: string;
   Quarter: number;
-  Status: string;     // "Open" | "Final"...
+  Status: string;     // "Open", "Final", "Pending", "Void"
 };
 
 type ApiQuestion = {
@@ -54,10 +57,16 @@ type SponsorQuestionConfig = {
   questionId: string;
 };
 
+type QuestionStatusDoc = {
+  roundNumber: number;
+  questionId: string;
+  status: QuestionStatus;
+};
+
 // Coerce raw JSON to array of rows
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
-// Map numeric roundNumber (used in Firestore) → string code used in JSON
+// Map numeric roundNumber (used in Firestore & URL) → code used in JSON
 // 0 -> "OR" (Opening Round), 1 -> "R1", 2 -> "R2", etc.
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
@@ -70,9 +79,7 @@ function getRoundCode(roundNumber: number): string {
 
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
 
   const idToken = authHeader.substring("Bearer ".length).trim();
   if (!idToken) return null;
@@ -88,17 +95,13 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 
 async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
   try {
-    const configDocRef = db.collection("config").doc("season-2026");
-    const snap = await configDocRef.get();
-
+    const docRef = db.collection("config").doc("season-2026");
+    const snap = await docRef.get();
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
     const sponsorQuestion = data.sponsorQuestion as SponsorQuestionConfig | undefined;
-
-    if (!sponsorQuestion || !sponsorQuestion.questionId) {
-      return null;
-    }
+    if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
   } catch (error) {
@@ -118,13 +121,12 @@ async function getPickStatsForRound(
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
-    const picksQuery = db
+    const snap = await db
       .collection("picks")
-      .where("roundNumber", "==", roundNumber);
+      .where("roundNumber", "==", roundNumber)
+      .get();
 
-    const picksSnap = await picksQuery.get();
-
-    picksSnap.forEach((docSnap) => {
+    snap.forEach((docSnap) => {
       const data = docSnap.data() as {
         userId?: string;
         roundNumber?: number;
@@ -134,7 +136,6 @@ async function getPickStatsForRound(
 
       const questionId = data.questionId;
       const pick = data.pick;
-
       if (!questionId || (pick !== "yes" && pick !== "no")) return;
 
       if (!pickStats[questionId]) {
@@ -161,27 +162,45 @@ async function getCommentCountsForRound(
   const commentCounts: Record<string, number> = {};
 
   try {
-    const commentsQuery = db
+    const snap = await db
       .collection("comments")
-      .where("roundNumber", "==", roundNumber);
+      .where("roundNumber", "==", roundNumber)
+      .get();
 
-    const commentsSnap = await commentsQuery.get();
-
-    commentsSnap.forEach((docSnap) => {
-      const data = docSnap.data() as {
-        questionId?: string;
-      };
-
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as { questionId?: string };
       const questionId = data.questionId;
       if (!questionId) return;
-
       commentCounts[questionId] = (commentCounts[questionId] ?? 0) + 1;
     });
   } catch (error) {
-    console.error("[/api/picks] Error fetching comment counts", error);
+    console.error("[/api/picks] Error fetching comments", error);
   }
 
   return commentCounts;
+}
+
+async function getQuestionStatusForRound(
+  roundNumber: number
+): Promise<Record<string, QuestionStatus>> {
+  const map: Record<string, QuestionStatus> = {};
+
+  try {
+    const snap = await db
+      .collection("questionStatus")
+      .where("roundNumber", "==", roundNumber)
+      .get();
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as QuestionStatusDoc;
+      if (!data.questionId || !data.status) return;
+      map[data.questionId] = data.status;
+    });
+  } catch (error) {
+    console.error("[/api/picks] Error fetching questionStatus", error);
+  }
+
+  return map;
 }
 
 // ─────────────────────────────────────────────
@@ -190,20 +209,19 @@ async function getCommentCountsForRound(
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Determine round number (?round=0, ?round=1, etc.)
+    // 1) Determine round number (?round=0, ?round=1, ...)
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
     let roundNumber: number | null = null;
-
-    if (roundParam) {
+    if (roundParam !== null) {
       const parsed = Number(roundParam);
       if (!Number.isNaN(parsed) && parsed >= 0) {
         roundNumber = parsed;
       }
     }
 
-    // Default to Opening Round (0) if nothing provided
+    // Default: Opening Round (0)
     if (roundNumber === null) {
       roundNumber = 0;
     }
@@ -214,29 +232,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
-      const emptyResponse: PicksApiResponse = {
-        games: [],
-        roundNumber,
-      };
-      return NextResponse.json(emptyResponse);
+      const empty: PicksApiResponse = { games: [], roundNumber };
+      return NextResponse.json(empty);
     }
 
-    // 3) Current user
+    // 3) Identify user (for userPick)
     const currentUserId = await getUserIdFromRequest(req);
 
     // 4) Sponsor config
     const sponsorConfig = await getSponsorQuestionConfig();
 
-    // 5) Picks + user picks
+    // 5) Stats & comments
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
-
-    // 6) Comment counts
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // 7) Group rows into games, build questions
+    // 6) Status overrides from questionStatus
+    const statusOverrides = await getQuestionStatusForRound(roundNumber);
+
+    // 7) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
 
@@ -247,7 +263,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         gamesByKey[gameKey] = {
           id: gameKey,
           match: row.Match,
-          sport: "AFL",         // All AFL for this JSON
+          sport: "AFL",
           venue: row.Venue,
           startTime: row.StartTime,
           questions: [],
@@ -271,13 +287,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         sponsorConfig.roundNumber === roundNumber &&
         sponsorConfig.questionId === questionId;
 
-      const statusLower = row.Status.toLowerCase() as QuestionStatus;
+      const jsonStatusRaw = row.Status || "Open";
+      const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
+      const dbStatus = statusOverrides[questionId];
+      const effectiveStatus = dbStatus ?? jsonStatus;
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
         quarter: row.Quarter,
         question: row.Question,
-        status: statusLower,
+        status: effectiveStatus,
         sport: "AFL",
         isSponsorQuestion: !!isSponsorQuestion,
         userPick: userPicks[questionId],
@@ -291,12 +310,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const games = Object.values(gamesByKey);
 
-    const responseBody: PicksApiResponse = {
+    const response: PicksApiResponse = {
       games,
       roundNumber,
     };
 
-    return NextResponse.json(responseBody);
+    return NextResponse.json(response);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
