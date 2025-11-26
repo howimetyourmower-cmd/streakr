@@ -1,8 +1,7 @@
 // /app/api/picks/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { getAuth } from "firebase-admin/auth";
-import { db } from "@/lib/firebaseAdmin"; // <-- adjust to your actual admin Firestore export
+import { db, auth } from "@/lib/admin"; // ✅ use your existing admin.ts
 import rounds2026 from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -78,7 +77,7 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   if (!idToken) return null;
 
   try {
-    const decoded = await getAuth().verifyIdToken(idToken);
+    const decoded = await auth.verifyIdToken(idToken); // ✅ use admin.ts auth
     return decoded.uid ?? null;
   } catch (error) {
     console.error("[/api/picks] Failed to verify ID token", error);
@@ -201,9 +200,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // If no round is provided, you could default to 1 or use config.
+    // Default to Round 1 if not specified
     if (!roundNumber) {
-      // Fallback: round 1 by default
       roundNumber = 1;
     }
 
@@ -211,7 +209,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const jsonRound = allRounds.find((r) => r.roundNumber === roundNumber);
 
     if (!jsonRound) {
-      // No such round in JSON – return empty but valid payload
       const emptyResponse: PicksApiResponse = {
         games: [],
         roundNumber,
