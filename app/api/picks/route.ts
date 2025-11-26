@@ -1,37 +1,25 @@
 // /app/api/picks/route.ts
-export const dynamic = "force-dynamic";
-
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
 
-// ---- Types ----
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-// These represent the *ideal* JSON shape we want to work with.
-// We’ll coerce the raw JSON into this shape.
-type JsonQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-  sport?: string;
-};
-
-type JsonGame = {
-  id: string;
-  match: string;
-  sport: string;
-  venue: string;
-  startTime: string;
-  questions: JsonQuestion[];
-};
-
-type JsonRound = {
-  roundNumber: number;
-  games: JsonGame[];
+// This matches the flat rows in rounds-2026.json
+type JsonRow = {
+  Round: string;      // e.g. "OR", "R1", "R2"
+  Game: number;       // 1, 2, 3...
+  Match: string;      // "Sydney vs Carlton"
+  Venue: string;      // "SCG, Sydney"
+  StartTime: string;  // ISO-ish string
+  Question: string;
+  Quarter: number;
+  Status: string;     // "Open" | "Final"...
 };
 
 type ApiQuestion = {
@@ -66,21 +54,19 @@ type SponsorQuestionConfig = {
   questionId: string;
 };
 
-// ---- JSON normalisation ----
+// Coerce raw JSON to array of rows
+const rows: JsonRow[] = rounds2026 as JsonRow[];
 
-// We don’t care if rounds-2026.json is:
-//   [ { roundNumber, games: [...] }, ... ]
-// or
-//   { rounds: [ ... ] }
-//
-// We just coerce it to JsonRound[] and move on.
-const allRounds: JsonRound[] = (
-  Array.isArray((rounds2026 as any).rounds)
-    ? (rounds2026 as any).rounds
-    : (rounds2026 as any)
-) as JsonRound[];
+// Map numeric roundNumber (used in Firestore) → string code used in JSON
+// 0 -> "OR" (Opening Round), 1 -> "R1", 2 -> "R2", etc.
+function getRoundCode(roundNumber: number): string {
+  if (roundNumber === 0) return "OR";
+  return `R${roundNumber}`;
+}
 
-// ---- Helper functions ----
+// ─────────────────────────────────────────────
+// Helper functions
+// ─────────────────────────────────────────────
 
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
@@ -198,11 +184,13 @@ async function getCommentCountsForRound(
   return commentCounts;
 }
 
-// ---- Main handler ----
+// ─────────────────────────────────────────────
+// Main GET handler
+// ─────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Determine round number from query (?round=1)
+    // 1) Determine round number (?round=0, ?round=1, etc.)
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
@@ -210,20 +198,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     if (roundParam) {
       const parsed = Number(roundParam);
-      if (!Number.isNaN(parsed) && parsed > 0) {
+      if (!Number.isNaN(parsed) && parsed >= 0) {
         roundNumber = parsed;
       }
     }
 
-    // Default to round 1 if nothing provided
-    if (!roundNumber) {
-      roundNumber = 1;
+    // Default to Opening Round (0) if nothing provided
+    if (roundNumber === null) {
+      roundNumber = 0;
     }
 
-    // 2) Load the round from JSON
-    const jsonRound = allRounds.find((r) => r.roundNumber === roundNumber);
+    const roundCode = getRoundCode(roundNumber);
 
-    if (!jsonRound) {
+    // 2) Filter JSON rows for this round
+    const roundRows = rows.filter((row) => row.Round === roundCode);
+
+    if (!roundRows.length) {
       const emptyResponse: PicksApiResponse = {
         games: [],
         roundNumber,
@@ -231,62 +221,75 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(emptyResponse);
     }
 
-    // 3) Identify current user (for userPick)
+    // 3) Current user
     const currentUserId = await getUserIdFromRequest(req);
 
-    // 4) Fetch sponsor question config from Firestore
+    // 4) Sponsor config
     const sponsorConfig = await getSponsorQuestionConfig();
 
-    // 5) Fetch pick stats and user picks from Firestore
+    // 5) Picks + user picks
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
 
-    // 6) Fetch comment counts from Firestore
+    // 6) Comment counts
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // 7) Build API games array from JSON, enriching with stats + sponsor flag
-    const games: ApiGame[] = jsonRound.games.map((game) => {
-      const sport = game.sport;
+    // 7) Group rows into games, build questions
+    const gamesByKey: Record<string, ApiGame> = {};
+    const questionIndexByGame: Record<string, number> = {};
 
-      const questions: ApiQuestion[] = game.questions.map((q) => {
-        const stats = pickStats[q.id] ?? { yes: 0, no: 0, total: 0 };
-        const total = stats.total;
+    for (const row of roundRows) {
+      const gameKey = `${roundCode}-G${row.Game}`;
 
-        const yesPercent =
-          total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-        const noPercent =
-          total > 0 ? Math.round((stats.no / total) * 100) : 0;
-
-        const isSponsorQuestion =
-          sponsorConfig &&
-          sponsorConfig.roundNumber === roundNumber &&
-          sponsorConfig.questionId === q.id;
-
-        return {
-          id: q.id,
-          quarter: q.quarter,
-          question: q.question,
-          status: q.status,
-          sport: q.sport ?? sport,
-          isSponsorQuestion: !!isSponsorQuestion,
-          userPick: userPicks[q.id],
-          yesPercent,
-          noPercent,
-          commentCount: commentCounts[q.id] ?? 0,
+      if (!gamesByKey[gameKey]) {
+        gamesByKey[gameKey] = {
+          id: gameKey,
+          match: row.Match,
+          sport: "AFL",         // All AFL for this JSON
+          venue: row.Venue,
+          startTime: row.StartTime,
+          questions: [],
         };
-      });
+        questionIndexByGame[gameKey] = 0;
+      }
 
-      return {
-        id: game.id,
-        match: game.match,
-        sport,
-        venue: game.venue,
-        startTime: game.startTime,
-        questions,
+      const qIndex = questionIndexByGame[gameKey]++;
+      const questionId = `${gameKey}-Q${qIndex + 1}`;
+
+      const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
+      const total = stats.total;
+
+      const yesPercent =
+        total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+      const noPercent =
+        total > 0 ? Math.round((stats.no / total) * 100) : 0;
+
+      const isSponsorQuestion =
+        sponsorConfig &&
+        sponsorConfig.roundNumber === roundNumber &&
+        sponsorConfig.questionId === questionId;
+
+      const statusLower = row.Status.toLowerCase() as QuestionStatus;
+
+      const apiQuestion: ApiQuestion = {
+        id: questionId,
+        quarter: row.Quarter,
+        question: row.Question,
+        status: statusLower,
+        sport: "AFL",
+        isSponsorQuestion: !!isSponsorQuestion,
+        userPick: userPicks[questionId],
+        yesPercent,
+        noPercent,
+        commentCount: commentCounts[questionId] ?? 0,
       };
-    });
+
+      gamesByKey[gameKey].questions.push(apiQuestion);
+    }
+
+    const games = Object.values(gamesByKey);
 
     const responseBody: PicksApiResponse = {
       games,
