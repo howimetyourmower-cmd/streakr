@@ -1,5 +1,7 @@
-import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/admin";
+import { getAuth } from "firebase-admin/auth";   // ✅ this is now correct
+import rounds2026 from "@/data/rounds-2026.json";
 
 const serviceAccountBase64 = process.env.FIREBASE_ADMIN_PRIVATE_KEY_BASE64;
 
