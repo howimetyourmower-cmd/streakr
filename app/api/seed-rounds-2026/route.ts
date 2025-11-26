@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 // app/api/seed-rounds-2026/route.ts
 import { NextResponse } from "next/server";
 import { db } from "@/lib/admin";
