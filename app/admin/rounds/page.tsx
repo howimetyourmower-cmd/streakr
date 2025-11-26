@@ -41,6 +41,13 @@ type RoundMeta = {
 
 const SEASON = 2026;
 
+// Helper: generate round code used by picks API and sponsorQuestion
+// 0 -> "OR", 1 -> "R1", 2 -> "R2", etc.
+function getRoundCode(roundNumber: number): string {
+  if (roundNumber === 0) return "OR";
+  return `R${roundNumber}`;
+}
+
 export default function RoundsAdminPage() {
   const { user, isAdmin, loading } = useAuth();
   const [rounds, setRounds] = useState<RoundMeta[]>([]);
@@ -55,6 +62,9 @@ export default function RoundsAdminPage() {
     questionIndex: number;
   } | null>(null);
   const [sponsorSaving, setSponsorSaving] = useState(false);
+  const [sponsorSavedMessage, setSponsorSavedMessage] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     if (loading) return;
@@ -168,9 +178,6 @@ export default function RoundsAdminPage() {
       setSavingId(round.id);
       setError(null);
 
-      // Clear the flag on the round itself. We leave the config doc alone
-      // so that Picks keeps pointing to the last published round unless
-      // you explicitly change it.
       await updateDoc(doc(db, "rounds", round.id), {
         published: false,
       });
@@ -192,6 +199,7 @@ export default function RoundsAdminPage() {
 
   const openSponsorEditor = (round: RoundMeta) => {
     setSponsorRoundId(round.id);
+    setSponsorSavedMessage(null);
 
     // Find existing sponsor question in this round, if any
     let found: { gameIndex: number; questionIndex: number } | null = null;
@@ -210,6 +218,7 @@ export default function RoundsAdminPage() {
   const cancelSponsorEditor = () => {
     setSponsorRoundId(null);
     setSponsorSelection(null);
+    setSponsorSavedMessage(null);
   };
 
   const handleSaveSponsorQuestion = async () => {
@@ -221,17 +230,16 @@ export default function RoundsAdminPage() {
     try {
       setSponsorSaving(true);
       setError(null);
+      setSponsorSavedMessage(null);
 
       const { gameIndex, questionIndex } = sponsorSelection;
 
-      // Build a new games array with a single sponsor question
+      // Build a new games array with a single sponsor question flag
       const updatedGames: GameMeta[] = round.games.map((game, gi) => {
-        const questions = (game.questions ?? []).map((q, qi) => {
-          return {
-            ...q,
-            isSponsorQuestion: gi === gameIndex && qi === questionIndex,
-          };
-        });
+        const questions = (game.questions ?? []).map((q, qi) => ({
+          ...q,
+          isSponsorQuestion: gi === gameIndex && qi === questionIndex,
+        }));
 
         return {
           ...game,
@@ -239,19 +247,41 @@ export default function RoundsAdminPage() {
         };
       });
 
+      // 1) Persist the sponsor flag into this round doc (for admin view)
       await updateDoc(doc(db, "rounds", round.id), {
         games: updatedGames,
       });
 
-      // Update local state
+      // 2) ALSO update config/season-2026.sponsorQuestion
+      // so that /api/picks can tag the correct question.
+      const roundCode = getRoundCode(round.roundNumber);
+      const sponsorQuestionId = `${roundCode}-G${gameIndex + 1}-Q${
+        questionIndex + 1
+      }`;
+
+      const configRef = doc(db, "config", `season-${SEASON}`);
+      await setDoc(
+        configRef,
+        {
+          sponsorQuestion: {
+            roundNumber: round.roundNumber,
+            questionId: sponsorQuestionId,
+          },
+          // keep other fields (currentRound*, season, etc.) untouched
+        },
+        { merge: true }
+      );
+
+      // 3) Update local state
       setRounds((prev) =>
         prev.map((r) =>
           r.id === round.id ? { ...r, games: updatedGames } : r
         )
       );
 
-      setSponsorRoundId(null);
-      setSponsorSelection(null);
+      setSponsorSavedMessage(
+        `Sponsor question saved: ${sponsorQuestionId} (Round ${round.roundNumber}).`
+      );
     } catch (err) {
       console.error("Error saving sponsor question", err);
       setError("Failed to save sponsor question.");
@@ -286,6 +316,10 @@ export default function RoundsAdminPage() {
         <br />
         2) update the <code>config / season-{SEASON}</code> document
         that the Picks API and Settlement console read.
+        <br />
+        Saving a <strong>Sponsor question</strong> will also write
+        <code>config / season-{SEASON} / sponsorQuestion</code>, which the
+        Picks API uses to tag the sponsor question.
       </p>
 
       {error && (
@@ -442,30 +476,38 @@ export default function RoundsAdminPage() {
                 </div>
               )}
 
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={cancelSponsorEditor}
-                  className="rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!sponsorSelection || sponsorSaving}
-                  onClick={handleSaveSponsorQuestion}
-                  className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold disabled:opacity-60"
-                >
-                  {sponsorSaving
-                    ? "Saving sponsor question…"
-                    : "Save sponsor question"}
-                </button>
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <div className="text-[11px] text-gray-400">
+                  Only one Sponsor Question is allowed per round. Saving will
+                  mark the selected question as the Sponsor Question and update{" "}
+                  <code>config/season-{SEASON}.sponsorQuestion</code> to match
+                  the new ID (e.g. OR-G1-Q1).
+                  {sponsorSavedMessage && (
+                    <div className="mt-1 text-emerald-400">
+                      {sponsorSavedMessage}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelSponsorEditor}
+                    className="rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!sponsorSelection || sponsorSaving}
+                    onClick={handleSaveSponsorQuestion}
+                    className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold disabled:opacity-60"
+                  >
+                    {sponsorSaving
+                      ? "Saving sponsor question…"
+                      : "Save sponsor question"}
+                  </button>
+                </div>
               </div>
-              <p className="mt-2 text-[11px] text-gray-400">
-                Only one Sponsor Question is allowed per round. Saving will mark
-                the selected question as the Sponsor Question and clear the
-                sponsor flag from all other questions in this round.
-              </p>
             </div>
           )}
         </>
