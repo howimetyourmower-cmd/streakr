@@ -1,24 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/admin";
-import { getAuth } from "firebase-admin/auth";   // ✅ this is now correct
-import rounds2026 from "@/data/rounds-2026.json";
+// src/lib/admin.ts
 
-const serviceAccountBase64 = process.env.FIREBASE_ADMIN_PRIVATE_KEY_BASE64;
+import { cert, getApps, initializeApp, App } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 
-if (!serviceAccountBase64) {
-  throw new Error("Missing FIREBASE_ADMIN_PRIVATE_KEY_BASE64 env variable");
+// Load service account from environment variables
+const serviceAccount = {
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+};
+
+// Ensure we only initialize once
+let app: App;
+if (!getApps().length) {
+  app = initializeApp({
+    credential: cert(serviceAccount as any),
+  });
+} else {
+  app = getApps()[0]!;
 }
 
-const serviceAccount = JSON.parse(
-  Buffer.from(serviceAccountBase64, "base64").toString("utf8")
-);
-
-const app =
-  getApps().length === 0
-    ? initializeApp({
-        credential: cert(serviceAccount),
-      })
-    : getApps()[0];
-
-// ✔ THIS is what route.ts needs
+// ✅ Exports used across the backend
 export const db = getFirestore(app);
+export const auth = getAuth(app);
