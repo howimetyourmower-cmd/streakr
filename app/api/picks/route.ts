@@ -1,11 +1,15 @@
 // /app/api/picks/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, auth } from "@/lib/admin"; // ✅ use your existing admin.ts
+import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
+
+// ---- Types ----
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
+// These represent the *ideal* JSON shape we want to work with.
+// We’ll coerce the raw JSON into this shape.
 type JsonQuestion = {
   id: string;
   quarter: number;
@@ -60,12 +64,21 @@ type SponsorQuestionConfig = {
   questionId: string;
 };
 
-// ---- Helpers ----
+// ---- JSON normalisation ----
 
-// Normalise JSON in case it's either an array or { rounds: [...] }
-const allRounds: JsonRound[] = Array.isArray((rounds2026 as any).rounds)
-  ? ((rounds2026 as any).rounds as JsonRound[])
-  : (rounds2026 as JsonRound[]);
+// We don’t care if rounds-2026.json is:
+//   [ { roundNumber, games: [...] }, ... ]
+// or
+//   { rounds: [ ... ] }
+//
+// We just coerce it to JsonRound[] and move on.
+const allRounds: JsonRound[] = (
+  Array.isArray((rounds2026 as any).rounds)
+    ? (rounds2026 as any).rounds
+    : (rounds2026 as any)
+) as JsonRound[];
+
+// ---- Helper functions ----
 
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
@@ -77,7 +90,7 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   if (!idToken) return null;
 
   try {
-    const decoded = await auth.verifyIdToken(idToken); // ✅ use admin.ts auth
+    const decoded = await auth.verifyIdToken(idToken);
     return decoded.uid ?? null;
   } catch (error) {
     console.error("[/api/picks] Failed to verify ID token", error);
@@ -187,7 +200,7 @@ async function getCommentCountsForRound(
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Figure out which round to load
+    // 1) Determine round number from query (?round=1)
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
@@ -200,7 +213,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Default to Round 1 if not specified
+    // Default to round 1 if nothing provided
     if (!roundNumber) {
       roundNumber = 1;
     }
