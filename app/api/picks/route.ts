@@ -1,33 +1,53 @@
-// app/api/picks/route.ts
-export const runtime = "nodejs";
+// /app/api/picks/route.ts
 
-import { NextResponse } from "next/server";
-import { db } from "@/lib/admin";
+import { NextRequest, NextResponse } from "next/server";
+import { getAuth } from "firebase-admin/auth";
+import { db } from "@/lib/firebaseAdmin"; // <-- adjust to your actual admin Firestore export
 import rounds2026 from "@/data/rounds-2026.json";
 
-// --- Types that match what PicksClient expects ---
-
 type QuestionStatus = "open" | "final" | "pending" | "void";
+
+type JsonQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  sport?: string;
+};
+
+type JsonGame = {
+  id: string;
+  match: string;
+  sport: string;
+  venue: string;
+  startTime: string;
+  questions: JsonQuestion[];
+};
+
+type JsonRound = {
+  roundNumber: number;
+  games: JsonGame[];
+};
 
 type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
+  sport: string;
+  isSponsorQuestion?: boolean;
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  sport?: string;
-  isSponsorQuestion?: boolean;
 };
 
 type ApiGame = {
   id: string;
   match: string;
+  sport: string;
   venue: string;
   startTime: string;
-  sport?: string;
   questions: ApiQuestion[];
 };
 
@@ -36,157 +56,236 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-// --- JSON row type (from data/rounds-2026.json) ---
-
-type RawRow = {
-  Round: string;        // e.g. "OR", "R1", "R2"
-  Game: number;         // 1..9 etc
-  Match: string;        // "Sydney vs Carlton"
-  Venue: string;        // "SCG, Sydney"
-  StartTime: string;    // ISO-ish string
-  Question: string;
-  Quarter: number;
-  Status: string;       // "Open", "Final", "Pending", "Void"
-  Sport?: string;       // "AFL" etc (optional)
-  // if you later add "IsSponsor": true to JSON, we can also use that
+type SponsorQuestionConfig = {
+  roundNumber: number;
+  questionId: string;
 };
 
-// --- Helpers ---
+// ---- Helpers ----
 
-function slugifyMatch(match: string): string {
-  return match
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
+// Normalise JSON in case it's either an array or { rounds: [...] }
+const allRounds: JsonRound[] = Array.isArray((rounds2026 as any).rounds)
+  ? ((rounds2026 as any).rounds as JsonRound[])
+  : (rounds2026 as JsonRound[]);
 
-function normaliseStatus(raw: string): QuestionStatus {
-  const s = (raw || "").toLowerCase();
-  if (s === "final") return "final";
-  if (s === "pending") return "pending";
-  if (s === "void") return "void";
-  return "open";
-}
+async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
 
-// --- GET handler ---
+  const idToken = authHeader.substring("Bearer ".length).trim();
+  if (!idToken) return null;
 
-export async function GET() {
   try {
-    // 1) Load current round config from Firestore
-    //    doc: config/season-2026
-    const configSnap = await db.collection("config").doc("season-2026").get();
+    const decoded = await getAuth().verifyIdToken(idToken);
+    return decoded.uid ?? null;
+  } catch (error) {
+    console.error("[/api/picks] Failed to verify ID token", error);
+    return null;
+  }
+}
 
-    let currentRoundKey = "OR"; // matches "Round" in JSON
-    let currentRoundNumber = 0;
-    let currentRoundId: string | undefined;
+async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
+  try {
+    const configDocRef = db.collection("config").doc("season-2026");
+    const snap = await configDocRef.get();
 
-    if (configSnap.exists) {
-      const data = configSnap.data() as any;
-      if (typeof data.currentRoundKey === "string") {
-        currentRoundKey = data.currentRoundKey;
-      }
-      if (typeof data.currentRoundNumber === "number") {
-        currentRoundNumber = data.currentRoundNumber;
-      }
-      if (typeof data.currentRoundId === "string") {
-        currentRoundId = data.currentRoundId;
-      }
+    if (!snap.exists) return null;
+
+    const data = snap.data() || {};
+    const sponsorQuestion = data.sponsorQuestion as SponsorQuestionConfig | undefined;
+
+    if (!sponsorQuestion || !sponsorQuestion.questionId) {
+      return null;
     }
 
-    // 2) Filter JSON rows for the active round
-    const allRows = rounds2026 as RawRow[];
-    const roundRows = allRows.filter(
-      (row) => (row.Round || "").toString() === currentRoundKey
-    );
+    return sponsorQuestion;
+  } catch (error) {
+    console.error("[/api/picks] Error fetching sponsorQuestion config", error);
+    return null;
+  }
+}
 
-    if (!roundRows.length) {
-      // No questions for this round in JSON – return empty but with roundNumber
-      return NextResponse.json<PicksApiResponse>({
-        games: [],
-        roundNumber: currentRoundNumber,
-      });
-    }
+async function getPickStatsForRound(
+  roundNumber: number,
+  currentUserId: string | null
+): Promise<{
+  pickStats: Record<string, { yes: number; no: number; total: number }>;
+  userPicks: Record<string, "yes" | "no">;
+}> {
+  const pickStats: Record<string, { yes: number; no: number; total: number }> = {};
+  const userPicks: Record<string, "yes" | "no"> = {};
 
-    // 3) Build game + question structures from JSON
-    const gamesMap = new Map<string, ApiGame>();
-    const questionCounters: Record<string, number> = {};
+  try {
+    const picksQuery = db
+      .collection("picks")
+      .where("roundNumber", "==", roundNumber);
 
-    for (const row of roundRows) {
-      const match = row.Match;
-      const matchSlug = slugifyMatch(match);
-      const sport = row.Sport ?? "AFL";
+    const picksSnap = await picksQuery.get();
 
-      // ensure game entry
-      let game = gamesMap.get(matchSlug);
-      if (!game) {
-        game = {
-          id: matchSlug,
-          match,
-          venue: row.Venue,
-          startTime: row.StartTime,
-          sport,
-          questions: [],
-        };
-        gamesMap.set(matchSlug, game);
-      }
-
-      const quarterNum = Number(row.Quarter) || 0;
-      const status = normaliseStatus(row.Status);
-
-      // Build a stable questionId that matches your existing scheme:
-      // e.g. "sydney-vs-carlton-q1-1"
-      const qKey = `${matchSlug}-q${quarterNum}`;
-      const indexWithinQuarter = (questionCounters[qKey] ?? 0) + 1;
-      questionCounters[qKey] = indexWithinQuarter;
-
-      const questionId = `${matchSlug}-q${quarterNum}-${indexWithinQuarter}`;
-
-      const apiQuestion: ApiQuestion = {
-        id: questionId,
-        quarter: quarterNum,
-        question: row.Question,
-        status,
-        yesPercent: 0,
-        noPercent: 0,
-        commentCount: 0,
-        sport,
+    picksSnap.forEach((docSnap) => {
+      const data = docSnap.data() as {
+        userId?: string;
+        roundNumber?: number;
+        questionId?: string;
+        pick?: "yes" | "no";
       };
 
-      game.questions.push(apiQuestion);
-    }
+      const questionId = data.questionId;
+      const pick = data.pick;
 
-    const games: ApiGame[] = Array.from(gamesMap.values());
+      if (!questionId || (pick !== "yes" && pick !== "no")) return;
 
-    // 4) Fetch sponsorQuestionId from Firestore for this round
-    if (currentRoundId) {
-      const roundSnap = await db.collection("rounds").doc(currentRoundId).get();
-      if (roundSnap.exists) {
-        const roundData = roundSnap.data() as any;
-        const sponsorId: string | undefined = roundData?.sponsorQuestionId;
+      if (!pickStats[questionId]) {
+        pickStats[questionId] = { yes: 0, no: 0, total: 0 };
+      }
 
-        if (sponsorId) {
-          // mark the matching question
-          for (const g of games) {
-            for (const q of g.questions) {
-              if (q.id === sponsorId) {
-                q.isSponsorQuestion = true;
-              }
-            }
-          }
-        }
+      pickStats[questionId][pick] += 1;
+      pickStats[questionId].total += 1;
+
+      if (currentUserId && data.userId === currentUserId) {
+        userPicks[questionId] = pick;
+      }
+    });
+  } catch (error) {
+    console.error("[/api/picks] Error fetching picks", error);
+  }
+
+  return { pickStats, userPicks };
+}
+
+async function getCommentCountsForRound(
+  roundNumber: number
+): Promise<Record<string, number>> {
+  const commentCounts: Record<string, number> = {};
+
+  try {
+    const commentsQuery = db
+      .collection("comments")
+      .where("roundNumber", "==", roundNumber);
+
+    const commentsSnap = await commentsQuery.get();
+
+    commentsSnap.forEach((docSnap) => {
+      const data = docSnap.data() as {
+        questionId?: string;
+      };
+
+      const questionId = data.questionId;
+      if (!questionId) return;
+
+      commentCounts[questionId] = (commentCounts[questionId] ?? 0) + 1;
+    });
+  } catch (error) {
+    console.error("[/api/picks] Error fetching comment counts", error);
+  }
+
+  return commentCounts;
+}
+
+// ---- Main handler ----
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  try {
+    // 1) Figure out which round to load
+    const url = new URL(req.url);
+    const roundParam = url.searchParams.get("round");
+
+    let roundNumber: number | null = null;
+
+    if (roundParam) {
+      const parsed = Number(roundParam);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        roundNumber = parsed;
       }
     }
 
-    // 5) Return response
-    return NextResponse.json<PicksApiResponse>({
-      games,
-      roundNumber: currentRoundNumber,
+    // If no round is provided, you could default to 1 or use config.
+    if (!roundNumber) {
+      // Fallback: round 1 by default
+      roundNumber = 1;
+    }
+
+    // 2) Load the round from JSON
+    const jsonRound = allRounds.find((r) => r.roundNumber === roundNumber);
+
+    if (!jsonRound) {
+      // No such round in JSON – return empty but valid payload
+      const emptyResponse: PicksApiResponse = {
+        games: [],
+        roundNumber,
+      };
+      return NextResponse.json(emptyResponse);
+    }
+
+    // 3) Identify current user (for userPick)
+    const currentUserId = await getUserIdFromRequest(req);
+
+    // 4) Fetch sponsor question config from Firestore
+    const sponsorConfig = await getSponsorQuestionConfig();
+
+    // 5) Fetch pick stats and user picks from Firestore
+    const { pickStats, userPicks } = await getPickStatsForRound(
+      roundNumber,
+      currentUserId
+    );
+
+    // 6) Fetch comment counts from Firestore
+    const commentCounts = await getCommentCountsForRound(roundNumber);
+
+    // 7) Build API games array from JSON, enriching with stats + sponsor flag
+    const games: ApiGame[] = jsonRound.games.map((game) => {
+      const sport = game.sport;
+
+      const questions: ApiQuestion[] = game.questions.map((q) => {
+        const stats = pickStats[q.id] ?? { yes: 0, no: 0, total: 0 };
+        const total = stats.total;
+
+        const yesPercent =
+          total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+        const noPercent =
+          total > 0 ? Math.round((stats.no / total) * 100) : 0;
+
+        const isSponsorQuestion =
+          sponsorConfig &&
+          sponsorConfig.roundNumber === roundNumber &&
+          sponsorConfig.questionId === q.id;
+
+        return {
+          id: q.id,
+          quarter: q.quarter,
+          question: q.question,
+          status: q.status,
+          sport: q.sport ?? sport,
+          isSponsorQuestion: !!isSponsorQuestion,
+          userPick: userPicks[q.id],
+          yesPercent,
+          noPercent,
+          commentCount: commentCounts[q.id] ?? 0,
+        };
+      });
+
+      return {
+        id: game.id,
+        match: game.match,
+        sport,
+        venue: game.venue,
+        startTime: game.startTime,
+        questions,
+      };
     });
-  } catch (err) {
-    console.error("Error in /api/picks:", err);
+
+    const responseBody: PicksApiResponse = {
+      games,
+      roundNumber,
+    };
+
+    return NextResponse.json(responseBody);
+  } catch (error) {
+    console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
-      { error: "Failed to load picks" },
+      { error: "Internal server error", games: [], roundNumber: 0 },
       { status: 500 }
     );
   }
