@@ -4,16 +4,15 @@ import { App, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getAuth as getAdminAuth } from "firebase-admin/auth";
 
-let app: App;
-
 function initFirebaseAdmin(): App {
-  if (getApps().length) {
+  // Re-use existing app in dev / serverless environments
+  if (getApps().length > 0) {
     return getApps()[0]!;
   }
 
   try {
     // 1️⃣ Preferred: full service account JSON in one env var
-    //    (this is very likely what you had working before)
+    //    This is usually the safest option on Vercel.
     if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
       const serviceAccount = JSON.parse(
         process.env.FIREBASE_SERVICE_ACCOUNT_KEY
@@ -24,7 +23,7 @@ function initFirebaseAdmin(): App {
       });
     }
 
-    // 2️⃣ Fallback: separate env vars (PROJECT_ID / CLIENT_EMAIL / PRIVATE_KEY)
+    // 2️⃣ Fallback: separate env vars
     if (
       process.env.FIREBASE_PROJECT_ID &&
       process.env.FIREBASE_CLIENT_EMAIL &&
@@ -33,6 +32,7 @@ function initFirebaseAdmin(): App {
       const serviceAccount = {
         projectId: process.env.FIREBASE_PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        // important: fix \n newlines when coming from env
         privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
       };
 
@@ -41,22 +41,22 @@ function initFirebaseAdmin(): App {
       });
     }
 
-    // 3️⃣ Last resort: no explicit credentials (will use default creds if available)
+    // 3️⃣ Last resort: default credentials
     console.warn(
       "[firebase-admin] No explicit service account env vars found. " +
-        "Using default credentials. Ensure this is configured in Vercel."
+        "Using default credentials – make sure this is configured in Vercel."
     );
 
     return initializeApp();
   } catch (error) {
     console.error("[firebase-admin] Error initializing Firebase Admin:", error);
-    // As a safety net, still try to init without options.
+    // As a safety net, still try to init without explicit options
     return initializeApp();
   }
 }
 
-app = initFirebaseAdmin();
+const app = initFirebaseAdmin();
 
-// ✅ Exports used by all server routes
+// ✅ Exports used by all server routes (picks, settlement, etc.)
 export const db = getFirestore(app);
 export const auth = getAdminAuth(app);
