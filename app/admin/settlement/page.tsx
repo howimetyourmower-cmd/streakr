@@ -46,12 +46,13 @@ type SettlementRow = {
   sport: string;
 };
 
-const DEFAULT_ROUND = 0; // 0 = Opening Round
-
 export default function SettlementPage() {
   const { user, loading, isAdmin } = useAuth();
 
-  const [roundNumber, setRoundNumber] = useState<number>(DEFAULT_ROUND);
+  // UI-only round selector (for now, settlement always works on the
+  // currently live round returned by /api/picks).
+  const [roundFilter, setRoundFilter] = useState<number>(0);
+
   const [rows, setRows] = useState<SettlementRow[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | QuestionStatus>(
     "all"
@@ -60,14 +61,17 @@ export default function SettlementPage() {
   const [error, setError] = useState<string | null>(null);
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
 
-  // Load questions for this round from /api/picks
+  // Load questions for the CURRENT live round from /api/picks
   useEffect(() => {
     const load = async () => {
       try {
         setLoadingData(true);
         setError(null);
 
-        const res = await fetch(`/api/picks?round=${roundNumber}`);
+        // 🔹 Important: no ?round=… – we always use the same
+        // API that the Picks page uses, which already knows
+        // which round is live from config/season-2026.
+        const res = await fetch("/api/picks");
         const data = await res.json();
 
         if (!res.ok) {
@@ -105,7 +109,7 @@ export default function SettlementPage() {
     if (!loading && user && isAdmin) {
       load();
     }
-  }, [roundNumber, user, loading, isAdmin]);
+  }, [user, loading, isAdmin, roundFilter]); // roundFilter just forces reload if you change dropdown
 
   const handleSetOutcome = async (row: SettlementRow, action: OutcomeAction) => {
     try {
@@ -120,7 +124,7 @@ export default function SettlementPage() {
         body: JSON.stringify({
           questionId: row.questionId,
           action,
-          roundNumber: row.roundNumber, // 🔹 pass roundNumber to backend
+          roundNumber: row.roundNumber, // sent to backend for history
         }),
       });
 
@@ -203,19 +207,19 @@ export default function SettlementPage() {
         question.
       </p>
 
-      {/* Round selector */}
+      {/* Round selector – UI only for now (forces reload) */}
       <div className="flex items-center gap-3 mb-4 text-sm">
         <span>Round:</span>
         <select
           className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm"
-          value={roundNumber}
-          onChange={(e) => setRoundNumber(Number(e.target.value))}
+          value={roundFilter}
+          onChange={(e) => setRoundFilter(Number(e.target.value))}
         >
-          <option value={0}>Opening Round (OR)</option>
+          <option value={0}>Opening Round (current live round)</option>
           <option value={1}>Round 1</option>
           <option value={2}>Round 2</option>
           <option value={3}>Round 3</option>
-          {/* add more as needed */}
+          {/* more later if needed */}
         </select>
       </div>
 
@@ -326,7 +330,7 @@ export default function SettlementPage() {
             );
           })}
 
-          {filteredRows.length === 0 && !loadingData && (
+          {filteredRows.length === 0 && !loadingData && !error && (
             <div className="px-4 py-4 text-xs text-gray-400">
               No questions match this filter.
             </div>
