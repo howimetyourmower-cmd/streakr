@@ -1,21 +1,18 @@
-// /app/api/picks/route.ts
-
+// app/api/picks/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-// This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
-  Round: string; // "OR", "R1", "R2", ...
-  Game: number; // 1, 2, 3...
-  Match: string; // "Sydney vs Carlton"
-  Venue: string; // "SCG, Sydney"
-  StartTime: string; // "2026-03-05T19:30:00+11:00"
+  Round: string;      // "OR", "R1", ...
+  Game: number;       // 1, 2, 3...
+  Match: string;
+  Venue: string;
+  StartTime: string;  // ISO string
   Question: string;
   Quarter: number;
-  Status: string; // "Open", "Final", "Pending", "Void"
+  Status: string;     // "Open", "Final", "Pending", "Void"
 };
 
 type ApiQuestion = {
@@ -45,136 +42,27 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-type SponsorQuestionConfig = {
-  roundNumber: number;
-  questionId: string;
-};
-
-type QuestionStatusDoc = {
-  roundNumber: number;
-  questionId: string;
-  status: QuestionStatus;
-};
-
-// Coerce raw JSON to array of rows
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
-// Map numeric roundNumber (used in Firestore & URL) → code used in JSON
-// 0 -> "OR" (Opening Round), 1 -> "R1", 2 -> "R2", etc.
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
 }
 
-// ─────────────────────────────────────────────
-// Helper functions
-// ─────────────────────────────────────────────
-
-async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-
-  const idToken = authHeader.substring("Bearer ".length).trim();
-  if (!idToken) return null;
-
-  try {
-    const decoded = await auth.verifyIdToken(idToken);
-    return decoded.uid ?? null;
-  } catch (error) {
-    console.error("[/api/picks] Failed to verify ID token", error);
-    return null;
-  }
+function normalizeStatus(raw: string | undefined): QuestionStatus {
+  const s = (raw || "open").toLowerCase();
+  if (s === "final") return "final";
+  if (s === "pending") return "pending";
+  if (s === "void") return "void";
+  return "open";
 }
-
-async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
-  try {
-    const docRef = db.collection("config").doc("season-2026");
-    const snap = await docRef.get();
-    if (!snap.exists) return null;
-
-    const data = snap.data() || {};
-    const sponsorQuestion = data.sponsorQuestion as
-      | SponsorQuestionConfig
-      | undefined;
-    if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
-
-    return sponsorQuestion;
-  } catch (error) {
-    console.error("[/api/picks] Error fetching sponsorQuestion config", error);
-    return null;
-  }
-}
-
-/**
- * MUCH LIGHTER:
- * Only load THIS USER'S picks for the round.
- * We do NOT aggregate all users' stats anymore.
- */
-async function getUserPicksForRound(
-  roundNumber: number,
-  currentUserId: string | null
-): Promise<Record<string, "yes" | "no">> {
-  const userPicks: Record<string, "yes" | "no"> = {};
-  if (!currentUserId) return userPicks;
-
-  try {
-    const snap = await db
-      .collection("picks")
-      .where("roundNumber", "==", roundNumber)
-      .where("userId", "==", currentUserId)
-      .get();
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as {
-        questionId?: string;
-        pick?: "yes" | "no";
-      };
-      const questionId = data.questionId;
-      const pick = data.pick;
-      if (!questionId || (pick !== "yes" && pick !== "no")) return;
-      userPicks[questionId] = pick;
-    });
-  } catch (error) {
-    console.error("[/api/picks] Error fetching user picks", error);
-  }
-
-  return userPicks;
-}
-
-async function getQuestionStatusForRound(
-  roundNumber: number
-): Promise<Record<string, QuestionStatus>> {
-  const map: Record<string, QuestionStatus> = {};
-
-  try {
-    const snap = await db
-      .collection("questionStatus")
-      .where("roundNumber", "==", roundNumber)
-      .get();
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as QuestionStatusDoc;
-      if (!data.questionId || !data.status) return;
-      map[data.questionId] = data.status;
-    });
-  } catch (error) {
-    console.error("[/api/picks] Error fetching questionStatus", error);
-  }
-
-  return map;
-}
-
-// ─────────────────────────────────────────────
-// Main GET handler
-// ─────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Determine round number (?round=0, ?round=1, ...)
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
-    let roundNumber: number | null = null;
+    let roundNumber: number = 0;
     if (roundParam !== null) {
       const parsed = Number(roundParam);
       if (!Number.isNaN(parsed) && parsed >= 0) {
@@ -182,14 +70,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Default: Opening Round (0)
-    if (roundNumber === null) {
-      roundNumber = 0;
-    }
-
     const roundCode = getRoundCode(roundNumber);
 
-    // 2) Filter JSON rows for this round
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
@@ -197,19 +79,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(empty);
     }
 
-    // 3) Identify user (for userPick)
-    const currentUserId = await getUserIdFromRequest(req);
-
-    // 4) Sponsor config
-    const sponsorConfig = await getSponsorQuestionConfig();
-
-    // 5) LIGHT stats: only this user's picks
-    const userPicks = await getUserPicksForRound(roundNumber, currentUserId);
-
-    // 6) Status overrides from questionStatus
-    const statusOverrides = await getQuestionStatusForRound(roundNumber);
-
-    // 7) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
 
@@ -231,34 +100,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const qIndex = questionIndexByGame[gameKey]++;
       const questionId = `${gameKey}-Q${qIndex + 1}`;
 
-      const isSponsorQuestion =
-        sponsorConfig &&
-        sponsorConfig.roundNumber === roundNumber &&
-        sponsorConfig.questionId === questionId;
-
-      const jsonStatusRaw = row.Status || "Open";
-      const jsonStatusLower = jsonStatusRaw.toLowerCase();
-      const jsonStatus: QuestionStatus =
-        jsonStatusLower === "pending"
-          ? "pending"
-          : jsonStatusLower === "final"
-          ? "final"
-          : jsonStatusLower === "void"
-          ? "void"
-          : "open";
-
-      const dbStatus = statusOverrides[questionId];
-      const effectiveStatus = dbStatus ?? jsonStatus;
-
       const apiQuestion: ApiQuestion = {
         id: questionId,
         quarter: row.Quarter,
         question: row.Question,
-        status: effectiveStatus,
+        status: normalizeStatus(row.Status),
         sport: "AFL",
-        isSponsorQuestion: !!isSponsorQuestion,
-        userPick: userPicks[questionId],
-        // We keep these fields, but no longer compute them live.
+        isSponsorQuestion: false,
+        userPick: undefined,
         yesPercent: 0,
         noPercent: 0,
         commentCount: 0,
