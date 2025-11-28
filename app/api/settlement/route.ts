@@ -1,3 +1,4 @@
+// /app/api/settlement/route.ts
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -176,6 +177,21 @@ export async function POST(req: NextRequest) {
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
+      // 🔹 NEW: mirror into questionStatus so /api/picks sees "pending"
+      await db
+        .collection("questionStatus")
+        .doc(questionId)
+        .set(
+          {
+            roundNumber: roundNumber ?? null,
+            questionId,
+            status: "pending" as QuestionStatus,
+            outcome: "lock",
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+
       // simple history record
       await db.collection("settlementHistory").add({
         questionId,
@@ -315,7 +331,6 @@ export async function POST(req: NextRequest) {
             questionId,
             outcome,
             season: CURRENT_SEASON,
-            // server timestamp from admin SDK
             createdAt: now,
           },
           { merge: true }
@@ -341,6 +356,21 @@ export async function POST(req: NextRequest) {
     });
 
     await batch.commit();
+
+    // 🔹 NEW: mirror final status/outcome into questionStatus too
+    await db
+      .collection("questionStatus")
+      .doc(questionId)
+      .set(
+        {
+          roundNumber: roundNumber ?? null,
+          questionId,
+          status: finalStatus,
+          outcome,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
 
     return NextResponse.json({
       ok: true,
