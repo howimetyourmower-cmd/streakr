@@ -4,25 +4,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
 
-// If Next/Vercel ever complains about DYNAMIC_SERVER_USAGE, uncomment this:
-// export const dynamic = "force-dynamic";
-
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
-
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
-  Round: string;      // "OR", "R1", "R2", ...
-  Game: number;       // 1, 2, 3...
-  Match: string;      // "Sydney vs Carlton"
-  Venue: string;      // "SCG, Sydney"
-  StartTime: string;  // "2026-03-05T19:30:00+11:00"
+  Round: string; // "OR", "R1", "R2", ...
+  Game: number; // 1, 2, 3...
+  Match: string; // "Sydney vs Carlton"
+  Venue: string; // "SCG, Sydney"
+  StartTime: string; // "2026-03-05T19:30:00+11:00"
   Question: string;
   Quarter: number;
-  Status: string;     // "Open", "Final", "Pending", "Void"
+  Status: string; // "Open", "Final", "Pending", "Void"
 };
 
 type ApiQuestion = {
@@ -100,7 +93,9 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
-    const sponsorQuestion = data.sponsorQuestion as SponsorQuestionConfig | undefined;
+    const sponsorQuestion = data.sponsorQuestion as
+      | SponsorQuestionConfig
+      | undefined;
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
@@ -110,74 +105,40 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
   }
 }
 
-async function getPickStatsForRound(
+/**
+ * MUCH LIGHTER:
+ * Only load THIS USER'S picks for the round.
+ * We do NOT aggregate all users' stats anymore.
+ */
+async function getUserPicksForRound(
   roundNumber: number,
   currentUserId: string | null
-): Promise<{
-  pickStats: Record<string, { yes: number; no: number; total: number }>;
-  userPicks: Record<string, "yes" | "no">;
-}> {
-  const pickStats: Record<string, { yes: number; no: number; total: number }> = {};
+): Promise<Record<string, "yes" | "no">> {
   const userPicks: Record<string, "yes" | "no"> = {};
+  if (!currentUserId) return userPicks;
 
   try {
     const snap = await db
       .collection("picks")
       .where("roundNumber", "==", roundNumber)
+      .where("userId", "==", currentUserId)
       .get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as {
-        userId?: string;
-        roundNumber?: number;
         questionId?: string;
         pick?: "yes" | "no";
       };
-
       const questionId = data.questionId;
       const pick = data.pick;
       if (!questionId || (pick !== "yes" && pick !== "no")) return;
-
-      if (!pickStats[questionId]) {
-        pickStats[questionId] = { yes: 0, no: 0, total: 0 };
-      }
-
-      pickStats[questionId][pick] += 1;
-      pickStats[questionId].total += 1;
-
-      if (currentUserId && data.userId === currentUserId) {
-        userPicks[questionId] = pick;
-      }
+      userPicks[questionId] = pick;
     });
   } catch (error) {
-    console.error("[/api/picks] Error fetching picks", error);
+    console.error("[/api/picks] Error fetching user picks", error);
   }
 
-  return { pickStats, userPicks };
-}
-
-async function getCommentCountsForRound(
-  roundNumber: number
-): Promise<Record<string, number>> {
-  const commentCounts: Record<string, number> = {};
-
-  try {
-    const snap = await db
-      .collection("comments")
-      .where("roundNumber", "==", roundNumber)
-      .get();
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as { questionId?: string };
-      const questionId = data.questionId;
-      if (!questionId) return;
-      commentCounts[questionId] = (commentCounts[questionId] ?? 0) + 1;
-    });
-  } catch (error) {
-    console.error("[/api/picks] Error fetching comments", error);
-  }
-
-  return commentCounts;
+  return userPicks;
 }
 
 async function getQuestionStatusForRound(
@@ -242,12 +203,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 4) Sponsor config
     const sponsorConfig = await getSponsorQuestionConfig();
 
-    // 5) Stats & comments
-    const { pickStats, userPicks } = await getPickStatsForRound(
-      roundNumber,
-      currentUserId
-    );
-    const commentCounts = await getCommentCountsForRound(roundNumber);
+    // 5) LIGHT stats: only this user's picks
+    const userPicks = await getUserPicksForRound(roundNumber, currentUserId);
 
     // 6) Status overrides from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
@@ -274,21 +231,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const qIndex = questionIndexByGame[gameKey]++;
       const questionId = `${gameKey}-Q${qIndex + 1}`;
 
-      const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
-      const total = stats.total;
-
-      const yesPercent =
-        total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-      const noPercent =
-        total > 0 ? Math.round((stats.no / total) * 100) : 0;
-
       const isSponsorQuestion =
         sponsorConfig &&
         sponsorConfig.roundNumber === roundNumber &&
         sponsorConfig.questionId === questionId;
 
       const jsonStatusRaw = row.Status || "Open";
-      const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
+      const jsonStatusLower = jsonStatusRaw.toLowerCase();
+      const jsonStatus: QuestionStatus =
+        jsonStatusLower === "pending"
+          ? "pending"
+          : jsonStatusLower === "final"
+          ? "final"
+          : jsonStatusLower === "void"
+          ? "void"
+          : "open";
+
       const dbStatus = statusOverrides[questionId];
       const effectiveStatus = dbStatus ?? jsonStatus;
 
@@ -300,9 +258,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         sport: "AFL",
         isSponsorQuestion: !!isSponsorQuestion,
         userPick: userPicks[questionId],
-        yesPercent,
-        noPercent,
-        commentCount: commentCounts[questionId] ?? 0,
+        // We keep these fields, but no longer compute them live.
+        yesPercent: 0,
+        noPercent: 0,
+        commentCount: 0,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
