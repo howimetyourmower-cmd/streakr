@@ -19,7 +19,7 @@ type ApiQuestion = {
 };
 
 type ApiGame = {
-  id: string; // e.g. "OR-G1"
+  id: string;
   match: string;
   sport: string;
   venue: string;
@@ -32,7 +32,7 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-type OutcomeAction = "lock" | "yes" | "no" | "void";
+type OutcomeAction = "lock" | "yes" | "no" | "void" | "reopen";
 
 type SettlementRow = {
   questionId: string;
@@ -60,7 +60,7 @@ export default function SettlementPage() {
   const [error, setError] = useState<string | null>(null);
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
 
-  // 🔹 Load questions for the selected round from /api/picks
+  // Load questions from /api/picks for the selected round
   useEffect(() => {
     const load = async () => {
       try {
@@ -107,7 +107,6 @@ export default function SettlementPage() {
     }
   }, [roundNumber, user, loading, isAdmin]);
 
-  // 🔹 Call POST /api/settlement to lock / settle / void
   const handleSetOutcome = async (row: SettlementRow, action: OutcomeAction) => {
     try {
       setSubmittingKey(`${row.questionId}-${action}`);
@@ -178,8 +177,10 @@ export default function SettlementPage() {
       case "void":
         return "px-3 py-1 rounded-full text-xs font-semibold bg-gray-600 text-white hover:bg-gray-700";
       case "lock":
-      default:
         return "px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-500";
+      case "reopen":
+      default:
+        return "px-3 py-1 rounded-full text-xs font-semibold bg-slate-500 text-white hover:bg-slate-400";
     }
   };
 
@@ -195,10 +196,10 @@ export default function SettlementPage() {
     <div className="max-w-6xl mx-auto px-4 py-6 text-white">
       <h1 className="text-2xl font-bold mb-2">Settlement console</h1>
       <p className="text-sm text-gray-300 mb-4">
-        Lock and settle questions. This uses the same data as the Picks page
-        (via <code>/api/picks</code>) and writes results via{" "}
-        <code>/api/settlement</code>, which also mirrors into{" "}
-        <code>questionStatus</code> for the Picks API.
+        Lock and settle questions. Uses <code>/api/picks</code> for data and{" "}
+        <code>/api/settlement</code> for updates.{" "}
+        <strong>Reopen</strong> is available as a safety net if you lock or
+        settle the wrong question.
       </p>
 
       {/* Round selector */}
@@ -213,7 +214,7 @@ export default function SettlementPage() {
           <option value={1}>Round 1</option>
           <option value={2}>Round 2</option>
           <option value={3}>Round 3</option>
-          {/* Add more when you add more rounds */}
+          {/* add more as needed */}
         </select>
       </div>
 
@@ -247,7 +248,7 @@ export default function SettlementPage() {
 
       {/* Table */}
       <div className="w-full border border-slate-700 rounded-lg overflow-hidden">
-        <div className="grid grid-cols-[1.8fr,0.5fr,3fr,1fr,2fr] gap-2 px-4 py-2 bg-slate-900 text-xs font-semibold text-gray-300">
+        <div className="grid grid-cols-[1.8fr,0.5fr,3fr,1fr,2.4fr] gap-2 px-4 py-2 bg-slate-900 text-xs font-semibold text-gray-300">
           <div>Match</div>
           <div>Qtr</div>
           <div>Question</div>
@@ -258,10 +259,12 @@ export default function SettlementPage() {
         <div className="divide-y divide-slate-800">
           {filteredRows.map((row) => {
             const key = row.questionId;
+            const canReopen = row.status !== "open";
+
             return (
               <div
                 key={key}
-                className="grid grid-cols-[1.8fr,0.5fr,3fr,1fr,2fr] gap-2 px-4 py-3 items-center text-sm bg-slate-900/60 hover:bg-slate-900"
+                className="grid grid-cols-[1.8fr,0.5fr,3fr,1fr,2.4fr] gap-2 px-4 py-3 items-center text-sm bg-slate-900/60 hover:bg-slate-900"
               >
                 <div>
                   <div className="font-semibold text-white">
@@ -306,6 +309,17 @@ export default function SettlementPage() {
                       );
                     }
                   )}
+
+                  {/* REOPEN button */}
+                  <button
+                    disabled={!canReopen || submittingKey === `${key}-reopen`}
+                    onClick={() => handleSetOutcome(row, "reopen")}
+                    className={`${outcomeButtonClass(
+                      "reopen"
+                    )} disabled:opacity-40 disabled:cursor-not-allowed text-xs`}
+                  >
+                    REOPEN
+                  </button>
                 </div>
               </div>
             );
