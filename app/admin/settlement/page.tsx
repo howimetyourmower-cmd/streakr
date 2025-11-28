@@ -46,7 +46,7 @@ type SettlementRow = {
   sport: string;
 };
 
-const DEFAULT_ROUND = 0; // 0 = Opening Round, 1 = R1, etc.
+const DEFAULT_ROUND = 0; // 0 = Opening Round
 
 export default function SettlementPage() {
   const { user, loading, isAdmin } = useAuth();
@@ -60,7 +60,7 @@ export default function SettlementPage() {
   const [error, setError] = useState<string | null>(null);
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
 
-  // Load questions from /api/picks for the selected round
+  // Load questions for this round from /api/picks
   useEffect(() => {
     const load = async () => {
       try {
@@ -120,6 +120,7 @@ export default function SettlementPage() {
         body: JSON.stringify({
           questionId: row.questionId,
           action,
+          roundNumber: row.roundNumber, // 🔹 pass roundNumber to backend
         }),
       });
 
@@ -198,8 +199,8 @@ export default function SettlementPage() {
       <p className="text-sm text-gray-300 mb-4">
         Lock and settle questions. Uses <code>/api/picks</code> for data and{" "}
         <code>/api/settlement</code> for updates.{" "}
-        <strong>Reopen</strong> is available as a safety net if you lock or
-        settle the wrong question.
+        <strong>Reopen</strong> is a safety net if you lock or settle the wrong
+        question.
       </p>
 
       {/* Round selector */}
