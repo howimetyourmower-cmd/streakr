@@ -5,23 +5,54 @@ import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "pending" | "final" | "void";
 
-type SettlementQuestion = {
-  id: string;          // questionId
-  gameId: string;
-  match: string;
-  venue: string;
-  startTime: string;
+type ApiQuestion = {
+  id: string; // questionId e.g. "OR-G1-Q1"
   quarter: number;
   question: string;
   status: QuestionStatus;
-  round?: number;
+  sport: string;
+  isSponsorQuestion?: boolean;
+  userPick?: "yes" | "no";
+  yesPercent?: number;
+  noPercent?: number;
+  commentCount?: number;
+};
+
+type ApiGame = {
+  id: string; // e.g. "OR-G1"
+  match: string;
+  sport: string;
+  venue: string;
+  startTime: string;
+  questions: ApiQuestion[];
+};
+
+type PicksApiResponse = {
+  games: ApiGame[];
+  roundNumber: number;
 };
 
 type OutcomeAction = "lock" | "yes" | "no" | "void";
 
+type SettlementRow = {
+  questionId: string;
+  roundNumber: number;
+  gameId: string;
+  match: string;
+  venue: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  sport: string;
+};
+
+const DEFAULT_ROUND = 0; // 0 = Opening Round, 1 = R1, etc.
+
 export default function SettlementPage() {
   const { user, loading, isAdmin } = useAuth();
-  const [questions, setQuestions] = useState<SettlementQuestion[]>([]);
+
+  const [roundNumber, setRoundNumber] = useState<number>(DEFAULT_ROUND);
+  const [rows, setRows] = useState<SettlementRow[]>([]);
   const [statusFilter, setStatusFilter] = useState<"all" | QuestionStatus>(
     "all"
   );
@@ -29,21 +60,43 @@ export default function SettlementPage() {
   const [error, setError] = useState<string | null>(null);
   const [submittingKey, setSubmittingKey] = useState<string | null>(null);
 
-  // Load questions from /api/settlement
+  // 🔹 Load questions for the selected round from /api/picks
   useEffect(() => {
     const load = async () => {
       try {
         setLoadingData(true);
         setError(null);
-        const res = await fetch("/api/settlement");
+
+        const res = await fetch(`/api/picks?round=${roundNumber}`);
         const data = await res.json();
+
         if (!res.ok) {
-          throw new Error(data.error || "Failed to load settlement data");
+          throw new Error(data.error || "Failed to load picks for settlement");
         }
-        setQuestions(data.questions || []);
+
+        const apiData = data as PicksApiResponse;
+
+        const flattened: SettlementRow[] = [];
+        for (const game of apiData.games) {
+          for (const q of game.questions) {
+            flattened.push({
+              questionId: q.id,
+              roundNumber: apiData.roundNumber,
+              gameId: game.id,
+              match: game.match,
+              venue: game.venue,
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              sport: q.sport,
+            });
+          }
+        }
+
+        setRows(flattened);
       } catch (err: any) {
         console.error("[Settlement] load error", err);
-        setError(err.message || "Failed to load questions");
+        setError(err.message || "Failed to load questions for settlement");
       } finally {
         setLoadingData(false);
       }
@@ -52,11 +105,12 @@ export default function SettlementPage() {
     if (!loading && user && isAdmin) {
       load();
     }
-  }, [user, loading, isAdmin]);
+  }, [roundNumber, user, loading, isAdmin]);
 
-  const handleSetOutcome = async (q: SettlementQuestion, action: OutcomeAction) => {
+  // 🔹 Call POST /api/settlement to lock / settle / void
+  const handleSetOutcome = async (row: SettlementRow, action: OutcomeAction) => {
     try {
-      setSubmittingKey(`${q.id}-${action}`);
+      setSubmittingKey(`${row.questionId}-${action}`);
       setError(null);
 
       const res = await fetch("/api/settlement", {
@@ -65,12 +119,13 @@ export default function SettlementPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          questionId: q.id,
+          questionId: row.questionId,
           action,
         }),
       });
 
       const data = await res.json();
+
       if (!res.ok) {
         console.error("[Settlement] POST error", data);
         alert(data.error || "Failed to update settlement");
@@ -80,9 +135,9 @@ export default function SettlementPage() {
       const newStatus = data.status as QuestionStatus | undefined;
 
       if (newStatus) {
-        setQuestions((prev) =>
-          prev.map((row) =>
-            row.id === q.id ? { ...row, status: newStatus } : row
+        setRows((prev) =>
+          prev.map((r) =>
+            r.questionId === row.questionId ? { ...r, status: newStatus } : r
           )
         );
       }
@@ -94,10 +149,10 @@ export default function SettlementPage() {
     }
   };
 
-  const filtered = 
+  const filteredRows =
     statusFilter === "all"
-      ? questions
-      : questions.filter((q) => q.status === statusFilter);
+      ? rows
+      : rows.filter((r) => r.status === statusFilter);
 
   const statusClass = (status: QuestionStatus) => {
     switch (status) {
@@ -140,10 +195,27 @@ export default function SettlementPage() {
     <div className="max-w-6xl mx-auto px-4 py-6 text-white">
       <h1 className="text-2xl font-bold mb-2">Settlement console</h1>
       <p className="text-sm text-gray-300 mb-4">
-        Lock and settle questions for published rounds. These actions update
-        user streaks and picks, and now also feed the Picks API via
-        <code>questionStatus</code>.
+        Lock and settle questions. This uses the same data as the Picks page
+        (via <code>/api/picks</code>) and writes results via{" "}
+        <code>/api/settlement</code>, which also mirrors into{" "}
+        <code>questionStatus</code> for the Picks API.
       </p>
+
+      {/* Round selector */}
+      <div className="flex items-center gap-3 mb-4 text-sm">
+        <span>Round:</span>
+        <select
+          className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm"
+          value={roundNumber}
+          onChange={(e) => setRoundNumber(Number(e.target.value))}
+        >
+          <option value={0}>Opening Round (OR)</option>
+          <option value={1}>Round 1</option>
+          <option value={2}>Round 2</option>
+          <option value={3}>Round 3</option>
+          {/* Add more when you add more rounds */}
+        </select>
+      </div>
 
       {/* Status filters */}
       <div className="flex gap-2 mb-4 text-sm">
@@ -173,6 +245,7 @@ export default function SettlementPage() {
         <p className="text-sm text-red-400 mb-2">Error: {error}</p>
       )}
 
+      {/* Table */}
       <div className="w-full border border-slate-700 rounded-lg overflow-hidden">
         <div className="grid grid-cols-[1.8fr,0.5fr,3fr,1fr,2fr] gap-2 px-4 py-2 bg-slate-900 text-xs font-semibold text-gray-300">
           <div>Match</div>
@@ -183,8 +256,8 @@ export default function SettlementPage() {
         </div>
 
         <div className="divide-y divide-slate-800">
-          {filtered.map((q) => {
-            const key = q.id;
+          {filteredRows.map((row) => {
+            const key = row.questionId;
             return (
               <div
                 key={key}
@@ -192,17 +265,17 @@ export default function SettlementPage() {
               >
                 <div>
                   <div className="font-semibold text-white">
-                    {q.match}
+                    {row.match}
                   </div>
                   <div className="text-xs text-gray-400">
-                    {q.venue}
+                    {row.venue}
                   </div>
                 </div>
-                <div className="text-xs font-semibold">Q{q.quarter}</div>
-                <div className="text-xs text-gray-100">{q.question}</div>
+                <div className="text-xs font-semibold">Q{row.quarter}</div>
+                <div className="text-xs text-gray-100">{row.question}</div>
                 <div>
-                  <span className={statusClass(q.status)}>
-                    {q.status.toUpperCase()}
+                  <span className={statusClass(row.status)}>
+                    {row.status.toUpperCase()}
                   </span>
                 </div>
                 <div className="flex justify-end gap-2">
@@ -223,7 +296,7 @@ export default function SettlementPage() {
                         <button
                           key={action}
                           disabled={isBusy}
-                          onClick={() => handleSetOutcome(q, action)}
+                          onClick={() => handleSetOutcome(row, action)}
                           className={`${outcomeButtonClass(
                             action
                           )} disabled:opacity-50 disabled:cursor-not-allowed text-xs`}
@@ -238,7 +311,7 @@ export default function SettlementPage() {
             );
           })}
 
-          {filtered.length === 0 && !loadingData && (
+          {filteredRows.length === 0 && !loadingData && (
             <div className="px-4 py-4 text-xs text-gray-400">
               No questions match this filter.
             </div>
