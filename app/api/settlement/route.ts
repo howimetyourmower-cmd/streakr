@@ -132,7 +132,7 @@ export async function GET() {
   }
 }
 
-/** POST – lock / settle / void a question and update streaks */
+/** POST – lock / settle / void / reopen a question and update streaks */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     const roundRef = db.collection("rounds").doc(roundDocId);
     const now = Timestamp.now();
 
-    // ---- Handle LOCK only ----
+    // ---- LOCK ----
     if (action === "lock") {
       const updatedQuestion = {
         ...question,
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
-      // 🔹 NEW: mirror into questionStatus so /api/picks sees "pending"
+      // mirror into questionStatus so /api/picks sees "pending"
       await db
         .collection("questionStatus")
         .doc(questionId)
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
           { merge: true }
         );
 
-      // simple history record
+      // history
       await db.collection("settlementHistory").add({
         questionId,
         action: "lock",
@@ -202,6 +202,45 @@ export async function POST(req: NextRequest) {
       });
 
       return NextResponse.json({ ok: true, status: "pending" });
+    }
+
+    // ---- REOPEN (undo lock / settlement) ----
+    if (action === "reopen") {
+      const updatedQuestion: any = {
+        ...question,
+        status: "open" as QuestionStatus,
+        outcome: null,
+        lockedAt: null,
+        settledAt: null,
+      };
+
+      games[gameIndex].questions[questionIndex] = updatedQuestion;
+      await roundRef.update({ games });
+
+      // questionStatus back to open
+      await db
+        .collection("questionStatus")
+        .doc(questionId)
+        .set(
+          {
+            roundNumber: roundNumber ?? null,
+            questionId,
+            status: "open" as QuestionStatus,
+            outcome: null,
+            updatedAt: now,
+          },
+          { merge: true }
+        );
+
+      await db.collection("settlementHistory").add({
+        questionId,
+        action: "reopen",
+        round: roundNumber ?? null,
+        season: CURRENT_SEASON,
+        reopenedAt: now,
+      });
+
+      return NextResponse.json({ ok: true, status: "open" });
     }
 
     // ---- Determine outcome for settle / void ----
@@ -357,7 +396,7 @@ export async function POST(req: NextRequest) {
 
     await batch.commit();
 
-    // 🔹 NEW: mirror final status/outcome into questionStatus too
+    // mirror final status/outcome into questionStatus too
     await db
       .collection("questionStatus")
       .doc(questionId)
