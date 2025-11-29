@@ -29,10 +29,21 @@ function toIso(value: any): string {
   return "";
 }
 
+/** Map numeric roundNumber -> code used in JSON IDs, e.g. 0 -> "OR", 1 -> "R1" */
+function getRoundCodeForId(roundNumber: number | null | undefined): string {
+  if (roundNumber === 0) return "OR";
+  if (typeof roundNumber === "number") return `R${roundNumber}`;
+  return "R?";
+}
+
 /**
  * Find a question by its ID inside rounds/games/questions
  * Looks through ALL rounds for CURRENT_SEASON (published or not),
  * since settlement might need to adjust older data.
+ *
+ * Supports both:
+ * - legacy IDs:  <roundDoc.id>_game_<gi>_q<qi+1>
+ * - new JSON IDs: <roundCode>-G<gi+1>-Q<qi+1>  (e.g. OR-G1-Q1)
  */
 async function findQuestionById(questionId: string) {
   const roundsSnap = await db
@@ -43,6 +54,9 @@ async function findQuestionById(questionId: string) {
   for (const roundDoc of roundsSnap.docs) {
     const data = roundDoc.data() as any;
     const games = data.games ?? [];
+    const roundNumber: number | null =
+      typeof data.roundNumber === "number" ? data.roundNumber : null;
+    const roundCode = getRoundCodeForId(roundNumber);
 
     for (let gi = 0; gi < games.length; gi++) {
       const g = games[gi];
@@ -50,15 +64,23 @@ async function findQuestionById(questionId: string) {
 
       for (let qi = 0; qi < questions.length; qi++) {
         const q = questions[qi];
-        const id = q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
-        if (id === questionId) {
+
+        // Legacy ID (old system)
+        const legacyId =
+          q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
+
+        // New ID, matching /api/picks and the JSON: OR-G1-Q1, R1-G3-Q5, etc.
+        const jsonStyleId = `${roundCode}-G${gi + 1}-Q${qi + 1}`;
+
+        if (questionId === legacyId || questionId === jsonStyleId) {
           return {
             roundDocId: roundDoc.id,
-            roundNumber: data.roundNumber ?? null,
+            roundNumber,
             games,
             gameIndex: gi,
             questionIndex: qi,
-            question: { ...q, id },
+            // normalise the id to the JSON style so future lookups are consistent
+            question: { ...q, id: jsonStyleId },
           };
         }
       }
@@ -111,7 +133,8 @@ export async function GET() {
         const startTimeIso = toIso(g.startTime ?? g.kickoffTime);
 
         (g.questions ?? []).forEach((q: any, qi: number) => {
-          const id = q.id ?? `${gameId}_q${qi + 1}`;
+          const id =
+            q.id ?? `${gameId}_q${qi + 1}`; // display can use either, POST uses the json-style id from /api/picks
           const status: QuestionStatus =
             q.status === "pending" ||
             q.status === "final" ||
@@ -185,7 +208,7 @@ export async function POST(req: NextRequest) {
     const roundRef = db.collection("rounds").doc(roundDocId);
     const now = Timestamp.now();
 
-    // ───────────────── LOCK ─────────────────
+    // ───────────── LOCK ─────────────
     if (action === "lock") {
       const updatedQuestion = {
         ...question,
@@ -196,11 +219,10 @@ export async function POST(req: NextRequest) {
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
-      await writeQuestionStatus(questionId, roundNumber, "pending", now);
+      await writeQuestionStatus(question.id, roundNumber, "pending", now);
 
-      // simple history record
       await db.collection("settlementHistory").add({
-        questionId,
+        questionId: question.id,
         action: "lock",
         round: roundNumber ?? null,
         season: CURRENT_SEASON,
@@ -210,7 +232,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: "pending" });
     }
 
-    // ───────────────── REOPEN ─────────────────
+    // ───────────── REOPEN ─────────────
     if (action === "reopen") {
       const updatedQuestion = {
         ...question,
@@ -221,10 +243,10 @@ export async function POST(req: NextRequest) {
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
-      await writeQuestionStatus(questionId, roundNumber, "open", now);
+      await writeQuestionStatus(question.id, roundNumber, "open", now);
 
       await db.collection("settlementHistory").add({
-        questionId,
+        questionId: question.id,
         action: "reopen",
         round: roundNumber ?? null,
         season: CURRENT_SEASON,
@@ -234,7 +256,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: "open" });
     }
 
-    // ───────────────── SETTLE / VOID ────────────────
+    // ───────────── SETTLE / VOID ─────────────
     let outcome: "yes" | "no" | "void";
     if (action === "void") {
       outcome = "void";
@@ -262,27 +284,24 @@ export async function POST(req: NextRequest) {
     games[gameIndex].questions[questionIndex] = updatedQuestion;
     await roundRef.update({ games });
 
-    await writeQuestionStatus(questionId, roundNumber, finalStatus, now);
+    await writeQuestionStatus(question.id, roundNumber, finalStatus, now);
 
-    // Is this the sponsor question for this round?
     const isSponsorQuestion =
       updatedQuestion && updatedQuestion.isSponsorQuestion === true;
 
     // ---- Update streaks + picks for users whose ACTIVE pick is this question ----
     const usersSnap = await db
       .collection("users")
-      .where("activeQuestionId", "==", questionId)
+      .where("activeQuestionId", "==", question.id)
       .get();
 
     const batch = db.batch();
-
     const sponsorWinners: string[] = [];
 
     usersSnap.forEach((userDoc) => {
       const userId = userDoc.id;
       const data = userDoc.data() as any;
       const activePick = data.activePick as "yes" | "no" | undefined;
-
       if (!activePick) return;
 
       const win = outcome !== "void" && activePick === outcome;
@@ -310,14 +329,14 @@ export async function POST(req: NextRequest) {
           lastResult: outcome === "void" ? "void" : win ? "win" : "loss",
           lastSettledAt: now,
           lastSettledRound: roundNumber ?? null,
-          lastSettledQuestionId: questionId,
+          lastSettledQuestionId: question.id,
           activeQuestionId: null,
           activePick: null,
         },
         { merge: true }
       );
 
-      const pickId = `${userId}_${questionId}`;
+      const pickId = `${userId}_${question.id}`;
       const pickRef = db.collection("picks").doc(pickId);
 
       batch.set(
@@ -351,7 +370,7 @@ export async function POST(req: NextRequest) {
             uid: userId,
             roundId: roundDocId,
             roundNumber: roundNumber ?? null,
-            questionId,
+            questionId: question.id,
             outcome,
             season: CURRENT_SEASON,
             createdAt: now,
@@ -363,7 +382,7 @@ export async function POST(req: NextRequest) {
 
     // history record
     batch.set(db.collection("settlementHistory").doc(), {
-      questionId,
+      questionId: question.id,
       outcome,
       action:
         outcome === "void"
