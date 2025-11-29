@@ -1,4 +1,4 @@
-// /app/api/settlement/route.ts
+// app/api/settlement/route.ts
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -7,102 +7,202 @@ import { Timestamp } from "firebase-admin/firestore";
 import { CURRENT_SEASON } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "pending" | "final" | "void";
-type Action = "lock" | "yes" | "no" | "void" | "reopen";
 
-function isValidAction(action: string): action is Action {
-  return ["lock", "yes", "no", "void", "reopen"].includes(action);
+type SettlementQuestion = {
+  id: string;
+  gameId: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  round?: number;
+};
+
+/** Convert Firestore Timestamp | Date | string -> ISO string */
+function toIso(value: any): string {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (value.toDate) return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return "";
 }
 
 /**
- * POST /api/settlement
- *
- * Body:
- * {
- *   questionId: string;          // e.g. "OR-G1-Q1"
- *   action: "lock" | "yes" | "no" | "void" | "reopen";
- *   roundNumber?: number;        // e.g. 0 for OR, 1 for R1 (optional but recommended)
- * }
- *
- * We no longer touch the "rounds" collection here.
- * Source of truth for status/outcome for Picks is:
- *   - questionStatus/{questionId}
- *   - plus users / picks for streaks & results
+ * Find a question by its ID inside rounds/games/questions
+ * Looks through ALL rounds for CURRENT_SEASON (published or not),
+ * since settlement might need to adjust older data.
  */
+async function findQuestionById(questionId: string) {
+  const roundsSnap = await db
+    .collection("rounds")
+    .where("season", "==", CURRENT_SEASON)
+    .get();
+
+  for (const roundDoc of roundsSnap.docs) {
+    const data = roundDoc.data() as any;
+    const games = data.games ?? [];
+
+    for (let gi = 0; gi < games.length; gi++) {
+      const g = games[gi];
+      const questions = g.questions ?? [];
+
+      for (let qi = 0; qi < questions.length; qi++) {
+        const q = questions[qi];
+        const id = q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
+        if (id === questionId) {
+          return {
+            roundDocId: roundDoc.id,
+            roundNumber: data.roundNumber ?? null,
+            games,
+            gameIndex: gi,
+            questionIndex: qi,
+            question: { ...q, id },
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/** Helper to upsert the questionStatus doc used by /api/picks */
+async function writeQuestionStatus(
+  questionId: string,
+  roundNumber: number | null,
+  status: QuestionStatus,
+  now: Timestamp
+) {
+  const ref = db.collection("questionStatus").doc(questionId);
+  await ref.set(
+    {
+      questionId,
+      roundNumber: roundNumber ?? null,
+      status,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+}
+
+/** GET – list questions to settle for the console */
+export async function GET() {
+  try {
+    // Only show questions from PUBLISHED rounds for this season
+    const roundsSnap = await db
+      .collection("rounds")
+      .where("season", "==", CURRENT_SEASON)
+      .where("published", "==", true)
+      .get();
+
+    const questions: SettlementQuestion[] = [];
+
+    roundsSnap.forEach((roundDoc) => {
+      const data = roundDoc.data() as any;
+      const roundNumber: number | undefined = data.roundNumber;
+      const games = data.games ?? [];
+
+      games.forEach((g: any, gi: number) => {
+        const gameId = `${roundDoc.id}_game_${gi}`;
+        const match = g.match ?? g.fixture ?? "TBD match";
+        const venue = g.venue ?? "TBD venue";
+        const startTimeIso = toIso(g.startTime ?? g.kickoffTime);
+
+        (g.questions ?? []).forEach((q: any, qi: number) => {
+          const id = q.id ?? `${gameId}_q${qi + 1}`;
+          const status: QuestionStatus =
+            q.status === "pending" ||
+            q.status === "final" ||
+            q.status === "void"
+              ? q.status
+              : "open";
+
+          questions.push({
+            id,
+            gameId,
+            match,
+            venue,
+            startTime: startTimeIso,
+            quarter: Number(q.quarter ?? 1),
+            question: q.question ?? "",
+            status,
+            round: roundNumber,
+          });
+        });
+      });
+    });
+
+    // sort by start time then quarter
+    questions.sort((a, b) => {
+      const t = a.startTime.localeCompare(b.startTime);
+      if (t !== 0) return t;
+      return a.quarter - b.quarter;
+    });
+
+    return NextResponse.json({ questions });
+  } catch (err) {
+    console.error("Error in GET /api/settlement:", err);
+    return NextResponse.json(
+      { error: "Failed to load questions for settlement" },
+      { status: 500 }
+    );
+  }
+}
+
+/** POST – lock / reopen / settle / void a question and update streaks */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const questionId: string | undefined = body.questionId;
-    const actionRaw: string | undefined = body.action;
-    const roundNumber: number | null =
-      typeof body.roundNumber === "number" ? body.roundNumber : null;
+    const action: string | undefined = body.action;
 
-    if (!questionId || !actionRaw) {
+    if (!questionId || !action) {
       return NextResponse.json(
         { error: "Missing questionId or action" },
         { status: 400 }
       );
     }
 
-    if (!isValidAction(actionRaw)) {
+    const found = await findQuestionById(questionId);
+    if (!found) {
       return NextResponse.json(
-        { error: `Invalid action: ${actionRaw}` },
-        { status: 400 }
+        { error: "Question not found" },
+        { status: 404 }
       );
     }
 
-    const action: Action = actionRaw as Action;
+    const {
+      roundDocId,
+      roundNumber,
+      games,
+      gameIndex,
+      questionIndex,
+      question,
+    } = found;
+
+    const roundRef = db.collection("rounds").doc(roundDocId);
     const now = Timestamp.now();
 
-    // Read season config so we can:
-    // - know which round doc is current (for sponsor entries)
-    // - know sponsor question (for sponsor draw)
-    const configSnap = await db
-      .collection("config")
-      .doc(`season-${CURRENT_SEASON}`)
-      .get();
-
-    const configData = configSnap.exists ? (configSnap.data() as any) : {};
-    const sponsorConfig = configData.sponsorQuestion || null;
-    const configRoundNumber: number | null =
-      typeof configData.currentRoundNumber === "number"
-        ? configData.currentRoundNumber
-        : null;
-    const roundForWrite: number | null = roundNumber ?? configRoundNumber;
-
-    const roundDocId: string =
-      typeof configData.currentRoundId === "string"
-        ? configData.currentRoundId
-        : `season-${CURRENT_SEASON}-round-${roundForWrite ?? "unknown"}`;
-
-    const isSponsorQuestion =
-      sponsorConfig &&
-      sponsorConfig.questionId === questionId &&
-      (roundForWrite === null ||
-        sponsorConfig.roundNumber === undefined ||
-        sponsorConfig.roundNumber === roundForWrite);
-
-    // ---- Simple branches that do NOT touch streaks ----
-
-    // LOCK → status = pending
+    // ───────────────── LOCK ─────────────────
     if (action === "lock") {
-      await db
-        .collection("questionStatus")
-        .doc(questionId)
-        .set(
-          {
-            questionId,
-            roundNumber: roundForWrite,
-            status: "pending" as QuestionStatus,
-            outcome: "lock",
-            updatedAt: now,
-          },
-          { merge: true }
-        );
+      const updatedQuestion = {
+        ...question,
+        status: "pending" as QuestionStatus,
+        lockedAt: now,
+      };
 
+      games[gameIndex].questions[questionIndex] = updatedQuestion;
+      await roundRef.update({ games });
+
+      await writeQuestionStatus(questionId, roundNumber, "pending", now);
+
+      // simple history record
       await db.collection("settlementHistory").add({
         questionId,
         action: "lock",
-        round: roundForWrite,
+        round: roundNumber ?? null,
         season: CURRENT_SEASON,
         lockedAt: now,
       });
@@ -110,26 +210,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: "pending" });
     }
 
-    // REOPEN → status = open, clear outcome/lock info
+    // ───────────────── REOPEN ─────────────────
     if (action === "reopen") {
-      await db
-        .collection("questionStatus")
-        .doc(questionId)
-        .set(
-          {
-            questionId,
-            roundNumber: roundForWrite,
-            status: "open" as QuestionStatus,
-            outcome: null,
-            updatedAt: now,
-          },
-          { merge: true }
-        );
+      const updatedQuestion = {
+        ...question,
+        status: "open" as QuestionStatus,
+        reopenedAt: now,
+      };
+
+      games[gameIndex].questions[questionIndex] = updatedQuestion;
+      await roundRef.update({ games });
+
+      await writeQuestionStatus(questionId, roundNumber, "open", now);
 
       await db.collection("settlementHistory").add({
         questionId,
         action: "reopen",
-        round: roundForWrite,
+        round: roundNumber ?? null,
         season: CURRENT_SEASON,
         reopenedAt: now,
       });
@@ -137,18 +234,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: "open" });
     }
 
-    // ---- YES / NO / VOID – these do streaks & picks ----
-
+    // ───────────────── SETTLE / VOID ────────────────
     let outcome: "yes" | "no" | "void";
     if (action === "void") {
       outcome = "void";
-    } else if (action === "yes") {
+    } else if (action === "yes" || action === "settleYes") {
       outcome = "yes";
-    } else if (action === "no") {
+    } else if (action === "no" || action === "settleNo") {
       outcome = "no";
     } else {
       return NextResponse.json(
-        { error: `Unsupported action: ${action}` },
+        { error: "Unknown action" },
         { status: 400 }
       );
     }
@@ -156,13 +252,30 @@ export async function POST(req: NextRequest) {
     const finalStatus: QuestionStatus =
       outcome === "void" ? "void" : "final";
 
-    // Users whose active streak pick is this question
+    const updatedQuestion: any = {
+      ...question,
+      status: finalStatus,
+      outcome,
+      settledAt: now,
+    };
+
+    games[gameIndex].questions[questionIndex] = updatedQuestion;
+    await roundRef.update({ games });
+
+    await writeQuestionStatus(questionId, roundNumber, finalStatus, now);
+
+    // Is this the sponsor question for this round?
+    const isSponsorQuestion =
+      updatedQuestion && updatedQuestion.isSponsorQuestion === true;
+
+    // ---- Update streaks + picks for users whose ACTIVE pick is this question ----
     const usersSnap = await db
       .collection("users")
       .where("activeQuestionId", "==", questionId)
       .get();
 
     const batch = db.batch();
+
     const sponsorWinners: string[] = [];
 
     usersSnap.forEach((userDoc) => {
@@ -175,13 +288,9 @@ export async function POST(req: NextRequest) {
       const win = outcome !== "void" && activePick === outcome;
 
       let current =
-        typeof data.currentStreak === "number"
-          ? data.currentStreak
-          : 0;
+        typeof data.currentStreak === "number" ? data.currentStreak : 0;
       let longest =
-        typeof data.longestStreak === "number"
-          ? data.longestStreak
-          : 0;
+        typeof data.longestStreak === "number" ? data.longestStreak : 0;
 
       if (outcome === "void") {
         // streak unchanged
@@ -200,7 +309,7 @@ export async function POST(req: NextRequest) {
           longestStreak: longest,
           lastResult: outcome === "void" ? "void" : win ? "win" : "loss",
           lastSettledAt: now,
-          lastSettledRound: roundForWrite,
+          lastSettledRound: roundNumber ?? null,
           lastSettledQuestionId: questionId,
           activeQuestionId: null,
           activePick: null,
@@ -217,7 +326,7 @@ export async function POST(req: NextRequest) {
           outcome,
           result: outcome === "void" ? "void" : win ? "win" : "loss",
           settledAt: now,
-          round: roundForWrite,
+          round: roundNumber ?? null,
           season: CURRENT_SEASON,
         },
         { merge: true }
@@ -241,7 +350,7 @@ export async function POST(req: NextRequest) {
           {
             uid: userId,
             roundId: roundDocId,
-            roundNumber: roundForWrite,
+            roundNumber: roundNumber ?? null,
             questionId,
             outcome,
             season: CURRENT_SEASON,
@@ -252,7 +361,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Settlement history
+    // history record
     batch.set(db.collection("settlementHistory").doc(), {
       questionId,
       outcome,
@@ -262,7 +371,7 @@ export async function POST(req: NextRequest) {
           : outcome === "yes"
           ? "settleYes"
           : "settleNo",
-      round: roundForWrite,
+      round: roundNumber ?? null,
       season: CURRENT_SEASON,
       settledAt: now,
       isSponsorQuestion: !!isSponsorQuestion,
@@ -271,30 +380,15 @@ export async function POST(req: NextRequest) {
 
     await batch.commit();
 
-    // Mirror into questionStatus so Picks sees the new status/outcome
-    await db
-      .collection("questionStatus")
-      .doc(questionId)
-      .set(
-        {
-          questionId,
-          roundNumber: roundForWrite,
-          status: finalStatus,
-          outcome,
-          updatedAt: now,
-        },
-        { merge: true }
-      );
-
     return NextResponse.json({
       ok: true,
       status: finalStatus,
       outcome,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Error in POST /api/settlement:", err);
     return NextResponse.json(
-      { error: err?.message || "Failed to update settlement" },
+      { error: "Failed to update settlement" },
       { status: 500 }
     );
   }
