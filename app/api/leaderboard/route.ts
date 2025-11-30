@@ -3,7 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 
-type Scope = "overall" | string;
+export const dynamic = "force-dynamic";
 
 type LeaderboardEntry = {
   uid: string;
@@ -11,7 +11,7 @@ type LeaderboardEntry = {
   username?: string;
   avatarUrl?: string;
   rank: number;
-  streak: number;
+  streak: number; // meaning depends on scope
 };
 
 type LeaderboardApiResponse = {
@@ -19,69 +19,99 @@ type LeaderboardApiResponse = {
   userEntry: LeaderboardEntry | null;
 };
 
+type Scope = "overall" | string;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const url = new URL(req.url);
-    const scope = (url.searchParams.get("scope") ?? "overall") as Scope;
-    const uid = url.searchParams.get("uid");
+    const { searchParams } = new URL(req.url);
 
-    const isOverall = scope === "overall";
-    const streakField = isOverall ? "longestStreak" : "currentStreak";
+    const scopeParam = (searchParams.get("scope") ?? "overall") as Scope;
+    const uidParam = searchParams.get("uid") || null;
+    // season is currently unused but safe to accept
+    // const seasonParam = searchParams.get("season");
 
-    // Single-field orderBy so we don't need any composite indexes.
-    const snap = await db
-      .collection("users")
-      .orderBy(streakField, "desc")
-      .limit(100)
-      .get();
+    // -------------------------------
+    // 1) Load all users
+    // -------------------------------
+    const usersSnap = await db.collection("users").get();
 
-    const entries: LeaderboardEntry[] = [];
-    let userEntry: LeaderboardEntry | null = null;
+    const rows: Omit<LeaderboardEntry, "rank">[] = [];
 
-    let rank = 1;
-    snap.forEach((docSnap) => {
+    usersSnap.forEach((docSnap) => {
       const data = docSnap.data() as any;
 
-      const streakVal =
-        typeof data[streakField] === "number" ? data[streakField] : 0;
+      const currentStreak =
+        typeof data.currentStreak === "number" ? data.currentStreak : 0;
+      const longestStreak =
+        typeof data.longestStreak === "number" ? data.longestStreak : 0;
 
-      const username: string = data.username ?? "";
-      const firstName: string = data.firstName ?? "";
-      const email: string = data.email ?? "";
-      const displayName =
-        firstName ||
-        username ||
-        email ||
+      // Decide which streak to show for this scope
+      const streakForScope =
+        scopeParam === "overall" ? longestStreak : currentStreak;
+
+      const displayName: string =
+        (typeof data.username === "string" && data.username.trim()) ||
+        (typeof data.firstName === "string" && data.firstName.trim()) ||
+        (typeof data.displayName === "string" && data.displayName.trim()) ||
+        (typeof data.email === "string" && data.email.trim()) ||
         "Player";
 
-      const entry: LeaderboardEntry = {
+      const username =
+        typeof data.username === "string" && data.username.trim().length > 0
+          ? data.username.trim()
+          : undefined;
+
+      const avatarUrl =
+        typeof data.avatarUrl === "string" && data.avatarUrl.trim().length > 0
+          ? data.avatarUrl.trim()
+          : undefined;
+
+      rows.push({
         uid: docSnap.id,
         displayName,
-        username: username || undefined,
-        avatarUrl: data.avatarUrl ?? undefined,
-        rank,
-        streak: streakVal,
-      };
-
-      entries.push(entry);
-
-      if (uid && docSnap.id === uid) {
-        userEntry = entry;
-      }
-
-      rank += 1;
+        username,
+        avatarUrl,
+        streak: streakForScope,
+      });
     });
 
-    const response: LeaderboardApiResponse = {
+    // -------------------------------
+    // 2) Sort & rank
+    // -------------------------------
+    rows.sort((a, b) => {
+      // Highest streak first
+      if (b.streak !== a.streak) return b.streak - a.streak;
+      // Tie-break alphabetically by name
+      return a.displayName.localeCompare(b.displayName);
+    });
+
+    const entries: LeaderboardEntry[] = rows.map((r, index) => ({
+      ...r,
+      rank: index + 1,
+    }));
+
+    // -------------------------------
+    // 3) Logged-in user's row (if uid passed in)
+    // -------------------------------
+    const userEntry =
+      uidParam !== null
+        ? entries.find((e) => e.uid === uidParam) ?? null
+        : null;
+
+    const payload: LeaderboardApiResponse = {
       entries,
       userEntry,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(payload);
   } catch (error) {
-    console.error("[/api/leaderboard] Error:", error);
+    console.error("[/api/leaderboard] Error loading leaderboard", error);
     return NextResponse.json(
-      { error: "Failed to load leaderboard" },
+      {
+        entries: [],
+        userEntry: null,
+        error: "Internal server error",
+      },
       { status: 500 }
     );
   }
