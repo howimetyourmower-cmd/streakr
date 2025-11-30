@@ -4,14 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
 
-// If Next/Vercel ever complains about DYNAMIC_SERVER_USAGE, uncomment this:
-// export const dynamic = "force-dynamic";
-
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
-
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type QuestionOutcome = "yes" | "no" | "void";
 
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
@@ -36,6 +30,7 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+  correctOutcome?: QuestionOutcome; // 👈 settlement result
 };
 
 type ApiGame = {
@@ -58,9 +53,10 @@ type SponsorQuestionConfig = {
 };
 
 type QuestionStatusDoc = {
-  roundNumber: number | string | null;
+  roundNumber: number;
   questionId: string;
   status: QuestionStatus;
+  outcome?: QuestionOutcome | "lock";
 };
 
 // Coerce raw JSON to array of rows
@@ -101,8 +97,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
 
     const data = snap.data() || {};
     const sponsorQuestion =
-      (data.sponsorQuestion as SponsorQuestionConfig | undefined) ??
-      null;
+      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
@@ -119,10 +114,8 @@ async function getPickStatsForRound(
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
 }> {
-  const pickStats: Record<
-    string,
-    { yes: number; no: number; total: number }
-  > = {};
+  const pickStats: Record<string, { yes: number; no: number; total: number }> =
+    {};
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
@@ -185,52 +178,41 @@ async function getCommentCountsForRound(
   return commentCounts;
 }
 
-/**
- * Question status overrides stored in `questionStatus`.
- * We used to filter by `roundNumber` in the query; instead we now
- * load all docs and match in code, tolerating number vs string.
- */
 async function getQuestionStatusForRound(
   roundNumber: number
-): Promise<Record<string, QuestionStatus>> {
-  const map: Record<string, QuestionStatus> = {};
-  const rnStr = String(roundNumber);
+): Promise<
+  Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
+> {
+  const map: Record<
+    string,
+    { status: QuestionStatus; outcome?: QuestionOutcome }
+  > = {};
 
   try {
-    const snap = await db.collection("questionStatus").get();
+    const snap = await db
+      .collection("questionStatus")
+      .where("roundNumber", "==", roundNumber)
+      .get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as QuestionStatusDoc;
-      const qid = data.questionId;
-      if (!qid) return;
+      if (!data.questionId || !data.status) return;
 
-      const rn = data.roundNumber;
-      const rnMatches =
-        rn === roundNumber || String(rn) === rnStr || rn === null;
-
-      if (!rnMatches) return;
-
-      const rawStatus = (data.status || "open") as QuestionStatus;
-      let status: QuestionStatus;
-      switch (rawStatus) {
-        case "pending":
-        case "final":
-        case "void":
-        case "open":
-          status = rawStatus;
-          break;
-        default:
-          status = "open";
+      // Only keep an outcome if it's a real result (yes/no/void).
+      let outcome: QuestionOutcome | undefined;
+      if (
+        data.outcome === "yes" ||
+        data.outcome === "no" ||
+        data.outcome === "void"
+      ) {
+        outcome = data.outcome;
       }
 
-      map[qid] = status;
+      map[data.questionId] = {
+        status: data.status,
+        outcome,
+      };
     });
-
-    console.log(
-      "[/api/picks] questionStatus overrides for round",
-      roundNumber,
-      Object.keys(map)
-    );
   } catch (error) {
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
@@ -284,7 +266,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // 6) Status overrides from questionStatus
+    // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
     // 7) Group rows into games and build final API shape
@@ -312,18 +294,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
 
-      const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-      const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
+      const yesPercent =
+        total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+      const noPercent =
+        total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const isSponsorQuestion =
         sponsorConfig &&
         sponsorConfig.roundNumber === roundNumber &&
         sponsorConfig.questionId === questionId;
 
+      const statusInfo = statusOverrides[questionId];
+
       const jsonStatusRaw = row.Status || "Open";
       const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
-      const dbStatus = statusOverrides[questionId];
-      const effectiveStatus = dbStatus ?? jsonStatus;
+
+      const effectiveStatus = statusInfo?.status ?? jsonStatus;
+      const correctOutcome = statusInfo?.outcome;
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
@@ -336,6 +323,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         yesPercent,
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
+        correctOutcome,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
