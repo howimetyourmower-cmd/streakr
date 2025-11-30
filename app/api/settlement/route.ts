@@ -20,7 +20,6 @@ type SettlementQuestion = {
   round?: number;
 };
 
-/** Convert Firestore Timestamp | Date | string -> ISO string */
 function toIso(value: any): string {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -30,9 +29,8 @@ function toIso(value: any): string {
 }
 
 /**
- * Find a question by its ID inside rounds/games/questions.
- * Looks through ALL rounds for CURRENT_SEASON (published or not),
- * since settlement might need to adjust older data.
+ * Find a question by its ID inside rounds/games/questions
+ * (searches all rounds for CURRENT_SEASON).
  */
 async function findQuestionById(questionId: string) {
   const roundsSnap = await db
@@ -50,17 +48,11 @@ async function findQuestionById(questionId: string) {
 
       for (let qi = 0; qi < questions.length; qi++) {
         const q = questions[qi];
-
-        // Prefer explicit id if present, otherwise fall back to our pattern
-        const id =
-          q.id ??
-          `${data.roundKey || roundDoc.id}-G${gi + 1}-Q${qi + 1}`;
-
+        const id = q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
         if (id === questionId) {
           return {
             roundDocId: roundDoc.id,
             roundNumber: data.roundNumber ?? null,
-            roundKey: data.roundKey ?? roundDoc.id,
             games,
             gameIndex: gi,
             questionIndex: qi,
@@ -92,14 +84,13 @@ export async function GET() {
       const games = data.games ?? [];
 
       games.forEach((g: any, gi: number) => {
-        const gameId = `${data.roundKey || roundDoc.id}-G${gi + 1}`;
+        const gameId = `${roundDoc.id}_game_${gi}`;
         const match = g.match ?? g.fixture ?? "TBD match";
         const venue = g.venue ?? "TBD venue";
         const startTimeIso = toIso(g.startTime ?? g.kickoffTime);
 
         (g.questions ?? []).forEach((q: any, qi: number) => {
-          const id =
-            q.id ?? `${data.roundKey || roundDoc.id}-G${gi + 1}-Q${qi + 1}`;
+          const id = q.id ?? `${gameId}_q${qi + 1}`;
           const status: QuestionStatus =
             q.status === "pending" ||
             q.status === "final" ||
@@ -122,7 +113,6 @@ export async function GET() {
       });
     });
 
-    // sort by start time then quarter
     questions.sort((a, b) => {
       const t = a.startTime.localeCompare(b.startTime);
       if (t !== 0) return t;
@@ -139,7 +129,7 @@ export async function GET() {
   }
 }
 
-/** POST – lock / reopen / settle / void a question and update streaks */
+/** POST – lock / settle / void / reopen a question and update streaks */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -173,7 +163,8 @@ export async function POST(req: NextRequest) {
     const roundRef = db.collection("rounds").doc(roundDocId);
     const now = Timestamp.now();
 
-    const statusRef = db.collection("questionStatus").doc(questionId);
+    // Reference to questionStatus overrides used by /api/picks
+    const qsRef = db.collection("questionStatus").doc(questionId);
 
     // ───────────────── LOCK ─────────────────
     if (action === "lock") {
@@ -186,18 +177,17 @@ export async function POST(req: NextRequest) {
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
-      // status override for Picks
-      await statusRef.set(
+      // Override for Picks page
+      await qsRef.set(
         {
           questionId,
           roundNumber: roundNumber ?? null,
-          status: "pending",
+          status: "pending" as QuestionStatus,
           updatedAt: now,
         },
         { merge: true }
       );
 
-      // simple history record
       await db.collection("settlementHistory").add({
         questionId,
         action: "lock",
@@ -209,25 +199,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, status: "pending" });
     }
 
-    // ──────────────── REOPEN (safety net) ────────────────
+    // ──────────────── REOPEN (back to OPEN) ────────────────
     if (action === "reopen") {
-      const updatedQuestion: any = {
+      const updatedQuestion = {
         ...question,
         status: "open" as QuestionStatus,
+        lockedAt: null,
+        settledAt: null,
+        outcome: undefined,
       };
-
-      delete updatedQuestion.outcome;
-      delete updatedQuestion.settledAt;
-      delete updatedQuestion.lockedAt;
 
       games[gameIndex].questions[questionIndex] = updatedQuestion;
       await roundRef.update({ games });
 
-      await statusRef.set(
+      // Tell Picks that this question is open again
+      await qsRef.set(
         {
           questionId,
           roundNumber: roundNumber ?? null,
-          status: "open",
+          status: "open" as QuestionStatus,
           updatedAt: now,
         },
         { merge: true }
@@ -276,15 +266,25 @@ export async function POST(req: NextRequest) {
     const isSponsorQuestion =
       updatedQuestion && updatedQuestion.isSponsorQuestion === true;
 
-    // ──────────────── Update streaks + picks for users whose ACTIVE pick is this question ────────────────
+    // ──────────────── Update questionStatus for Picks ────────────────
+    await qsRef.set(
+      {
+        questionId,
+        roundNumber: roundNumber ?? null,
+        status: finalStatus,
+        outcome,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    // ──────────────── Update streaks + picks ────────────────
     const usersSnap = await db
       .collection("users")
       .where("activeQuestionId", "==", questionId)
       .get();
 
     const batch = db.batch();
-
-    // Track sponsor draw winners (if applicable)
     const sponsorWinners: string[] = [];
 
     usersSnap.forEach((userDoc) => {
@@ -292,15 +292,18 @@ export async function POST(req: NextRequest) {
       const data = userDoc.data() as any;
       const activePick = data.activePick as "yes" | "no" | undefined;
 
-      // If they somehow have no activePick, skip
       if (!activePick) return;
 
       const win = outcome !== "void" && activePick === outcome;
 
       let current =
-        typeof data.currentStreak === "number" ? data.currentStreak : 0;
+        typeof data.currentStreak === "number"
+          ? data.currentStreak
+          : 0;
       let longest =
-        typeof data.longestStreak === "number" ? data.longestStreak : 0;
+        typeof data.longestStreak === "number"
+          ? data.longestStreak
+          : 0;
 
       if (outcome === "void") {
         // streak unchanged
@@ -321,14 +324,12 @@ export async function POST(req: NextRequest) {
           lastSettledAt: now,
           lastSettledRound: roundNumber ?? null,
           lastSettledQuestionId: questionId,
-          // clear the active pick – next question they pick becomes new streak pick
           activeQuestionId: null,
           activePick: null,
         },
         { merge: true }
       );
 
-      // update that player's pick doc with outcome + result
       const pickId = `${userId}_${questionId}`;
       const pickRef = db.collection("picks").doc(pickId);
 
@@ -344,13 +345,12 @@ export async function POST(req: NextRequest) {
         { merge: true }
       );
 
-      // --- Sponsor draw: collect winners for this sponsor question ---
       if (isSponsorQuestion && outcome !== "void" && win) {
         sponsorWinners.push(userId);
       }
     });
 
-    // --- Sponsor draw entries write (in same batch) ---
+    // Sponsor draw entries
     if (isSponsorQuestion && outcome !== "void" && sponsorWinners.length > 0) {
       const sponsorRoundRef = db
         .collection("sponsorDrawEntries")
@@ -374,21 +374,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // --- QuestionStatus override used by Picks page ---
-    const statusRefForBatch = db.collection("questionStatus").doc(questionId);
-    batch.set(
-      statusRefForBatch,
-      {
-        questionId,
-        roundNumber: roundNumber ?? null,
-        status: finalStatus,
-        outcome,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
-
-    // history record for the admin
+    // History record
     batch.set(db.collection("settlementHistory").doc(), {
       questionId,
       outcome,
