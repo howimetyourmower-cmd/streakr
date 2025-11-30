@@ -1,24 +1,22 @@
+// /app/admin/settlement/page.tsx
+
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
-import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  getDocs,
-  orderBy,
-  limit,
-  query,
-} from "firebase/firestore";
+import { useEffect, useState, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
-type Outcome = "yes" | "no" | "void";
+type QuestionOutcome = "yes" | "no" | "void";
 
 type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
+  sport?: string;
+  isSponsorQuestion?: boolean;
+  correctOutcome?: QuestionOutcome;
 };
 
 type ApiGame = {
@@ -26,13 +24,26 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
+  sport?: string;
   questions: ApiQuestion[];
 };
 
-type PicksApiResponse = { games: ApiGame[] };
+type PicksApiResponse = {
+  games: ApiGame[];
+  roundNumber: number;
+};
 
-type QuestionRow = {
+type SettlementAction =
+  | "lock"
+  | "reopen"
+  | "final_yes"
+  | "final_no"
+  | "final_void"
+  | "void";
+
+type Row = {
   id: string;
+  roundNumber: number;
   gameId: string;
   match: string;
   venue: string;
@@ -40,118 +51,77 @@ type QuestionRow = {
   quarter: number;
   question: string;
   status: QuestionStatus;
+  correctOutcome?: QuestionOutcome;
+  isSponsorQuestion?: boolean;
 };
 
-type SettlementLog = {
-  id: string;
-  questionId: string;
-  action: "lock" | "unlock" | "settle";
-  outcome?: Outcome | null;
-  match?: string;
-  question?: string;
-  quarter?: number | null;
-  adminDisplayName?: string | null;
-  createdAt?: string;
-  newStatus?: QuestionStatus;
+const statusClass = (status: QuestionStatus) => {
+  switch (status) {
+    case "open":
+      return "bg-green-600";
+    case "pending":
+      return "bg-yellow-500";
+    case "final":
+      return "bg-slate-600";
+    case "void":
+      return "bg-red-600";
+    default:
+      return "bg-slate-600";
+  }
 };
 
 export default function SettlementPage() {
-  const { user } = useAuth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const [rows, setRows] = useState<QuestionRow[]>([]);
+  // roundNumber is numeric (0 = Opening Round)
+  const [roundNumber, setRoundNumber] = useState<number>(() => {
+    const p = searchParams?.get("round");
+    const n = p ? Number(p) : NaN;
+    return Number.isNaN(n) ? 0 : n;
+  });
+
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [workingRowId, setWorkingRowId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string>("");
 
-  const [logs, setLogs] = useState<SettlementLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState("");
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string>("");
 
-  // --- Helpers ---
-  const formatStart = (iso: string) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-AU", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    });
-  };
+  // For the header dropdown label
+  const roundLabel = useMemo(() => {
+    const match = ROUND_OPTIONS.find((r) => r.roundNumber === roundNumber);
+    return match ? match.label : "Round";
+  }, [roundNumber]);
 
-  const statusColour = (status: QuestionStatus) => {
-    switch (status) {
-      case "open":
-        return "bg-green-600";
-      case "pending":
-        return "bg-yellow-500";
-      case "final":
-        return "bg-gray-600";
-      case "void":
-        return "bg-red-600";
-      default:
-        return "bg-gray-600";
-    }
-  };
+  // Keep URL in sync with selected round
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams ?? undefined);
+    params.set("round", String(roundNumber));
+    router.replace(`/admin/settlement?${params.toString()}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roundNumber]);
 
-  const formatLogTime = (iso?: string) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return "";
-    return d.toLocaleString("en-AU", {
-      day: "2-digit",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    });
-  };
-
-  const actionLabel = (log: SettlementLog) => {
-    if (log.action === "lock") return "Locked";
-    if (log.action === "unlock") return "Re-opened";
-    if (log.action === "settle") {
-      if (!log.outcome || log.outcome === "void") return "Voided";
-      return `Settled ${log.outcome.toUpperCase()}`;
-    }
-    return log.action;
-  };
-
-  const actionColour = (log: SettlementLog) => {
-    if (log.action === "lock") return "bg-yellow-500 text-black";
-    if (log.action === "unlock") return "bg-gray-600";
-    if (log.action === "settle") {
-      if (!log.outcome || log.outcome === "void") return "bg-gray-500";
-      if (log.outcome === "yes") return "bg-green-600";
-      if (log.outcome === "no") return "bg-red-600";
-    }
-    return "bg-gray-600";
-  };
-
-  // --- Load current questions from existing picks API ---
+  // Load picks for this round
   useEffect(() => {
     const load = async () => {
-      setLoading(true);
-      setError("");
-      setMessage(null);
-
       try {
-        const res = await fetch("/api/picks");
+        setLoading(true);
+        setError("");
+
+        const res = await fetch(`/api/picks?round=${roundNumber}`, {
+          cache: "no-store",
+        });
         if (!res.ok) {
           throw new Error(`API error: ${res.status}`);
         }
 
         const data: PicksApiResponse = await res.json();
 
-        const flat: QuestionRow[] = data.games.flatMap((g) =>
-          (g.questions || []).map((q) => ({
+        const flat: Row[] = data.games.flatMap((g) =>
+          g.questions.map((q) => ({
             id: q.id,
+            roundNumber: data.roundNumber,
             gameId: g.id,
             match: g.match,
             venue: g.venue,
@@ -159,498 +129,328 @@ export default function SettlementPage() {
             quarter: q.quarter,
             question: q.question,
             status: q.status,
+            correctOutcome: q.correctOutcome,
+            isSponsorQuestion: !!q.isSponsorQuestion,
           }))
         );
 
-        // Sort: open first, then pending, then final/void, then by start time
-        flat.sort((a, b) => {
-          const order: Record<QuestionStatus, number> = {
-            open: 0,
-            pending: 1,
-            final: 2,
-            void: 3,
-          };
-          const diff = order[a.status] - order[b.status];
-          if (diff !== 0) return diff;
-          return a.startTime.localeCompare(b.startTime);
-        });
-
         setRows(flat);
       } catch (err) {
-        console.error("Failed to load questions for settlement", err);
-        setError("Failed to load questions. Check /api/picks and try again.");
+        console.error("[Settlement] load error", err);
+        setError("Failed to load questions for this round.");
+        setRows([]);
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, []);
+  }, [roundNumber]);
 
-  // --- Load recent logs ---
-  useEffect(() => {
-    if (!user) return;
-
-    const loadLogs = async () => {
-      setLogsLoading(true);
-      setLogsError("");
-
-      try {
-        const q = query(
-          collection(db, "settlementLogs"),
-          orderBy("createdAt", "desc"),
-          limit(20)
-        );
-
-        const snap = await getDocs(q);
-
-        const items: SettlementLog[] = snap.docs.map((docSnap) => {
-          const data: any = docSnap.data() || {};
-          let createdAtIso: string | undefined;
-
-          const createdAt = data.createdAt;
-          if (createdAt && typeof createdAt.toDate === "function") {
-            createdAtIso = createdAt.toDate().toISOString();
-          } else if (typeof createdAt === "string") {
-            createdAtIso = createdAt;
-          }
-
-          return {
-            id: docSnap.id,
-            questionId: data.questionId ?? "",
-            action: data.action ?? "settle",
-            outcome: data.outcome ?? null,
-            match: data.match ?? "",
-            question: data.question ?? "",
-            quarter: data.quarter ?? null,
-            adminDisplayName: data.adminDisplayName ?? null,
-            createdAt: createdAtIso,
-            newStatus: data.newStatus ?? undefined,
-          } as SettlementLog;
-        });
-
-        setLogs(items);
-      } catch (err) {
-        console.error("Failed to load settlement logs", err);
-        setLogsError("Failed to load recent history.");
-      } finally {
-        setLogsLoading(false);
-      }
+  const formatStart = (iso: string) => {
+    if (!iso) return { date: "", time: "" };
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+    return {
+      date: d.toLocaleDateString("en-AU", {
+        weekday: "short",
+        day: "2-digit",
+        month: "short",
+      }),
+      time: d.toLocaleTimeString("en-AU", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }),
     };
+  };
 
-    loadLogs();
-  }, [user, message]);
+  const handleRoundChange = (value: string) => {
+    const num = Number(value);
+    if (!Number.isNaN(num)) {
+      setRoundNumber(num);
+    }
+  };
 
-  // --- LOCK / UNLOCK ---
-  const lockQuestion = async (
-    row: QuestionRow,
-    action: "lock" | "unlock"
-  ) => {
-    const confirmText =
-      action === "lock"
-        ? `Lock this question (no more picks)?\n\n"${row.question}"`
-        : `Re-open this question for picks?\n\n"${row.question}"`;
+  const applyLocalAction = (
+    rowId: string,
+    action: SettlementAction
+  ): { status: QuestionStatus; correctOutcome?: QuestionOutcome } => {
+    switch (action) {
+      case "lock":
+        return { status: "pending" };
+      case "reopen":
+        return { status: "open" };
+      case "final_yes":
+        return { status: "final", correctOutcome: "yes" };
+      case "final_no":
+        return { status: "final", correctOutcome: "no" };
+      case "final_void":
+      case "void":
+        return { status: "void", correctOutcome: "void" };
+      default:
+        return { status: "open" };
+    }
+  };
 
-    const confirmed = window.confirm(confirmText);
-    if (!confirmed) return;
-
-    setMessage(null);
-    setError("");
-    setWorkingRowId(row.id);
+  const handleAction = async (row: Row, action: SettlementAction) => {
+    setSaveError("");
+    setSavingId(row.id);
 
     try {
       const res = await fetch("/api/settlement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          roundNumber,
           questionId: row.id,
           action,
-          adminUid: user?.uid ?? null,
-          adminDisplayName:
-            (user as any)?.displayName || "Admin",
         }),
       });
 
       if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        const msg =
-          payload?.error ||
-          `Lock action failed (${res.status})`;
-        throw new Error(msg);
+        const text = await res.text();
+        console.error("Settlement error:", text);
+        throw new Error("Failed to update question. See console for details.");
       }
 
-      const payload = await res.json();
-      console.log("Lock/unlock response", payload);
-
-      const newStatus: QuestionStatus =
-        action === "lock" ? "pending" : "open";
+      // Apply optimistic local update so the admin can see the change instantly
+      const patch = applyLocalAction(row.id, action);
 
       setRows((prev) =>
-        prev.map((q) =>
-          q.id === row.id
-            ? {
-                ...q,
-                status: newStatus,
-              }
-            : q
+        prev.map((r) =>
+          r.id === row.id
+            ? { ...r, status: patch.status, correctOutcome: patch.correctOutcome }
+            : r
         )
       );
-
-      setMessage(
-        action === "lock"
-          ? `Locked question: "${row.question}"`
-          : `Re-opened question: "${row.question}"`
-      );
     } catch (err: any) {
-      console.error("Error locking/unlocking question", err);
-      setError(err?.message || "Failed to update lock status.");
+      console.error("[Settlement] handleAction error", err);
+      setSaveError(err?.message || "Failed to update question.");
     } finally {
-      setWorkingRowId(null);
+      setSavingId(null);
     }
   };
-
-  // --- SETTLE ---
-  const settleQuestion = async (row: QuestionRow, outcome: Outcome) => {
-    const confirmText =
-      outcome === "void"
-        ? `Void this question?\n\n"${row.question}"`
-        : `Settle this question as '${outcome.toUpperCase()}'?\n\n"${row.question}"`;
-
-    const confirmed = window.confirm(confirmText);
-    if (!confirmed) return;
-
-    setMessage(null);
-    setError("");
-    setWorkingRowId(row.id);
-
-    try {
-      const res = await fetch("/api/settlement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionId: row.id,
-          outcome,
-          adminUid: user?.uid ?? null,
-          adminDisplayName:
-            (user as any)?.displayName || "Admin",
-        }),
-      });
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}));
-        const msg =
-          payload?.error ||
-          `Settlement failed (${res.status})`;
-        throw new Error(msg);
-      }
-
-      const payload = await res.json();
-      console.log("Settlement response", payload);
-
-      const newStatus: QuestionStatus =
-        outcome === "void" ? "void" : "final";
-
-      setRows((prev) =>
-        prev.map((q) =>
-          q.id === row.id
-            ? {
-                ...q,
-                status: newStatus,
-              }
-            : q
-        )
-      );
-
-      setMessage(
-        `Settled: "${row.question}" → ${outcome.toUpperCase()} (updated ${
-          payload.picksUpdated ?? 0
-        } picks)`
-      );
-    } catch (err: any) {
-      console.error("Error settling question", err);
-      setError(err?.message || "Failed to settle question.");
-    } finally {
-      setWorkingRowId(null);
-    }
-  };
-
-  // --- Render ---
-  if (!user) {
-    return (
-      <div className="py-6 md:py-8">
-        <h1 className="text-2xl md:text-3xl font-bold mb-2">Settlement (admin)</h1>
-        <p className="text-sm text-white/70">
-          You must be logged in to use the settlement console.
-        </p>
-      </div>
-    );
-  }
 
   return (
-    <div className="py-6 md:py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl md:text-3xl font-bold">Settlement console</h1>
-        <p className="mt-1 text-sm text-white/70 max-w-2xl">
-          Internal tool to lock and settle Streakr questions. This calls{" "}
-          <code className="px-1 py-0.5 bg-black/40 rounded text-xs">
-            /api/settlement
-          </code>{" "}
-          and updates picks and question status. Use carefully.
-        </p>
-      </div>
-
-      {loading && (
-        <p className="text-sm text-white/70">Loading questions…</p>
-      )}
-
-      {!loading && error && (
-        <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-          {error}
-        </p>
-      )}
-
-      {!loading && message && (
-        <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-          {message}
-        </p>
-      )}
-
-      {!loading && rows.length === 0 && !error && (
-        <p className="text-sm text-white/70">
-          No questions found. Check that your <code>rounds</code> collection for
-          the 2026 season has games and questions.
-        </p>
-      )}
-
-      {/* Main questions table */}
-      {!loading && rows.length > 0 && (
-        <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
-          {/* Header */}
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-            <div className="text-sm font-semibold text-orange-300">
-              Questions to settle
-            </div>
-            <div className="text-[11px] text-gray-400">
-              Showing {rows.length} questions
-            </div>
+    <main className="min-h-screen bg-black text-white">
+      <section className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+        {/* Header */}
+        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
+              Settlement
+            </h1>
+            <p className="mt-2 text-sm text-white/70 max-w-xl">
+              Lock questions, settle outcomes and reopen if needed. Reopen is a
+              safety net if you lock or settle the wrong question.
+            </p>
           </div>
 
-          {/* Table header */}
-          <div className="hidden md:grid grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] px-4 py-2 text-[11px] text-gray-400 uppercase tracking-wide bg-black/40">
-            <div>Start</div>
-            <div>Match</div>
-            <div className="text-center">Q#</div>
-            <div>Question</div>
-            <div className="text-right">Lock / Settle</div>
+          {/* Round selector */}
+          <div className="flex flex-col items-start md:items-end gap-2 text-sm">
+            <span className="text-xs uppercase tracking-wide text-white/60">
+              Round
+            </span>
+            <select
+              value={roundNumber}
+              onChange={(e) => handleRoundChange(e.target.value)}
+              className="rounded-full bg-black border border-white/20 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+            >
+              {ROUND_OPTIONS.map((r) => (
+                <option key={r.key} value={r.roundNumber}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
           </div>
+        </header>
 
-          {/* Rows */}
-          <div className="divide-y divide-white/5">
+        {/* Meta strip */}
+        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black via-slate-900/70 to-black px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs md:text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center rounded-full bg-white/5 border border-white/20 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
+              AFL Season {CURRENT_SEASON}
+            </span>
+            <span className="text-white/80">
+              Updating settlement for{" "}
+              <span className="font-semibold text-white">{roundLabel}</span>
+            </span>
+          </div>
+          <div className="text-white/60">
+            Set the correct outcome once play has finished. Final results will
+            update player streaks automatically.
+          </div>
+        </div>
+
+        {/* Sponsor helper strip */}
+        <div className="rounded-xl bg-gradient-to-r from-amber-500/15 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+          <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
+            Sponsor Question
+          </span>
+          <span className="text-[12px] sm:text-[13px]">
+            If a question is tagged as the{" "}
+            <span className="font-semibold">Sponsor Question</span>, its
+            outcome drives the $100 gift card draw for this round.
+          </span>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-400">
+            {error}
+          </p>
+        )}
+        {saveError && (
+          <p className="text-sm text-red-400">
+            {saveError}
+          </p>
+        )}
+
+        {/* Table header */}
+        <div className="hidden lg:grid grid-cols-[1.2fr_3fr_0.6fr_2.2fr] text-xs text-white/70 px-4 pb-2">
+          <div>START</div>
+          <div>QUESTION</div>
+          <div className="text-center">STATUS</div>
+          <div className="text-center">SET OUTCOME</div>
+        </div>
+
+        {loading && (
+          <p className="text-sm text-white/70">
+            Loading questions…
+          </p>
+        )}
+
+        {!loading && rows.length === 0 && !error && (
+          <p className="text-sm text-white/70">
+            No questions found for this round.
+          </p>
+        )}
+
+        {/* Rows */}
+        {!loading && rows.length > 0 && (
+          <div className="space-y-2">
             {rows.map((row) => {
-              const start = formatStart(row.startTime);
-              const isWorking = workingRowId === row.id;
+              const { date, time } = formatStart(row.startTime);
+              const isSaving = savingId === row.id;
+              const isSponsor = !!row.isSponsorQuestion;
 
               return (
                 <div
                   key={row.id}
-                  className="px-4 py-3 flex flex-col gap-3 md:grid md:grid-cols-[160px,minmax(0,1.3fr),60px,minmax(0,2fr),140px] md:items-center bg-black/20 hover:bg-black/30 transition"
+                  className="rounded-lg bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] px-4 py-3 text-sm flex flex-col lg:grid lg:grid-cols-[1.2fr_3fr_0.6fr_2.2fr] gap-3 lg:items-center"
                 >
-                  {/* Start time + status */}
-                  <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-white/90">
-                      {start || "TBD"}
-                    </span>
-                    <span
-                      className={`inline-flex w-max items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${statusColour(
-                        row.status
-                      )}`}
-                    >
-                      {row.status.toUpperCase()}
-                    </span>
-                  </div>
-
-                  {/* Match + venue */}
+                  {/* Start */}
                   <div>
-                    <div className="text-sm font-semibold">
-                      {row.match || "Match"}
+                    <div className="font-semibold">
+                      {date || "—"}
                     </div>
-                    <div className="text-[11px] text-white/70">
-                      {row.venue || "Venue"}
+                    <div className="text-[11px] text-white/80">
+                      {time ? `${time} AEDT` : ""}
                     </div>
-                    <div className="md:hidden mt-1 flex items-center gap-1 text-[11px] text-white/60">
-                      <span>{start || "TBD"}</span>
+                    <div className="text-[11px] text-white/60 mt-1">
+                      {row.match}
                     </div>
-                  </div>
-
-                  {/* Q# */}
-                  <div className="md:text-center text-sm font-bold">
-                    Q{row.quarter}
-                  </div>
-
-                  {/* Question text */}
-                  <div className="text-sm leading-snug">
-                    {row.question}
-                    <div className="mt-1 text-[11px] text-white/50 break-all">
-                      <span className="font-mono text-white/60">
-                        ID: {row.id}
-                      </span>
+                    <div className="text-[11px] text-white/60">
+                      {row.venue}
+                    </div>
+                    <div className="mt-1 text-[11px] text-white/60">
+                      Q{row.quarter}
                     </div>
                   </div>
 
-                  {/* Lock / Settle buttons */}
-                  <div className="flex md:flex-col items-end md:items-end gap-1">
-                    {/* Lock / Unlock */}
-                    {row.status === "open" && (
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => lockQuestion(row, "lock")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-yellow-700/70 opacity-70"
-                            : "bg-yellow-500 hover:bg-yellow-600 text-black"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Lock"}
-                      </button>
-                    )}
-
-                    {row.status === "pending" && (
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => lockQuestion(row, "unlock")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-gray-700/70 opacity-70"
-                            : "bg-gray-600 hover:bg-gray-500"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Re-open"}
-                      </button>
-                    )}
-
-                    {/* Settle */}
-                    <div className="flex md:flex-col items-end gap-1">
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "yes")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-green-900/70 opacity-70"
-                            : "bg-green-600 hover:bg-green-700"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Settle YES"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "no")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-red-900/70 opacity-70"
-                            : "bg-red-600 hover:bg-red-700"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Settle NO"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isWorking}
-                        onClick={() => settleQuestion(row, "void")}
-                        className={`px-3 py-1 rounded-full text-[11px] font-semibold text-white w-24 text-center ${
-                          isWorking
-                            ? "bg-gray-800/80 opacity-70"
-                            : "bg-gray-700 hover:bg-gray-600"
-                        }`}
-                      >
-                        {isWorking ? "Working…" : "Void"}
-                      </button>
+                  {/* Question + sponsor badge */}
+                  <div>
+                    <p className="font-medium leading-snug">
+                      {row.question}
+                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {isSponsor && (
+                        <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                          Sponsor Question
+                        </span>
+                      )}
+                      {row.status === "pending" && (
+                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+                          Locked – awaiting result
+                        </span>
+                      )}
+                      {row.status === "final" && row.correctOutcome && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+                          Final outcome: {row.correctOutcome.toUpperCase()}
+                        </span>
+                      )}
+                      {row.status === "void" && (
+                        <span className="inline-flex items-center rounded-full bg-slate-500 text-black px-2 py-0.5 text-[10px] font-semibold">
+                          Void – excluded from streaks
+                        </span>
+                      )}
                     </div>
+                  </div>
+
+                  {/* Status pill */}
+                  <div className="flex lg:justify-center">
+                    <span
+                      className={`${statusClass(
+                        row.status
+                      )} inline-flex items-center px-3 py-1 rounded-full text-[11px] font-bold uppercase`}
+                    >
+                      {row.status}
+                    </span>
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-wrap justify-start lg:justify-center gap-2">
+                    <button
+                      type="button"
+                      disabled={isSaving || row.status === "final"}
+                      onClick={() => handleAction(row, "lock")}
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        row.status === "pending"
+                          ? "bg-yellow-400 text-black"
+                          : "bg-yellow-500/80 text-black hover:bg-yellow-400"
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      LOCK
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleAction(row, "reopen")}
+                      className="px-3 py-1 rounded-full text-xs font-bold bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      REOPEN
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleAction(row, "final_yes")}
+                      className="px-3 py-1 rounded-full text-xs font-bold bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      YES
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleAction(row, "final_no")}
+                      className="px-3 py-1 rounded-full text-xs font-bold bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      NO
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSaving}
+                      onClick={() => handleAction(row, "final_void")}
+                      className="px-3 py-1 rounded-full text-xs font-bold bg-slate-500 hover:bg-slate-400 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      VOID
+                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Recent history */}
-      <div className="rounded-2xl bg-black/30 border border-white/10 overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <div className="text-sm font-semibold text-orange-300">
-            Recent settlement history
-          </div>
-          <div className="text-[11px] text-gray-400">
-            {logsLoading
-              ? "Loading…"
-              : `Showing last ${Math.min(logs.length, 20)} actions`}
-          </div>
-        </div>
-
-        {logsError && (
-          <div className="px-4 py-3 text-sm text-red-400">
-            {logsError}
-          </div>
         )}
-
-        {!logsLoading && !logsError && logs.length === 0 && (
-          <div className="px-4 py-3 text-sm text-white/70">
-            No settlement actions logged yet.
-          </div>
-        )}
-
-        {!logsLoading && logs.length > 0 && (
-          <div className="divide-y divide-white/5">
-            {logs.map((log) => (
-              <div
-                key={log.id}
-                className="px-4 py-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${actionColour(
-                        log
-                      )}`}
-                    >
-                      {actionLabel(log)}
-                    </span>
-                    {log.newStatus && (
-                      <span className="text-[11px] text-white/60">
-                        → {log.newStatus.toUpperCase()}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[13px] font-medium truncate">
-                    {log.match || "Match"}{" "}
-                    {typeof log.quarter === "number"
-                      ? `(Q${log.quarter})`
-                      : ""}
-                  </div>
-                  <div className="text-[12px] text-white/70 truncate">
-                    {log.question}
-                  </div>
-                  <div className="mt-1 text-[11px] text-white/40 font-mono truncate">
-                    {log.questionId}
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-1 text-right">
-                  <span className="text-[11px] text-white/60">
-                    {formatLogTime(log.createdAt)}
-                  </span>
-                  <span className="text-[11px] text-white/50">
-                    {log.adminDisplayName || "Admin"}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
