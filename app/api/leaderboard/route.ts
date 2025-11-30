@@ -1,191 +1,108 @@
+// /app/api/leaderboard/route.ts
+
+import { NextRequest, NextResponse } from "next/server";
+import { db, auth } from "@/lib/admin";
+
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
-import { db } from "@/lib/admin"; // 🔧 adjust path if needed
-import { Timestamp } from "firebase-admin/firestore";
+type Scope = "overall" | string;
 
 type LeaderboardEntry = {
-  rank: number;
+  uid: string;
   displayName: string;
-  username: string;
-  favouriteTeam: string;
-  currentStreak: number;
-  bestStreak: number;
+  username?: string;
+  avatarUrl?: string;
+  rank: number;
+  streak: number; // meaning depends on scope
 };
 
-type LeaderboardData = {
-  round: number;
-  season: number;
-  roundLeaderboard: LeaderboardEntry[];
-  seasonLeaderboard: LeaderboardEntry[];
-  yourPosition: {
-    roundRank: number | null;
-    seasonRank: number | null;
-    currentStreak: number;
-    bestStreak: number;
-  };
+type LeaderboardApiResponse = {
+  entries: LeaderboardEntry[];
+  userEntry: LeaderboardEntry | null;
 };
 
-const CURRENT_SEASON = 2026;
-// For now, treat YOU as this user
-const DEMO_USER_ID = "demo-user";
+async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
 
-// Streaks per user using ordered picks
-function computeStreaks(picks: { result: string; settledAtDate?: Date }[]) {
-  // Ensure time order
-  const ordered = [...picks].sort((a, b) => {
-    const aTime = a.settledAtDate ? a.settledAtDate.getTime() : 0;
-    const bTime = b.settledAtDate ? b.settledAtDate.getTime() : 0;
-    return aTime - bTime;
-  });
+  const idToken = authHeader.substring("Bearer ".length).trim();
+  if (!idToken) return null;
 
-  let current = 0;
-  let best = 0;
-
-  for (const p of ordered) {
-    if (p.result === "correct") {
-      current++;
-      if (current > best) best = current;
-    } else if (p.result === "wrong") {
-      current = 0;
-    }
+  try {
+    const decoded = await auth.verifyIdToken(idToken);
+    return decoded.uid ?? null;
+  } catch (err) {
+    console.error("[/api/leaderboard] Failed to verify ID token", err);
+    return null;
   }
-
-  return { current, best };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Load all picks for current season
-    const picksSnap = await db
-      .collection("picks")
-      .where("season", "==", CURRENT_SEASON)
+    const url = new URL(req.url);
+    const scope = (url.searchParams.get("scope") || "overall") as Scope;
+
+    // season is currently unused but kept for future flexibility
+    const _season = url.searchParams.get("season") || "";
+
+    const currentUserId = await getUserIdFromRequest(req);
+
+    // For "overall" we rank by longest streak, otherwise by current streak.
+    const orderField =
+      scope === "overall" ? "longestStreak" : "currentStreak";
+
+    const snap = await db
+      .collection("users")
+      .orderBy(orderField, "desc")
+      .orderBy("username", "asc")
+      .limit(100)
       .get();
 
-    type RawPick = {
-      userID: string;
-      round: number;
-      result: string;
-      settledAtDate?: Date;
-    };
+    const entries: LeaderboardEntry[] = [];
+    let userEntry: LeaderboardEntry | null = null;
+    let rank = 1;
 
-    const rawPicks: RawPick[] = picksSnap.docs.map((doc) => {
-      const data = doc.data() as any;
-      const ts = data.settledAt as Timestamp | undefined;
-      const roundNumber = Number(data.round ?? 0); // round is string in your DB
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as any;
 
-      return {
-        userID: (data.userID ?? "") as string,
-        round: roundNumber,
-        result: (data.result ?? "pending") as string,
-        settledAtDate: ts ? ts.toDate() : undefined,
+      const rawStreak =
+        typeof data[orderField] === "number" ? data[orderField] : 0;
+
+      // Don’t show players with 0 streak for this scope.
+      if (rawStreak <= 0) return;
+
+      const displayName: string =
+        data.firstName ||
+        data.username ||
+        data.email ||
+        "Player";
+
+      const entry: LeaderboardEntry = {
+        uid: docSnap.id,
+        displayName,
+        username: data.username ?? "",
+        avatarUrl: data.avatarUrl ?? "",
+        rank,
+        streak: rawStreak,
       };
-    });
 
-    // 2) Group picks by userID
-    const picksByUser = new Map<string, RawPick[]>();
-    for (const p of rawPicks) {
-      if (!p.userID) continue;
-      if (!picksByUser.has(p.userID)) picksByUser.set(p.userID, []);
-      picksByUser.get(p.userID)!.push(p);
-    }
+      entries.push(entry);
 
-    // 3) Compute streaks for each user
-    type UserStats = {
-      userID: string;
-      currentStreak: number;
-      bestStreak: number;
-    };
-
-    const userStats: UserStats[] = [];
-    for (const [userID, picks] of picksByUser.entries()) {
-      const { current, best } = computeStreaks(picks);
-      userStats.push({ userID, currentStreak: current, bestStreak: best });
-    }
-
-    // 4) Load user profiles
-    const userIDs = Array.from(picksByUser.keys());
-    const userDocs = await Promise.all(
-      userIDs.map((uid) => db.collection("users").doc(uid).get())
-    );
-
-    const userInfo = new Map<
-      string,
-      { displayName: string; username: string; favouriteTeam: string }
-    >();
-
-    userDocs.forEach((doc) => {
-      if (!doc.exists) return;
-      const data = doc.data() as any;
-      userInfo.set(doc.id, {
-        displayName: data.displayName ?? "Player",
-        username: data.username ?? "user",
-        favouriteTeam: data.favouriteTeam ?? "Unknown",
-      });
-    });
-
-    // 5) Build leaderboard rows
-    type Row = LeaderboardEntry & { userID: string };
-
-    const rows: Row[] = userStats.map((s) => {
-      const info = userInfo.get(s.userID);
-      return {
-        userID: s.userID,
-        rank: 0, // temp
-        displayName: info?.displayName ?? "Player",
-        username: info?.username ?? "user",
-        favouriteTeam: info?.favouriteTeam ?? "Unknown",
-        currentStreak: s.currentStreak,
-        bestStreak: s.bestStreak,
-      };
-    });
-
-    // Sort by current streak desc, then best streak desc
-    rows.sort((a, b) => {
-      if (b.currentStreak !== a.currentStreak) {
-        return b.currentStreak - a.currentStreak;
+      if (currentUserId && docSnap.id === currentUserId) {
+        userEntry = entry;
       }
-      return b.bestStreak - a.bestStreak;
+
+      rank += 1;
     });
 
-    // Assign ranks
-    rows.forEach((row, index) => {
-      row.rank = index + 1;
-    });
-
-    // You don’t yet track “round-specific” streaks,
-    // so for now we use the same list for both round + season.
-    const roundLeaderboard: LeaderboardEntry[] = rows.slice(0, 100).map(
-      ({ userID, ...rest }) =>
-        rest // strip userID from public output
-    );
-    const seasonLeaderboard: LeaderboardEntry[] = roundLeaderboard;
-
-    // Pick some round number: use max round we saw, or 1 if none
-    const maxRound =
-      rawPicks.length > 0
-        ? rawPicks.reduce((max, p) => Math.max(max, p.round), 1)
-        : 1;
-
-    // Your position
-    const yourRow = rows.find((r) => r.userID === DEMO_USER_ID);
-
-    const payload: LeaderboardData = {
-      round: maxRound,
-      season: CURRENT_SEASON,
-      roundLeaderboard,
-      seasonLeaderboard,
-      yourPosition: {
-        roundRank: yourRow?.rank ?? null,
-        seasonRank: yourRow?.rank ?? null,
-        currentStreak: yourRow?.currentStreak ?? 0,
-        bestStreak: yourRow?.bestStreak ?? 0,
-      },
+    const response: LeaderboardApiResponse = {
+      entries,
+      userEntry,
     };
 
-    return NextResponse.json(payload);
+    return NextResponse.json(response);
   } catch (err) {
-    console.error("Error in /api/leaderboard:", err);
+    console.error("[/api/leaderboard] Unexpected error", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
