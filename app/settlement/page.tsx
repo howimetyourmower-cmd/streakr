@@ -76,6 +76,7 @@ export default function SettlementPage() {
       setLoading(true);
       setError(null);
       try {
+        console.log("[Settlement] Loading picks for round", num, "(", roundKey, ")");
         const res = await fetch(`/api/picks?round=${num}`, {
           cache: "no-store",
         });
@@ -97,6 +98,7 @@ export default function SettlementPage() {
           });
         });
 
+        console.log("[Settlement] Loaded rows:", allRows);
         setRows(allRows);
       } catch (err) {
         console.error("Settlement load error", err);
@@ -127,6 +129,11 @@ export default function SettlementPage() {
     setSavingId(question.id);
     setError(null);
     try {
+      console.log("[Settlement] Action", op, "for", {
+        roundNumber,
+        questionId: question.id,
+      });
+
       // Build payload using ONLY status + outcome (no 'action')
       const payload: any = {
         roundNumber,
@@ -156,14 +163,18 @@ export default function SettlementPage() {
           break;
       }
 
+      console.log("[Settlement] Payload to /api/settlement:", payload);
+
       const res = await fetch("/api/settlement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
+      const text = await res.text();
+      console.log("[Settlement] /api/settlement response:", res.status, text);
+
       if (!res.ok) {
-        const text = await res.text();
         throw new Error(`Settlement error: ${res.status} ${text}`);
       }
 
@@ -175,14 +186,12 @@ export default function SettlementPage() {
           switch (op) {
             case "lock":
               return { ...q, status: "pending" };
-            case "reopen": {
-              const { correctOutcome, ...rest } = q;
+            case "reopen":
               return {
-                ...rest,
+                ...q,
                 status: "open",
                 correctOutcome: undefined,
               };
-            }
             case "final_yes":
               return { ...q, status: "final", correctOutcome: "yes" };
             case "final_no":
@@ -370,9 +379,7 @@ export default function SettlementPage() {
                   {/* Buttons */}
                   <div className="flex flex-wrap justify-center gap-1 text-[11px]">
                     <button
-                      disabled={
-                        row.status !== "open" || isBusy(row.id)
-                      }
+                      disabled={row.status !== "open" || isBusy(row.id)}
                       onClick={() => callSettlement(row, "lock")}
                       className="px-3 py-1 rounded-full bg-amber-500/90 text-black font-semibold disabled:opacity-40"
                     >
@@ -411,8 +418,9 @@ export default function SettlementPage() {
                     >
                       VOID
                     </button>
+                    {/* Reopen: only disabled while busy so we can always try it */}
                     <button
-                      disabled={row.status === "open" || isBusy(row.id)}
+                      disabled={isBusy(row.id)}
                       onClick={() => callSettlement(row, "reopen")}
                       className="px-3 py-1 rounded-full bg-slate-700 text-white font-semibold disabled:opacity-40"
                     >
