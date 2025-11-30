@@ -6,6 +6,7 @@ import rounds2026 from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
+type UserQuestionResult = "win" | "loss" | "void";
 
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
@@ -30,7 +31,8 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  correctOutcome?: QuestionOutcome; // 👈 settlement result
+  correctOutcome?: QuestionOutcome;          // 👈 settlement result
+  resultForUser?: UserQuestionResult | null; // 👈 win / loss / void for this user
 };
 
 type ApiGame = {
@@ -312,6 +314,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const effectiveStatus = statusInfo?.status ?? jsonStatus;
       const correctOutcome = statusInfo?.outcome;
 
+      // personal result for this user
+      const userPick = userPicks[questionId];
+      let resultForUser: UserQuestionResult | null = null;
+
+      if (correctOutcome === "void") {
+        resultForUser = "void";
+      } else if (correctOutcome && userPick) {
+        resultForUser = userPick === correctOutcome ? "win" : "loss";
+      }
+
       const apiQuestion: ApiQuestion = {
         id: questionId,
         quarter: row.Quarter,
@@ -319,11 +331,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         status: effectiveStatus,
         sport: "AFL",
         isSponsorQuestion: !!isSponsorQuestion,
-        userPick: userPicks[questionId],
+        userPick,
         yesPercent,
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
+        resultForUser,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
