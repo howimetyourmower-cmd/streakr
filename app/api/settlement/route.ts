@@ -46,13 +46,23 @@ async function updateStreaksForQuestion(
   // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
+  // 🔧 IMPORTANT FIX:
+  // Use only questionId here so we definitely match the picks, even if
+  // roundNumber on the pick docs doesn't line up with what the UI passed in.
   const picksSnap = await db
     .collection("picks")
-    .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
 
-  if (picksSnap.empty) return;
+  if (picksSnap.empty) {
+    console.log(
+      "[/api/settlement] No picks found for questionId:",
+      questionId,
+      "roundNumber passed:",
+      roundNumber
+    );
+    return;
+  }
 
   const updates: Promise<unknown>[] = [];
 
@@ -69,7 +79,6 @@ async function updateStreaksForQuestion(
 
     const userRef = db.collection("users").doc(userId);
 
-    // Use a transaction per user so multiple questions still behave.
     const p = db.runTransaction(async (tx) => {
       const snap = await tx.get(userRef);
 
@@ -84,7 +93,7 @@ async function updateStreaksForQuestion(
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
-      // If user picked the correct outcome, streak +1; otherwise reset to 0.
+      // Correct pick = streak +1; wrong pick = reset to 0
       if (pick === outcome) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
@@ -99,7 +108,6 @@ async function updateStreaksForQuestion(
         {
           currentStreak,
           longestStreak,
-          // optional extra stats you can use later
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
