@@ -315,7 +315,6 @@ export default function PicksClient() {
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
 
-        // DEBUG: see if any sponsor questions are coming through at all
         console.log(
           "[PicksClient] Sponsor rows from API:",
           flat.filter((r) => r.isSponsorQuestion)
@@ -745,7 +744,7 @@ export default function PicksClient() {
       <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div>
-            <p className="text-[11px] uppercase tracking-wide text-white/60">
+            <p className="text-[11px] uppercase tracking-wide text:white/60">
               Streak progress
             </p>
             <p className="text-xs sm:text-sm text-white/80 max-w-md">
@@ -836,7 +835,7 @@ export default function PicksClient() {
 
       {/* FILTER BUTTONS */}
       <div className="flex flex-wrap gap-2 mb-6">
-        {(["open", "final", "pending", "void", "all"] as const).map((f) => (
+        {(["all", "open", "final", "pending", "void"] as const).map((f) => (
           <button
             key={f}
             onClick={() => applyFilter(f)}
