@@ -154,11 +154,11 @@ export default function ProfilePage() {
   useEffect(() => {
     const loadStats = async () => {
       try {
+        if (!user) return;
         setStatsLoading(true);
         setStatsError("");
 
-        // UPDATED: pass uid to API
-        const res = await fetch(`/api/profile?uid=${user!.uid}`);
+        const res = await fetch(`/api/profile?uid=${user.uid}`);
         if (!res.ok) {
           throw new Error(`API error: ${res.status}`);
         }
@@ -294,15 +294,21 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
+  // ---- LABEL FIX FOR OPENING ROUND ----
   const currentRoundLabel =
-    currentRound && currentRound > 0
+    currentRound === 0
+      ? "Active in Opening Round"
+      : currentRound && currentRound > 0
       ? `Active in Round ${currentRound}`
       : "Active this season";
 
   const longestRoundLabel =
-    currentRound && currentRound > 0
+    currentRound === 0
+      ? "This season • Opening Round"
+      : currentRound && currentRound > 0
       ? `This season • Round ${currentRound}`
       : "This season";
+  // ------------------------------------
 
   const displayCurrentStreak =
     stats?.currentStreak ?? form.currentStreak ?? 0;
@@ -698,7 +704,7 @@ export default function ProfilePage() {
             {/* Optional logo side */}
             <div className="flex justify-center md:justify-end">
               <img
-                src="/sponsor-placeholder.png" // replace with real logo when ready
+                src="/sponsor-placeholder.png"
                 alt="Sponsor logo"
                 className="w-28 opacity-90 md:w-32"
               />
