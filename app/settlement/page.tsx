@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
+import { ROUND_OPTIONS } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
@@ -14,15 +14,19 @@ type ApiQuestion = {
   status: QuestionStatus;
   sport: string;
   isSponsorQuestion?: boolean;
+  userPick?: "yes" | "no";
+  yesPercent?: number;
+  noPercent?: number;
+  commentCount?: number;
   correctOutcome?: QuestionOutcome;
 };
 
 type ApiGame = {
   id: string;
   match: string;
+  sport: string;
   venue: string;
   startTime: string;
-  sport: string;
   questions: ApiQuestion[];
 };
 
@@ -31,374 +35,382 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-type FlatQuestionRow = {
-  id: string;
+type QuestionRow = ApiQuestion & {
   gameId: string;
   match: string;
   venue: string;
   startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-  isSponsorQuestion?: boolean;
-  correctOutcome?: QuestionOutcome;
 };
 
-// Actions we send to /api/settlement
-type SettlementAction =
-  | "lock"
-  | "reopen"
-  | "final_yes"
-  | "final_no"
-  | "final_void"
-  | "void";
+type StatusFilter = "all" | "open" | "pending" | "final" | "void";
 
-function formatStart(iso: string) {
-  if (!iso) return { date: "", time: "" };
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
-
-  return {
-    date: d.toLocaleDateString("en-AU", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short",
-      timeZone: "Australia/Melbourne",
-    }),
-    time: d.toLocaleTimeString("en-AU", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-      timeZone: "Australia/Melbourne",
-    }),
-  };
-}
-
-function statusColour(status: QuestionStatus) {
-  switch (status) {
-    case "open":
-      return "bg-green-600";
-    case "pending":
-      return "bg-yellow-500";
-    case "final":
-      return "bg-blue-600";
-    case "void":
-      return "bg-red-600";
-    default:
-      return "bg-gray-600";
+/** Map a round key like "OR", "R1", "R2" → numeric roundNumber used by /api/picks */
+function roundKeyToNumber(key: string): number {
+  if (key === "OR") return 0;
+  const match = key.match(/^R(\d+)$/i);
+  if (match) {
+    const n = Number(match[1]);
+    if (!Number.isNaN(n) && n >= 1) return n;
   }
+  // fallback
+  return 0;
 }
 
 export default function SettlementPage() {
-  // 0 = Opening Round, 1 = Round 1, etc.
-  const [roundNumber, setRoundNumber] = useState<number>(0);
+  const [roundKey, setRoundKey] = useState<string>(ROUND_OPTIONS[0].key);
+  const [roundNumber, setRoundNumber] = useState<number>(
+    roundKeyToNumber(ROUND_OPTIONS[0].key)
+  );
 
-  const [rows, setRows] = useState<FlatQuestionRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [rows, setRows] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [error, setError] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [error, setError] = useState<string | null>(null);
 
-  // Friendly label for the header dropdown
-  const roundLabel = useMemo(() => {
-    const opt = ROUND_OPTIONS[roundNumber];
-    return opt ? opt.label : (roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`);
-  }, [roundNumber]);
-
-  // Load questions for selected round
-  const loadRound = async (round: number) => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const res = await fetch(`/api/picks?round=${round}`, {
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to load picks for round ${round}`);
-      }
-
-      const data: PicksApiResponse = await res.json();
-
-      const flat: FlatQuestionRow[] = data.games.flatMap((g) =>
-        g.questions.map((q) => ({
-          id: q.id,
-          gameId: g.id,
-          match: g.match,
-          venue: g.venue,
-          startTime: g.startTime,
-          quarter: q.quarter,
-          question: q.question,
-          status: q.status,
-          isSponsorQuestion: q.isSponsorQuestion,
-          correctOutcome: q.correctOutcome,
-        }))
-      );
-
-      setRows(flat);
-    } catch (err) {
-      console.error("[Settlement] loadRound error", err);
-      setError("Failed to load questions for this round.");
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Initial + when roundNumber changes
+  // Load questions whenever roundKey changes
   useEffect(() => {
-    loadRound(roundNumber);
-  }, [roundNumber]);
+    const num = roundKeyToNumber(roundKey);
+    setRoundNumber(num);
 
-  const handleRoundChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = Number(e.target.value);
-    if (!Number.isNaN(value)) {
-      setRoundNumber(value);
-    }
-  };
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/picks?round=${num}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`Failed to load picks: ${res.status}`);
+        }
+        const data: PicksApiResponse = await res.json();
+        const allRows: QuestionRow[] = [];
 
-  // Send settlement action for a specific question
-  const sendAction = async (questionId: string, action: SettlementAction) => {
+        data.games.forEach((g) => {
+          g.questions.forEach((q) => {
+            allRows.push({
+              ...q,
+              gameId: g.id,
+              match: g.match,
+              venue: g.venue,
+              startTime: g.startTime,
+            });
+          });
+        });
+
+        setRows(allRows);
+      } catch (err) {
+        console.error("Settlement load error", err);
+        setError("Failed to load questions for this round.");
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [roundKey]);
+
+  const roundLabel = useMemo(() => {
+    const found = ROUND_OPTIONS.find((r) => r.key === roundKey);
+    return found ? found.label : "Round";
+  }, [roundKey]);
+
+  const filteredRows = useMemo(() => {
+    if (statusFilter === "all") return rows;
+    return rows.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
+  async function callSettlement(
+    question: QuestionRow,
+    action:
+      | "lock"
+      | "reopen"
+      | "final_yes"
+      | "final_no"
+      | "final_void"
+  ) {
+    setSavingId(question.id);
+    setError(null);
     try {
-      setSavingId(questionId);
-      setError("");
-
       const res = await fetch("/api/settlement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           roundNumber,
-          questionId,
+          questionId: question.id,
           action,
         }),
       });
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || "Failed to update settlement");
+        throw new Error(`Settlement error: ${res.status} ${text}`);
       }
 
-      // Refresh questions so status + badges update
-      await loadRound(roundNumber);
+      // Update local state based on action so UI responds immediately
+      setRows((prev) =>
+        prev.map((q) => {
+          if (q.id !== question.id) return q;
+
+          if (action === "lock") {
+            return { ...q, status: "pending" };
+          }
+
+          if (action === "reopen") {
+            // 👇 THIS is the important bit – clear status & correctOutcome
+            const { correctOutcome, ...rest } = q;
+            return {
+              ...rest,
+              status: "open",
+              correctOutcome: undefined,
+            };
+          }
+
+          if (action === "final_yes") {
+            return { ...q, status: "final", correctOutcome: "yes" };
+          }
+          if (action === "final_no") {
+            return { ...q, status: "final", correctOutcome: "no" };
+          }
+          if (action === "final_void") {
+            return { ...q, status: "void", correctOutcome: "void" };
+          }
+          return q;
+        })
+      );
     } catch (err) {
-      console.error("[Settlement] sendAction error", err);
-      setError("Failed to update this question. Please try again.");
+      console.error(err);
+      setError("Failed to update that question. Please try again.");
     } finally {
       setSavingId(null);
     }
-  };
+  }
+
+  function statusBadge(status: QuestionStatus) {
+    const base =
+      "inline-flex items-center rounded-full px-3 py-0.5 text-[11px] font-semibold uppercase tracking-wide";
+    switch (status) {
+      case "open":
+        return `${base} bg-emerald-600/15 text-emerald-300 border border-emerald-500/40`;
+      case "pending":
+        return `${base} bg-amber-500/15 text-amber-300 border border-amber-400/40`;
+      case "final":
+        return `${base} bg-sky-600/15 text-sky-300 border border-sky-500/40`;
+      case "void":
+      default:
+        return `${base} bg-slate-600/15 text-slate-200 border border-slate-400/40`;
+    }
+  }
+
+  function outcomeLabel(row: QuestionRow) {
+    if (!row.correctOutcome) return "";
+    if (row.correctOutcome === "void") return "Void";
+    return row.correctOutcome === "yes" ? "YES correct" : "NO correct";
+  }
+
+  const isBusy = (id: string) => savingId === id;
 
   return (
     <main className="min-h-screen bg-black text-white">
       <section className="max-w-6xl mx-auto px-4 py-8 md:py-10 space-y-6">
-        {/* Header */}
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-              Settlement Console
+              Settlement centre
             </h1>
             <p className="mt-2 text-sm text-white/70 max-w-xl">
-              Lock questions before bounce, then mark them as correct, wrong or
-              void once stats are confirmed. Reopen is a safety net if you lock
-              or settle the wrong question.
+              Lock questions, mark the correct outcome, or reopen if you
+              made a mistake. Reopen is a safety net – it clears the result
+              and returns the question to OPEN.
             </p>
           </div>
 
           {/* Round selector */}
           <div className="flex flex-col items-start md:items-end gap-2 text-sm">
             <span className="text-xs uppercase tracking-wide text-white/60">
-              Season {CURRENT_SEASON}
+              Round
             </span>
-            <div className="inline-flex items-center gap-2">
-              <span className="text-xs text-white/60">Round</span>
-              <select
-                value={roundNumber}
-                onChange={handleRoundChange}
-                className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
-              >
-                {/* Map numeric index → ROUND_OPTIONS label */}
-                {ROUND_OPTIONS.map((opt, idx) => (
-                  <option key={opt.key} value={idx}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <p className="text-xs text-white/50">
-              Currently editing: <span className="font-semibold">{roundLabel}</span>
-            </p>
+            <select
+              value={roundKey}
+              onChange={(e) => setRoundKey(e.target.value)}
+              className="rounded-full bg-black border border-white/20 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+            >
+              {ROUND_OPTIONS.map((r) => (
+                <option key={r.key} value={r.key}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
           </div>
         </header>
 
-        {/* Info strip */}
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black via-slate-900/70 to-black px-4 py-3 text-xs md:text-sm flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
+        {/* Meta strip */}
+        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black via-slate-900/70 to-black px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 text-xs md:text-sm">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center rounded-full bg-white/5 border border-white/20 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
-              Admin only
+              Settlement • {roundLabel}
             </span>
-            <p className="mt-1 text-white/80">
-              Status is pulled into the player Picks page live. Make sure each
-              quarter&apos;s questions are locked before the quarter starts.
-            </p>
+            <span className="text-white/80">
+              Click{" "}
+              <span className="font-semibold text-amber-300">
+                Lock
+              </span>{" "}
+              to freeze picks, then{" "}
+              <span className="font-semibold text-sky-300">
+                YES / NO / VOID
+              </span>{" "}
+              when you know the result.{" "}
+              <span className="font-semibold text-white">
+                Reopen
+              </span>{" "}
+              sends the question back to OPEN.
+            </span>
           </div>
-          <div className="text-white/60">
-            <span className="font-semibold">Lock</span> →{" "}
-            <span className="font-semibold">Final YES / NO / VOID</span> →{" "}
-            <span className="font-semibold">Reopen</span> only if you need to
-            fix a mistake.
-          </div>
+        </div>
+
+        {/* Status filter row */}
+        <div className="flex flex-wrap gap-2 text-xs">
+          {(["all", "open", "pending", "final", "void"] as StatusFilter[]).map(
+            (s) => {
+              const label =
+                s === "all"
+                  ? "All"
+                  : s.charAt(0).toUpperCase() + s.slice(1);
+              const isActive = statusFilter === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`rounded-full px-3 py-1 border ${
+                    isActive
+                      ? "bg-orange-500 text-black border-orange-400"
+                      : "bg-black/40 text-white/80 border-white/20 hover:bg-white/5"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            }
+          )}
         </div>
 
         {/* Error */}
         {error && (
-          <div className="rounded-xl bg-red-900/40 border border-red-500/60 px-4 py-3 text-sm text-red-100">
+          <div className="rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-200">
             {error}
           </div>
         )}
 
-        {/* Main table */}
+        {/* Table */}
         <section className="rounded-2xl bg-black/80 border border-white/12 overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.7)]">
-          {/* Header row */}
-          <div className="px-4 py-3 border-b border-white/10 grid grid-cols-12 text-[11px] uppercase tracking-wide text-white/60 gap-2">
-            <div className="col-span-3">Match • Question</div>
-            <div className="col-span-2">Start</div>
-            <div className="col-span-1 text-center">Qtr</div>
-            <div className="col-span-2 text-center">Status</div>
-            <div className="col-span-4 text-right">Set outcome</div>
+          <div className="px-4 py-3 border-b border-white/10 text-xs uppercase tracking-wide text-white/60 grid grid-cols-[minmax(0,3fr)_auto_auto_auto] gap-4">
+            <span>Question</span>
+            <span className="text-center">Quarter</span>
+            <span className="text-center">Status</span>
+            <span className="text-center">Set outcome</span>
           </div>
 
-          {/* Loading / empty */}
           {loading && (
             <div className="px-4 py-6 text-sm text-white/70">
               Loading questions…
             </div>
           )}
 
-          {!loading && rows.length === 0 && (
+          {!loading && filteredRows.length === 0 && (
             <div className="px-4 py-6 text-sm text-white/70">
-              No questions found for this round.
+              No questions for this filter.
             </div>
           )}
 
-          {/* Rows */}
-          {!loading && rows.length > 0 && (
+          {!loading && filteredRows.length > 0 && (
             <div className="divide-y divide-white/10">
-              {rows.map((row) => {
-                const { date, time } = formatStart(row.startTime);
-                const isSaving = savingId === row.id;
-
-                return (
-                  <div
-                    key={row.id}
-                    className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-sm bg-black/60"
-                  >
-                    {/* Match + question */}
-                    <div className="col-span-3">
-                      <div className="font-semibold text-white">
-                        {row.match}
+              {filteredRows.map((row) => (
+                <div
+                  key={row.id}
+                  className="px-4 py-3 text-sm grid grid-cols-[minmax(0,3fr)_auto_auto_auto] gap-4 items-center bg-black/40"
+                >
+                  {/* Question text */}
+                  <div>
+                    <div className="font-semibold text-white">
+                      {row.question}
+                    </div>
+                    <div className="text-[11px] text-white/60 mt-0.5">
+                      {row.match} • {row.venue}
+                    </div>
+                    {row.correctOutcome && (
+                      <div className="mt-1 text-[11px] text-sky-300">
+                        Outcome: {outcomeLabel(row)}
                       </div>
-                      <div className="text-[11px] text-white/70">
-                        {row.question}
-                      </div>
-                      {row.isSponsorQuestion && (
-                        <span className="inline-flex mt-1 items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                          Sponsor Question
-                        </span>
-                      )}
-                      {row.correctOutcome && (
-                        <span className="inline-flex mt-1 ml-1 items-center rounded-full bg-emerald-500/20 text-emerald-200 px-2 py-0.5 text-[10px] font-semibold">
-                          Final result: {row.correctOutcome.toUpperCase()}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Start */}
-                    <div className="col-span-2 text-xs text-white/80">
-                      <div>{date}</div>
-                      <div>{time} AEDT</div>
-                      <div className="text-[11px] text-white/60 mt-0.5">
-                        {row.venue}
-                      </div>
-                    </div>
-
-                    {/* Quarter */}
-                    <div className="col-span-1 text-center font-bold">
-                      Q{row.quarter}
-                    </div>
-
-                    {/* Status */}
-                    <div className="col-span-2 text-center">
-                      <span
-                        className={`inline-flex items-center justify-center px-3 py-1 rounded-full text-[11px] font-bold ${statusColour(
-                          row.status
-                        )}`}
-                      >
-                        {row.status.toUpperCase()}
-                      </span>
-                    </div>
-
-                    {/* Action buttons */}
-                    <div className="col-span-4">
-                      <div className="flex flex-wrap justify-end gap-1.5">
-                        {/* YES = final_yes */}
-                        <button
-                          type="button"
-                          onClick={() => sendAction(row.id, "final_yes")}
-                          disabled={isSaving}
-                          className="px-3 py-1 rounded-full text-[11px] font-bold bg-green-600 hover:bg-green-700 disabled:opacity-40"
-                        >
-                          YES
-                        </button>
-
-                        {/* NO = final_no */}
-                        <button
-                          type="button"
-                          onClick={() => sendAction(row.id, "final_no")}
-                          disabled={isSaving}
-                          className="px-3 py-1 rounded-full text-[11px] font-bold bg-red-600 hover:bg-red-700 disabled:opacity-40"
-                        >
-                          NO
-                        </button>
-
-                        {/* VOID (final) */}
-                        <button
-                          type="button"
-                          onClick={() => sendAction(row.id, "final_void")}
-                          disabled={isSaving}
-                          className="px-3 py-1 rounded-full text-[11px] font-bold bg-gray-500 hover:bg-gray-600 disabled:opacity-40"
-                        >
-                          VOID
-                        </button>
-
-                        {/* LOCK → pending */}
-                        <button
-                          type="button"
-                          onClick={() => sendAction(row.id, "lock")}
-                          disabled={isSaving}
-                          className="px-3 py-1 rounded-full text-[11px] font-bold bg-yellow-400 text-black hover:bg-yellow-300 disabled:opacity-40"
-                        >
-                          LOCK
-                        </button>
-
-                        {/* REOPEN → open (clear outcome) */}
-                        <button
-                          type="button"
-                          onClick={() => sendAction(row.id, "reopen")}
-                          disabled={isSaving || row.status === "open"}
-                          className="px-3 py-1 rounded-full text-[11px] font-bold bg-slate-500 hover:bg-slate-400 disabled:opacity-30"
-                        >
-                          REOPEN
-                        </button>
-                      </div>
-                      {isSaving && (
-                        <p className="mt-1 text-[10px] text-white/50 text-right">
-                          Saving…
-                        </p>
-                      )}
-                    </div>
+                    )}
                   </div>
-                );
-              })}
+
+                  {/* Quarter */}
+                  <div className="text-center text-xs">
+                    Q{row.quarter}
+                  </div>
+
+                  {/* Status badge */}
+                  <div className="text-center">
+                    <span className={statusBadge(row.status)}>
+                      {row.status.toUpperCase()}
+                    </span>
+                  </div>
+
+                  {/* Buttons */}
+                  <div className="flex flex-wrap justify-center gap-1 text-[11px]">
+                    <button
+                      disabled={
+                        row.status !== "open" || isBusy(row.id)
+                      }
+                      onClick={() => callSettlement(row, "lock")}
+                      className="px-3 py-1 rounded-full bg-amber-500/90 text-black font-semibold disabled:opacity-40"
+                    >
+                      Lock
+                    </button>
+                    <button
+                      disabled={
+                        (row.status !== "pending" &&
+                          row.status !== "open") ||
+                        isBusy(row.id)
+                      }
+                      onClick={() => callSettlement(row, "final_yes")}
+                      className="px-3 py-1 rounded-full bg-emerald-500/90 text-black font-semibold disabled:opacity-40"
+                    >
+                      YES
+                    </button>
+                    <button
+                      disabled={
+                        (row.status !== "pending" &&
+                          row.status !== "open") ||
+                        isBusy(row.id)
+                      }
+                      onClick={() => callSettlement(row, "final_no")}
+                      className="px-3 py-1 rounded-full bg-red-500/90 text-black font-semibold disabled:opacity-40"
+                    >
+                      NO
+                    </button>
+                    <button
+                      disabled={
+                        (row.status !== "pending" &&
+                          row.status !== "open") ||
+                        isBusy(row.id)
+                      }
+                      onClick={() => callSettlement(row, "final_void")}
+                      className="px-3 py-1 rounded-full bg-slate-400 text-black font-semibold disabled:opacity-40"
+                    >
+                      VOID
+                    </button>
+                    <button
+                      disabled={isBusy(row.id)}
+                      onClick={() => callSettlement(row, "reopen")}
+                      className="px-3 py-1 rounded-full bg-slate-700 text-white font-semibold disabled:opacity-40"
+                    >
+                      Reopen
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>
