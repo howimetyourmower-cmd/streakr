@@ -44,6 +44,13 @@ type QuestionRow = ApiQuestion & {
 
 type StatusFilter = "all" | "open" | "pending" | "final" | "void";
 
+type SettlementAction =
+  | "lock"
+  | "reopen"
+  | "final_yes"
+  | "final_no"
+  | "final_void";
+
 /** Map a round key like "OR", "R1", "R2" → numeric roundNumber used by /api/picks & /api/settlement */
 function roundKeyToNumber(key: string): number {
   if (key === "OR") return 0;
@@ -67,49 +74,51 @@ export default function SettlementPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [error, setError] = useState<string | null>(null);
 
-  // Load questions whenever roundKey changes
-  useEffect(() => {
-    const num = roundKeyToNumber(roundKey);
+  // ---- shared loader so we can call it from useEffect AND after settlement ----
+  const loadRoundQuestions = async (rk: string) => {
+    const num = roundKeyToNumber(rk);
     setRoundNumber(num);
+    setLoading(true);
+    setError(null);
 
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        console.log("[Settlement] Loading picks for round", num, "(", roundKey, ")");
-        const res = await fetch(`/api/picks?round=${num}`, {
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to load picks: ${res.status}`);
-        }
-        const data: PicksApiResponse = await res.json();
-        const allRows: QuestionRow[] = [];
+    try {
+      console.log("[Settlement] Loading picks for round", num, "(", rk, ")");
+      const res = await fetch(`/api/picks?round=${num}`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to load picks: ${res.status}`);
+      }
+      const data: PicksApiResponse = await res.json();
+      const allRows: QuestionRow[] = [];
 
-        data.games.forEach((g) => {
-          g.questions.forEach((q) => {
-            allRows.push({
-              ...q,
-              gameId: g.id,
-              match: g.match,
-              venue: g.venue,
-              startTime: g.startTime,
-            });
+      data.games.forEach((g) => {
+        g.questions.forEach((q) => {
+          allRows.push({
+            ...q,
+            gameId: g.id,
+            match: g.match,
+            venue: g.venue,
+            startTime: g.startTime,
           });
         });
+      });
 
-        console.log("[Settlement] Loaded rows:", allRows);
-        setRows(allRows);
-      } catch (err) {
-        console.error("Settlement load error", err);
-        setError("Failed to load questions for this round.");
-        setRows([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+      console.log("[Settlement] Loaded rows:", allRows);
+      setRows(allRows);
+    } catch (err) {
+      console.error("Settlement load error", err);
+      setError("Failed to load questions for this round.");
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    load();
+  // Load on first mount + whenever roundKey changes
+  useEffect(() => {
+    loadRoundQuestions(roundKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundKey]);
 
   const roundLabel = useMemo(() => {
@@ -122,48 +131,18 @@ export default function SettlementPage() {
     return rows.filter((r) => r.status === statusFilter);
   }, [rows, statusFilter]);
 
-  async function callSettlement(
-    question: QuestionRow,
-    op: "lock" | "reopen" | "final_yes" | "final_no" | "final_void"
-  ) {
+  async function callSettlement(question: QuestionRow, action: SettlementAction) {
     setSavingId(question.id);
     setError(null);
-    try {
-      console.log("[Settlement] Action", op, "for", {
-        roundNumber,
-        questionId: question.id,
-      });
 
-      // Build payload using ONLY status + outcome (no 'action')
-      const payload: any = {
+    try {
+      const payload = {
         roundNumber,
         questionId: question.id,
+        action, // 👈 let the API decide status/outcome from this
       };
 
-      switch (op) {
-        case "lock":
-          payload.status = "pending";
-          payload.outcome = "lock";
-          break;
-        case "reopen":
-          payload.status = "open";
-          // no outcome field – backend will clear any existing outcome
-          break;
-        case "final_yes":
-          payload.status = "final";
-          payload.outcome = "yes";
-          break;
-        case "final_no":
-          payload.status = "final";
-          payload.outcome = "no";
-          break;
-        case "final_void":
-          payload.status = "void";
-          payload.outcome = "void";
-          break;
-      }
-
-      console.log("[Settlement] Payload to /api/settlement:", payload);
+      console.log("[Settlement] POST /api/settlement payload:", payload);
 
       const res = await fetch("/api/settlement", {
         method: "POST",
@@ -178,31 +157,8 @@ export default function SettlementPage() {
         throw new Error(`Settlement error: ${res.status} ${text}`);
       }
 
-      // Update local state so UI reflects immediately
-      setRows((prev) =>
-        prev.map((q) => {
-          if (q.id !== question.id) return q;
-
-          switch (op) {
-            case "lock":
-              return { ...q, status: "pending" };
-            case "reopen":
-              return {
-                ...q,
-                status: "open",
-                correctOutcome: undefined,
-              };
-            case "final_yes":
-              return { ...q, status: "final", correctOutcome: "yes" };
-            case "final_no":
-              return { ...q, status: "final", correctOutcome: "no" };
-            case "final_void":
-              return { ...q, status: "void", correctOutcome: "void" };
-            default:
-              return q;
-          }
-        })
-      );
+      // After any successful update, always reload the round from /api/picks
+      await loadRoundQuestions(roundKey);
     } catch (err) {
       console.error(err);
       setError("Failed to update that question. Please try again.");
@@ -276,12 +232,9 @@ export default function SettlementPage() {
               Settlement • {roundLabel}
             </span>
             <span className="text-white/80">
-              Click <span className="font-semibold text-amber-300">Lock</span>{" "}
-              to freeze picks, then{" "}
-              <span className="font-semibold text-sky-300">
-                YES / NO / VOID
-              </span>{" "}
-              when you know the result.{" "}
+              <span className="font-semibold text-amber-300">Lock</span> freezes
+              picks, <span className="font-semibold text-sky-300">YES / NO / VOID</span>{" "}
+              sets the result, and{" "}
               <span className="font-semibold">Reopen</span> resets it back to
               OPEN.
             </span>
@@ -418,7 +371,7 @@ export default function SettlementPage() {
                     >
                       VOID
                     </button>
-                    {/* Reopen: only disabled while busy so we can always try it */}
+                    {/* Reopen: only disabled while busy so it's always clickable otherwise */}
                     <button
                       disabled={isBusy(row.id)}
                       onClick={() => callSettlement(row, "reopen")}
