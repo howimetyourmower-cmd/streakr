@@ -18,7 +18,6 @@ import {
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
-type QuestionOutcome = "yes" | "no" | "void";
 
 type ApiQuestion = {
   id: string;
@@ -33,7 +32,6 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  correctOutcome?: QuestionOutcome;
 };
 
 type ApiGame = {
@@ -60,7 +58,8 @@ type QuestionRow = {
   sport: string; // text-only, e.g. "AFL"
   commentCount: number;
   isSponsorQuestion?: boolean;
-  correctOutcome?: QuestionOutcome;
+  correctOutcome?: "yes" | "no" | "void" | null;
+  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -219,6 +218,8 @@ function parseAflMatchTeams(match: string): {
   };
 }
 
+// --------------------------------------------------
+
 // localStorage key for persistence
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 
@@ -310,7 +311,14 @@ export default function PicksClient() {
             sport: q.sport ?? g.sport ?? "AFL",
             commentCount: q.commentCount ?? 0,
             isSponsorQuestion: !!q.isSponsorQuestion,
-            correctOutcome: q.correctOutcome,
+            correctOutcome:
+              q.status === "final" || q.status === "void"
+                ? (q as any).correctOutcome ?? null
+                : null,
+            resultForUser:
+              q.status === "final" || q.status === "void"
+                ? (q as any).resultForUser ?? null
+                : null,
           }))
         );
 
@@ -418,7 +426,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Optional: also try to load from /api/user-picks, but localStorage is primary --------
+  // -------- Optional: also try to load from /api/user-picks (server copy) --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -430,7 +438,13 @@ export default function PicksClient() {
       if (!rows.length) return;
 
       try {
-        const res = await fetch("/api/user-picks", { method: "GET" });
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/user-picks", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        });
         if (!res.ok) return;
 
         const data = await res.json();
@@ -521,8 +535,28 @@ export default function PicksClient() {
   };
 
   // -------- Local Yes/No % based on streak pick only --------
-  const getDisplayPercents = (rowId: string) => {
-    if (!activeQuestionId || !activeOutcome || rowId !== activeQuestionId) {
+  const getDisplayPercents = (row: QuestionRow) => {
+    // If question is final/void, ignore active streak UI and just show the
+    // "correct" side at 100% for this user
+    if (row.status === "final" || row.status === "void") {
+      if (!row.resultForUser || row.correctOutcome === "void") {
+        return { yes: 0, no: 0 };
+      }
+      if (row.resultForUser === "win") {
+        return row.correctOutcome === "yes"
+          ? { yes: 100, no: 0 }
+          : { yes: 0, no: 100 };
+      }
+      if (row.resultForUser === "loss") {
+        return row.correctOutcome === "yes"
+          ? { yes: 0, no: 100 }
+          : { yes: 100, no: 0 };
+      }
+      return { yes: 0, no: 0 };
+    }
+
+    // otherwise, live streak pick only
+    if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
     return activeOutcome === "yes"
@@ -566,14 +600,19 @@ export default function PicksClient() {
       console.error("Failed to save pick to localStorage", err);
     }
 
-    // best-effort save to API
+    // best-effort save to API (user's active streak pick)
     try {
+      const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
           questionId: row.id,
           outcome: pick,
+          roundNumber,
         }),
       });
 
@@ -728,10 +767,10 @@ export default function PicksClient() {
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
-          <p className="text-sm text-white/70">
+          <p className="text-sm text:white/70">
             Current Round:{" "}
             <span className="font-semibold text-orange-400">
-              Round {roundNumber}
+              {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
             </span>
           </p>
         )}
@@ -830,12 +869,12 @@ export default function PicksClient() {
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
-      {/* FILTER BUTTONS – ALL first */}
+      {/* FILTER BUTTONS */}
       <div className="flex flex-wrap gap-2 mb-6">
-        {(["all", "open", "pending", "final", "void"] as const).map((f) => (
+        {(["all", "open", "final", "pending", "void"] as const).map((f) => (
           <button
             key={f}
-            onClick={() => applyFilter(f)}
+            onClick={() => applyFilter(f === "all" ? "all" : f)}
             className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
               activeFilter === f
                 ? "bg-orange-500"
@@ -868,33 +907,10 @@ export default function PicksClient() {
           const isActive = row.id === activeQuestionId;
           const isYesActive = isActive && activeOutcome === "yes";
           const isNoActive = isActive && activeOutcome === "no";
-          const { yes: yesPct, no: noPct } = getDisplayPercents(row.id);
+          const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
-          const isFinal = row.status === "final";
-          const userPicked = row.userPick;
-          const correctOutcome = row.correctOutcome;
-
-          let resultLabel: string | null = null;
-          let resultClass = "";
-
-          if (isFinal && correctOutcome) {
-            if (correctOutcome === "void") {
-              resultLabel = "Question void – no impact on streak";
-              resultClass = "bg-gray-500 text-white";
-            } else if (!userPicked) {
-              resultLabel =
-                correctOutcome === "yes" ? "Result: YES" : "Result: NO";
-              resultClass = "bg-slate-700 text-white";
-            } else if (userPicked === correctOutcome) {
-              resultLabel = "You were right!";
-              resultClass = "bg-emerald-500 text-black";
-            } else {
-              resultLabel = "You were wrong";
-              resultClass = "bg-red-500 text-white";
-            }
-          }
 
           const parsed =
             row.sport.toUpperCase() === "AFL"
@@ -1037,20 +1053,25 @@ export default function PicksClient() {
                         Sponsor Question
                       </span>
                     )}
-                    {resultLabel && (
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${resultClass}`}
-                      >
-                        {resultLabel}
-                      </span>
-                    )}
+                    {(row.status === "final" || row.status === "void") &&
+                      row.resultForUser && (
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            row.resultForUser === "win"
+                              ? "bg-emerald-400 text-black"
+                              : row.resultForUser === "loss"
+                              ? "bg-red-500 text-black"
+                              : "bg-slate-500 text-white"
+                          }`}
+                        >
+                          {row.resultForUser === "win"
+                            ? "You were right!"
+                            : row.resultForUser === "loss"
+                            ? "You missed this one"
+                            : "Void – no change"}
+                        </span>
+                      )}
                   </div>
-                  {isSponsor && (
-                    <p className="mt-0.5 text-[11px] text-amber-200/90">
-                      Get this one right to go into the draw for this
-                      round&apos;s $100 sponsor gift card.*
-                    </p>
-                  )}
                 </div>
 
                 {/* PICK / YES / NO */}
