@@ -1,9 +1,11 @@
 // /app/api/leaderboard/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/admin";
+import { db, auth } from "@/lib/admin";
 
 export const dynamic = "force-dynamic";
+
+type Scope = "overall" | string;
 
 type LeaderboardEntry = {
   uid: string;
@@ -11,7 +13,7 @@ type LeaderboardEntry = {
   username?: string;
   avatarUrl?: string;
   rank: number;
-  streak: number; // meaning depends on scope
+  streak: number;
 };
 
 type LeaderboardApiResponse = {
@@ -19,84 +21,87 @@ type LeaderboardApiResponse = {
   userEntry: LeaderboardEntry | null;
 };
 
-type Scope = "overall" | string;
+async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+  const token = authHeader.substring("Bearer ".length).trim();
+  if (!token) return null;
+
+  try {
+    const decoded = await auth.verifyIdToken(token);
+    return decoded.uid ?? null;
+  } catch (err) {
+    console.error("[/api/leaderboard] Failed to verify ID token", err);
+    return null;
+  }
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const { searchParams } = new URL(req.url);
+    const url = new URL(req.url);
+    const scope = (url.searchParams.get("scope") || "overall") as Scope;
 
-    const scopeParam = (searchParams.get("scope") ?? "overall") as Scope;
-    const uidParam = searchParams.get("uid") || null;
-    // season is currently unused but safe to accept
-    // const seasonParam = searchParams.get("season");
+    const currentUserId = await getUserIdFromRequest(req);
 
-    // -------------------------------
     // 1) Load all users
-    // -------------------------------
-    const usersSnap = await db.collection("users").get();
+    const snap = await db.collection("users").get();
 
-    const rows: Omit<LeaderboardEntry, "rank">[] = [];
+    const entries: LeaderboardEntry[] = [];
 
-    usersSnap.forEach((docSnap) => {
-      const data = docSnap.data() as any;
+    snap.forEach((docSnap) => {
+      const u = docSnap.data() as any;
+      const uid = docSnap.id;
 
-      const currentStreak =
-        typeof data.currentStreak === "number" ? data.currentStreak : 0;
-      const longestStreak =
-        typeof data.longestStreak === "number" ? data.longestStreak : 0;
+      const firstName: string = u.firstName ?? "";
+      const surname: string = u.surname ?? "";
+      const username: string = u.username ?? "";
+      const email: string = u.email ?? "";
+      const avatarUrl: string | undefined = u.avatarUrl ?? undefined;
 
-      // Decide which streak to show for this scope
-      const streakForScope =
-        scopeParam === "overall" ? longestStreak : currentStreak;
-
-      const displayName: string =
-        (typeof data.username === "string" && data.username.trim()) ||
-        (typeof data.firstName === "string" && data.firstName.trim()) ||
-        (typeof data.displayName === "string" && data.displayName.trim()) ||
-        (typeof data.email === "string" && data.email.trim()) ||
+      const displayName =
+        (firstName && surname && `${firstName} ${surname}`) ||
+        username ||
+        email ||
         "Player";
 
-      const username =
-        typeof data.username === "string" && data.username.trim().length > 0
-          ? data.username.trim()
-          : undefined;
+      const currentStreak: number =
+        typeof u.currentStreak === "number" ? u.currentStreak : 0;
+      const longestStreak: number =
+        typeof u.longestStreak === "number" ? u.longestStreak : 0;
 
-      const avatarUrl =
-        typeof data.avatarUrl === "string" && data.avatarUrl.trim().length > 0
-          ? data.avatarUrl.trim()
-          : undefined;
+      const streak =
+        scope === "overall" ? longestStreak : currentStreak;
 
-      rows.push({
-        uid: docSnap.id,
+      // You *can* filter out zero-streak players by uncommenting this:
+      // if (streak <= 0) return;
+
+      entries.push({
+        uid,
         displayName,
         username,
         avatarUrl,
-        streak: streakForScope,
+        rank: 0, // we assign below
+        streak,
       });
     });
 
-    // -------------------------------
-    // 2) Sort & rank
-    // -------------------------------
-    rows.sort((a, b) => {
-      // Highest streak first
-      if (b.streak !== a.streak) return b.streak - a.streak;
-      // Tie-break alphabetically by name
-      return a.displayName.localeCompare(b.displayName);
+    // 2) Sort and assign ranks
+    entries.sort(
+      (a, b) =>
+        b.streak - a.streak ||
+        a.displayName.localeCompare(b.displayName)
+    );
+
+    entries.forEach((entry, index) => {
+      entry.rank = index + 1;
     });
 
-    const entries: LeaderboardEntry[] = rows.map((r, index) => ({
-      ...r,
-      rank: index + 1,
-    }));
-
-    // -------------------------------
-    // 3) Logged-in user's row (if uid passed in)
-    // -------------------------------
+    // 3) Find current user's row (for the orange highlight)
     const userEntry =
-      uidParam !== null
-        ? entries.find((e) => e.uid === uidParam) ?? null
-        : null;
+      currentUserId &&
+      entries.find((e) => e.uid === currentUserId) ||
+      null;
 
     const payload: LeaderboardApiResponse = {
       entries,
@@ -105,13 +110,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json(payload);
   } catch (error) {
-    console.error("[/api/leaderboard] Error loading leaderboard", error);
+    console.error("[/api/leaderboard] Unexpected error", error);
     return NextResponse.json(
-      {
-        entries: [],
-        userEntry: null,
-        error: "Internal server error",
-      },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
