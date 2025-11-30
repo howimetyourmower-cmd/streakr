@@ -7,18 +7,22 @@ import rounds2026 from "@/data/rounds-2026.json";
 // If Next/Vercel ever complains about DYNAMIC_SERVER_USAGE, uncomment this:
 // export const dynamic = "force-dynamic";
 
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
+
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-// Matches the flat JSON rows in rounds-2026.json
+// This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
-  Round: string;     // "OR", "R1", "R2", ...
-  Game: number;      // 1, 2, 3...
-  Match: string;     // "Sydney vs Carlton"
-  Venue: string;     // "SCG, Sydney"
+  Round: string; // "OR", "R1", "R2", ...
+  Game: number; // 1, 2, 3...
+  Match: string; // "Sydney vs Carlton"
+  Venue: string; // "SCG, Sydney"
   StartTime: string; // "2026-03-05T19:30:00+11:00"
   Question: string;
   Quarter: number;
-  Status: string;    // "Open", "Final", "Pending", "Void"
+  Status: string; // "Open", "Final", "Pending", "Void"
 };
 
 type ApiQuestion = {
@@ -54,15 +58,15 @@ type SponsorQuestionConfig = {
 };
 
 type QuestionStatusDoc = {
+  roundNumber: number | string | null;
   questionId: string;
-  status: QuestionStatus | string;
-  roundNumber?: number | null;
+  status: QuestionStatus;
 };
 
 // Coerce raw JSON to array of rows
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
-// Map numeric roundNumber (used in URL) → code used in JSON
+// Map numeric roundNumber (used in Firestore & URL) → code used in JSON
 // 0 -> "OR" (Opening Round), 1 -> "R1", 2 -> "R2", etc.
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
@@ -96,9 +100,9 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
-    const sponsorQuestion = data.sponsorQuestion as
-      | SponsorQuestionConfig
-      | undefined;
+    const sponsorQuestion =
+      (data.sponsorQuestion as SponsorQuestionConfig | undefined) ??
+      null;
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
@@ -115,8 +119,10 @@ async function getPickStatsForRound(
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
 }> {
-  const pickStats: Record<string, { yes: number; no: number; total: number }> =
-    {};
+  const pickStats: Record<
+    string,
+    { yes: number; no: number; total: number }
+  > = {};
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
@@ -180,35 +186,53 @@ async function getCommentCountsForRound(
 }
 
 /**
- * Get latest status overrides from questionStatus collection.
- * We *don’t* filter by roundNumber – instead we build a map by questionId.
- * Question IDs are unique across the season (they include round + game),
- * so it’s safe to just read them all and let the client use what it needs.
+ * Question status overrides stored in `questionStatus`.
+ * We used to filter by `roundNumber` in the query; instead we now
+ * load all docs and match in code, tolerating number vs string.
  */
-async function getQuestionStatusOverrides(): Promise<
-  Record<string, QuestionStatus>
-> {
+async function getQuestionStatusForRound(
+  roundNumber: number
+): Promise<Record<string, QuestionStatus>> {
   const map: Record<string, QuestionStatus> = {};
+  const rnStr = String(roundNumber);
 
   try {
     const snap = await db.collection("questionStatus").get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as QuestionStatusDoc;
-      if (!data.questionId || !data.status) return;
+      const qid = data.questionId;
+      if (!qid) return;
 
-      const raw = String(data.status).toLowerCase();
+      const rn = data.roundNumber;
+      const rnMatches =
+        rn === roundNumber || String(rn) === rnStr || rn === null;
+
+      if (!rnMatches) return;
+
+      const rawStatus = (data.status || "open") as QuestionStatus;
       let status: QuestionStatus;
+      switch (rawStatus) {
+        case "pending":
+        case "final":
+        case "void":
+        case "open":
+          status = rawStatus;
+          break;
+        default:
+          status = "open";
+      }
 
-      if (raw === "pending") status = "pending";
-      else if (raw === "final") status = "final";
-      else if (raw === "void") status = "void";
-      else status = "open";
-
-      map[data.questionId] = status;
+      map[qid] = status;
     });
+
+    console.log(
+      "[/api/picks] questionStatus overrides for round",
+      roundNumber,
+      Object.keys(map)
+    );
   } catch (error) {
-    console.error("[/api/picks] Error fetching questionStatus overrides", error);
+    console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
   return map;
@@ -260,8 +284,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // 6) Status overrides from questionStatus (all rounds; keyed by questionId)
-    const statusOverrides = await getQuestionStatusOverrides();
+    // 6) Status overrides from questionStatus
+    const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
     // 7) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
@@ -288,10 +312,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
 
-      const yesPercent =
-        total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-      const noPercent =
-        total > 0 ? Math.round((stats.no / total) * 100) : 0;
+      const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+      const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const isSponsorQuestion =
         sponsorConfig &&
@@ -300,9 +322,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const jsonStatusRaw = row.Status || "Open";
       const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
-
-      const overrideStatus = statusOverrides[questionId];
-      const effectiveStatus = overrideStatus ?? jsonStatus;
+      const dbStatus = statusOverrides[questionId];
+      const effectiveStatus = dbStatus ?? jsonStatus;
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
