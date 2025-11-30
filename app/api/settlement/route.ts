@@ -218,6 +218,7 @@ export async function POST(req: NextRequest) {
           questionId,
           roundNumber: roundNumber ?? null,
           status: "open" as QuestionStatus,
+          outcome: null,
           updatedAt: now,
         },
         { merge: true }
@@ -262,7 +263,7 @@ export async function POST(req: NextRequest) {
     games[gameIndex].questions[questionIndex] = updatedQuestion;
     await roundRef.update({ games });
 
-    // Is this the sponsor question for this round?
+    // Is this the sponsor question for this round? (kept from your version)
     const isSponsorQuestion =
       updatedQuestion && updatedQuestion.isSponsorQuestion === true;
 
@@ -278,35 +279,50 @@ export async function POST(req: NextRequest) {
       { merge: true }
     );
 
-    // ──────────────── Update streaks + picks ────────────────
-    const usersSnap = await db
-      .collection("users")
-      .where("activeQuestionId", "==", questionId)
-      .get();
+    // ──────────────── Update streaks + picks (NEW LOGIC) ────────────────
+    // Drive from `picks` collection instead of users.activeQuestionId
+    let picksQuery: FirebaseFirestore.Query = db
+      .collection("picks")
+      .where("questionId", "==", questionId);
+
+    if (typeof roundNumber === "number") {
+      picksQuery = picksQuery.where("roundNumber", "==", roundNumber);
+    }
+
+    const picksSnap = await picksQuery.get();
 
     const batch = db.batch();
     const sponsorWinners: string[] = [];
 
-    usersSnap.forEach((userDoc) => {
-      const userId = userDoc.id;
-      const data = userDoc.data() as any;
-      const activePick = data.activePick as "yes" | "no" | undefined;
+    for (const pickDoc of picksSnap.docs) {
+      const pickData = pickDoc.data() as {
+        userId?: string;
+        pick?: "yes" | "no";
+        roundNumber?: number;
+      };
 
-      if (!activePick) return;
+      const userId = pickData.userId;
+      const userPick = pickData.pick;
 
-      const win = outcome !== "void" && activePick === outcome;
+      if (!userId || (userPick !== "yes" && userPick !== "no")) continue;
+
+      const userRef = db.collection("users").doc(userId);
+      const userSnap = await userRef.get();
+      const userData = (userSnap.exists ? userSnap.data() : {}) as any;
 
       let current =
-        typeof data.currentStreak === "number"
-          ? data.currentStreak
+        typeof userData.currentStreak === "number"
+          ? userData.currentStreak
           : 0;
       let longest =
-        typeof data.longestStreak === "number"
-          ? data.longestStreak
+        typeof userData.longestStreak === "number"
+          ? userData.longestStreak
           : 0;
 
+      const win = outcome !== "void" && userPick === outcome;
+
       if (outcome === "void") {
-        // streak unchanged
+        // streak unchanged for void
       } else if (win) {
         current += 1;
         if (current > longest) longest = current;
@@ -314,7 +330,6 @@ export async function POST(req: NextRequest) {
         current = 0;
       }
 
-      const userRef = db.collection("users").doc(userId);
       batch.set(
         userRef,
         {
@@ -324,17 +339,15 @@ export async function POST(req: NextRequest) {
           lastSettledAt: now,
           lastSettledRound: roundNumber ?? null,
           lastSettledQuestionId: questionId,
+          // Optional clean-up fields, safe even if they weren't set:
           activeQuestionId: null,
           activePick: null,
         },
         { merge: true }
       );
 
-      const pickId = `${userId}_${questionId}`;
-      const pickRef = db.collection("picks").doc(pickId);
-
       batch.set(
-        pickRef,
+        pickDoc.ref,
         {
           outcome,
           result: outcome === "void" ? "void" : win ? "win" : "loss",
@@ -348,7 +361,7 @@ export async function POST(req: NextRequest) {
       if (isSponsorQuestion && outcome !== "void" && win) {
         sponsorWinners.push(userId);
       }
-    });
+    }
 
     // Sponsor draw entries
     if (isSponsorQuestion && outcome !== "void" && sponsorWinners.length > 0) {
