@@ -1,11 +1,9 @@
 // /app/api/profile/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, auth } from "@/lib/admin";
+import { db } from "@/lib/admin";
 
-export const dynamic = "force-dynamic";
-
-type StatsResponse = {
+type ApiProfileStats = {
   displayName: string;
   username: string;
   favouriteTeam: string;
@@ -13,11 +11,11 @@ type StatsResponse = {
   state?: string;
   currentStreak: number;
   bestStreak: number;
-  correctPercentage: number;
+  correctPercentage: number; // 0–100
   roundsPlayed: number;
 };
 
-type RecentPickResponse = {
+type ApiRecentPick = {
   id: string;
   round: string | number;
   match: string;
@@ -27,46 +25,24 @@ type RecentPickResponse = {
   settledAt?: string;
 };
 
-// Optional helper – only used if no ?uid is passed
-async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-
-  const idToken = authHeader.substring("Bearer ".length).trim();
-  if (!idToken) return null;
-
-  try {
-    const decoded = await auth.verifyIdToken(idToken);
-    return decoded.uid ?? null;
-  } catch (err) {
-    console.error("[/api/profile] Failed to verify ID token", err);
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
-    let uid = url.searchParams.get("uid");
-
-    // Fallback to auth header if no uid query param
-    if (!uid) {
-      uid = await getUserIdFromRequest(req);
-    }
+    const uid = url.searchParams.get("uid");
 
     if (!uid) {
       return NextResponse.json(
-        { error: "Unauthorised: missing uid" },
-        { status: 401 }
+        { error: "Missing uid" },
+        { status: 400 }
       );
     }
 
+    // ── 1) Load user doc ───────────────────────────────────────
     const userRef = db.collection("users").doc(uid);
-    const snap = await userRef.get();
+    const userSnap = await userRef.get();
 
-    if (!snap.exists) {
-      // Create a super-basic default so UI still works
-      const emptyStats: StatsResponse = {
+    if (!userSnap.exists) {
+      const emptyStats: ApiProfileStats = {
         displayName: "Player",
         username: "",
         favouriteTeam: "",
@@ -77,49 +53,93 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         correctPercentage: 0,
         roundsPlayed: 0,
       };
-
       return NextResponse.json({
         stats: emptyStats,
-        recentPicks: [] as RecentPickResponse[],
+        recentPicks: [] as ApiRecentPick[],
       });
     }
 
-    const data = snap.data() as any;
+    const u = userSnap.data() as any;
 
-    const displayName: string =
-      data.firstName ||
-      data.username ||
-      data.email ||
+    const username: string = u.username ?? "";
+    const firstName: string = u.firstName ?? "";
+    const email: string = u.email ?? "";
+    const suburb: string = u.suburb ?? "";
+    const state: string = u.state ?? "";
+    const favouriteTeam: string = u.team ?? "";
+
+    const currentStreak: number =
+      typeof u.currentStreak === "number" ? u.currentStreak : 0;
+    const longestStreak: number =
+      typeof u.longestStreak === "number" ? u.longestStreak : 0;
+
+    const displayName =
+      firstName ||
+      username ||
+      email ||
       "Player";
 
-    const stats: StatsResponse = {
+    // ── 2) Load picks for roundsPlayed + "Last 5 picks" ────────
+    const picksSnap = await db
+      .collection("picks")
+      .where("userId", "==", uid)
+      .limit(25)
+      .get();
+
+    const roundsPlayedSet = new Set<number>();
+    const recentPicks: ApiRecentPick[] = [];
+
+    picksSnap.forEach((docSnap) => {
+      const data = docSnap.data() as any;
+
+      const roundNumber: number =
+        typeof data.roundNumber === "number" ? data.roundNumber : 0;
+      const match: string = data.match ?? "";
+      const question: string = data.question ?? "";
+      const pick: "yes" | "no" =
+        data.pick === "no" ? "no" : "yes";
+
+      roundsPlayedSet.add(roundNumber);
+
+      // Build a simple "pending" recent pick entry.
+      if (recentPicks.length < 5) {
+        recentPicks.push({
+          id: docSnap.id,
+          round: roundNumber,
+          match,
+          question,
+          userPick: pick,
+          result: "pending",
+          settledAt: undefined,
+        });
+      }
+    });
+
+    const roundsPlayed = roundsPlayedSet.size;
+
+    // For now we keep correct% at 0 until we wire full results
+    const correctPercentage = 0;
+
+    const stats: ApiProfileStats = {
       displayName,
-      username: data.username ?? "",
-      favouriteTeam: data.team ?? "",
-      suburb2: data.suburb ?? "",
-      state: data.state ?? "",
-      currentStreak:
-        typeof data.currentStreak === "number" ? data.currentStreak : 0,
-      bestStreak:
-        typeof data.longestStreak === "number" ? data.longestStreak : 0,
-      // For now we keep these simple – you can wire them to real history later
-      correctPercentage:
-        typeof data.correctPercentage === "number"
-          ? data.correctPercentage
-          : 0,
-      roundsPlayed:
-        typeof data.roundsPlayed === "number" ? data.roundsPlayed : 0,
+      username,
+      favouriteTeam,
+      suburb2: suburb,
+      state,
+      currentStreak,
+      bestStreak: longestStreak,
+      correctPercentage,
+      roundsPlayed,
     };
 
-    // To keep it robust and avoid complex joins, we’ll return an empty list
-    // for recentPicks for now. Your Profile page already handles this nicely.
-    const recentPicks: RecentPickResponse[] = [];
-
-    return NextResponse.json({ stats, recentPicks });
-  } catch (err) {
-    console.error("[/api/profile] Unexpected error", err);
+    return NextResponse.json({
+      stats,
+      recentPicks,
+    });
+  } catch (error) {
+    console.error("[/api/profile] Error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to load profile" },
       { status: 500 }
     );
   }
