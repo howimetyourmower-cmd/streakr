@@ -1,418 +1,210 @@
-// app/api/settlement/route.ts
-export const runtime = "nodejs";
+// /app/api/settlement/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
-import { Timestamp } from "firebase-admin/firestore";
-import { CURRENT_SEASON } from "@/lib/rounds";
+import { FieldValue } from "firebase-admin/firestore";
 
-type QuestionStatus = "open" | "pending" | "final" | "void";
+export const dynamic = "force-dynamic";
 
-type SettlementQuestion = {
-  id: string;
-  gameId: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-  round?: number;
+type QuestionStatus = "open" | "final" | "pending" | "void";
+type QuestionOutcome = "yes" | "no" | "void";
+
+type RequestBody = {
+  roundNumber: number;
+  questionId: string;
+  // old style
+  status?: QuestionStatus;
+  outcome?: QuestionOutcome | "lock";
+  // or new style from UI
+  action?:
+    | "lock"
+    | "reopen"
+    | "final_yes"
+    | "final_no"
+    | "final_void"
+    | "void";
 };
 
-function toIso(value: any): string {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (value.toDate) return value.toDate().toISOString();
-  if (value instanceof Date) return value.toISOString();
-  return "";
+/**
+ * Helper: deterministic doc id for questionStatus so we can overwrite safely.
+ */
+function questionStatusDocId(roundNumber: number, questionId: string) {
+  return `${roundNumber}__${questionId}`;
 }
 
 /**
- * Find a question by its ID inside rounds/games/questions
- * (searches all rounds for CURRENT_SEASON).
+ * Recalculate streaks for all players who picked this question.
+ * outcome:
+ *   - "yes" / "no"  => correct answer
+ *   - "void"        => does not change streak
  */
-async function findQuestionById(questionId: string) {
-  const roundsSnap = await db
-    .collection("rounds")
-    .where("season", "==", CURRENT_SEASON)
+async function updateStreaksForQuestion(
+  roundNumber: number,
+  questionId: string,
+  outcome: QuestionOutcome
+) {
+  // If void, we don't change anyone's streak – question is just ignored.
+  if (outcome === "void") return;
+
+  const picksSnap = await db
+    .collection("picks")
+    .where("roundNumber", "==", roundNumber)
+    .where("questionId", "==", questionId)
     .get();
 
-  for (const roundDoc of roundsSnap.docs) {
-    const data = roundDoc.data() as any;
-    const games = data.games ?? [];
+  if (picksSnap.empty) return;
 
-    for (let gi = 0; gi < games.length; gi++) {
-      const g = games[gi];
-      const questions = g.questions ?? [];
+  const updates: Promise<unknown>[] = [];
 
-      for (let qi = 0; qi < questions.length; qi++) {
-        const q = questions[qi];
-        const id = q.id ?? `${roundDoc.id}_game_${gi}_q${qi + 1}`;
-        if (id === questionId) {
-          return {
-            roundDocId: roundDoc.id,
-            roundNumber: data.roundNumber ?? null,
-            games,
-            gameIndex: gi,
-            questionIndex: qi,
-            question: { ...q, id },
-          };
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-/** GET – list questions to settle for the console */
-export async function GET() {
-  try {
-    // Only show questions from PUBLISHED rounds for this season
-    const roundsSnap = await db
-      .collection("rounds")
-      .where("season", "==", CURRENT_SEASON)
-      .where("published", "==", true)
-      .get();
-
-    const questions: SettlementQuestion[] = [];
-
-    roundsSnap.forEach((roundDoc) => {
-      const data = roundDoc.data() as any;
-      const roundNumber: number | undefined = data.roundNumber;
-      const games = data.games ?? [];
-
-      games.forEach((g: any, gi: number) => {
-        const gameId = `${roundDoc.id}_game_${gi}`;
-        const match = g.match ?? g.fixture ?? "TBD match";
-        const venue = g.venue ?? "TBD venue";
-        const startTimeIso = toIso(g.startTime ?? g.kickoffTime);
-
-        (g.questions ?? []).forEach((q: any, qi: number) => {
-          const id = q.id ?? `${gameId}_q${qi + 1}`;
-          const status: QuestionStatus =
-            q.status === "pending" ||
-            q.status === "final" ||
-            q.status === "void"
-              ? q.status
-              : "open";
-
-          questions.push({
-            id,
-            gameId,
-            match,
-            venue,
-            startTime: startTimeIso,
-            quarter: Number(q.quarter ?? 1),
-            question: q.question ?? "",
-            status,
-            round: roundNumber,
-          });
-        });
-      });
-    });
-
-    questions.sort((a, b) => {
-      const t = a.startTime.localeCompare(b.startTime);
-      if (t !== 0) return t;
-      return a.quarter - b.quarter;
-    });
-
-    return NextResponse.json({ questions });
-  } catch (err) {
-    console.error("Error in GET /api/settlement:", err);
-    return NextResponse.json(
-      { error: "Failed to load questions for settlement" },
-      { status: 500 }
-    );
-  }
-}
-
-/** POST – lock / settle / void / reopen a question and update streaks */
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const questionId: string | undefined = body.questionId;
-    const action: string | undefined = body.action;
-
-    if (!questionId || !action) {
-      return NextResponse.json(
-        { error: "Missing questionId or action" },
-        { status: 400 }
-      );
-    }
-
-    const found = await findQuestionById(questionId);
-    if (!found) {
-      return NextResponse.json(
-        { error: "Question not found" },
-        { status: 404 }
-      );
-    }
-
-    const {
-      roundDocId,
-      roundNumber,
-      games,
-      gameIndex,
-      questionIndex,
-      question,
-    } = found;
-
-    const roundRef = db.collection("rounds").doc(roundDocId);
-    const now = Timestamp.now();
-
-    // Reference to questionStatus overrides used by /api/picks
-    const qsRef = db.collection("questionStatus").doc(questionId);
-
-    // ───────────────── LOCK ─────────────────
-    if (action === "lock") {
-      const updatedQuestion = {
-        ...question,
-        status: "pending" as QuestionStatus,
-        lockedAt: now,
-      };
-
-      games[gameIndex].questions[questionIndex] = updatedQuestion;
-      await roundRef.update({ games });
-
-      // Override for Picks page
-      await qsRef.set(
-        {
-          questionId,
-          roundNumber: roundNumber ?? null,
-          status: "pending" as QuestionStatus,
-          updatedAt: now,
-        },
-        { merge: true }
-      );
-
-      await db.collection("settlementHistory").add({
-        questionId,
-        action: "lock",
-        round: roundNumber ?? null,
-        season: CURRENT_SEASON,
-        lockedAt: now,
-      });
-
-      return NextResponse.json({ ok: true, status: "pending" });
-    }
-
-    // ──────────────── REOPEN (back to OPEN) ────────────────
-    if (action === "reopen") {
-      const updatedQuestion = {
-        ...question,
-        status: "open" as QuestionStatus,
-        lockedAt: null,
-        settledAt: null,
-        outcome: undefined,
-      };
-
-      games[gameIndex].questions[questionIndex] = updatedQuestion;
-      await roundRef.update({ games });
-
-      // Tell Picks that this question is open again
-      await qsRef.set(
-        {
-          questionId,
-          roundNumber: roundNumber ?? null,
-          status: "open" as QuestionStatus,
-          outcome: null,
-          updatedAt: now,
-        },
-        { merge: true }
-      );
-
-      await db.collection("settlementHistory").add({
-        questionId,
-        action: "reopen",
-        round: roundNumber ?? null,
-        season: CURRENT_SEASON,
-        reopenedAt: now,
-      });
-
-      return NextResponse.json({ ok: true, status: "open" });
-    }
-
-    // ──────────────── Determine outcome for settle / void ────────────────
-    let outcome: "yes" | "no" | "void";
-    if (action === "void") {
-      outcome = "void";
-    } else if (action === "yes" || action === "settleYes") {
-      outcome = "yes";
-    } else if (action === "no" || action === "settleNo") {
-      outcome = "no";
-    } else {
-      return NextResponse.json(
-        { error: "Unknown action" },
-        { status: 400 }
-      );
-    }
-
-    const finalStatus: QuestionStatus =
-      outcome === "void" ? "void" : "final";
-
-    const updatedQuestion: any = {
-      ...question,
-      status: finalStatus,
-      outcome,
-      settledAt: now,
+  picksSnap.forEach((pickDoc) => {
+    const data = pickDoc.data() as {
+      userId?: string;
+      pick?: "yes" | "no";
     };
 
-    games[gameIndex].questions[questionIndex] = updatedQuestion;
-    await roundRef.update({ games });
+    const userId = data.userId;
+    const pick = data.pick;
 
-    // Is this the sponsor question for this round? (kept from your version)
-    const isSponsorQuestion =
-      updatedQuestion && updatedQuestion.isSponsorQuestion === true;
+    if (!userId || (pick !== "yes" && pick !== "no")) return;
 
-    // ──────────────── Update questionStatus for Picks ────────────────
-    await qsRef.set(
-      {
-        questionId,
-        roundNumber: roundNumber ?? null,
-        status: finalStatus,
-        outcome,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
+    const userRef = db.collection("users").doc(userId);
 
-    // ──────────────── Update streaks + picks (NEW LOGIC) ────────────────
-    // Drive from `picks` collection instead of users.activeQuestionId
-    let picksQuery: FirebaseFirestore.Query = db
-      .collection("picks")
-      .where("questionId", "==", questionId);
+    // Use a transaction per user so multiple questions still behave.
+    const p = db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
 
-    if (typeof roundNumber === "number") {
-      picksQuery = picksQuery.where("roundNumber", "==", roundNumber);
-    }
+      let currentStreak = 0;
+      let longestStreak = 0;
 
-    const picksSnap = await picksQuery.get();
-
-    const batch = db.batch();
-    const sponsorWinners: string[] = [];
-
-    for (const pickDoc of picksSnap.docs) {
-      const pickData = pickDoc.data() as {
-        userId?: string;
-        pick?: "yes" | "no";
-        roundNumber?: number;
-      };
-
-      const userId = pickData.userId;
-      const userPick = pickData.pick;
-
-      if (!userId || (userPick !== "yes" && userPick !== "no")) continue;
-
-      const userRef = db.collection("users").doc(userId);
-      const userSnap = await userRef.get();
-      const userData = (userSnap.exists ? userSnap.data() : {}) as any;
-
-      let current =
-        typeof userData.currentStreak === "number"
-          ? userData.currentStreak
-          : 0;
-      let longest =
-        typeof userData.longestStreak === "number"
-          ? userData.longestStreak
-          : 0;
-
-      const win = outcome !== "void" && userPick === outcome;
-
-      if (outcome === "void") {
-        // streak unchanged for void
-      } else if (win) {
-        current += 1;
-        if (current > longest) longest = current;
-      } else {
-        current = 0;
+      if (snap.exists) {
+        const u = snap.data() as any;
+        currentStreak =
+          typeof u.currentStreak === "number" ? u.currentStreak : 0;
+        longestStreak =
+          typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
-      batch.set(
+      // If user picked the correct outcome, streak +1; otherwise reset to 0.
+      if (pick === outcome) {
+        currentStreak += 1;
+        if (currentStreak > longestStreak) {
+          longestStreak = currentStreak;
+        }
+      } else {
+        currentStreak = 0;
+      }
+
+      tx.set(
         userRef,
         {
-          currentStreak: current,
-          longestStreak: longest,
-          lastResult: outcome === "void" ? "void" : win ? "win" : "loss",
-          lastSettledAt: now,
-          lastSettledRound: roundNumber ?? null,
-          lastSettledQuestionId: questionId,
-          // Optional clean-up fields, safe even if they weren't set:
-          activeQuestionId: null,
-          activePick: null,
+          currentStreak,
+          longestStreak,
+          // optional extra stats you can use later
+          lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
       );
+    });
 
-      batch.set(
-        pickDoc.ref,
-        {
-          outcome,
-          result: outcome === "void" ? "void" : win ? "win" : "loss",
-          settledAt: now,
-          round: roundNumber ?? null,
-          season: CURRENT_SEASON,
-        },
-        { merge: true }
+    updates.push(p);
+  });
+
+  await Promise.all(updates);
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    const body = (await req.json()) as RequestBody;
+
+    const { roundNumber, questionId } = body;
+
+    if (
+      typeof roundNumber !== "number" ||
+      Number.isNaN(roundNumber) ||
+      !questionId
+    ) {
+      return NextResponse.json(
+        { error: "roundNumber and questionId are required" },
+        { status: 400 }
       );
+    }
 
-      if (isSponsorQuestion && outcome !== "void" && win) {
-        sponsorWinners.push(userId);
+    // Work out final status + outcome from either action or direct fields.
+    let status: QuestionStatus | undefined = body.status;
+    let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
+
+    if (body.action) {
+      switch (body.action) {
+        case "lock":
+          status = "pending";
+          outcome = "lock";
+          break;
+        case "reopen":
+          status = "open";
+          outcome = undefined;
+          break;
+        case "final_yes":
+          status = "final";
+          outcome = "yes";
+          break;
+        case "final_no":
+          status = "final";
+          outcome = "no";
+          break;
+        case "final_void":
+        case "void":
+          status = "void";
+          outcome = "void";
+          break;
+        default:
+          break;
       }
     }
 
-    // Sponsor draw entries
-    if (isSponsorQuestion && outcome !== "void" && sponsorWinners.length > 0) {
-      const sponsorRoundRef = db
-        .collection("sponsorDrawEntries")
-        .doc(roundDocId);
-
-      sponsorWinners.forEach((userId) => {
-        const entryRef = sponsorRoundRef.collection("entries").doc(userId);
-        batch.set(
-          entryRef,
-          {
-            uid: userId,
-            roundId: roundDocId,
-            roundNumber: roundNumber ?? null,
-            questionId,
-            outcome,
-            season: CURRENT_SEASON,
-            createdAt: now,
-          },
-          { merge: true }
-        );
-      });
+    if (!status) {
+      return NextResponse.json(
+        { error: "status or action is required" },
+        { status: 400 }
+      );
     }
 
-    // History record
-    batch.set(db.collection("settlementHistory").doc(), {
+    // Write / overwrite questionStatus doc so /api/picks can read it.
+    const qsRef = db
+      .collection("questionStatus")
+      .doc(questionStatusDocId(roundNumber, questionId));
+
+    const payload: any = {
+      roundNumber,
       questionId,
-      outcome,
-      action:
-        outcome === "void"
-          ? "void"
-          : outcome === "yes"
-          ? "settleYes"
-          : "settleNo",
-      round: roundNumber ?? null,
-      season: CURRENT_SEASON,
-      settledAt: now,
-      isSponsorQuestion: !!isSponsorQuestion,
-      sponsorWinnerCount: isSponsorQuestion ? sponsorWinners.length : 0,
-    });
+      status,
+      updatedAt: FieldValue.serverTimestamp(),
+    };
 
-    await batch.commit();
+    if (outcome) {
+      payload.outcome = outcome;
+    } else {
+      // Clear any previous outcome when reopening back to OPEN.
+      payload.outcome = FieldValue.delete();
+    }
 
-    return NextResponse.json({
-      ok: true,
-      status: finalStatus,
-      outcome,
-    });
-  } catch (err) {
-    console.error("Error in POST /api/settlement:", err);
+    await qsRef.set(payload, { merge: true });
+
+    // If this is a final result (YES / NO / VOID),
+    // update user streaks based on picks for this question.
+    if (
+      status === "final" &&
+      (outcome === "yes" || outcome === "no" || outcome === "void")
+    ) {
+      await updateStreaksForQuestion(
+        roundNumber,
+        questionId,
+        outcome as QuestionOutcome
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[/api/settlement] Error:", error);
     return NextResponse.json(
       { error: "Failed to update settlement" },
       { status: 500 }
