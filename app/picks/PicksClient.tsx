@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type QuestionOutcome = "yes" | "no" | "void";
 
 type ApiQuestion = {
   id: string;
@@ -32,6 +33,7 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
+  correctOutcome?: QuestionOutcome;
 };
 
 type ApiGame = {
@@ -58,6 +60,7 @@ type QuestionRow = {
   sport: string; // text-only, e.g. "AFL"
   commentCount: number;
   isSponsorQuestion?: boolean;
+  correctOutcome?: QuestionOutcome;
 };
 
 type PicksApiResponse = {
@@ -216,8 +219,6 @@ function parseAflMatchTeams(match: string): {
   };
 }
 
-// --------------------------------------------------
-
 // localStorage key for persistence
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 
@@ -309,16 +310,12 @@ export default function PicksClient() {
             sport: q.sport ?? g.sport ?? "AFL",
             commentCount: q.commentCount ?? 0,
             isSponsorQuestion: !!q.isSponsorQuestion,
+            correctOutcome: q.correctOutcome,
           }))
         );
 
         setRows(flat);
         setFilteredRows(flat.filter((r) => r.status === "open"));
-
-        console.log(
-          "[PicksClient] Sponsor rows from API:",
-          flat.filter((r) => r.isSponsorQuestion)
-        );
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -744,7 +741,7 @@ export default function PicksClient() {
       <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
           <div>
-            <p className="text-[11px] uppercase tracking-wide text:white/60">
+            <p className="text-[11px] uppercase tracking-wide text-white/60">
               Streak progress
             </p>
             <p className="text-xs sm:text-sm text-white/80 max-w-md">
@@ -833,9 +830,9 @@ export default function PicksClient() {
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
-      {/* FILTER BUTTONS */}
+      {/* FILTER BUTTONS – ALL first */}
       <div className="flex flex-wrap gap-2 mb-6">
-        {(["all", "open", "final", "pending", "void"] as const).map((f) => (
+        {(["all", "open", "pending", "final", "void"] as const).map((f) => (
           <button
             key={f}
             onClick={() => applyFilter(f)}
@@ -875,6 +872,29 @@ export default function PicksClient() {
 
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
+          const isFinal = row.status === "final";
+          const userPicked = row.userPick;
+          const correctOutcome = row.correctOutcome;
+
+          let resultLabel: string | null = null;
+          let resultClass = "";
+
+          if (isFinal && correctOutcome) {
+            if (correctOutcome === "void") {
+              resultLabel = "Question void – no impact on streak";
+              resultClass = "bg-gray-500 text-white";
+            } else if (!userPicked) {
+              resultLabel =
+                correctOutcome === "yes" ? "Result: YES" : "Result: NO";
+              resultClass = "bg-slate-700 text-white";
+            } else if (userPicked === correctOutcome) {
+              resultLabel = "You were right!";
+              resultClass = "bg-emerald-500 text-black";
+            } else {
+              resultLabel = "You were wrong";
+              resultClass = "bg-red-500 text-white";
+            }
+          }
 
           const parsed =
             row.sport.toUpperCase() === "AFL"
@@ -1015,6 +1035,13 @@ export default function PicksClient() {
                     {isSponsor && (
                       <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                         Sponsor Question
+                      </span>
+                    )}
+                    {resultLabel && (
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${resultClass}`}
+                      >
+                        {resultLabel}
                       </span>
                     )}
                   </div>
