@@ -44,7 +44,7 @@ type QuestionRow = ApiQuestion & {
 
 type StatusFilter = "all" | "open" | "pending" | "final" | "void";
 
-/** Map a round key like "OR", "R1", "R2" → numeric roundNumber used by /api/picks */
+/** Map a round key like "OR", "R1", "R2" → numeric roundNumber used by /api/picks & /api/settlement */
 function roundKeyToNumber(key: string): number {
   if (key === "OR") return 0;
   const match = key.match(/^R(\d+)$/i);
@@ -52,7 +52,6 @@ function roundKeyToNumber(key: string): number {
     const n = Number(match[1]);
     if (!Number.isNaN(n) && n >= 1) return n;
   }
-  // fallback
   return 0;
 }
 
@@ -123,24 +122,44 @@ export default function SettlementPage() {
 
   async function callSettlement(
     question: QuestionRow,
-    action:
-      | "lock"
-      | "reopen"
-      | "final_yes"
-      | "final_no"
-      | "final_void"
+    op: "lock" | "reopen" | "final_yes" | "final_no" | "final_void"
   ) {
     setSavingId(question.id);
     setError(null);
     try {
+      // Build payload using ONLY status + outcome (no 'action')
+      const payload: any = {
+        roundNumber,
+        questionId: question.id,
+      };
+
+      switch (op) {
+        case "lock":
+          payload.status = "pending";
+          payload.outcome = "lock";
+          break;
+        case "reopen":
+          payload.status = "open";
+          // no outcome field – backend will clear any existing outcome
+          break;
+        case "final_yes":
+          payload.status = "final";
+          payload.outcome = "yes";
+          break;
+        case "final_no":
+          payload.status = "final";
+          payload.outcome = "no";
+          break;
+        case "final_void":
+          payload.status = "void";
+          payload.outcome = "void";
+          break;
+      }
+
       const res = await fetch("/api/settlement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roundNumber,
-          questionId: question.id,
-          action,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -148,35 +167,31 @@ export default function SettlementPage() {
         throw new Error(`Settlement error: ${res.status} ${text}`);
       }
 
-      // Update local state based on action so UI responds immediately
+      // Update local state so UI reflects immediately
       setRows((prev) =>
         prev.map((q) => {
           if (q.id !== question.id) return q;
 
-          if (action === "lock") {
-            return { ...q, status: "pending" };
+          switch (op) {
+            case "lock":
+              return { ...q, status: "pending" };
+            case "reopen": {
+              const { correctOutcome, ...rest } = q;
+              return {
+                ...rest,
+                status: "open",
+                correctOutcome: undefined,
+              };
+            }
+            case "final_yes":
+              return { ...q, status: "final", correctOutcome: "yes" };
+            case "final_no":
+              return { ...q, status: "final", correctOutcome: "no" };
+            case "final_void":
+              return { ...q, status: "void", correctOutcome: "void" };
+            default:
+              return q;
           }
-
-          if (action === "reopen") {
-            // 👇 THIS is the important bit – clear status & correctOutcome
-            const { correctOutcome, ...rest } = q;
-            return {
-              ...rest,
-              status: "open",
-              correctOutcome: undefined,
-            };
-          }
-
-          if (action === "final_yes") {
-            return { ...q, status: "final", correctOutcome: "yes" };
-          }
-          if (action === "final_no") {
-            return { ...q, status: "final", correctOutcome: "no" };
-          }
-          if (action === "final_void") {
-            return { ...q, status: "void", correctOutcome: "void" };
-          }
-          return q;
         })
       );
     } catch (err) {
@@ -220,9 +235,9 @@ export default function SettlementPage() {
               Settlement centre
             </h1>
             <p className="mt-2 text-sm text-white/70 max-w-xl">
-              Lock questions, mark the correct outcome, or reopen if you
-              made a mistake. Reopen is a safety net – it clears the result
-              and returns the question to OPEN.
+              Lock questions, mark the correct outcome, or reopen if you make a
+              mistake. Reopen sends the question back to OPEN and clears the
+              result.
             </p>
           </div>
 
@@ -252,19 +267,14 @@ export default function SettlementPage() {
               Settlement • {roundLabel}
             </span>
             <span className="text-white/80">
-              Click{" "}
-              <span className="font-semibold text-amber-300">
-                Lock
-              </span>{" "}
+              Click <span className="font-semibold text-amber-300">Lock</span>{" "}
               to freeze picks, then{" "}
               <span className="font-semibold text-sky-300">
                 YES / NO / VOID
               </span>{" "}
               when you know the result.{" "}
-              <span className="font-semibold text-white">
-                Reopen
-              </span>{" "}
-              sends the question back to OPEN.
+              <span className="font-semibold">Reopen</span> resets it back to
+              OPEN.
             </span>
           </div>
         </div>
@@ -402,7 +412,7 @@ export default function SettlementPage() {
                       VOID
                     </button>
                     <button
-                      disabled={isBusy(row.id)}
+                      disabled={row.status === "open" || isBusy(row.id)}
                       onClick={() => callSettlement(row, "reopen")}
                       className="px-3 py-1 rounded-full bg-slate-700 text-white font-semibold disabled:opacity-40"
                     >
