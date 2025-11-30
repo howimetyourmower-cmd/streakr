@@ -3,6 +3,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 
+export const dynamic = "force-dynamic";
+
 type ApiProfileStats = {
   displayName: string;
   username: string;
@@ -25,10 +27,15 @@ type ApiRecentPick = {
   settledAt?: string;
 };
 
+type ProfileResponse = {
+  stats: ApiProfileStats;
+  recentPicks: ApiRecentPick[];
+};
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const url = new URL(req.url);
-    const uid = url.searchParams.get("uid");
+    const { searchParams } = new URL(req.url);
+    const uid = searchParams.get("uid");
 
     if (!uid) {
       return NextResponse.json(
@@ -37,94 +44,68 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ── 1) Load user doc ───────────────────────────────────────
+    // 1) Load user document
     const userRef = db.collection("users").doc(uid);
     const userSnap = await userRef.get();
 
-    if (!userSnap.exists) {
-      const emptyStats: ApiProfileStats = {
-        displayName: "Player",
-        username: "",
-        favouriteTeam: "",
-        suburb2: "",
-        state: "",
-        currentStreak: 0,
-        bestStreak: 0,
-        correctPercentage: 0,
-        roundsPlayed: 0,
-      };
-      return NextResponse.json({
-        stats: emptyStats,
-        recentPicks: [] as ApiRecentPick[],
-      });
-    }
+    const userData = (userSnap.exists ? userSnap.data() : {}) as any;
 
-    const u = userSnap.data() as any;
+    const currentStreak =
+      typeof userData.currentStreak === "number"
+        ? userData.currentStreak
+        : 0;
+    const longestStreak =
+      typeof userData.longestStreak === "number"
+        ? userData.longestStreak
+        : 0;
 
-    const username: string = u.username ?? "";
-    const firstName: string = u.firstName ?? "";
-    const email: string = u.email ?? "";
-    const suburb: string = u.suburb ?? "";
-    const state: string = u.state ?? "";
-    const favouriteTeam: string = u.team ?? "";
-
-    const currentStreak: number =
-      typeof u.currentStreak === "number" ? u.currentStreak : 0;
-    const longestStreak: number =
-      typeof u.longestStreak === "number" ? u.longestStreak : 0;
-
-    const displayName =
-      firstName ||
-      username ||
-      email ||
+    const displayName: string =
+      (typeof userData.username === "string" && userData.username.trim()) ||
+      (typeof userData.firstName === "string" && userData.firstName.trim()) ||
+      (typeof userData.displayName === "string" && userData.displayName.trim()) ||
+      (typeof userData.email === "string" && userData.email.trim()) ||
       "Player";
 
-    // ── 2) Load picks for roundsPlayed + "Last 5 picks" ────────
+    const username: string =
+      (typeof userData.username === "string" && userData.username.trim()) ||
+      "";
+
+    const favouriteTeam: string =
+      (typeof userData.team === "string" && userData.team.trim()) || "";
+
+    const suburb2: string =
+      (typeof userData.suburb === "string" && userData.suburb.trim()) || "";
+
+    const state: string | undefined =
+      typeof userData.state === "string" ? userData.state : undefined;
+
+    // 2) Basic rounds played from picks
     const picksSnap = await db
       .collection("picks")
       .where("userId", "==", uid)
-      .limit(25)
       .get();
 
-    const roundsPlayedSet = new Set<number>();
-    const recentPicks: ApiRecentPick[] = [];
+    const roundSet = new Set<number>();
 
     picksSnap.forEach((docSnap) => {
       const data = docSnap.data() as any;
-
-      const roundNumber: number =
-        typeof data.roundNumber === "number" ? data.roundNumber : 0;
-      const match: string = data.match ?? "";
-      const question: string = data.question ?? "";
-      const pick: "yes" | "no" =
-        data.pick === "no" ? "no" : "yes";
-
-      roundsPlayedSet.add(roundNumber);
-
-      // Build a simple "pending" recent pick entry.
-      if (recentPicks.length < 5) {
-        recentPicks.push({
-          id: docSnap.id,
-          round: roundNumber,
-          match,
-          question,
-          userPick: pick,
-          result: "pending",
-          settledAt: undefined,
-        });
+      if (typeof data.roundNumber === "number") {
+        roundSet.add(data.roundNumber);
       }
     });
 
-    const roundsPlayed = roundsPlayedSet.size;
+    const roundsPlayed = roundSet.size;
 
-    // For now we keep correct% at 0 until we wire full results
+    // NOTE: for now we keep correctPercentage + recentPicks simple.
+    // We can wire them to questionStatus later if you want.
     const correctPercentage = 0;
+    const recentPicks: ApiRecentPick[] = [];
 
     const stats: ApiProfileStats = {
       displayName,
       username,
       favouriteTeam,
-      suburb2: suburb,
+      suburb2,
       state,
       currentStreak,
       bestStreak: longestStreak,
@@ -132,14 +113,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       roundsPlayed,
     };
 
-    return NextResponse.json({
+    const payload: ProfileResponse = {
       stats,
       recentPicks,
-    });
+    };
+
+    return NextResponse.json(payload);
   } catch (error) {
-    console.error("[/api/profile] Error:", error);
+    console.error("[/api/profile] Error loading profile", error);
     return NextResponse.json(
-      { error: "Failed to load profile" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
