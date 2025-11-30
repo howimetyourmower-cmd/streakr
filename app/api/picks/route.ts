@@ -6,7 +6,6 @@ import rounds2026 from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
-type UserQuestionResult = "win" | "loss" | "void";
 
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
@@ -31,8 +30,7 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  correctOutcome?: QuestionOutcome;          // 👈 settlement result
-  resultForUser?: UserQuestionResult | null; // 👈 win / loss / void for this user
+  correctOutcome?: QuestionOutcome; // 👈 settlement result
 };
 
 type ApiGame = {
@@ -59,6 +57,7 @@ type QuestionStatusDoc = {
   questionId: string;
   status: QuestionStatus;
   outcome?: QuestionOutcome | "lock";
+  updatedAt?: FirebaseFirestore.Timestamp;
 };
 
 // Coerce raw JSON to array of rows
@@ -180,14 +179,19 @@ async function getCommentCountsForRound(
   return commentCounts;
 }
 
+/**
+ * Read questionStatus, but if multiple docs exist for the same questionId,
+ * we ALWAYS use the one with the latest updatedAt.
+ */
 async function getQuestionStatusForRound(
   roundNumber: number
 ): Promise<
   Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
 > {
-  const map: Record<
+  // internal map keeps updatedAtMs so latest wins
+  const temp: Record<
     string,
-    { status: QuestionStatus; outcome?: QuestionOutcome }
+    { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
   > = {};
 
   try {
@@ -198,6 +202,7 @@ async function getQuestionStatusForRound(
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as QuestionStatusDoc;
+
       if (!data.questionId || !data.status) return;
 
       // Only keep an outcome if it's a real result (yes/no/void).
@@ -210,16 +215,40 @@ async function getQuestionStatusForRound(
         outcome = data.outcome;
       }
 
-      map[data.questionId] = {
-        status: data.status,
-        outcome,
-      };
+      const updatedAtMs =
+        data.updatedAt &&
+        typeof (data.updatedAt as any).toMillis === "function"
+          ? (data.updatedAt as any).toMillis()
+          : 0;
+
+      const existing = temp[data.questionId];
+
+      if (!existing || updatedAtMs >= existing.updatedAtMs) {
+        temp[data.questionId] = {
+          status: data.status,
+          outcome,
+          updatedAtMs,
+        };
+      }
     });
   } catch (error) {
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  return map;
+  // strip updatedAtMs before returning
+  const finalMap: Record<
+    string,
+    { status: QuestionStatus; outcome?: QuestionOutcome }
+  > = {};
+
+  Object.entries(temp).forEach(([qid, value]) => {
+    finalMap[qid] = {
+      status: value.status,
+      outcome: value.outcome,
+    };
+  });
+
+  return finalMap;
 }
 
 // ─────────────────────────────────────────────
@@ -314,16 +343,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const effectiveStatus = statusInfo?.status ?? jsonStatus;
       const correctOutcome = statusInfo?.outcome;
 
-      // personal result for this user
-      const userPick = userPicks[questionId];
-      let resultForUser: UserQuestionResult | null = null;
-
-      if (correctOutcome === "void") {
-        resultForUser = "void";
-      } else if (correctOutcome && userPick) {
-        resultForUser = userPick === correctOutcome ? "win" : "loss";
-      }
-
       const apiQuestion: ApiQuestion = {
         id: questionId,
         quarter: row.Quarter,
@@ -331,12 +350,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         status: effectiveStatus,
         sport: "AFL",
         isSponsorQuestion: !!isSponsorQuestion,
-        userPick,
+        userPick: userPicks[questionId],
         yesPercent,
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
-        resultForUser,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
