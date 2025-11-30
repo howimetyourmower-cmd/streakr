@@ -36,7 +36,7 @@ export default function LeaderboardsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch leaderboard whenever scope changes
+  // Fetch leaderboard whenever scope (or logged-in user) changes
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -44,9 +44,14 @@ export default function LeaderboardsClient() {
 
       try {
         const params = new URLSearchParams({
-          season: String(CURRENT_SEASON),
+          season: String(CURRENT_SEASON), // API currently ignores this, safe to keep
           scope,
         });
+
+        // Pass uid so API can return a personalised userEntry
+        if (user?.uid) {
+          params.set("uid", user.uid);
+        }
 
         const res = await fetch(`/api/leaderboard?${params.toString()}`, {
           cache: "no-store",
@@ -58,7 +63,6 @@ export default function LeaderboardsClient() {
 
         const data: LeaderboardApiResponse = await res.json();
 
-        // Ensure entries are sorted by rank
         const sorted = [...(data.entries ?? [])].sort(
           (a, b) => a.rank - b.rank
         );
@@ -76,7 +80,7 @@ export default function LeaderboardsClient() {
     };
 
     load();
-  }, [scope]);
+  }, [scope, user]);
 
   const topTen = useMemo(() => entries.slice(0, 10), [entries]);
 
