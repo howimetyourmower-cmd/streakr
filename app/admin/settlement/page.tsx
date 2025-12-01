@@ -10,6 +10,15 @@ import {
 } from "react";
 import { ROUND_OPTIONS } from "@/lib/rounds";
 
+// Convert ROUND_OPTIONS.key → numeric roundNumber
+function keyToRoundNumber(key: string): number {
+  if (key === "OR") return 0;
+  if (key.startsWith("R")) {
+    const num = Number(key.substring(1));
+    return Number.isFinite(num) ? num : 0;
+  }
+  return 0;
+}
 export const dynamic = "force-dynamic";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
