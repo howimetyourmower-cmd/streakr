@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, useMemo, ChangeEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  ChangeEvent,
+} from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
@@ -32,9 +38,9 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  // possible fields from /api/picks
+  // fields from /api/picks
   correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null; // 👈 NEW – raw outcome field if API uses it
+  outcome?: "yes" | "no" | "void" | "lock" | null; // raw outcome if API uses it
 };
 
 type ApiGame = {
@@ -285,77 +291,104 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load Picks --------
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/picks");
-        if (!res.ok) throw new Error("API error");
+  // -------- Load Picks (re-usable + polling) --------
+  const loadPicks = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-        const data: PicksApiResponse = await res.json();
+      const res = await fetch("/api/picks");
+      if (!res.ok) throw new Error("API error");
 
-        if (typeof data.roundNumber === "number") {
-          setRoundNumber(data.roundNumber);
-        }
+      const data: PicksApiResponse = await res.json();
 
-        const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
-          g.questions.map((q: ApiQuestion) => {
-            // 🔹 normalise any outcome coming from the API when final/void
-            const rawOutcome =
-              q.correctOutcome ??
-              (q.outcome === "yes" ||
+      if (typeof data.roundNumber === "number") {
+        setRoundNumber(data.roundNumber);
+      }
+
+      let flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
+        g.questions.map((q: ApiQuestion) => {
+          // Prefer explicit correctOutcome from API if valid
+          let correctOutcome: QuestionRow["correctOutcome"] = null;
+          if (
+            q.status === "final" ||
+            q.status === "void"
+          ) {
+            if (
+              q.correctOutcome === "yes" ||
+              q.correctOutcome === "no" ||
+              q.correctOutcome === "void"
+            ) {
+              correctOutcome = q.correctOutcome;
+            } else if (
+              q.outcome === "yes" ||
               q.outcome === "no" ||
               q.outcome === "void"
-                ? q.outcome
-                : null);
-
-            const correctOutcome: QuestionRow["correctOutcome"] =
-              q.status === "final" || q.status === "void"
-                ? rawOutcome ?? null
-                : null;
-
-            // 🔹 work out resultForUser on the client
-            let resultForUser: QuestionRow["resultForUser"] = null;
-            if (correctOutcome === "void") {
-              resultForUser = "void";
-            } else if (correctOutcome && q.userPick) {
-              resultForUser =
-                q.userPick === correctOutcome ? "win" : "loss";
+            ) {
+              // Fallback: some APIs may still use `outcome`
+              correctOutcome = q.outcome;
+            } else {
+              correctOutcome = null;
             }
+          }
 
-            return {
-              id: q.id,
-              gameId: g.id,
-              match: g.match,
-              venue: g.venue ?? q.venue ?? "",
-              startTime: g.startTime ?? q.startTime ?? "",
-              quarter: q.quarter,
-              question: q.question,
-              status: q.status,
-              userPick: q.userPick,
-              yesPercent: q.yesPercent,
-              noPercent: q.noPercent,
-              sport: q.sport ?? g.sport ?? "AFL",
-              commentCount: q.commentCount ?? 0,
-              isSponsorQuestion: !!q.isSponsorQuestion,
-              correctOutcome,
-              resultForUser,
-            };
-          })
+          // work out resultForUser on the client
+          let resultForUser: QuestionRow["resultForUser"] = null;
+          if (correctOutcome === "void") {
+            // Void always shows as "no change" if it ever settles
+            resultForUser = "void";
+          } else if (correctOutcome && q.userPick) {
+            resultForUser =
+              q.userPick === correctOutcome ? "win" : "loss";
+          }
+
+          return {
+            id: q.id,
+            gameId: g.id,
+            match: g.match,
+            venue: g.venue ?? q.venue ?? "",
+            startTime: g.startTime ?? q.startTime ?? "",
+            quarter: q.quarter,
+            question: q.question,
+            status: q.status,
+            userPick: q.userPick,
+            yesPercent: q.yesPercent,
+            noPercent: q.noPercent,
+            sport: q.sport ?? g.sport ?? "AFL",
+            commentCount: q.commentCount ?? 0,
+            isSponsorQuestion: !!q.isSponsorQuestion,
+            correctOutcome,
+            resultForUser,
+          };
+        })
+      );
+
+      // Preserve local active pick highlight (if present)
+      if (activeQuestionId && activeOutcome) {
+        flat = flat.map((r) =>
+          r.id === activeQuestionId
+            ? { ...r, userPick: activeOutcome }
+            : r
         );
-
-        setRows(flat);
-        setFilteredRows(flat.filter((r) => r.status === "open"));
-      } catch (e) {
-        console.error(e);
-        setError("Failed to load picks");
-      } finally {
-        setLoading(false);
       }
-    };
 
-    load();
-  }, []);
+      setRows(flat);
+      setFilteredRows(
+        activeFilter === "all"
+          ? flat
+          : flat.filter((r) => r.status === activeFilter)
+      );
+    } catch (e) {
+      console.error(e);
+      setError("Failed to load picks");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeQuestionId, activeOutcome, activeFilter]);
+
+  useEffect(() => {
+    loadPicks();
+  }, [loadPicks]);
 
   // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
@@ -433,13 +466,13 @@ export default function PicksClient() {
         setRows((prev) =>
           prev.map((r) => ({
             ...r,
-            userPick: r.id === questionId ? outcome : undefined,
+            userPick: r.id === questionId ? outcome : r.userPick,
           }))
         );
         setFilteredRows((prev) =>
           prev.map((r) => ({
             ...r,
-            userPick: r.id === questionId ? outcome : undefined,
+            userPick: r.id === questionId ? outcome : r.userPick,
           }))
         );
       }
@@ -484,13 +517,13 @@ export default function PicksClient() {
           setRows((prev) =>
             prev.map((r) => ({
               ...r,
-              userPick: r.id === questionId ? outcome : undefined,
+              userPick: r.id === questionId ? outcome : r.userPick,
             }))
           );
           setFilteredRows((prev) =>
             prev.map((r) => ({
               ...r,
-              userPick: r.id === questionId ? outcome : undefined,
+              userPick: r.id === questionId ? outcome : r.userPick,
             }))
           );
         }
@@ -504,50 +537,60 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
-  // -------- Load streak progress (user vs leader) --------
-  useEffect(() => {
-    const loadStreaks = async () => {
-      try {
-        setStreakLoading(true);
-        setStreakError("");
+  // -------- Load streak progress (user vs leader) - reusable --------
+  const loadStreaks = useCallback(async () => {
+    try {
+      setStreakLoading(true);
+      setStreakError("");
 
-        const usersRef = collection(db, "users");
-        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
-        const topSnap = await getDocs(topQ);
+      const usersRef = collection(db, "users");
+      const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
+      const topSnap = await getDocs(topQ);
 
-        let leaderVal: number | null = null;
-        topSnap.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const val =
+      let leaderVal: number | null = null;
+      topSnap.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        const val =
+          typeof data.currentStreak === "number" ? data.currentStreak : 0;
+        leaderVal = val;
+      });
+      setLeaderStreak(leaderVal);
+
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const userSnap = await getDoc(userRef);
+        if (userSnap.exists()) {
+          const data = userSnap.data() as any;
+          const myVal =
             typeof data.currentStreak === "number" ? data.currentStreak : 0;
-          leaderVal = val;
-        });
-        setLeaderStreak(leaderVal);
-
-        if (user) {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data() as any;
-            const myVal =
-              typeof data.currentStreak === "number" ? data.currentStreak : 0;
-            setUserStreak(myVal);
-          } else {
-            setUserStreak(0);
-          }
+          setUserStreak(myVal);
         } else {
-          setUserStreak(null);
+          setUserStreak(0);
         }
-      } catch (err) {
-        console.error("Failed to load streak progress", err);
-        setStreakError("Could not load streak tracker.");
-      } finally {
-        setStreakLoading(false);
+      } else {
+        setUserStreak(null);
       }
-    };
-
-    loadStreaks();
+    } catch (err) {
+      console.error("Failed to load streak progress", err);
+      setStreakError("Could not load streak tracker.");
+    } finally {
+      setStreakLoading(false);
+    }
   }, [user]);
+
+  useEffect(() => {
+    loadStreaks();
+  }, [loadStreaks]);
+
+  // -------- Polling: keep picks + streaks fresh after settlement --------
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadPicks();
+      loadStreaks();
+    }, 15000); // 15s – can tweak
+
+    return () => clearInterval(interval);
+  }, [loadPicks, loadStreaks]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -601,12 +644,16 @@ export default function PicksClient() {
 
     setRows((prev) =>
       prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+        r.id === row.id
+          ? { ...r, userPick: pick }
+          : { ...r, userPick: r.userPick }
       )
     );
     setFilteredRows((prev) =>
       prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: pick } : { ...r, userPick: undefined }
+        r.id === row.id
+          ? { ...r, userPick: pick }
+          : { ...r, userPick: r.userPick }
       )
     );
 
@@ -778,9 +825,10 @@ export default function PicksClient() {
       setShareStatus("Could not share right now.");
     }
 
-    if (shareStatus) {
-      setTimeout(() => setShareStatus(""), 3000);
-    }
+    // Clear the status after a short delay
+    setTimeout(() => {
+      setShareStatus("");
+    }, 3000);
   };
 
   // -------- Render --------
