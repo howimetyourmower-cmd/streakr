@@ -12,41 +12,49 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
-
-  // legacy style
   status?: QuestionStatus;
-  outcome?: string; // we’ll normalise this
-
-  // new style
-  action?: string; // we’ll normalise this too
+  outcome?: QuestionOutcome | "lock";
+  action?:
+    | "lock"
+    | "reopen"
+    | "final_yes"
+    | "final_no"
+    | "final_void"
+    | "void";
 };
 
-/** Deterministic doc id for questionStatus */
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
 }
 
 /**
  * Recalculate streaks for all players who picked this question.
- * outcome:
- *   - "yes" / "no"  => correct answer
- *   - "void"        => does not change streak
+ *
+ * NOTE: we now only filter by questionId so it works
+ * even if roundNumber is stored as a string in the picks docs.
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
 ) {
-  // VOID does not change streaks
   if (outcome === "void") return;
 
   const picksSnap = await db
     .collection("picks")
-    .where("roundNumber", "==", roundNumber)
+    // 🔥 only questionId, no roundNumber filter
     .where("questionId", "==", questionId)
     .get();
 
-  if (picksSnap.empty) return;
+  if (picksSnap.empty) {
+    console.log(
+      "[/api/settlement] No picks found for questionId",
+      questionId,
+      "roundNumber",
+      roundNumber
+    );
+    return;
+  }
 
   const updates: Promise<unknown>[] = [];
 
@@ -77,7 +85,6 @@ async function updateStreaksForQuestion(
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
-      // If user picked the correct outcome, streak +1; otherwise reset to 0.
       if (pick === outcome) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
@@ -104,17 +111,6 @@ async function updateStreaksForQuestion(
   await Promise.all(updates);
 }
 
-/** Normalise any string into an outcome or "lock" if possible */
-function normaliseOutcome(
-  value: string | undefined
-): QuestionOutcome | "lock" | undefined {
-  if (!value) return undefined;
-  const v = value.toLowerCase().trim();
-  if (v === "yes" || v === "no" || v === "void") return v;
-  if (v === "lock") return "lock";
-  return undefined;
-}
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
@@ -131,14 +127,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    let status: QuestionStatus | undefined;
-    let outcome: QuestionOutcome | "lock" | undefined;
+    let status: QuestionStatus | undefined = body.status;
+    let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
 
-    // ── 1) Try to interpret `action` first ──────────────────────
-    const action = body.action ? body.action.toLowerCase().trim() : undefined;
-
-    if (action) {
-      switch (action) {
+    // New style – action wins
+    if (body.action) {
+      switch (body.action) {
         case "lock":
           status = "pending";
           outcome = "lock";
@@ -147,8 +141,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           status = "open";
           outcome = undefined;
           break;
-
-        // Explicit new-style finals
         case "final_yes":
           status = "final";
           outcome = "yes";
@@ -158,66 +150,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           outcome = "no";
           break;
         case "final_void":
-          status = "void";
-          outcome = "void";
-          break;
-
-        // If the UI just sends "yes" / "no" / "void" as action,
-        // treat that as a final result too.
-        case "yes":
-          status = "final";
-          outcome = "yes";
-          break;
-        case "no":
-          status = "final";
-          outcome = "no";
-          break;
         case "void":
           status = "void";
           outcome = "void";
           break;
-        default:
-        // leave status/outcome undefined – we’ll fall back below
       }
     }
 
-    // ── 2) Legacy fields: status + outcome ──────────────────────
-    if (!status) {
-      // existing status field wins if present
-      if (body.status) {
-        status = body.status;
-      }
-
-      // normalise outcome field (handles YES/NO/VOID/lock etc.)
-      const normalisedOutcome = normaliseOutcome(body.outcome);
-      if (!outcome) {
-        outcome = normalisedOutcome;
-      }
-
-      // if we still have no status but *do* have an outcome,
-      // infer the status from it.
-      if (!status && normalisedOutcome) {
-        if (normalisedOutcome === "lock") {
-          status = "pending";
-        } else if (normalisedOutcome === "void") {
-          status = "void";
-        } else {
-          status = "final"; // yes / no
-        }
-      }
+    // Backwards compat – if only outcome was sent
+    if (
+      !status &&
+      outcome &&
+      (outcome === "yes" || outcome === "no" || outcome === "void")
+    ) {
+      status = outcome === "void" ? "void" : "final";
     }
 
-    // ── 3) Final guard ──────────────────────────────────────────
     if (!status) {
-      // At this point we had roundNumber & questionId,
-      // but nothing indicating what to do.
       return NextResponse.json(
         { error: "status or action is required" },
         { status: 400 }
       );
     }
 
-    // ── 4) Write / overwrite questionStatus doc ─────────────────
     const qsRef = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
@@ -232,13 +187,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (outcome) {
       payload.outcome = outcome;
     } else {
-      // when reopening, clear any previous outcome
       payload.outcome = FieldValue.delete();
     }
 
     await qsRef.set(payload, { merge: true });
 
-    // ── 5) If this is a final result, update user streaks ───────
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
