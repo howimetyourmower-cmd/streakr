@@ -12,8 +12,10 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
+  // old style
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock";
+  // new style
   action?:
     | "lock"
     | "reopen"
@@ -23,49 +25,47 @@ type RequestBody = {
     | "void";
 };
 
+/** Deterministic doc id for questionStatus */
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
 }
 
 /**
  * Recalculate streaks for all players who picked this question.
+ * outcome:
+ *   - "yes" / "no"  => correct answer
+ *   - "void"        => does not change streak
  *
- * NOTE: we now only filter by questionId so it works
- * even if roundNumber is stored as a string in the picks docs.
+ * We now use the `userPicks` collection (one active streak pick per user),
+ * where documents look like:
+ *   { userId, roundNumber, questionId, outcome: "yes" | "no" }
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
 ) {
+  // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
   const picksSnap = await db
-    .collection("picks")
-    // 🔥 only questionId, no roundNumber filter
+    .collection("userPicks")
+    .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
 
-  if (picksSnap.empty) {
-    console.log(
-      "[/api/settlement] No picks found for questionId",
-      questionId,
-      "roundNumber",
-      roundNumber
-    );
-    return;
-  }
+  if (picksSnap.empty) return;
 
   const updates: Promise<unknown>[] = [];
 
   picksSnap.forEach((pickDoc) => {
     const data = pickDoc.data() as {
       userId?: string;
-      pick?: "yes" | "no";
+      outcome?: "yes" | "no";
     };
 
     const userId = data.userId;
-    const pick = data.pick;
+    const pick = data.outcome; // user’s chosen side
 
     if (!userId || (pick !== "yes" && pick !== "no")) return;
 
@@ -85,6 +85,7 @@ async function updateStreaksForQuestion(
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
+      // If user picked the correct outcome, streak +1; otherwise reset to 0.
       if (pick === outcome) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
@@ -114,6 +115,7 @@ async function updateStreaksForQuestion(
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
+
     const { roundNumber, questionId } = body;
 
     if (
@@ -127,10 +129,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // ── Work out final status + outcome ─────────────────────────
     let status: QuestionStatus | undefined = body.status;
     let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
 
-    // New style – action wins
+    // New style: action takes priority
     if (body.action) {
       switch (body.action) {
         case "lock":
@@ -154,10 +157,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           status = "void";
           outcome = "void";
           break;
+        default:
+          break;
       }
     }
 
-    // Backwards compat – if only outcome was sent
+    // 🔙 Backwards-compat:
+    // old UI sometimes sends only { outcome: "yes" | "no" | "void" }
     if (
       !status &&
       outcome &&
@@ -173,6 +179,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // ── Write / overwrite questionStatus doc ────────────────────
     const qsRef = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
@@ -192,6 +199,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
+    // If this is a final result, update user streaks
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
