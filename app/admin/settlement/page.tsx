@@ -19,6 +19,16 @@ function keyToRoundNumber(key: string): number {
   }
   return 0;
 }
+
+const roundNumber = useMemo(() => {
+  return keyToRoundNumber(roundKey);
+}, [roundKey]);
+
+const roundLabel = useMemo(() => {
+  const found = ROUND_OPTIONS.find((r) => r.key === roundKey);
+  return found?.label ?? "Round";
+}, [roundKey]);
+
 export const dynamic = "force-dynamic";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
