@@ -28,7 +28,6 @@ type ApiQuestion = {
   venue?: string;
   startTime?: string;
   correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null;
 };
 
 type ApiGame = {
@@ -56,7 +55,6 @@ type QuestionRow = {
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
-  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -228,7 +226,7 @@ export default function PicksClient() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
   const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
-    "open"
+    "all" // 👈 default to ALL now
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -250,7 +248,7 @@ export default function PicksClient() {
   // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // streak progress tracker (now driven by /api/picks)
+  // streak progress tracker from API
   const [userStreak, setUserStreak] = useState<number | null>(null);
   const [leaderStreak, setLeaderStreak] = useState<number | null>(null);
   const [streakLoading, setStreakLoading] = useState(false);
@@ -281,6 +279,18 @@ export default function PicksClient() {
     };
   };
 
+  // --- helper: derive resultForUser from row.correctOutcome + row.userPick ---
+  const getResultForUser = (row: QuestionRow):
+    | "win"
+    | "loss"
+    | "void"
+    | null => {
+    if (!row.correctOutcome) return null;
+    if (row.correctOutcome === "void") return "void";
+    if (!row.userPick) return null;
+    return row.userPick === row.correctOutcome ? "win" : "loss";
+  };
+
   // -------- Load Picks + streaks (from API, WITH auth if logged in) --------
   useEffect(() => {
     const load = async () => {
@@ -288,7 +298,6 @@ export default function PicksClient() {
         setStreakLoading(true);
         setStreakError("");
 
-        // 🔑 If logged in, send ID token so /api/picks knows who you are
         let res: Response;
         if (user) {
           const idToken = await user.getIdToken();
@@ -310,53 +319,29 @@ export default function PicksClient() {
         }
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
-          g.questions.map((q: ApiQuestion) => {
-            const rawOutcome =
-              q.correctOutcome ??
-              (q.outcome === "yes" ||
-              q.outcome === "no" ||
-              q.outcome === "void"
-                ? q.outcome
-                : null);
-
-            const correctOutcome: QuestionRow["correctOutcome"] =
-              q.status === "final" || q.status === "void"
-                ? rawOutcome ?? null
-                : null;
-
-            let resultForUser: QuestionRow["resultForUser"] = null;
-            if (correctOutcome === "void") {
-              resultForUser = "void";
-            } else if (correctOutcome && q.userPick) {
-              resultForUser =
-                q.userPick === correctOutcome ? "win" : "loss";
-            }
-
-            return {
-              id: q.id,
-              gameId: g.id,
-              match: g.match,
-              venue: g.venue ?? q.venue ?? "",
-              startTime: g.startTime ?? q.startTime ?? "",
-              quarter: q.quarter,
-              question: q.question,
-              status: q.status,
-              userPick: q.userPick,
-              yesPercent: q.yesPercent,
-              noPercent: q.noPercent,
-              sport: q.sport ?? g.sport ?? "AFL",
-              commentCount: q.commentCount ?? 0,
-              isSponsorQuestion: !!q.isSponsorQuestion,
-              correctOutcome,
-              resultForUser,
-            };
-          })
+          g.questions.map((q: ApiQuestion) => ({
+            id: q.id,
+            gameId: g.id,
+            match: g.match,
+            venue: g.venue ?? q.venue ?? "",
+            startTime: g.startTime ?? q.startTime ?? "",
+            quarter: q.quarter,
+            question: q.question,
+            status: q.status,
+            userPick: q.userPick,
+            yesPercent: q.yesPercent,
+            noPercent: q.noPercent,
+            sport: q.sport ?? g.sport ?? "AFL",
+            commentCount: q.commentCount ?? 0,
+            isSponsorQuestion: !!q.isSponsorQuestion,
+            correctOutcome: q.correctOutcome ?? null,
+          }))
         );
 
         setRows(flat);
-        setFilteredRows(flat.filter((r) => r.status === "open"));
+        // 👇 default to ALL
+        setFilteredRows(flat);
 
-        // streaks coming from API (server-calculated)
         setUserStreak(
           typeof data.userStreak === "number" ? data.userStreak : 0
         );
@@ -373,7 +358,6 @@ export default function PicksClient() {
       }
     };
 
-    // Re-load when login state changes
     load();
   }, [user]);
 
@@ -451,16 +435,14 @@ export default function PicksClient() {
         setActiveOutcome(outcome);
 
         setRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            userPick: r.id === questionId ? outcome : r.userPick,
-          }))
+          prev.map((r) =>
+            r.id === questionId ? { ...r, userPick: outcome } : r
+          )
         );
         setFilteredRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            userPick: r.id === questionId ? outcome : r.userPick,
-          }))
+          prev.map((r) =>
+            r.id === questionId ? { ...r, userPick: outcome } : r
+          )
         );
       }
     } catch (err) {
@@ -502,16 +484,14 @@ export default function PicksClient() {
           setActiveOutcome(outcome);
 
           setRows((prev) =>
-            prev.map((r) => ({
-              ...r,
-              userPick: r.id === questionId ? outcome : r.userPick,
-            }))
+            prev.map((r) =>
+              r.id === questionId ? { ...r, userPick: outcome } : r
+            )
           );
           setFilteredRows((prev) =>
-            prev.map((r) => ({
-              ...r,
-              userPick: r.id === questionId ? outcome : r.userPick,
-            }))
+            prev.map((r) =>
+              r.id === questionId ? { ...r, userPick: outcome } : r
+            )
           );
         }
       } catch (err) {
@@ -533,16 +513,18 @@ export default function PicksClient() {
 
   // -------- Local Yes/No % based on streak pick only --------
   const getDisplayPercents = (row: QuestionRow) => {
+    const resultForUser = getResultForUser(row);
+
     if (row.status === "final" || row.status === "void") {
-      if (!row.resultForUser || row.correctOutcome === "void") {
+      if (!resultForUser || row.correctOutcome === "void") {
         return { yes: 0, no: 0 };
       }
-      if (row.resultForUser === "win") {
+      if (resultForUser === "win") {
         return row.correctOutcome === "yes"
           ? { yes: 100, no: 0 }
           : { yes: 0, no: 100 };
       }
-      if (row.resultForUser === "loss") {
+      if (resultForUser === "loss") {
         return row.correctOutcome === "yes"
           ? { yes: 0, no: 100 }
           : { yes: 100, no: 0 };
@@ -572,16 +554,12 @@ export default function PicksClient() {
 
     setRows((prev) =>
       prev.map((r) =>
-        r.id === row.id
-          ? { ...r, userPick: pick }
-          : { ...r, userPick: r.userPick }
+        r.id === row.id ? { ...r, userPick: pick } : r
       )
     );
     setFilteredRows((prev) =>
       prev.map((r) =>
-        r.id === row.id
-          ? { ...r, userPick: pick }
-          : { ...r, userPick: r.userPick }
+        r.id === row.id ? { ...r, userPick: pick } : r
       )
     );
 
@@ -922,6 +900,7 @@ export default function PicksClient() {
               : null;
 
           const useAflLayout = !!parsed && (homeTeam || awayTeam);
+          const resultForUser = getResultForUser(row);
 
           return (
             <div
@@ -1010,7 +989,7 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER – mobile: "Quarter 1", desktop: "Q1" */}
+                {/* QUARTER */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   <span className="block md:hidden">
                     Quarter {row.quarter}
@@ -1097,22 +1076,21 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Result pill directly under the YES/NO buttons */}
                   {(row.status === "final" || row.status === "void") &&
-                    row.resultForUser && (
+                    resultForUser && (
                       <div className="mb-0.5">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            row.resultForUser === "win"
+                            resultForUser === "win"
                               ? "bg-emerald-400 text-black"
-                              : row.resultForUser === "loss"
+                              : resultForUser === "loss"
                               ? "bg-red-500 text-black"
                               : "bg-slate-500 text-white"
                           }`}
                         >
-                          {row.resultForUser === "win"
+                          {resultForUser === "win"
                             ? "You were right!"
-                            : row.resultForUser === "loss"
+                            : resultForUser === "loss"
                             ? "You missed this one"
                             : "Void – no change"}
                         </span>
