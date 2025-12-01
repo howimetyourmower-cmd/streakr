@@ -32,6 +32,8 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
+  // 🔹 these may be supplied by /api/picks
+  correctOutcome?: "yes" | "no" | "void" | null;
 };
 
 type ApiGame = {
@@ -296,30 +298,41 @@ export default function PicksClient() {
         }
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
-          g.questions.map((q: ApiQuestion) => ({
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue ?? q.venue ?? "",
-            startTime: g.startTime ?? q.startTime ?? "",
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
-            sport: q.sport ?? g.sport ?? "AFL",
-            commentCount: q.commentCount ?? 0,
-            isSponsorQuestion: !!q.isSponsorQuestion,
-            correctOutcome:
+          g.questions.map((q: ApiQuestion) => {
+            // 🔹 pull any outcome coming from the API when final/void
+            const correctOutcome: QuestionRow["correctOutcome"] =
               q.status === "final" || q.status === "void"
-                ? (q as any).correctOutcome ?? null
-                : null,
-            resultForUser:
-              q.status === "final" || q.status === "void"
-                ? (q as any).resultForUser ?? null
-                : null,
-          }))
+                ? q.correctOutcome ?? null
+                : null;
+
+            // 🔹 work out resultForUser on the client
+            let resultForUser: QuestionRow["resultForUser"] = null;
+            if (correctOutcome === "void") {
+              resultForUser = "void";
+            } else if (correctOutcome && q.userPick) {
+              resultForUser =
+                q.userPick === correctOutcome ? "win" : "loss";
+            }
+
+            return {
+              id: q.id,
+              gameId: g.id,
+              match: g.match,
+              venue: g.venue ?? q.venue ?? "",
+              startTime: g.startTime ?? q.startTime ?? "",
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              userPick: q.userPick,
+              yesPercent: q.yesPercent,
+              noPercent: q.noPercent,
+              sport: q.sport ?? g.sport ?? "AFL",
+              commentCount: q.commentCount ?? 0,
+              isSponsorQuestion: !!q.isSponsorQuestion,
+              correctOutcome,
+              resultForUser,
+            };
+          })
         );
 
         setRows(flat);
