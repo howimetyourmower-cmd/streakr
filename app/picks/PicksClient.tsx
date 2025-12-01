@@ -281,14 +281,26 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load Picks + streaks (from API) --------
+  // -------- Load Picks + streaks (from API, WITH auth if logged in) --------
   useEffect(() => {
     const load = async () => {
       try {
         setStreakLoading(true);
         setStreakError("");
 
-        const res = await fetch("/api/picks");
+        // 🔑 If logged in, send ID token so /api/picks knows who you are
+        let res: Response;
+        if (user) {
+          const idToken = await user.getIdToken();
+          res = await fetch("/api/picks", {
+            headers: {
+              Authorization: `Bearer ${idToken}`,
+            },
+          });
+        } else {
+          res = await fetch("/api/picks");
+        }
+
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
@@ -361,8 +373,9 @@ export default function PicksClient() {
       }
     };
 
+    // Re-load when login state changes
     load();
-  }, []);
+  }, [user]);
 
   // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
@@ -1038,7 +1051,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* PICK / YES / NO + RESULT PILL (moved under buttons) */}
+                {/* PICK / YES / NO + RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
