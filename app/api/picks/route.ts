@@ -45,6 +45,8 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
+  userStreak: number | null;
+  leaderStreak: number | null;
 };
 
 type SponsorQuestionConfig = {
@@ -251,6 +253,47 @@ async function getQuestionStatusForRound(
   return finalMap;
 }
 
+async function getStreaksForUser(
+  currentUserId: string | null
+): Promise<{ userStreak: number | null; leaderStreak: number | null }> {
+  let userStreak: number | null = null;
+  let leaderStreak: number | null = null;
+
+  try {
+    // Leader streak = max currentStreak across all users
+    const topSnap = await db
+      .collection("users")
+      .orderBy("currentStreak", "desc")
+      .limit(1)
+      .get();
+
+    topSnap.forEach((docSnap) => {
+      const data = docSnap.data() as any;
+      const val =
+        typeof data.currentStreak === "number" ? data.currentStreak : 0;
+      leaderStreak = val;
+    });
+
+    // Current user's streak
+    if (currentUserId) {
+      const userRef = db.collection("users").doc(currentUserId);
+      const userSnap = await userRef.get();
+      if (userSnap.exists) {
+        const data = userSnap.data() as any;
+        const val =
+          typeof data.currentStreak === "number" ? data.currentStreak : 0;
+        userStreak = val;
+      } else {
+        userStreak = 0;
+      }
+    }
+  } catch (error) {
+    console.error("[/api/picks] Error fetching streaks", error);
+  }
+
+  return { userStreak, leaderStreak };
+}
+
 // ─────────────────────────────────────────────
 // Main GET handler
 // ─────────────────────────────────────────────
@@ -280,11 +323,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
-      const empty: PicksApiResponse = { games: [], roundNumber };
+      const empty: PicksApiResponse = {
+        games: [],
+        roundNumber,
+        userStreak: null,
+        leaderStreak: null,
+      };
       return NextResponse.json(empty);
     }
 
-    // 3) Identify user (for userPick)
+    // 3) Identify user (for userPick and streak)
     const currentUserId = await getUserIdFromRequest(req);
 
     // 4) Sponsor config
@@ -300,7 +348,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
-    // 7) Group rows into games and build final API shape
+    // 7) Streak info (current user + leader)
+    const { userStreak, leaderStreak } = await getStreaksForUser(
+      currentUserId
+    );
+
+    // 8) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
 
@@ -365,13 +418,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const response: PicksApiResponse = {
       games,
       roundNumber,
+      userStreak,
+      leaderStreak,
     };
 
     return NextResponse.json(response);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
-      { error: "Internal server error", games: [], roundNumber: 0 },
+      {
+        error: "Internal server error",
+        games: [],
+        roundNumber: 0,
+        userStreak: null,
+        leaderStreak: null,
+      },
       { status: 500 }
     );
   }
