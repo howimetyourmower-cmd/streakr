@@ -16,11 +16,6 @@ import {
   onSnapshot,
   query,
   where,
-  getDoc,
-  getDocs,
-  doc,
-  orderBy,
-  limit,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -38,9 +33,8 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  // fields from /api/picks
+  // from /api/picks
   correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null; // raw outcome if API uses it
 };
 
 type ApiGame = {
@@ -74,6 +68,8 @@ type QuestionRow = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  userStreak?: number | null;
+  leaderStreak?: number | null;
 };
 
 type Comment = {
@@ -260,11 +256,9 @@ export default function PicksClient() {
   // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // streak progress tracker
+  // streak progress tracker (now driven from /api/picks)
   const [userStreak, setUserStreak] = useState<number | null>(null);
   const [leaderStreak, setLeaderStreak] = useState<number | null>(null);
-  const [streakLoading, setStreakLoading] = useState(false);
-  const [streakError, setStreakError] = useState("");
 
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
@@ -291,7 +285,7 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load Picks (spinner only on first load) --------
+  // -------- Load Picks + streaks (spinner only on first load) --------
   const loadPicks = useCallback(
     async (options?: { showSpinner?: boolean }) => {
       const showSpinner = options?.showSpinner ?? false;
@@ -311,28 +305,27 @@ export default function PicksClient() {
           setRoundNumber(data.roundNumber);
         }
 
-        let flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
+        if (
+          typeof data.userStreak === "number" ||
+          data.userStreak === null
+        ) {
+          setUserStreak(data.userStreak);
+        }
+
+        if (
+          typeof data.leaderStreak === "number" ||
+          data.leaderStreak === null
+        ) {
+          setLeaderStreak(data.leaderStreak);
+        }
+
+        const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
           g.questions.map((q: ApiQuestion) => {
-            // Determine correct outcome from API
-            let correctOutcome: QuestionRow["correctOutcome"] = null;
-            if (q.status === "final" || q.status === "void") {
-              if (
-                q.correctOutcome === "yes" ||
-                q.correctOutcome === "no" ||
-                q.correctOutcome === "void"
-              ) {
-                correctOutcome = q.correctOutcome;
-              } else if (
-                q.outcome === "yes" ||
-                q.outcome === "no" ||
-                q.outcome === "void"
-              ) {
-                // fallback if API is still using `outcome`
-                correctOutcome = q.outcome;
-              } else {
-                correctOutcome = null;
-              }
-            }
+            // Use outcome from API (correctOutcome is set server-side for final/void)
+            const correctOutcome: QuestionRow["correctOutcome"] =
+              q.status === "final" || q.status === "void"
+                ? q.correctOutcome ?? null
+                : null;
 
             // Effective user pick: prefer q.userPick, otherwise fallback to active streak pick
             const effectiveUserPick: "yes" | "no" | undefined =
@@ -489,7 +482,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Optional: also try to load from /api/user-picks (server copy) --------
+  // -------- Also try to load from /api/user-picks (server copy) --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -545,72 +538,14 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
-  // -------- Load streak progress (spinner only on first load) --------
-  const loadStreaks = useCallback(
-    async (options?: { showSpinner?: boolean }) => {
-      const showSpinner = options?.showSpinner ?? false;
-
-      try {
-        if (showSpinner) {
-          setStreakLoading(true);
-          setStreakError("");
-        }
-
-        const usersRef = collection(db, "users");
-        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
-        const topSnap = await getDocs(topQ);
-
-        let leaderVal: number | null = null;
-        topSnap.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const val =
-            typeof data.currentStreak === "number" ? data.currentStreak : 0;
-          leaderVal = val;
-        });
-        setLeaderStreak(leaderVal);
-
-        if (user) {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data() as any;
-            const myVal =
-              typeof data.currentStreak === "number" ? data.currentStreak : 0;
-            setUserStreak(myVal);
-          } else {
-            setUserStreak(0);
-          }
-        } else {
-          setUserStreak(null);
-        }
-      } catch (err) {
-        console.error("Failed to load streak progress", err);
-        if (showSpinner) {
-          setStreakError("Could not load streak tracker.");
-        }
-      } finally {
-        if (showSpinner) {
-          setStreakLoading(false);
-        }
-      }
-    },
-    [user]
-  );
-
-  useEffect(() => {
-    // first load: show spinner text
-    loadStreaks({ showSpinner: true });
-  }, [loadStreaks]);
-
   // -------- Polling: keep picks + streaks fresh after settlement (no spinner) --------
   useEffect(() => {
     const interval = setInterval(() => {
       loadPicks(); // background refresh, no loading spinner
-      loadStreaks(); // background, no "Loading streak data…" text
     }, 15000);
 
     return () => clearInterval(interval);
-  }, [loadPicks, loadStreaks]);
+  }, [loadPicks]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -927,14 +862,7 @@ export default function PicksClient() {
               <span>Waiting for streaks…</span>
             )}
           </div>
-          {streakLoading && (
-            <p className="mt-1 text-[10px] text-white/50">
-              Loading streak data…
-            </p>
-          )}
-          {streakError && (
-            <p className="mt-1 text-[10px] text-red-400">{streakError}</p>
-          )}
+
           {shareStatus && (
             <p className="mt-1 text-[10px] text-sky-300">{shareStatus}</p>
           )}
