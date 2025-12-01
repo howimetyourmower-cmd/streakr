@@ -36,9 +36,9 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
  *   - "yes" / "no"  => correct answer
  *   - "void"        => does not change streak
  *
- * We now use the `userPicks` collection (one active streak pick per user),
+ * We now use the `picks` collection (one doc per user per question),
  * where documents look like:
- *   { userId, roundNumber, questionId, outcome: "yes" | "no" }
+ *   { userId, roundNumber, questionId, pick: "yes" | "no" }
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
@@ -49,7 +49,7 @@ async function updateStreaksForQuestion(
   if (outcome === "void") return;
 
   const picksSnap = await db
-    .collection("userPicks")
+    .collection("picks")
     .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
@@ -61,11 +61,11 @@ async function updateStreaksForQuestion(
   picksSnap.forEach((pickDoc) => {
     const data = pickDoc.data() as {
       userId?: string;
-      outcome?: "yes" | "no";
+      pick?: "yes" | "no";
     };
 
     const userId = data.userId;
-    const pick = data.outcome; // user’s chosen side
+    const pick = data.pick; // user’s chosen side
 
     if (!userId || (pick !== "yes" && pick !== "no")) return;
 
