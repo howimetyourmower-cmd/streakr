@@ -1,57 +1,32 @@
 // app/admin/settlement/page.tsx
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  MouseEvent,
-} from "react";
-import { ROUND_OPTIONS } from "@/lib/rounds";
-
-// Convert ROUND_OPTIONS.key → numeric roundNumber
-function keyToRoundNumber(key: string): number {
-  if (key === "OR") return 0;
-  if (key.startsWith("R")) {
-    const num = Number(key.substring(1));
-    return Number.isFinite(num) ? num : 0;
-  }
-  return 0;
-}
-
-const roundNumber = useMemo(() => {
-  return keyToRoundNumber(roundKey);
-}, [roundKey]);
-
-const roundLabel = useMemo(() => {
-  const found = ROUND_OPTIONS.find((r) => r.key === roundKey);
-  return found?.label ?? "Round";
-}, [roundKey]);
-
-export const dynamic = "force-dynamic";
+import { useEffect, useMemo, useState } from "react";
+import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
-type QuestionOutcome = "yes" | "no" | "void";
+
+type SettlementAction =
+  | "lock"
+  | "reopen"
+  | "final_yes"
+  | "final_no"
+  | "final_void"
+  | "void";
+
+type RoundKey = (typeof ROUND_OPTIONS)[number]["key"];
 
 type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
-  sport: string;
   isSponsorQuestion?: boolean;
-  userPick?: "yes" | "no";
-  yesPercent?: number;
-  noPercent?: number;
-  commentCount?: number;
-  correctOutcome?: QuestionOutcome;
 };
 
 type ApiGame = {
   id: string;
   match: string;
-  sport: string;
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
@@ -62,39 +37,39 @@ type PicksApiResponse = {
   roundNumber: number;
 };
 
-type StatusFilter = "all" | "open" | "pending" | "final" | "void";
-type RoundKey = (typeof ROUND_OPTIONS)[number]["key"];
+type QuestionRow = {
+  id: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  match: string;
+  isSponsorQuestion?: boolean;
+};
 
-function formatStartTime(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("en-AU", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+// Map ROUND_OPTIONS.key → numeric roundNumber used by /api/picks & /api/settlement
+function keyToRoundNumber(key: string): number {
+  if (key === "OR") return 0; // Opening Round
+  if (key.startsWith("R")) {
+    const num = Number(key.slice(1));
+    return Number.isFinite(num) ? num : 0;
+  }
+  return 0;
 }
 
 export default function SettlementPage() {
-  // Which round (by key from ROUND_OPTIONS)
-  const [roundKey, setRoundKey] = useState<RoundKey>(ROUND_OPTIONS[0].key);
-  // Questions / games for that round
-  const [games, setGames] = useState<ApiGame[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [roundKey, setRoundKey] = useState<RoundKey>("OR");
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "open" | "pending" | "final" | "void"
+  >("all");
+
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Which status filter tab
-  const [filter, setFilter] = useState<StatusFilter>("all");
-
-  // Which button is currently saving "roundNumber|questionId|action"
-  const [savingKey, setSavingKey] = useState<string | null>(null);
-
-  // roundNumber used by /api/picks & /api/settlement
+  // Derived roundNumber from key
   const roundNumber = useMemo(() => {
-    const found = ROUND_OPTIONS.find((r) => r.key === roundKey);
-    return found?.roundNumber ?? 0;
+    return keyToRoundNumber(roundKey);
   }, [roundKey]);
 
   const roundLabel = useMemo(() => {
@@ -102,150 +77,203 @@ export default function SettlementPage() {
     return found?.label ?? "Round";
   }, [roundKey]);
 
-  // Load questions via /api/picks for the selected round
-  const loadQuestions = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const params = new URLSearchParams();
-      params.set("round", String(roundNumber));
-
-      const res = await fetch(`/api/picks?${params.toString()}`, {
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        throw new Error(`Failed to load picks (status ${res.status})`);
-      }
-
-      const data: PicksApiResponse = await res.json();
-      setGames(data.games ?? []);
-    } catch (err: any) {
-      console.error("[Settlement] loadQuestions error", err);
-      setError(
-        err?.message || "Failed to load questions. Please try again later."
-      );
-      setGames([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [roundNumber]);
-
-  // Initial + whenever roundNumber changes
+  // Load questions for the selected round
   useEffect(() => {
-    loadQuestions();
-  }, [loadQuestions]);
-
-  // Send settlement action to /api/settlement
-  const sendAction = useCallback(
-    async (
-      questionId: string,
-      action:
-        | "lock"
-        | "reopen"
-        | "final_yes"
-        | "final_no"
-        | "final_void"
-        | "void"
-    ) => {
-      const key = `${roundNumber}|${questionId}|${action}`;
-      setSavingKey(key);
-
+    const load = async () => {
       try {
-        const res = await fetch("/api/settlement", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            roundNumber,
-            questionId,
-            action, // 👈 always send explicit action
-          }),
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch(`/api/picks?round=${roundNumber}`, {
+          cache: "no-store",
         });
-
-        const json = await res.json();
-
         if (!res.ok) {
-          console.error("[Settlement] API error", res.status, json);
-          alert(json?.error || "Failed to update question status.");
-          return;
+          throw new Error(`Failed to load picks (status ${res.status})`);
         }
 
-        // Reload from /api/picks so status & correctOutcome are fresh
-        await loadQuestions();
-      } catch (err) {
-        console.error("[Settlement] sendAction error", err);
-        alert("Something went wrong. Please try again.");
+        const json: PicksApiResponse = await res.json();
+
+        const flat: QuestionRow[] = [];
+        for (const game of json.games || []) {
+          for (const q of game.questions || []) {
+            flat.push({
+              id: q.id,
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              match: game.match,
+              isSponsorQuestion: q.isSponsorQuestion,
+            });
+          }
+        }
+
+        setQuestions(flat);
+      } catch (err: any) {
+        console.error("[Settlement] load error", err);
+        setError(
+          err?.message || "Failed to load questions for settlement console."
+        );
+        setQuestions([]);
       } finally {
-        setSavingKey(null);
+        setLoading(false);
       }
-    },
-    [roundNumber, loadQuestions]
-  );
-
-  const onChangeRound = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setRoundKey(e.target.value as RoundKey);
-  };
-
-  const handleActionClick =
-    (
-      q: ApiQuestion,
-      action:
-        | "lock"
-        | "reopen"
-        | "final_yes"
-        | "final_no"
-        | "final_void"
-        | "void"
-    ) =>
-    (ev: MouseEvent<HTMLButtonElement>) => {
-      ev.preventDefault();
-      if (savingKey) return; // ignore double-clicks while saving
-      sendAction(q.id, action);
     };
 
-  const filteredGames = useMemo(() => {
-    if (filter === "all") return games;
+    load();
+  }, [roundNumber]);
 
-    return games
-      .map((g) => ({
-        ...g,
-        questions: g.questions.filter((q) => q.status === filter),
-      }))
-      .filter((g) => g.questions.length > 0);
-  }, [games, filter]);
+  const filteredQuestions = useMemo(() => {
+    if (statusFilter === "all") return questions;
+    return questions.filter((q) => q.status === statusFilter);
+  }, [questions, statusFilter]);
 
-  const isSaving = (q: ApiQuestion, action: string) =>
-    savingKey === `${roundNumber}|${q.id}|${action}`;
+  async function handleAction(questionId: string, action: SettlementAction) {
+    try {
+      setSavingId(questionId);
+      setError(null);
+
+      const res = await fetch("/api/settlement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roundNumber,
+          questionId,
+          action, // 👈 always send an action
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        const message =
+          data?.error || `Settlement API failed (status ${res.status})`;
+        throw new Error(message);
+      }
+
+      // Optimistic local status update so you see it instantly
+      setQuestions((prev) =>
+        prev.map((q) => {
+          if (q.id !== questionId) return q;
+
+          let newStatus: QuestionStatus = q.status;
+
+          switch (action) {
+            case "lock":
+              newStatus = "pending";
+              break;
+            case "reopen":
+              newStatus = "open";
+              break;
+            case "final_yes":
+            case "final_no":
+              newStatus = "final";
+              break;
+            case "final_void":
+            case "void":
+              newStatus = "void";
+              break;
+            default:
+              break;
+          }
+
+          return { ...q, status: newStatus };
+        })
+      );
+
+      // Hard refresh from /api/picks so everything is in sync
+      const refresh = await fetch(`/api/picks?round=${roundNumber}`, {
+        cache: "no-store",
+      });
+      if (refresh.ok) {
+        const json: PicksApiResponse = await refresh.json();
+        const flat: QuestionRow[] = [];
+        for (const game of json.games || []) {
+          for (const q of game.questions || []) {
+            flat.push({
+              id: q.id,
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              match: game.match,
+              isSponsorQuestion: q.isSponsorQuestion,
+            });
+          }
+        }
+        setQuestions(flat);
+      }
+    } catch (err: any) {
+      console.error("[Settlement] action error", err);
+      alert(err?.message || "Failed to update settlement.");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  function statusBadge(status: QuestionStatus) {
+    switch (status) {
+      case "open":
+        return (
+          <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 border border-emerald-400/40">
+            OPEN
+          </span>
+        );
+      case "pending":
+        return (
+          <span className="inline-flex items-center rounded-full bg-amber-500/15 px-3 py-1 text-xs font-semibold text-amber-300 border border-amber-400/40">
+            PENDING
+          </span>
+        );
+      case "final":
+        return (
+          <span className="inline-flex items-center rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-300 border border-sky-400/40">
+            FINAL
+          </span>
+        );
+      case "void":
+      default:
+        return (
+          <span className="inline-flex items-center rounded-full bg-slate-500/15 px-3 py-1 text-xs font-semibold text-slate-200 border border-slate-400/40">
+            VOID
+          </span>
+        );
+    }
+  }
 
   return (
-    <main className="min-h-screen bg-black text-white">
-      <section className="max-w-6xl mx-auto px-4 py-8 md:py-10 space-y-6">
-        {/* Header */}
+    <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white">
+      <section className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+        {/* HEADER */}
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
+            <h1 className="text-3xl font-extrabold tracking-tight">
               Settlement console
             </h1>
-            <p className="mt-2 text-sm text-white/70 max-w-xl">
-              Use this page to lock questions when the game is live and then
-              mark them as YES / NO / VOID once the stats are confirmed. The
-              picks page reads from <code>/api/picks</code> and this endpoint,
-              and streaks are recalculated from here.
+            <p className="mt-2 text-sm text-slate-200/80 max-w-xl">
+              Lock questions when they&apos;re live, then settle them with the
+              correct outcome. Uses <code className="text-xs">/api/picks</code>{" "}
+              for data and <code className="text-xs">/api/settlement</code> for
+              updates. Reopen is a safety net if you lock or settle the wrong
+              question.
             </p>
           </div>
 
-          {/* Round selector */}
-          <div className="flex flex-col items-start md:items-end gap-2 text-sm">
-            <span className="text-xs uppercase tracking-wide text-white/60">
-              Current round
-            </span>
+          <div className="flex flex-col items-start md:items-end gap-3 text-sm">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="inline-flex items-center rounded-full bg-white/5 border border-white/15 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
+                AFL Season {CURRENT_SEASON}
+              </span>
+              <span className="text-xs text-slate-300">
+                Round:{" "}
+                <span className="font-semibold text-white">
+                  {roundLabel}
+                </span>
+              </span>
+            </div>
+
             <select
               value={roundKey}
-              onChange={onChangeRound}
-              className="rounded-full bg-black border border-white/20 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+              onChange={(e) => setRoundKey(e.target.value as RoundKey)}
+              className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
             >
               {ROUND_OPTIONS.map((r) => (
                 <option key={r.key} value={r.key}>
@@ -256,78 +284,42 @@ export default function SettlementPage() {
           </div>
         </header>
 
-        {/* Helper strip */}
-        <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-black via-slate-900/70 to-black px-4 py-3 text-xs md:text-sm flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center rounded-full bg-white/5 border border-white/20 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
-              {roundLabel}
-            </span>
-            <span className="text-white/80">
-              Uses <code>/api/picks</code> for data and{" "}
-              <code>/api/settlement</code> for updates.{" "}
-              <span className="font-semibold">Reopen</span> is a safety net if
-              you lock or settle the wrong question.
-            </span>
-          </div>
-          <div className="text-white/60">
-            Lock → question becomes{" "}
-            <span className="font-semibold text-amber-300">PENDING</span>. YES /
-            NO / VOID →{" "}
-            <span className="font-semibold text-sky-300">FINAL</span> (or{" "}
-            <span className="font-semibold text-slate-200">VOID</span>) and
-            streaks are recalculated.
-          </div>
+        {/* FILTER ROW */}
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <span className="text-[11px] uppercase tracking-wide text-slate-400">
+            Filter by status
+          </span>
+          {(["open", "final", "pending", "void", "all"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStatusFilter(s)}
+              className={`px-3 py-1 rounded-full border text-xs font-semibold transition ${
+                statusFilter === s
+                  ? "bg-orange-500 text-black border-orange-400"
+                  : "bg-slate-900/70 text-slate-200 border-slate-600 hover:bg-slate-800"
+              }`}
+            >
+              {s.toUpperCase()}
+            </button>
+          ))}
         </div>
 
-        {/* Status filter tabs */}
-        <div className="flex flex-wrap gap-2 text-xs">
-          {(["all", "open", "pending", "final", "void"] as StatusFilter[]).map(
-            (key) => {
-              const label =
-                key === "all"
-                  ? "All"
-                  : key === "open"
-                  ? "Open"
-                  : key === "pending"
-                  ? "Pending"
-                  : key === "final"
-                  ? "Final"
-                  : "Void";
-              const active = filter === key;
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setFilter(key)}
-                  className={`px-4 py-1.5 rounded-full border text-xs font-semibold transition ${
-                    active
-                      ? "bg-orange-500 text-black border-orange-300"
-                      : "bg-black/50 text-white/80 border-white/25 hover:bg-black/80"
-                  }`}
-                >
-                  {label}
-                </button>
-              );
-            }
-          )}
-        </div>
-
-        {/* Main table */}
-        <section className="rounded-2xl bg-black/80 border border-white/12 overflow-hidden shadow-[0_0_40px_rgba(0,0,0,0.7)]">
-          {/* Header row */}
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-white/60 bg-black/80">
+        {/* TABLE */}
+        <section className="rounded-2xl bg-slate-950/90 border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.7)] overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-slate-300 bg-black/80">
             <div className="flex items-center gap-6">
               <span className="w-10 text-left">Qtr</span>
               <span>Question</span>
             </div>
             <div className="flex items-center gap-6">
               <span>Status</span>
-              <span className="hidden md:inline">Set outcome</span>
+              <span>Set outcome</span>
             </div>
           </div>
 
           {loading && (
-            <div className="px-4 py-6 text-sm text-white/70">
+            <div className="px-4 py-6 text-sm text-slate-200">
               Loading questions…
             </div>
           )}
@@ -336,201 +328,104 @@ export default function SettlementPage() {
             <div className="px-4 py-6 text-sm text-red-400">{error}</div>
           )}
 
-          {!loading && !error && filteredGames.length === 0 && (
-            <div className="px-4 py-6 text-sm text-white/70">
-              No questions match this filter.
+          {!loading && !error && filteredQuestions.length === 0 && (
+            <div className="px-4 py-6 text-sm text-slate-200">
+              No questions found for this round / filter.
             </div>
           )}
 
-          {!loading && !error && filteredGames.length > 0 && (
-            <div className="divide-y divide-white/8">
-              {filteredGames.map((game) => (
-                <div key={game.id} className="bg-slate-950/80">
-                  {/* Game header */}
-                  <div className="px-4 py-3 border-b border-white/10 flex flex-col gap-1 md:flex-row md:items-center md:justify-between text-xs md:text-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex items-center rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/70 border border-white/20">
-                        {game.sport}
-                      </span>
-                      <div>
-                        <div className="font-semibold text-white">
-                          {game.match}
-                        </div>
-                        <div className="text-white/60">
-                          {game.venue} • {formatStartTime(game.startTime)}
-                        </div>
+          {!loading && !error && filteredQuestions.length > 0 && (
+            <div className="divide-y divide-white/10">
+              {filteredQuestions.map((q) => (
+                <div
+                  key={q.id}
+                  className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
+                >
+                  <div className="flex items-start gap-4 md:w-2/3">
+                    <div className="w-10 mt-1 text-sm font-semibold text-slate-200">
+                      Q{q.quarter}
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-400 mb-0.5">
+                        {q.match}
                       </div>
+                      <div className="text-sm font-semibold text-white">
+                        {q.question}
+                      </div>
+                      {q.isSponsorQuestion && (
+                        <div className="mt-1 inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
+                          Sponsor Question
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Questions */}
-                  {game.questions.map((q) => {
-                    const isOpen = q.status === "open";
-                    const isPending = q.status === "pending";
-                    const isFinal = q.status === "final";
-                    const isVoid = q.status === "void";
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-3 md:w-1/3">
+                    <div>{statusBadge(q.status)}</div>
 
-                    let statusColour =
-                      "bg-slate-700 text-white border border-slate-500";
-                    if (isOpen)
-                      statusColour =
-                        "bg-emerald-600/80 text-white border border-emerald-500/80";
-                    if (isPending)
-                      statusColour =
-                        "bg-amber-500/90 text-black border border-amber-300";
-                    if (isFinal)
-                      statusColour =
-                        "bg-sky-600/90 text-white border border-sky-400";
-                    if (isVoid)
-                      statusColour =
-                        "bg-slate-500/90 text-white border border-slate-300";
-
-                    return (
-                      <div
-                        key={q.id}
-                        className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* YES / NO / VOID */}
+                      <button
+                        type="button"
+                        disabled={savingId === q.id}
+                        onClick={() =>
+                          handleAction(q.id, "final_yes")
+                        }
+                        className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/80 text-black hover:bg-emerald-400 disabled:opacity-60"
                       >
-                        {/* Left: quarter + question + tags */}
-                        <div className="flex-1 flex gap-3">
-                          <div className="w-10 mt-0.5">
-                            <span className="inline-flex items-center justify-center rounded-full bg-white/8 border border-white/20 text-[11px] font-semibold px-2 py-1">
-                              Q{q.quarter}
-                            </span>
-                          </div>
-                          <div className="flex-1">
-                            <div className="text-sm md:text-base font-semibold text-white">
-                              {q.question}
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                              {q.isSponsorQuestion && (
-                                <span className="inline-flex items-center rounded-full bg-sky-500/20 px-3 py-1 font-semibold text-sky-300 border border-sky-500/60">
-                                  Streak Pick
-                                </span>
-                              )}
-                              <span
-                                className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold capitalize ${statusColour}`}
-                              >
-                                {q.status}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                        YES
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingId === q.id}
+                        onClick={() =>
+                          handleAction(q.id, "final_no")
+                        }
+                        className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/80 text-black hover:bg-red-400 disabled:opacity-60"
+                      >
+                        NO
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingId === q.id}
+                        onClick={() =>
+                          handleAction(q.id, "final_void")
+                        }
+                        className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/80 text-black hover:bg-slate-400 disabled:opacity-60"
+                      >
+                        VOID
+                      </button>
 
-                        {/* Right: outcome buttons */}
-                        <div className="mt-1 md:mt-0 flex flex-col items-end gap-2 min-w-[230px] text-[11px]">
-                          <div className="flex flex-wrap gap-2">
-                            {/* YES */}
-                            <button
-                              type="button"
-                              onClick={handleActionClick(q, "final_yes")}
-                              disabled={
-                                isVoid ||
-                                isFinal ||
-                                isSaving(q, "final_yes")
-                              }
-                              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
-                                isFinal && q.correctOutcome === "yes"
-                                  ? "bg-emerald-500 text-black border-emerald-300"
-                                  : "bg-emerald-600/40 text-emerald-100 border-emerald-400/70 hover:bg-emerald-600/70"
-                              } ${
-                                isSaving(q, "final_yes")
-                                  ? "opacity-50 cursor-wait"
-                                  : ""
-                              }`}
-                            >
-                              YES
-                            </button>
-                            {/* NO */}
-                            <button
-                              type="button"
-                              onClick={handleActionClick(q, "final_no")}
-                              disabled={
-                                isVoid || isFinal || isSaving(q, "final_no")
-                              }
-                              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
-                                isFinal && q.correctOutcome === "no"
-                                  ? "bg-red-500 text-black border-red-300"
-                                  : "bg-red-600/40 text-red-100 border-red-400/70 hover:bg-red-600/70"
-                              } ${
-                                isSaving(q, "final_no")
-                                  ? "opacity-50 cursor-wait"
-                                  : ""
-                              }`}
-                            >
-                              NO
-                            </button>
-                            {/* VOID */}
-                            <button
-                              type="button"
-                              onClick={handleActionClick(q, "final_void")}
-                              disabled={
-                                isVoid || isSaving(q, "final_void")
-                              }
-                              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
-                                isVoid
-                                  ? "bg-slate-400 text-black border-slate-200"
-                                  : "bg-slate-600/40 text-slate-100 border-slate-400/70 hover:bg-slate-600/70"
-                              } ${
-                                isSaving(q, "final_void")
-                                  ? "opacity-50 cursor-wait"
-                                  : ""
-                              }`}
-                            >
-                              VOID
-                            </button>
-                            {/* LOCK */}
-                            <button
-                              type="button"
-                              onClick={handleActionClick(q, "lock")}
-                              disabled={
-                                isPending ||
-                                isFinal ||
-                                isVoid ||
-                                isSaving(q, "lock")
-                              }
-                              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
-                                isPending
-                                  ? "bg-amber-400 text-black border-amber-200"
-                                  : "bg-amber-500/40 text-amber-100 border-amber-300/70 hover:bg-amber-500/70"
-                              } ${
-                                isSaving(q, "lock")
-                                  ? "opacity-50 cursor-wait"
-                                  : ""
-                              }`}
-                            >
-                              LOCK
-                            </button>
-                            {/* REOPEN */}
-                            <button
-                              type="button"
-                              onClick={handleActionClick(q, "reopen")}
-                              disabled={isOpen || isSaving(q, "reopen")}
-                              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${
-                                isOpen
-                                  ? "bg-slate-500/40 text-slate-200 border-slate-300"
-                                  : "bg-slate-700/60 text-slate-100 border-slate-400/70 hover:bg-slate-700"
-                              } ${
-                                isSaving(q, "reopen")
-                                  ? "opacity-50 cursor-wait"
-                                  : ""
-                              }`}
-                            >
-                              REOPEN
-                            </button>
-                          </div>
-                          <div className="text-[11px] text-white/60">
-                            Saving updates will briefly highlight buttons and
-                            then refresh this table from <code>/api/picks</code>.
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      {/* LOCK / REOPEN */}
+                      <button
+                        type="button"
+                        disabled={savingId === q.id}
+                        onClick={() => handleAction(q.id, "lock")}
+                        className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
+                      >
+                        LOCK
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingId === q.id}
+                        onClick={() => handleAction(q.id, "reopen")}
+                        className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-100 border border-slate-500 hover:bg-slate-700 disabled:opacity-60"
+                      >
+                        REOPEN
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </section>
+
+        <p className="text-xs text-slate-400">
+          Changes here update the live picks feed and player streaks. If a
+          question is settled incorrectly, hit <strong>REOPEN</strong> and then
+          settle it again with the correct outcome.
+        </p>
       </section>
     </main>
   );
