@@ -32,8 +32,9 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  // 🔹 these may be supplied by /api/picks
+  // possible fields from /api/picks
   correctOutcome?: "yes" | "no" | "void" | null;
+  outcome?: "yes" | "no" | "void" | "lock" | null; // 👈 NEW – raw outcome field if API uses it
 };
 
 type ApiGame = {
@@ -299,10 +300,18 @@ export default function PicksClient() {
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
           g.questions.map((q: ApiQuestion) => {
-            // 🔹 pull any outcome coming from the API when final/void
+            // 🔹 normalise any outcome coming from the API when final/void
+            const rawOutcome =
+              q.correctOutcome ??
+              (q.outcome === "yes" ||
+              q.outcome === "no" ||
+              q.outcome === "void"
+                ? q.outcome
+                : null);
+
             const correctOutcome: QuestionRow["correctOutcome"] =
               q.status === "final" || q.status === "void"
-                ? q.correctOutcome ?? null
+                ? rawOutcome ?? null
                 : null;
 
             // 🔹 work out resultForUser on the client
@@ -1165,7 +1174,7 @@ export default function PicksClient() {
             <div className="flex flex-col sm:flex-row gap-3">
               <Link
                 href="/auth?mode=login&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text:black font-semibold text-sm px-4 py-2 transition-colors"
                 onClick={() => setShowAuthModal(false)}
               >
                 Login
