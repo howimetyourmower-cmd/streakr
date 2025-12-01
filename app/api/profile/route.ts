@@ -3,8 +3,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 
-export const dynamic = "force-dynamic";
-
 type ApiProfileStats = {
   displayName: string;
   username: string;
@@ -13,7 +11,7 @@ type ApiProfileStats = {
   state?: string;
   currentStreak: number;
   bestStreak: number;
-  correctPercentage: number; // placeholder for now
+  correctPercentage: number;
   roundsPlayed: number;
 };
 
@@ -27,109 +25,82 @@ type ApiRecentPick = {
   settledAt?: string;
 };
 
-async function getUserIdFromRequest(
-  req: NextRequest,
-  explicitUid: string | null
-): Promise<string | null> {
-  if (explicitUid) return explicitUid;
-
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-
-  const token = authHeader.substring("Bearer ".length).trim();
-  if (!token) return null;
-
-  try {
-    const decoded = await auth.verifyIdToken(token);
-    return decoded.uid ?? null;
-  } catch (err) {
-    console.error("[/api/profile] Failed to verify ID token", err);
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
-    const uidParam = url.searchParams.get("uid");
+    let uid = url.searchParams.get("uid");
 
-    const uid = await getUserIdFromRequest(req, uidParam);
+    // Fallback: try auth token if uid not provided
+    if (!uid) {
+      const authHeader = req.headers.get("authorization");
+      if (authHeader?.startsWith("Bearer ")) {
+        const token = authHeader.substring("Bearer ".length).trim();
+        try {
+          const decoded = await auth.verifyIdToken(token);
+          uid = decoded.uid;
+        } catch {
+          // ignore; we'll just return 401 below
+        }
+      }
+    }
+
     if (!uid) {
       return NextResponse.json(
-        { error: "Unauthenticated" },
+        { error: "Missing uid" },
         { status: 401 }
       );
     }
 
-    // 1) Load user doc
     const userRef = db.collection("users").doc(uid);
-    const userSnap = await userRef.get();
-    const userData = (userSnap.exists ? userSnap.data() : {}) as any;
+    const snap = await userRef.get();
 
-    const firstName: string = userData.firstName ?? "";
-    const surname: string = userData.surname ?? "";
-    const username: string = userData.username ?? "";
-    const email: string = userData.email ?? "";
-    const team: string = userData.team ?? "";
-    const suburb: string = userData.suburb ?? "";
-    const state: string = userData.state ?? "";
+    const data = (snap.exists ? snap.data() : {}) as any;
+
+    const firstName = (data.firstName as string) || "";
+    const surname = (data.surname as string) || "";
+    const username = (data.username as string) || "";
+    const suburb = (data.suburb as string) || "";
+    const state = (data.state as string) || "";
+    const favouriteTeam = (data.team as string) || "";
 
     const displayName =
-      (firstName && surname && `${firstName} ${surname}`) ||
-      username ||
-      email ||
-      "Player";
+      (firstName || surname) ?
+        `${firstName} ${surname}`.trim() :
+        username || "Player";
 
-    const currentStreak: number =
-      typeof userData.currentStreak === "number"
-        ? userData.currentStreak
+    const currentStreak =
+      typeof data.currentStreak === "number" ? data.currentStreak : 0;
+    const longestStreak =
+      typeof data.longestStreak === "number" ? data.longestStreak : 0;
+
+    // For now keep these simple – you can wire real stats later
+    const correctPercentage =
+      typeof data.correctPercentage === "number"
+        ? data.correctPercentage
         : 0;
-
-    const bestStreak: number =
-      typeof userData.longestStreak === "number"
-        ? userData.longestStreak
-        : 0;
-
-    // 2) Basic stats from picks: rounds played
-    let roundsPlayed = 0;
-    let correctPercentage = 0; // keep at 0 for now
-
-    const picksSnap = await db
-      .collection("picks")
-      .where("userId", "==", uid)
-      .get();
-
-    if (!picksSnap.empty) {
-      const roundSet = new Set<number>();
-      picksSnap.forEach((docSnap) => {
-        const d = docSnap.data() as any;
-        if (typeof d.roundNumber === "number") {
-          roundSet.add(d.roundNumber);
-        }
-      });
-      roundsPlayed = roundSet.size;
-    }
+    const roundsPlayed =
+      typeof data.roundsPlayed === "number" ? data.roundsPlayed : 0;
 
     const stats: ApiProfileStats = {
       displayName,
       username,
-      favouriteTeam: team,
+      favouriteTeam,
       suburb2: suburb,
       state,
       currentStreak,
-      bestStreak,
+      bestStreak: longestStreak,
       correctPercentage,
       roundsPlayed,
     };
 
-    // 3) Recent picks – keep empty for now (Profile page will say “No settled picks yet”)
+    // You can fill these in properly later – for now just return empty
     const recentPicks: ApiRecentPick[] = [];
 
     return NextResponse.json({ stats, recentPicks });
   } catch (error) {
-    console.error("[/api/profile] Unexpected error", error);
+    console.error("[/api/profile] Error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to load profile" },
       { status: 500 }
     );
   }
