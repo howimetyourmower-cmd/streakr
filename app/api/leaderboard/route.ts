@@ -3,9 +3,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 
-export const dynamic = "force-dynamic";
-
-type Scope = "overall" | string;
+type Scope =
+  | "overall"
+  | "opening-round"
+  | "round-1"
+  | "round-2"
+  | string; // we only really care about "overall" vs not
 
 type LeaderboardEntry = {
   uid: string;
@@ -21,98 +24,94 @@ type LeaderboardApiResponse = {
   userEntry: LeaderboardEntry | null;
 };
 
-async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
-
-  const token = authHeader.substring("Bearer ".length).trim();
-  if (!token) return null;
-
-  try {
-    const decoded = await auth.verifyIdToken(token);
-    return decoded.uid ?? null;
-  } catch (err) {
-    console.error("[/api/leaderboard] Failed to verify ID token", err);
-    return null;
-  }
-}
-
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
     const scope = (url.searchParams.get("scope") || "overall") as Scope;
 
-    const currentUserId = await getUserIdFromRequest(req);
+    // Identify current user (for highlighting / "You" row)
+    let currentUid: string | null = null;
+    const authHeader = req.headers.get("authorization");
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.substring("Bearer ".length).trim();
+      try {
+        const decoded = await auth.verifyIdToken(token);
+        currentUid = decoded.uid;
+      } catch {
+        currentUid = null;
+      }
+    }
 
-    // 1) Load all users
+    // We keep it simple: for "overall" use longestStreak, otherwise currentStreak.
+    const useLongest = scope === "overall";
+
     const snap = await db.collection("users").get();
 
     const entries: LeaderboardEntry[] = [];
 
     snap.forEach((docSnap) => {
-      const u = docSnap.data() as any;
+      const data = docSnap.data() as any;
       const uid = docSnap.id;
 
-      const firstName: string = u.firstName ?? "";
-      const surname: string = u.surname ?? "";
-      const username: string = u.username ?? "";
-      const email: string = u.email ?? "";
-      const avatarUrl: string | undefined = u.avatarUrl ?? undefined;
+      const firstName = (data.firstName as string) || "";
+      const surname = (data.surname as string) || "";
+      const username = (data.username as string) || "";
+      const avatarUrl = (data.avatarUrl as string) || "";
 
       const displayName =
-        (firstName && surname && `${firstName} ${surname}`) ||
-        username ||
-        email ||
-        "Player";
+        (firstName || surname)
+          ? `${firstName} ${surname}`.trim()
+          : username || "Player";
 
-      const currentStreak: number =
-        typeof u.currentStreak === "number" ? u.currentStreak : 0;
-      const longestStreak: number =
-        typeof u.longestStreak === "number" ? u.longestStreak : 0;
+      const currentStreak =
+        typeof data.currentStreak === "number" ? data.currentStreak : 0;
+      const longestStreak =
+        typeof data.longestStreak === "number" ? data.longestStreak : 0;
 
-      const streak =
-        scope === "overall" ? longestStreak : currentStreak;
+      const streak = useLongest ? longestStreak : currentStreak;
 
-      // You *can* filter out zero-streak players by uncommenting this:
-      // if (streak <= 0) return;
-
+      // You can choose to hide pure zero rows; for testing keep everyone
       entries.push({
         uid,
         displayName,
         username,
         avatarUrl,
-        rank: 0, // we assign below
+        rank: 0, // temp, we’ll fill below
         streak,
       });
     });
 
-    // 2) Sort and assign ranks
-    entries.sort(
-      (a, b) =>
-        b.streak - a.streak ||
-        a.displayName.localeCompare(b.displayName)
-    );
+    // Sort by streak desc, then name as tiebreaker
+    entries.sort((a, b) => {
+      if (b.streak !== a.streak) return b.streak - a.streak;
+      return a.displayName.localeCompare(b.displayName);
+    });
 
+    // Assign ranks (1-based, with ties having same rank if you want; for
+    // now keep it simple: index + 1)
     entries.forEach((entry, index) => {
       entry.rank = index + 1;
     });
 
-    // 3) Find current user's row (for the orange highlight)
-    const userEntry =
-      currentUserId &&
-      entries.find((e) => e.uid === currentUserId) ||
-      null;
+    const topEntries = entries.slice(0, 50); // safety cap
 
-    const payload: LeaderboardApiResponse = {
-      entries,
+    const userEntry =
+      currentUid
+        ? topEntries.find((e) => e.uid === currentUid) ||
+          entries.find((e) => e.uid === currentUid) ||
+          null
+        : null;
+
+    const response: LeaderboardApiResponse = {
+      entries: topEntries,
       userEntry,
     };
 
-    return NextResponse.json(payload);
+    return NextResponse.json(response);
   } catch (error) {
-    console.error("[/api/leaderboard] Unexpected error", error);
+    console.error("[/api/leaderboard] Error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to load leaderboard" },
       { status: 500 }
     );
   }
