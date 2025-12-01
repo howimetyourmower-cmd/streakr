@@ -45,8 +45,8 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
-  userStreak?: number;
-  leaderStreak?: number;
+  userStreak: number;
+  leaderStreak: number;
 };
 
 type SponsorQuestionConfig = {
@@ -110,23 +110,16 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
   }
 }
 
-/**
- * Fetch stats (yes/no %) PLUS:
- *  - userPicks: the current user's pick per question
- *  - picksByUser: every user's pick per question for streak calculations
- */
 async function getPickStatsForRound(
   roundNumber: number,
   currentUserId: string | null
 ): Promise<{
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
-  picksByUser: Record<string, Record<string, "yes" | "no">>;
 }> {
   const pickStats: Record<string, { yes: number; no: number; total: number }> =
     {};
   const userPicks: Record<string, "yes" | "no"> = {};
-  const picksByUser: Record<string, Record<string, "yes" | "no">> = {};
 
   try {
     const snap = await db
@@ -142,36 +135,26 @@ async function getPickStatsForRound(
         pick?: "yes" | "no";
       };
 
-      const userId = data.userId;
       const questionId = data.questionId;
       const pick = data.pick;
-
       if (!questionId || (pick !== "yes" && pick !== "no")) return;
 
-      // Aggregate totals
       if (!pickStats[questionId]) {
         pickStats[questionId] = { yes: 0, no: 0, total: 0 };
       }
+
       pickStats[questionId][pick] += 1;
       pickStats[questionId].total += 1;
 
-      // Current user pick for pill logic
-      if (currentUserId && userId === currentUserId) {
+      if (currentUserId && data.userId === currentUserId) {
         userPicks[questionId] = pick;
       }
-
-      // Per-user picks for streak calculations
-      if (!userId) return;
-      if (!picksByUser[userId]) {
-        picksByUser[userId] = {};
-      }
-      picksByUser[userId][questionId] = pick;
     });
   } catch (error) {
     console.error("[/api/picks] Error fetching picks", error);
   }
 
-  return { pickStats, userPicks, picksByUser };
+  return { pickStats, userPicks };
 }
 
 async function getCommentCountsForRound(
@@ -207,7 +190,6 @@ async function getQuestionStatusForRound(
 ): Promise<
   Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
 > {
-  // internal map keeps updatedAtMs so latest wins
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -224,7 +206,6 @@ async function getQuestionStatusForRound(
 
       if (!data.questionId || !data.status) return;
 
-      // Only keep an outcome if it's a real result (yes/no/void).
       let outcome: QuestionOutcome | undefined;
       if (
         data.outcome === "yes" ||
@@ -254,7 +235,6 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  // strip updatedAtMs before returning
   const finalMap: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome }
@@ -271,65 +251,33 @@ async function getQuestionStatusForRound(
 }
 
 /**
- * Compute each user's current streak for this round based on:
- *  - `orderedQuestionIds` (in game/question order)
- *  - `statusOverrides` (final/void + correctOutcome)
- *  - `picksByUser` (userId -> { questionId -> "yes" | "no" })
+ * Get currentStreak for the logged-in user and the highest currentStreak
+ * across all users – for the streak header on the Picks page.
  */
-function computeCurrentStreaksForRound(
-  orderedQuestionIds: string[],
-  statusOverrides: Record<
-    string,
-    { status: QuestionStatus; outcome?: QuestionOutcome }
-  >,
-  picksByUser: Record<string, Record<string, "yes" | "no">>
-): { userStreaks: Record<string, number>; leaderStreak: number } {
-  const userStreaks: Record<string, number> = {};
+async function getStreaksForHeader(
+  currentUserId: string | null
+): Promise<{ userStreak: number; leaderStreak: number }> {
+  let userStreak = 0;
   let leaderStreak = 0;
 
-  const userIds = Object.keys(picksByUser);
-  if (!userIds.length) return { userStreaks, leaderStreak };
+  try {
+    const snap = await db.collection("users").get();
 
-  for (const userId of userIds) {
-    const userPicks = picksByUser[userId];
-    let streak = 0;
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as any;
+      const cs =
+        typeof data.currentStreak === "number" ? data.currentStreak : 0;
 
-    for (const qid of orderedQuestionIds) {
-      const statusInfo = statusOverrides[qid];
-      if (!statusInfo) continue;
-
-      const { status, outcome } = statusInfo;
-
-      // Only care about questions that have actually been settled
-      if (status !== "final" && status !== "void") continue;
-      if (!outcome) continue;
-
-      if (outcome === "void") {
-        // void: question does not affect streak at all
-        continue;
+      if (cs > leaderStreak) leaderStreak = cs;
+      if (currentUserId && docSnap.id === currentUserId) {
+        userStreak = cs;
       }
-
-      const pick = userPicks[qid];
-      if (!pick) {
-        // Didn’t pick – treat as a miss
-        streak = 0;
-        continue;
-      }
-
-      if (pick === outcome) {
-        streak += 1;
-      } else {
-        streak = 0;
-      }
-    }
-
-    userStreaks[userId] = streak;
-    if (streak > leaderStreak) {
-      leaderStreak = streak;
-    }
+    });
+  } catch (error) {
+    console.error("[/api/picks] Error fetching streaks", error);
   }
 
-  return { userStreaks, leaderStreak };
+  return { userStreak, leaderStreak };
 }
 
 // ─────────────────────────────────────────────
@@ -370,14 +318,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(empty);
     }
 
-    // 3) Identify user (for userPick and streak)
+    // 3) Identify user (for userPick & streaks)
     const currentUserId = await getUserIdFromRequest(req);
 
     // 4) Sponsor config
     const sponsorConfig = await getSponsorQuestionConfig();
 
     // 5) Stats & comments
-    const { pickStats, userPicks, picksByUser } = await getPickStatsForRound(
+    const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
@@ -386,10 +334,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
-    // 7) Group rows into games and build final API shape
+    // 7) Streak header values
+    const { userStreak, leaderStreak } = await getStreaksForHeader(
+      currentUserId
+    );
+
+    // 8) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
-    const orderedQuestionIds: string[] = [];
 
     for (const row of roundRows) {
       const gameKey = `${roundCode}-G${row.Game}`;
@@ -408,7 +360,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const qIndex = questionIndexByGame[gameKey]++;
       const questionId = `${gameKey}-Q${qIndex + 1}`;
-      orderedQuestionIds.push(questionId);
 
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
@@ -449,18 +400,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const games = Object.values(gamesByKey);
-
-    // 8) Compute streaks for this round based on settled questions
-    const { userStreaks, leaderStreak } = computeCurrentStreaksForRound(
-      orderedQuestionIds,
-      statusOverrides,
-      picksByUser
-    );
-
-    const userStreak =
-      currentUserId && currentUserId in userStreaks
-        ? userStreaks[currentUserId]
-        : 0;
 
     const response: PicksApiResponse = {
       games,
