@@ -12,10 +12,10 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
-  // old style
+  // old style (legacy callers)
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock";
-  // new style
+  // new style (preferred)
   action?:
     | "lock"
     | "reopen"
@@ -41,6 +41,7 @@ async function updateStreaksForQuestion(
   questionId: string,
   outcome: QuestionOutcome
 ) {
+  // VOID does not change streaks
   if (outcome === "void") return;
 
   const picksSnap = await db
@@ -80,6 +81,7 @@ async function updateStreaksForQuestion(
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
+      // If user picked the correct outcome, streak +1; otherwise reset to 0.
       if (pick === outcome) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
@@ -109,7 +111,6 @@ async function updateStreaksForQuestion(
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
-
     const { roundNumber, questionId } = body;
 
     if (
@@ -124,10 +125,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Work out final status + outcome ─────────────────────────
-    let status: QuestionStatus | undefined = body.status;
-    let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
+    let status: QuestionStatus | undefined;
+    let outcome: QuestionOutcome | "lock" | undefined;
 
-    // New style: action takes priority
+    // 1) Preferred: drive everything from `action`
     if (body.action) {
       switch (body.action) {
         case "lock":
@@ -151,16 +152,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           status = "void";
           outcome = "void";
           break;
-        default:
-          break;
       }
+    } else {
+      // 2) Legacy callers: use explicit status / outcome fields
+      status = body.status;
+      outcome = body.outcome;
     }
 
-    // 🔙 Backwards-compat layer:
-    // old UI sometimes sends only { outcome: "yes" | "no" | "void" }
+    // 3) Extra backwards-compat: if only outcome is sent, infer status.
     if (
       !status &&
-      outcome &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
     ) {
       status = outcome === "void" ? "void" : "final";
@@ -188,12 +189,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (outcome) {
       payload.outcome = outcome;
     } else {
+      // when reopening, clear any previous outcome
       payload.outcome = FieldValue.delete();
     }
 
     await qsRef.set(payload, { merge: true });
 
-    // If this is a final result, update user streaks
+    // If this is a final result (YES / NO / VOID),
+    // update user streaks based on picks for this question.
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
