@@ -291,7 +291,7 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load Picks (re-usable + polling, spinner only on first load) --------
+  // -------- Load Picks (spinner only on first load) --------
   const loadPicks = useCallback(
     async (options?: { showSpinner?: boolean }) => {
       const showSpinner = options?.showSpinner ?? false;
@@ -545,57 +545,69 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
-  // -------- Load streak progress (user vs leader) - reusable --------
-  const loadStreaks = useCallback(async () => {
-    try {
-      setStreakLoading(true);
-      setStreakError("");
+  // -------- Load streak progress (spinner only on first load) --------
+  const loadStreaks = useCallback(
+    async (options?: { showSpinner?: boolean }) => {
+      const showSpinner = options?.showSpinner ?? false;
 
-      const usersRef = collection(db, "users");
-      const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
-      const topSnap = await getDocs(topQ);
-
-      let leaderVal: number | null = null;
-      topSnap.forEach((docSnap) => {
-        const data = docSnap.data() as any;
-        const val =
-          typeof data.currentStreak === "number" ? data.currentStreak : 0;
-        leaderVal = val;
-      });
-      setLeaderStreak(leaderVal);
-
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const userSnap = await getDoc(userRef);
-        if (userSnap.exists()) {
-          const data = userSnap.data() as any;
-          const myVal =
-            typeof data.currentStreak === "number" ? data.currentStreak : 0;
-          setUserStreak(myVal);
-        } else {
-          setUserStreak(0);
+      try {
+        if (showSpinner) {
+          setStreakLoading(true);
+          setStreakError("");
         }
-      } else {
-        setUserStreak(null);
+
+        const usersRef = collection(db, "users");
+        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
+        const topSnap = await getDocs(topQ);
+
+        let leaderVal: number | null = null;
+        topSnap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const val =
+            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          leaderVal = val;
+        });
+        setLeaderStreak(leaderVal);
+
+        if (user) {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data() as any;
+            const myVal =
+              typeof data.currentStreak === "number" ? data.currentStreak : 0;
+            setUserStreak(myVal);
+          } else {
+            setUserStreak(0);
+          }
+        } else {
+          setUserStreak(null);
+        }
+      } catch (err) {
+        console.error("Failed to load streak progress", err);
+        if (showSpinner) {
+          setStreakError("Could not load streak tracker.");
+        }
+      } finally {
+        if (showSpinner) {
+          setStreakLoading(false);
+        }
       }
-    } catch (err) {
-      console.error("Failed to load streak progress", err);
-      setStreakError("Could not load streak tracker.");
-    } finally {
-      setStreakLoading(false);
-    }
-  }, [user]);
+    },
+    [user]
+  );
 
   useEffect(() => {
-    loadStreaks();
+    // first load: show spinner text
+    loadStreaks({ showSpinner: true });
   }, [loadStreaks]);
 
   // -------- Polling: keep picks + streaks fresh after settlement (no spinner) --------
   useEffect(() => {
     const interval = setInterval(() => {
       loadPicks(); // background refresh, no loading spinner
-      loadStreaks();
-    }, 15000); // 15s – tweak if needed
+      loadStreaks(); // background, no "Loading streak data…" text
+    }, 15000);
 
     return () => clearInterval(interval);
   }, [loadPicks, loadStreaks]);
@@ -833,7 +845,6 @@ export default function PicksClient() {
       setShareStatus("Could not share right now.");
     }
 
-    // Clear the status after a short delay
     setTimeout(() => {
       setShareStatus("");
     }, 3000);
@@ -1103,7 +1114,7 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* QUESTION + COMMENTS + pills */}
+                {/* QUESTION + COMMENTS */}
                 <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -1131,30 +1142,12 @@ export default function PicksClient() {
                         Sponsor Question
                       </span>
                     )}
-                    {(row.status === "final" || row.status === "void") &&
-                      row.resultForUser && (
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            row.resultForUser === "win"
-                              ? "bg-emerald-400 text-black"
-                              : row.resultForUser === "loss"
-                              ? "bg-red-500 text-black"
-                              : "bg-slate-500 text-white"
-                          }`}
-                        >
-                          {row.resultForUser === "win"
-                            ? "You were right!"
-                            : row.resultForUser === "loss"
-                            ? "You missed this one"
-                            : "Void – no change"}
-                        </span>
-                      )}
                   </div>
                 </div>
 
-                {/* PICK / YES / NO */}
+                {/* PICK / YES / NO + RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                  <div className="flex gap-2 mb-0.5">
+                  <div className="flex gap-2 mb-1">
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
@@ -1197,6 +1190,26 @@ export default function PicksClient() {
                       No
                     </button>
                   </div>
+
+                  {(row.status === "final" || row.status === "void") &&
+                    row.resultForUser && (
+                      <span
+                        className={`mb-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          row.resultForUser === "win"
+                            ? "bg-emerald-400 text-black"
+                            : row.resultForUser === "loss"
+                            ? "bg-red-500 text-black"
+                            : "bg-slate-500 text-white"
+                        }`}
+                      >
+                        {row.resultForUser === "win"
+                          ? "You were right!"
+                          : row.resultForUser === "loss"
+                          ? "You missed this one"
+                          : "Void – no change"}
+                      </span>
+                    )}
+
                   <div className="text-[11px] text-white/85">
                     Yes: {yesPct}% • No: {noPct}%
                   </div>
