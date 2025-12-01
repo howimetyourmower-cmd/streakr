@@ -291,103 +291,111 @@ export default function PicksClient() {
     };
   };
 
-  // -------- Load Picks (re-usable + polling) --------
-  const loadPicks = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
+  // -------- Load Picks (re-usable + polling, spinner only on first load) --------
+  const loadPicks = useCallback(
+    async (options?: { showSpinner?: boolean }) => {
+      const showSpinner = options?.showSpinner ?? false;
 
-      const res = await fetch("/api/picks");
-      if (!res.ok) throw new Error("API error");
+      try {
+        if (showSpinner) {
+          setLoading(true);
+          setError("");
+        }
 
-      const data: PicksApiResponse = await res.json();
+        const res = await fetch("/api/picks");
+        if (!res.ok) throw new Error("API error");
 
-      if (typeof data.roundNumber === "number") {
-        setRoundNumber(data.roundNumber);
-      }
+        const data: PicksApiResponse = await res.json();
 
-      let flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
-        g.questions.map((q: ApiQuestion) => {
-          // Prefer explicit correctOutcome from API if valid
-          let correctOutcome: QuestionRow["correctOutcome"] = null;
-          if (
-            q.status === "final" ||
-            q.status === "void"
-          ) {
-            if (
-              q.correctOutcome === "yes" ||
-              q.correctOutcome === "no" ||
-              q.correctOutcome === "void"
-            ) {
-              correctOutcome = q.correctOutcome;
-            } else if (
-              q.outcome === "yes" ||
-              q.outcome === "no" ||
-              q.outcome === "void"
-            ) {
-              // Fallback: some APIs may still use `outcome`
-              correctOutcome = q.outcome;
-            } else {
-              correctOutcome = null;
+        if (typeof data.roundNumber === "number") {
+          setRoundNumber(data.roundNumber);
+        }
+
+        let flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
+          g.questions.map((q: ApiQuestion) => {
+            // Determine correct outcome from API
+            let correctOutcome: QuestionRow["correctOutcome"] = null;
+            if (q.status === "final" || q.status === "void") {
+              if (
+                q.correctOutcome === "yes" ||
+                q.correctOutcome === "no" ||
+                q.correctOutcome === "void"
+              ) {
+                correctOutcome = q.correctOutcome;
+              } else if (
+                q.outcome === "yes" ||
+                q.outcome === "no" ||
+                q.outcome === "void"
+              ) {
+                // fallback if API is still using `outcome`
+                correctOutcome = q.outcome;
+              } else {
+                correctOutcome = null;
+              }
             }
-          }
 
-          // work out resultForUser on the client
-          let resultForUser: QuestionRow["resultForUser"] = null;
-          if (correctOutcome === "void") {
-            // Void always shows as "no change" if it ever settles
-            resultForUser = "void";
-          } else if (correctOutcome && q.userPick) {
-            resultForUser =
-              q.userPick === correctOutcome ? "win" : "loss";
-          }
+            // Effective user pick: prefer q.userPick, otherwise fallback to active streak pick
+            const effectiveUserPick: "yes" | "no" | undefined =
+              q.userPick ??
+              (activeQuestionId &&
+              activeOutcome &&
+              q.id === activeQuestionId
+                ? activeOutcome
+                : undefined);
 
-          return {
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue ?? q.venue ?? "",
-            startTime: g.startTime ?? q.startTime ?? "",
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
-            sport: q.sport ?? g.sport ?? "AFL",
-            commentCount: q.commentCount ?? 0,
-            isSponsorQuestion: !!q.isSponsorQuestion,
-            correctOutcome,
-            resultForUser,
-          };
-        })
-      );
+            // work out resultForUser on the client
+            let resultForUser: QuestionRow["resultForUser"] = null;
+            if (correctOutcome === "void") {
+              resultForUser = "void";
+            } else if (correctOutcome && effectiveUserPick) {
+              resultForUser =
+                effectiveUserPick === correctOutcome ? "win" : "loss";
+            }
 
-      // Preserve local active pick highlight (if present)
-      if (activeQuestionId && activeOutcome) {
-        flat = flat.map((r) =>
-          r.id === activeQuestionId
-            ? { ...r, userPick: activeOutcome }
-            : r
+            return {
+              id: q.id,
+              gameId: g.id,
+              match: g.match,
+              venue: g.venue ?? q.venue ?? "",
+              startTime: g.startTime ?? q.startTime ?? "",
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              userPick: effectiveUserPick,
+              yesPercent: q.yesPercent,
+              noPercent: q.noPercent,
+              sport: q.sport ?? g.sport ?? "AFL",
+              commentCount: q.commentCount ?? 0,
+              isSponsorQuestion: !!q.isSponsorQuestion,
+              correctOutcome,
+              resultForUser,
+            };
+          })
         );
-      }
 
-      setRows(flat);
-      setFilteredRows(
-        activeFilter === "all"
-          ? flat
-          : flat.filter((r) => r.status === activeFilter)
-      );
-    } catch (e) {
-      console.error(e);
-      setError("Failed to load picks");
-    } finally {
-      setLoading(false);
-    }
-  }, [activeQuestionId, activeOutcome, activeFilter]);
+        setRows(flat);
+        setFilteredRows(
+          activeFilter === "all"
+            ? flat
+            : flat.filter((r) => r.status === activeFilter)
+        );
+      } catch (e) {
+        console.error(e);
+        if (showSpinner) {
+          setError("Failed to load picks");
+        }
+      } finally {
+        if (showSpinner) {
+          setLoading(false);
+        }
+      }
+    },
+    [activeQuestionId, activeOutcome, activeFilter]
+  );
 
   useEffect(() => {
-    loadPicks();
+    // first load: show spinner
+    loadPicks({ showSpinner: true });
   }, [loadPicks]);
 
   // -------- Live comment counts from Firestore --------
@@ -582,12 +590,12 @@ export default function PicksClient() {
     loadStreaks();
   }, [loadStreaks]);
 
-  // -------- Polling: keep picks + streaks fresh after settlement --------
+  // -------- Polling: keep picks + streaks fresh after settlement (no spinner) --------
   useEffect(() => {
     const interval = setInterval(() => {
-      loadPicks();
+      loadPicks(); // background refresh, no loading spinner
       loadStreaks();
-    }, 15000); // 15s – can tweak
+    }, 15000); // 15s – tweak if needed
 
     return () => clearInterval(interval);
   }, [loadPicks, loadStreaks]);
