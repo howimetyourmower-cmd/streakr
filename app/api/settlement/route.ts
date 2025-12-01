@@ -15,7 +15,7 @@ type RequestBody = {
   // old style
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock";
-  // or new style from UI
+  // new style
   action?:
     | "lock"
     | "reopen"
@@ -25,9 +25,7 @@ type RequestBody = {
     | "void";
 };
 
-/**
- * Helper: deterministic doc id for questionStatus so we can overwrite safely.
- */
+/** Deterministic doc id for questionStatus */
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
 }
@@ -43,26 +41,15 @@ async function updateStreaksForQuestion(
   questionId: string,
   outcome: QuestionOutcome
 ) {
-  // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
-  // 🔧 IMPORTANT FIX:
-  // Use only questionId here so we definitely match the picks, even if
-  // roundNumber on the pick docs doesn't line up with what the UI passed in.
   const picksSnap = await db
     .collection("picks")
+    .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
 
-  if (picksSnap.empty) {
-    console.log(
-      "[/api/settlement] No picks found for questionId:",
-      questionId,
-      "roundNumber passed:",
-      roundNumber
-    );
-    return;
-  }
+  if (picksSnap.empty) return;
 
   const updates: Promise<unknown>[] = [];
 
@@ -93,7 +80,6 @@ async function updateStreaksForQuestion(
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
-      // Correct pick = streak +1; wrong pick = reset to 0
       if (pick === outcome) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
@@ -137,10 +123,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Work out final status + outcome from either action or direct fields.
+    // ── Work out final status + outcome ─────────────────────────
     let status: QuestionStatus | undefined = body.status;
     let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
 
+    // New style: action takes priority
     if (body.action) {
       switch (body.action) {
         case "lock":
@@ -169,6 +156,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // 🔙 Backwards-compat layer:
+    // old UI sometimes sends only { outcome: "yes" | "no" | "void" }
+    if (
+      !status &&
+      outcome &&
+      (outcome === "yes" || outcome === "no" || outcome === "void")
+    ) {
+      status = outcome === "void" ? "void" : "final";
+    }
+
     if (!status) {
       return NextResponse.json(
         { error: "status or action is required" },
@@ -176,7 +173,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Write / overwrite questionStatus doc so /api/picks can read it.
+    // ── Write / overwrite questionStatus doc ────────────────────
     const qsRef = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
@@ -191,14 +188,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (outcome) {
       payload.outcome = outcome;
     } else {
-      // Clear any previous outcome when reopening back to OPEN.
       payload.outcome = FieldValue.delete();
     }
 
     await qsRef.set(payload, { merge: true });
 
-    // If this is a final result (YES / NO / VOID),
-    // update user streaks based on picks for this question.
+    // If this is a final result, update user streaks
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
