@@ -1166,23 +1166,23 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill under YES/NO */}
-{question.status === "final" &&
-  question.correctOutcome &&
-  question.userPick && (
+                  {/* Outcome pill under YES/NO buttons when question is final/void */}
+{(row.status === "final" || row.status === "void") &&
+  row.correctOutcome &&
+  row.userPick && (
     <div className="mt-2">
       <span
         className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
-          question.correctOutcome === "void"
+          row.correctOutcome === "void"
             ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
-            : question.userPick === question.correctOutcome
+            : row.userPick === row.correctOutcome
             ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
             : "bg-red-500/15 border-red-400/60 text-red-300"
         }`}
       >
-        {question.correctOutcome === "void"
+        {row.correctOutcome === "void"
           ? "Question voided"
-          : question.userPick === question.correctOutcome
+          : row.userPick === row.correctOutcome
           ? "You were right!"
           : "Wrong pick"}
       </span>
