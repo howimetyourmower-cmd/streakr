@@ -273,6 +273,12 @@ export default function PicksClient() {
     Record<string, { yes?: number; no?: number }>
   >({});
 
+  // keep a ref of latest rows so fetchPicks can preserve userPick across refresh
+  const rowsRef = useRef<QuestionRow[]>([]);
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
@@ -295,10 +301,12 @@ export default function PicksClient() {
     };
   };
 
-  // ---- flatten API -> QuestionRow ----
-  const flattenApi = (data: PicksApiResponse): QuestionRow[] =>
+  // ---- flatten API -> QuestionRow, preserving existing userPick if API omits it ----
+  const flattenApi = (data: PicksApiResponse, prevRows: QuestionRow[]): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
+        const prev = prevRows.find((r) => r.id === q.id);
+
         // prefer `correctOutcome`, fall back to `outcome`
         const rawOutcome =
           q.correctOutcome ??
@@ -311,15 +319,15 @@ export default function PicksClient() {
 
         // keep last non-zero % so they don’t reset to 0 on refresh
         if (typeof q.yesPercent === "number" || typeof q.noPercent === "number") {
-          const prev = lastPercentsRef.current[q.id] || {};
+          const prevPerc = lastPercentsRef.current[q.id] || {};
           lastPercentsRef.current[q.id] = {
             yes:
-              typeof q.yesPercent === "number" ? q.yesPercent : prev.yes,
-            no: typeof q.noPercent === "number" ? q.noPercent : prev.no,
+              typeof q.yesPercent === "number" ? q.yesPercent : prevPerc.yes,
+            no: typeof q.noPercent === "number" ? q.noPercent : prevPerc.no,
           };
         }
 
-        const prevPerc = lastPercentsRef.current[q.id] || {};
+        const remembered = lastPercentsRef.current[q.id] || {};
 
         return {
           id: q.id,
@@ -330,13 +338,14 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          userPick: q.userPick,
+          // if API doesn’t send userPick, keep whatever we already had locally
+          userPick: q.userPick ?? prev?.userPick,
           yesPercent:
-            typeof q.yesPercent === "number" ? q.yesPercent : prevPerc.yes,
+            typeof q.yesPercent === "number" ? q.yesPercent : remembered.yes,
           noPercent:
-            typeof q.noPercent === "number" ? q.noPercent : prevPerc.no,
+            typeof q.noPercent === "number" ? q.noPercent : remembered.no,
           sport: q.sport ?? g.sport ?? "AFL",
-          commentCount: q.commentCount ?? 0,
+          commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
         };
@@ -360,7 +369,7 @@ export default function PicksClient() {
         setRoundNumber(data.roundNumber);
       }
 
-      const flat = flattenApi(data);
+      const flat = flattenApi(data, rowsRef.current);
 
       setRows(flat);
       setFilteredRows(
@@ -609,8 +618,17 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
+    // highlight this as the current streak pick
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
+
+    // IMPORTANT: update local state so userPick is set on this row
+    setRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+    );
+    setFilteredRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+    );
 
     try {
       if (typeof window !== "undefined") {
@@ -990,14 +1008,12 @@ export default function PicksClient() {
           let outcomeKind: OutcomeKind = null;
 
           if (row.status === "void" || row.correctOutcome === "void") {
-            // fully voided question
             outcomeKind = row.userPick ? "void" : null;
           } else if (row.status === "final" && row.userPick) {
             if (row.correctOutcome === "yes" || row.correctOutcome === "no") {
               outcomeKind =
                 row.userPick === row.correctOutcome ? "win" : "loss";
             } else {
-              // final but no correctOutcome – still show a neutral pill
               outcomeKind = "void";
             }
           }
