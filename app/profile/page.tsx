@@ -90,6 +90,9 @@ export default function ProfilePage() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState("");
 
+  // NEW: the round code for the user’s active streak ("OR", "R1", etc)
+  const [activeRoundCode, setActiveRoundCode] = useState<string | null>(null);
+
   // Redirect if not logged in
   useEffect(() => {
     if (!loading && !user) router.push("/auth");
@@ -132,7 +135,7 @@ export default function ProfilePage() {
     if (user && !initialLoaded) load();
   }, [user, initialLoaded]);
 
-  // Load current round from meta doc (for label only)
+  // Load current round from meta doc (fallback for labels only)
   useEffect(() => {
     async function loadRound() {
       try {
@@ -180,6 +183,42 @@ export default function ProfilePage() {
 
     if (user) {
       loadStats();
+    }
+  }, [user]);
+
+  // NEW: load active streak question from /api/user-picks to detect the true round
+  useEffect(() => {
+    const loadActiveRound = async () => {
+      try {
+        if (!user) return;
+
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/user-picks", {
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        });
+
+        if (!res.ok) {
+          // If unauth or no active pick, just fall back to meta round
+          return;
+        }
+
+        const json = await res.json();
+        const qid = json?.questionId as string | null;
+
+        if (!qid || typeof qid !== "string") return;
+
+        // questionId looks like "OR-G1-Q1" or "R1-G2-Q3"
+        const roundPart = qid.split("-")[0]; // "OR" or "R1" etc
+        setActiveRoundCode(roundPart);
+      } catch (err) {
+        console.error("Failed to load active round from /api/user-picks", err);
+      }
+    };
+
+    if (user) {
+      loadActiveRound();
     }
   }, [user]);
 
@@ -299,21 +338,38 @@ export default function ProfilePage() {
 
   if (!user) return null;
 
-  // ---- ROUND LABEL HELPERS (uses ROUND_OPTIONS for consistency) ----
-  const getRoundLabel = (roundNum: number | null): string => {
-    if (roundNum === null || Number.isNaN(roundNum)) return "this season";
-    if (roundNum === 0) {
-      const opening = ROUND_OPTIONS.find((r) => r.key === "OR");
-      return opening?.label || "Opening Round";
+  // ---------- ROUND LABEL HELPERS ----------
+
+  const getRoundLabelFromCode = (code: string | null): string => {
+    if (!code) return "this season";
+
+    const opt = ROUND_OPTIONS.find((r) => r.key === code);
+    if (opt) return opt.label;
+
+    if (code === "OR") return "Opening Round";
+    if (code.startsWith("R")) {
+      const num = code.slice(1);
+      return `Round ${num}`;
     }
-    const key = `R${roundNum}`;
-    const opt = ROUND_OPTIONS.find((r) => r.key === key);
-    return opt?.label || `Round ${roundNum}`;
+
+    return "this season";
   };
 
-  const currentRoundLabel = `Active in ${getRoundLabel(currentRound)}`;
-  const longestRoundLabel = `This season • ${getRoundLabel(currentRound)}`;
-  // ------------------------------------------------------------------
+  const getRoundLabelFromNumber = (roundNum: number | null): string => {
+    if (roundNum === null || Number.isNaN(roundNum)) return "this season";
+    if (roundNum === 0) return getRoundLabelFromCode("OR");
+    return getRoundLabelFromCode(`R${roundNum}`);
+  };
+
+  // Prefer the ACTIVE round (from /api/user-picks). If none, fall back to meta.
+  const effectiveRoundLabel = activeRoundCode
+    ? getRoundLabelFromCode(activeRoundCode)
+    : getRoundLabelFromNumber(currentRound);
+
+  const currentRoundLabel = `Active in ${effectiveRoundLabel}`;
+  const longestRoundLabel = `This season • ${effectiveRoundLabel}`;
+
+  // -----------------------------------------
 
   const displayCurrentStreak =
     stats?.currentStreak ?? form.currentStreak ?? 0;
