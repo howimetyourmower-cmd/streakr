@@ -31,25 +31,29 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
 }
 
 /**
- * Recalculate streaks for all players who picked this question.
- *
- * We now use the `picks` collection (one doc per user & question):
- *   { userId, roundNumber, questionId, pick: "yes" | "no" }
+ * Recalculate streaks and lifetime record for all players who picked this question.
  *
  * outcome:
  *   - "yes" / "no"  => correct answer
- *   - "void"        => does not change streak
+ *   - "void"        => does not change streak or record
+ *
+ * We use:
+ *   users.currentStreak     – live streak
+ *   users.longestStreak     – best ever streak
+ *   users.totalWins         – total correct picks
+ *   users.totalLosses       – total incorrect picks
+ *   users.totalPicks        – wins + losses
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
 ) {
-  // If void, we don't change anyone's streak – question is just ignored.
+  // If void, we don’t change anything
   if (outcome === "void") return;
 
   const picksSnap = await db
-    .collection("picks")
+    .collection("userPicks")
     .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
@@ -61,11 +65,11 @@ async function updateStreaksForQuestion(
   picksSnap.forEach((pickDoc) => {
     const data = pickDoc.data() as {
       userId?: string;
-      pick?: "yes" | "no";
+      outcome?: "yes" | "no";
     };
 
     const userId = data.userId;
-    const pick = data.pick; // user’s chosen side
+    const pick = data.outcome; // user’s chosen side
 
     if (!userId || (pick !== "yes" && pick !== "no")) return;
 
@@ -76,6 +80,9 @@ async function updateStreaksForQuestion(
 
       let currentStreak = 0;
       let longestStreak = 0;
+      let totalWins = 0;
+      let totalLosses = 0;
+      let totalPicks = 0;
 
       if (snap.exists) {
         const u = snap.data() as any;
@@ -83,23 +90,34 @@ async function updateStreaksForQuestion(
           typeof u.currentStreak === "number" ? u.currentStreak : 0;
         longestStreak =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
+        totalWins = typeof u.totalWins === "number" ? u.totalWins : 0;
+        totalLosses = typeof u.totalLosses === "number" ? u.totalLosses : 0;
+        totalPicks = typeof u.totalPicks === "number" ? u.totalPicks : 0;
       }
 
-      // If user picked the correct outcome, streak +1; otherwise reset to 0.
+      // Correct pick → streak +1, win++
+      // Wrong pick   → streak reset, loss++
       if (pick === outcome) {
         currentStreak += 1;
+        totalWins += 1;
         if (currentStreak > longestStreak) {
           longestStreak = currentStreak;
         }
       } else {
         currentStreak = 0;
+        totalLosses += 1;
       }
+
+      totalPicks = totalWins + totalLosses;
 
       tx.set(
         userRef,
         {
           currentStreak,
           longestStreak,
+          totalWins,
+          totalLosses,
+          totalPicks,
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -162,7 +180,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Backwards-compat: old UI might send only { outcome: "yes" | "no" | "void" }
+    // Backwards-compat: old UI sometimes sends only { outcome: "yes" | "no" | "void" }
     if (
       !status &&
       outcome &&
@@ -198,7 +216,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
-    // If this is a final result, update user streaks
+    // If this is a final result (incl. void), update user streaks / record
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
