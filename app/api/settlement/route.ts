@@ -31,30 +31,24 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
 }
 
 /**
- * Recalculate streaks and lifetime record for all players who picked this question.
- *
+ * Recalculate streaks for all players who picked this question.
  * outcome:
  *   - "yes" / "no"  => correct answer
- *   - "void"        => does not change streak or record
+ *   - "void"        => does not change streak
  *
- * We use:
- *   users.currentStreak     – live streak
- *   users.longestStreak     – best ever streak
- *   users.totalWins         – total correct picks
- *   users.totalLosses       – total incorrect picks
- *   users.totalPicks        – wins + losses
+ * We now use the `userPicks` collection, where documents look like:
+ *   { userId, roundNumber, questionId, outcome: "yes" | "no" }
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
 ) {
-  // If void, we don’t change anything
+  // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
-  // 🔥 FIX: use the real picks collection + `pick` field
   const picksSnap = await db
-    .collection("picks")
+    .collection("userPicks")
     .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
@@ -66,11 +60,11 @@ async function updateStreaksForQuestion(
   picksSnap.forEach((pickDoc) => {
     const data = pickDoc.data() as {
       userId?: string;
-      pick?: "yes" | "no";
+      outcome?: "yes" | "no";
     };
 
     const userId = data.userId;
-    const pick = data.pick;
+    const pick = data.outcome; // user’s chosen side
 
     if (!userId || (pick !== "yes" && pick !== "no")) return;
 
@@ -81,9 +75,6 @@ async function updateStreaksForQuestion(
 
       let currentStreak = 0;
       let longestStreak = 0;
-      let totalWins = 0;
-      let totalLosses = 0;
-      let totalPicks = 0;
 
       if (snap.exists) {
         const u = snap.data() as any;
@@ -91,36 +82,99 @@ async function updateStreaksForQuestion(
           typeof u.currentStreak === "number" ? u.currentStreak : 0;
         longestStreak =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
-        totalWins = typeof u.totalWins === "number" ? u.totalWins : 0;
-        totalLosses =
-          typeof u.totalLosses === "number" ? u.totalLosses : 0;
-        totalPicks =
-          typeof u.totalPicks === "number" ? u.totalPicks : 0;
       }
 
-      // Correct pick → streak +1, win++
-      // Wrong pick   → streak reset, loss++
+      // If user picked the correct outcome, streak +1; otherwise reset to 0.
       if (pick === outcome) {
         currentStreak += 1;
-        totalWins += 1;
         if (currentStreak > longestStreak) {
           longestStreak = currentStreak;
         }
       } else {
         currentStreak = 0;
-        totalLosses += 1;
       }
-
-      totalPicks = totalWins + totalLosses;
 
       tx.set(
         userRef,
         {
           currentStreak,
           longestStreak,
-          totalWins,
-          totalLosses,
-          totalPicks,
+          lastUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    updates.push(p);
+  });
+
+  await Promise.all(updates);
+}
+
+/**
+ * Revert the streak effect for this question when a FINAL result is reopened.
+ *
+ * If the question *used to be* final_yes / final_no and is now reopened,
+ * any user who was previously CORRECT on that result will have their
+ * currentStreak reduced by 1 (down to a minimum of 0).
+ *
+ * We intentionally do NOT touch longestStreak so "best ever" stays as a record.
+ */
+async function revertStreaksForQuestion(
+  roundNumber: number,
+  questionId: string,
+  previousOutcome: QuestionOutcome
+) {
+  if (previousOutcome === "void") return;
+
+  const picksSnap = await db
+    .collection("userPicks")
+    .where("roundNumber", "==", roundNumber)
+    .where("questionId", "==", questionId)
+    .get();
+
+  if (picksSnap.empty) return;
+
+  const updates: Promise<unknown>[] = [];
+
+  picksSnap.forEach((pickDoc) => {
+    const data = pickDoc.data() as {
+      userId?: string;
+      outcome?: "yes" | "no";
+    };
+
+    const userId = data.userId;
+    const pick = data.outcome;
+
+    if (!userId || (pick !== "yes" && pick !== "no")) return;
+
+    // Only revert players who were previously CORRECT on this question.
+    if (pick !== previousOutcome) return;
+
+    const userRef = db.collection("users").doc(userId);
+
+    const p = db.runTransaction(async (tx) => {
+      const snap = await tx.get(userRef);
+
+      let currentStreak = 0;
+      let longestStreak = 0;
+
+      if (snap.exists) {
+        const u = snap.data() as any;
+        currentStreak =
+          typeof u.currentStreak === "number" ? u.currentStreak : 0;
+        longestStreak =
+          typeof u.longestStreak === "number" ? u.longestStreak : 0;
+      }
+
+      // Revert the +1 we previously gave them for this result.
+      currentStreak = Math.max(0, currentStreak - 1);
+
+      tx.set(
+        userRef,
+        {
+          currentStreak,
+          longestStreak,
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -136,7 +190,6 @@ async function updateStreaksForQuestion(
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
-
     const { roundNumber, questionId } = body;
 
     if (
@@ -150,7 +203,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ── Work out final status + outcome ─────────────────────────
+    // ── Look up previous status/outcome so we can detect reopen ──
+    const qsRef = db
+      .collection("questionStatus")
+      .doc(questionStatusDocId(roundNumber, questionId));
+
+    const prevSnap = await qsRef.get();
+    const prevData = prevSnap.exists
+      ? (prevSnap.data() as {
+          status?: QuestionStatus;
+          outcome?: QuestionOutcome | "lock";
+        })
+      : null;
+
+    const prevStatus = prevData?.status;
+    const prevOutcome =
+      prevData?.outcome === "yes" ||
+      prevData?.outcome === "no" ||
+      prevData?.outcome === "void"
+        ? (prevData.outcome as QuestionOutcome)
+        : undefined;
+
+    // ── Work out final status + outcome from body ───────────────
     let status: QuestionStatus | undefined = body.status;
     let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
 
@@ -183,7 +257,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Backwards-compat: old UI sometimes sends only { outcome: "yes" | "no" | "void" }
+    // 🔙 Backwards-compat:
+    // old UI sometimes sends only { outcome: "yes" | "no" | "void" }
     if (
       !status &&
       outcome &&
@@ -200,10 +275,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ── Write / overwrite questionStatus doc ────────────────────
-    const qsRef = db
-      .collection("questionStatus")
-      .doc(questionStatusDocId(roundNumber, questionId));
-
     const payload: any = {
       roundNumber,
       questionId,
@@ -219,7 +290,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
-    // If this is a final result (incl. void), update user streaks / record
+    // ── Apply streak changes for FINAL results ───────────────────
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
@@ -228,6 +299,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         roundNumber,
         questionId,
         outcome as QuestionOutcome
+      );
+    }
+
+    // ── Revert streak changes if we REOPEN a previously-final question ──
+    if (
+      status === "open" &&
+      prevStatus === "final" &&
+      (prevOutcome === "yes" || prevOutcome === "no" || prevOutcome === "void")
+    ) {
+      await revertStreaksForQuestion(
+        roundNumber,
+        questionId,
+        prevOutcome as QuestionOutcome
       );
     }
 
