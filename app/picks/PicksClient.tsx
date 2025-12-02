@@ -1,4 +1,3 @@
-// /app/picks/PicksClient.tsx
 "use client";
 
 import { useEffect, useState, useMemo, useRef, ChangeEvent } from "react";
@@ -222,7 +221,6 @@ function parseAflMatchTeams(match: string): {
 
 /* -------------------------------------------------- */
 
-// localStorage key for persistence
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 
 export default function PicksClient() {
@@ -237,11 +235,9 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // Single active streak pick
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
 
-  // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -250,10 +246,8 @@ export default function PicksClient() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
-  // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // streak progress tracker
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
     null
   );
@@ -266,15 +260,13 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
-  // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
-  // Remember last non-zero Yes/No % per question (so settlement doesn’t zero them out visually)
+  // remember last non-zero percentages so settlement / API quirks don’t zero them visually
   const lastPercentsRef = useRef<Record<string, { yes?: number; no?: number }>>(
     {}
   );
 
-  // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -296,7 +288,6 @@ export default function PicksClient() {
     };
   };
 
-  // ---------- helpers ----------
   const computeResultForUser = (
     status: QuestionStatus,
     correct: QuestionRow["correctOutcome"],
@@ -326,7 +317,6 @@ export default function PicksClient() {
           q.userPick
         );
 
-        // update last known %s
         if (typeof q.yesPercent === "number" || typeof q.noPercent === "number") {
           const prev = lastPercentsRef.current[q.id] || {};
           lastPercentsRef.current[q.id] = {
@@ -380,23 +370,13 @@ export default function PicksClient() {
 
       const flat = flattenApi(data);
 
-      // preserve locally chosen pick highlight
-      setRows((prev) => {
-        const m = new Map(prev.map((r) => [r.id, r.userPick]));
-        const merged = flat.map((r) =>
-          m.has(r.id) && m.get(r.id) ? { ...r, userPick: m.get(r.id) } : r
-        );
-        return merged;
-      });
-      setFilteredRows((prev) => {
-        const m = new Map(prev.map((r) => [r.id, r.userPick]));
-        const merged = flat.map((r) =>
-          m.has(r.id) && m.get(r.id) ? { ...r, userPick: m.get(r.id) } : r
-        );
-        return activeFilter === "all"
-          ? merged
-          : merged.filter((r) => r.status === activeFilter);
-      });
+      // **Important**: TRUST the server userPick for every question
+      setRows(flat);
+      setFilteredRows(
+        activeFilter === "all"
+          ? flat
+          : flat.filter((r) => r.status === activeFilter)
+      );
     } catch (e) {
       console.error(e);
       if (!opts?.silent) setError("Failed to load picks");
@@ -420,7 +400,6 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   useEffect(() => {
@@ -492,26 +471,13 @@ export default function PicksClient() {
       ) {
         setActiveQuestionId(questionId);
         setActiveOutcome(outcome);
-
-        setRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            userPick: r.id === questionId ? outcome : r.userPick,
-          }))
-        );
-        setFilteredRows((prev) =>
-          prev.map((r) => ({
-            ...r,
-            userPick: r.id === questionId ? outcome : r.userPick,
-          }))
-        );
       }
     } catch (err) {
       console.error("Failed to restore pick from localStorage", err);
     }
   }, [rows.length]);
 
-  // -------- Optional: also load from /api/user-picks --------
+  // -------- Optional: load from /api/user-picks --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -540,19 +506,6 @@ export default function PicksClient() {
         ) {
           setActiveQuestionId(questionId);
           setActiveOutcome(outcome);
-
-          setRows((prev) =>
-            prev.map((r) => ({
-              ...r,
-              userPick: r.id === questionId ? outcome : r.userPick,
-            }))
-          );
-          setFilteredRows((prev) =>
-            prev.map((r) => ({
-              ...r,
-              userPick: r.id === questionId ? outcome : r.userPick,
-            }))
-          );
         }
       } catch (err) {
         console.error("Failed to load user pick from API", err);
@@ -562,7 +515,7 @@ export default function PicksClient() {
     if (user) loadServerPick();
   }, [user, rows.length]);
 
-  // -------- Load streak progress (user vs leader) --------
+  // -------- Load streak progress --------
   useEffect(() => {
     const loadStreaks = async () => {
       try {
@@ -619,28 +572,26 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // -------- Display Yes/No % (prefers server; falls back to last known; else active pick) --------
+  // -------- Yes/No percentages --------
   const getDisplayPercents = (row: QuestionRow) => {
-    const serverYes = typeof row.yesPercent === "number" ? row.yesPercent : undefined;
-    const serverNo = typeof row.noPercent === "number" ? row.noPercent : undefined;
+    const serverYes =
+      typeof row.yesPercent === "number" ? row.yesPercent : undefined;
+    const serverNo =
+      typeof row.noPercent === "number" ? row.noPercent : undefined;
 
-    // Use server values if present
     if (serverYes !== undefined || serverNo !== undefined) {
       return { yes: serverYes ?? 0, no: serverNo ?? 0 };
     }
 
-    // Fallback to last remembered values
     const remembered = lastPercentsRef.current[row.id];
     if (remembered && (remembered.yes !== undefined || remembered.no !== undefined)) {
       return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
     }
 
-    // Final/void but no data – show neutral
     if (row.status === "final" || row.status === "void") {
       return { yes: 0, no: 0 };
     }
 
-    // Otherwise show the active single-pick visual
     if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
@@ -657,13 +608,6 @@ export default function PicksClient() {
 
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
-
-    setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
-    );
-    setFilteredRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
-    );
 
     try {
       if (typeof window !== "undefined") {
@@ -699,7 +643,6 @@ export default function PicksClient() {
     }
   };
 
-  // -------- Status pill styling --------
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
@@ -789,7 +732,6 @@ export default function PicksClient() {
     }
   };
 
-  // --- helper for streak bar widths ---
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
     userLongestStreak ?? 0,
@@ -804,7 +746,6 @@ export default function PicksClient() {
     [rows]
   );
 
-  // -------- Share handler --------
   const handleShare = async () => {
     try {
       const shareUrl =
@@ -901,7 +842,6 @@ export default function PicksClient() {
           </div>
         </div>
 
-        {/* Bars: Current / Longest / Leader */}
         <div className="space-y-3">
           <div>
             <div className="flex justify-between text-[11px] text-white/70 mb-1">
@@ -960,7 +900,6 @@ export default function PicksClient() {
         )}
       </div>
 
-      {/* SPONSOR QUESTION INFO STRIP */}
       {hasSponsorQuestion && (
         <div className="mb-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
           <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
@@ -977,7 +916,6 @@ export default function PicksClient() {
 
       {error && <p className="text-red-500 mb-2">{error}</p>}
 
-      {/* FILTER BUTTONS */}
       <div className="flex flex-wrap gap-2 mb-6">
         {(["all", "open", "final", "pending", "void"] as const).map((f) => (
           <button
@@ -992,7 +930,6 @@ export default function PicksClient() {
         ))}
       </div>
 
-      {/* HEADER ROW (desktop) */}
       <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
         <div className="col-span-2">START</div>
         <div className="col-span-1">SPORT</div>
@@ -1005,7 +942,6 @@ export default function PicksClient() {
 
       {loading && <p>Loading…</p>}
 
-      {/* ROWS */}
       <div className="space-y-2">
         {filteredRows.map((row) => {
           const { date, time } = formatStartDate(row.startTime);
@@ -1040,20 +976,17 @@ export default function PicksClient() {
               className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
             >
               <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
-                {/* START */}
                 <div className="col-span-12 md:col-span-2">
                   <div className="text-sm font-semibold">{date}</div>
                   <div className="text-[11px] text-white/80">{time} AEDT</div>
                 </div>
 
-                {/* SPORT */}
                 <div className="col-span-6 md:col-span-1 flex items-center">
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
                     {row.sport}
                   </span>
                 </div>
 
-                {/* STATUS */}
                 <div className="col-span-6 md:col-span-1">
                   <span
                     className={`${statusClasses(
@@ -1064,7 +997,6 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* MATCH + VENUE */}
                 <div className="col-span-12 md:col-span-3">
                   {useAflLayout ? (
                     <>
@@ -1117,13 +1049,11 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   <span className="block md:hidden">Quarter {row.quarter}</span>
                   <span className="hidden md:inline">Quarter{row.quarter}</span>
                 </div>
 
-                {/* QUESTION + COMMENTS + pills */}
                 <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -1154,7 +1084,6 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* PICK / YES / NO / RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
@@ -1200,7 +1129,6 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill – permanent per question */}
                   {(row.status === "final" || row.status === "void") &&
                     row.correctOutcome &&
                     row.userPick && (
@@ -1234,7 +1162,6 @@ export default function PicksClient() {
         })}
       </div>
 
-      {/* AUTH REQUIRED MODAL */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
@@ -1275,7 +1202,6 @@ export default function PicksClient() {
         </div>
       )}
 
-      {/* COMMENT DRAWER */}
       {commentsOpenFor && (
         <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
           <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
