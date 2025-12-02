@@ -32,7 +32,9 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
+  // possible fields from /api/picks
   correctOutcome?: "yes" | "no" | "void" | null;
+  outcome?: "yes" | "no" | "void" | "lock" | null; // raw outcome if API uses it
 };
 
 type ApiGame = {
@@ -56,11 +58,10 @@ type QuestionRow = {
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
-  sport: string;
+  sport: string; // text-only, e.g. "AFL"
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
-  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -224,6 +225,21 @@ function parseAflMatchTeams(match: string): {
 // localStorage key for persistence
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 
+/** helper: derive result for this user & question */
+function getResultForRow(
+  row: QuestionRow
+): "win" | "loss" | "void" | null {
+  if (row.status !== "final" && row.status !== "void") return null;
+
+  if (row.correctOutcome === "void") {
+    return "void";
+  }
+
+  if (!row.correctOutcome || !row.userPick) return null;
+
+  return row.userPick === row.correctOutcome ? "win" : "loss";
+}
+
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -298,25 +314,19 @@ export default function PicksClient() {
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
           g.questions.map((q: ApiQuestion) => {
+            // normalise any outcome coming from the API when final/void
             const rawOutcome =
-              q.correctOutcome === "yes" ||
-              q.correctOutcome === "no" ||
-              q.correctOutcome === "void"
-                ? q.correctOutcome
-                : null;
+              q.correctOutcome ??
+              (q.outcome === "yes" ||
+              q.outcome === "no" ||
+              q.outcome === "void"
+                ? q.outcome
+                : null);
 
             const correctOutcome: QuestionRow["correctOutcome"] =
               q.status === "final" || q.status === "void"
                 ? rawOutcome ?? null
                 : null;
-
-            let resultForUser: QuestionRow["resultForUser"] = null;
-            if (correctOutcome === "void") {
-              resultForUser = "void";
-            } else if (correctOutcome && q.userPick) {
-              resultForUser =
-                q.userPick === correctOutcome ? "win" : "loss";
-            }
 
             return {
               id: q.id,
@@ -334,13 +344,12 @@ export default function PicksClient() {
               commentCount: q.commentCount ?? 0,
               isSponsorQuestion: !!q.isSponsorQuestion,
               correctOutcome,
-              resultForUser,
             };
           })
         );
 
         setRows(flat);
-        setFilteredRows(flat); // default ALL
+        setFilteredRows(flat); // default to ALL
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -443,7 +452,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Also load active pick from server copy --------
+  // -------- Also load from /api/user-picks (server copy) --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -553,20 +562,21 @@ export default function PicksClient() {
 
   // -------- Local Yes/No % based on streak pick only --------
   const getDisplayPercents = (row: QuestionRow) => {
-    // If question has a final/void result, we show a 100 / 0 style view
+    const resultForUser = getResultForRow(row);
+
+    // If question is final/void, show the "correct" side as 100% for this user
     if (row.status === "final" || row.status === "void") {
-      if (!row.resultForUser || row.correctOutcome === "void") {
+      if (!resultForUser) {
         return { yes: 0, no: 0 };
       }
-      if (row.resultForUser === "win") {
-        return row.correctOutcome === "yes"
-          ? { yes: 100, no: 0 }
-          : { yes: 0, no: 100 };
+      if (resultForUser === "void") {
+        return { yes: 0, no: 0 };
       }
-      if (row.resultForUser === "loss") {
-        return row.correctOutcome === "yes"
-          ? { yes: 0, no: 100 }
-          : { yes: 100, no: 0 };
+      if (row.correctOutcome === "yes") {
+        return { yes: 100, no: 0 };
+      }
+      if (row.correctOutcome === "no") {
+        return { yes: 0, no: 100 };
       }
       return { yes: 0, no: 0 };
     }
@@ -944,6 +954,8 @@ export default function PicksClient() {
 
           const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
+          const resultForUser = getResultForRow(row);
+
           return (
             <div
               key={row.id}
@@ -1072,7 +1084,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* PICK / YES / NO + result pill */}
+                {/* PICK / YES / NO + RESULT */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
@@ -1121,25 +1133,26 @@ export default function PicksClient() {
                     Yes: {yesPct}% • No: {noPct}%
                   </div>
 
-                  {row.resultForUser && (
-                    <div className="mt-0.5">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          row.resultForUser === "win"
-                            ? "bg-emerald-400 text-black"
-                            : row.resultForUser === "loss"
-                            ? "bg-red-500 text-black"
-                            : "bg-slate-500 text-white"
-                        }`}
-                      >
-                        {row.resultForUser === "win"
-                          ? "You were right!"
-                          : row.resultForUser === "loss"
-                          ? "You missed this one"
-                          : "Void – no change"}
-                      </span>
-                    </div>
-                  )}
+                  {(row.status === "final" || row.status === "void") &&
+                    resultForUser && (
+                      <div className="mt-1">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            resultForUser === "win"
+                              ? "bg-emerald-400 text-black"
+                              : resultForUser === "loss"
+                              ? "bg-red-500 text-black"
+                              : "bg-slate-500 text-white"
+                          }`}
+                        >
+                          {resultForUser === "win"
+                            ? "You were right!"
+                            : resultForUser === "loss"
+                            ? "You missed this one"
+                            : "Void – no change"}
+                        </span>
+                      </div>
+                    )}
                 </div>
               </div>
             </div>
