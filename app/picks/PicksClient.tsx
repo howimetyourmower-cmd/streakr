@@ -1085,7 +1085,7 @@ export default function PicksClient() {
                     Quarter {row.quarter}
                   </span>
                   <span className="hidden md:inline">
-                    Q{row.quarter}
+                    Quarter{row.quarter}
                   </span>
                 </div>
 
@@ -1166,27 +1166,29 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* outcome pill under buttons when final/void */}
-                  {(row.status === "final" || row.status === "void") &&
-                    row.resultForUser && (
-                      <div className="mb-0.5">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            row.resultForUser === "win"
-                              ? "bg-emerald-400 text-black"
-                              : row.resultForUser === "loss"
-                              ? "bg-red-500 text-black"
-                              : "bg-slate-500 text-white"
-                          }`}
-                        >
-                          {row.resultForUser === "win"
-                            ? "You were right!"
-                            : row.resultForUser === "loss"
-                            ? "You missed this one"
-                            : "Void – no change"}
-                        </span>
-                      </div>
-                    )}
+                  {/* Outcome pill under YES/NO */}
+{question.status === "final" &&
+  question.correctOutcome &&
+  question.userPick && (
+    <div className="mt-2">
+      <span
+        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+          question.correctOutcome === "void"
+            ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
+            : question.userPick === question.correctOutcome
+            ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
+            : "bg-red-500/15 border-red-400/60 text-red-300"
+        }`}
+      >
+        {question.correctOutcome === "void"
+          ? "Question voided"
+          : question.userPick === question.correctOutcome
+          ? "You were right!"
+          : "Wrong pick"}
+      </span>
+    </div>
+  )}
+
 
                   <div className="text-[11px] text-white/85">
                     Yes: {yesPct}% • No: {noPct}%
