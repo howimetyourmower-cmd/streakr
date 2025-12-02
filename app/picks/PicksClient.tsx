@@ -61,7 +61,6 @@ type QuestionRow = {
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
-  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -237,7 +236,7 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // Single active streak pick
+  // Single active streak pick (for highlight only)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
 
@@ -296,20 +295,11 @@ export default function PicksClient() {
     };
   };
 
-  const computeResultForUser = (
-    status: QuestionStatus,
-    correct: QuestionRow["correctOutcome"],
-    pick: "yes" | "no" | undefined
-  ): QuestionRow["resultForUser"] => {
-    if (status === "void" || correct === "void") return "void";
-    if (status !== "final") return null;
-    if (!correct || !pick) return null;
-    return pick === correct ? "win" : "loss";
-  };
-
+  // ---- flatten API -> QuestionRow ----
   const flattenApi = (data: PicksApiResponse): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
+        // prefer `correctOutcome`, fall back to `outcome`
         const rawOutcome =
           q.correctOutcome ??
           (q.outcome === "yes" || q.outcome === "no" || q.outcome === "void"
@@ -319,13 +309,7 @@ export default function PicksClient() {
         const correctOutcome: QuestionRow["correctOutcome"] =
           q.status === "final" || q.status === "void" ? rawOutcome ?? null : null;
 
-        const resultForUser = computeResultForUser(
-          q.status,
-          correctOutcome,
-          q.userPick
-        );
-
-        // keep last non-zero % so they don’t reset
+        // keep last non-zero % so they don’t reset to 0 on refresh
         if (typeof q.yesPercent === "number" || typeof q.noPercent === "number") {
           const prev = lastPercentsRef.current[q.id] || {};
           lastPercentsRef.current[q.id] = {
@@ -355,7 +339,6 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          resultForUser,
         };
       })
     );
@@ -589,7 +572,7 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  // -------- Local Yes/No % based on streak pick only --------
+  // -------- Yes/No % display --------
   const getDisplayPercents = (row: QuestionRow) => {
     const serverYes =
       typeof row.yesPercent === "number" ? row.yesPercent : undefined;
@@ -601,14 +584,14 @@ export default function PicksClient() {
     }
 
     const remembered = lastPercentsRef.current[row.id];
-    if (remembered && (remembered.yes !== undefined || remembered.no !== undefined)) {
+    if (
+      remembered &&
+      (remembered.yes !== undefined || remembered.no !== undefined)
+    ) {
       return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
     }
 
-    if (row.status === "final" || row.status === "void") {
-      return { yes: 0, no: 0 };
-    }
-
+    // if everything else fails, default to 0/0 (or active streak 100/0)
     if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
@@ -1002,6 +985,39 @@ export default function PicksClient() {
 
           const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
+          // -------- Outcome pill (local calculation) --------
+          type OutcomeKind = "win" | "loss" | "void" | null;
+          let outcomeKind: OutcomeKind = null;
+
+          if (row.status === "void" || row.correctOutcome === "void") {
+            // fully voided question
+            outcomeKind = row.userPick ? "void" : null;
+          } else if (row.status === "final" && row.userPick) {
+            if (row.correctOutcome === "yes" || row.correctOutcome === "no") {
+              outcomeKind =
+                row.userPick === row.correctOutcome ? "win" : "loss";
+            } else {
+              // final but no correctOutcome – still show a neutral pill
+              outcomeKind = "void";
+            }
+          }
+
+          const outcomeLabel =
+            outcomeKind === "void"
+              ? "Question voided – no streak change"
+              : outcomeKind === "win"
+              ? "You were right!"
+              : outcomeKind === "loss"
+              ? "Wrong pick"
+              : null;
+
+          const outcomeClasses =
+            outcomeKind === "void"
+              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
+              : outcomeKind === "win"
+              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
+              : "bg-red-500/15 border-red-400/60 text-red-300";
+
           return (
             <div
               key={row.id}
@@ -1176,31 +1192,20 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill – now based on resultForUser only */}
-                  {(row.status === "final" || row.status === "void") &&
-                    row.resultForUser && (
-                      <div className="mt-2">
-                        <span
-                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
-                            row.resultForUser === "void"
-                              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
-                              : row.resultForUser === "win"
-                              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
-                              : "bg-red-500/15 border-red-400/60 text-red-300"
-                          }`}
-                        >
-                          {row.resultForUser === "void"
-                            ? "Question voided – no streak change"
-                            : row.resultForUser === "win"
-                            ? "You were right!"
-                            : "Wrong pick"}
-                        </span>
-                      </div>
-                    )}
+                  {/* Outcome pill – for ALL final/void questions with a pick */}
+                  {outcomeLabel && (
+                    <div className="mt-2">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                      >
+                        {outcomeLabel}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="text-[11px] text-white/85">
-                    Yes: {Math.round((yesPct ?? 0) as number)}% • No:{" "}
-                    {Math.round((noPct ?? 0) as number)}%
+                    Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
+                    {Math.round(noPct ?? 0)}%
                   </div>
                 </div>
               </div>
