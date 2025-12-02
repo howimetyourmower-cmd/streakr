@@ -10,6 +10,11 @@ import {
   onSnapshot,
   query,
   where,
+  getDoc,
+  getDocs,
+  doc,
+  orderBy,
+  limit,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -55,13 +60,12 @@ type QuestionRow = {
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
+  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  userStreak?: number;
-  leaderStreak?: number;
 };
 
 type Comment = {
@@ -226,7 +230,7 @@ export default function PicksClient() {
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
   const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
-    "all" // 👈 default to ALL now
+    "all"
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -248,7 +252,7 @@ export default function PicksClient() {
   // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // streak progress tracker from API
+  // streak progress tracker
   const [userStreak, setUserStreak] = useState<number | null>(null);
   const [leaderStreak, setLeaderStreak] = useState<number | null>(null);
   const [streakLoading, setStreakLoading] = useState(false);
@@ -279,37 +283,11 @@ export default function PicksClient() {
     };
   };
 
-  // --- helper: derive resultForUser from row.correctOutcome + row.userPick ---
-  const getResultForUser = (row: QuestionRow):
-    | "win"
-    | "loss"
-    | "void"
-    | null => {
-    if (!row.correctOutcome) return null;
-    if (row.correctOutcome === "void") return "void";
-    if (!row.userPick) return null;
-    return row.userPick === row.correctOutcome ? "win" : "loss";
-  };
-
-  // -------- Load Picks + streaks (from API, WITH auth if logged in) --------
+  // -------- Load Picks --------
   useEffect(() => {
     const load = async () => {
       try {
-        setStreakLoading(true);
-        setStreakError("");
-
-        let res: Response;
-        if (user) {
-          const idToken = await user.getIdToken();
-          res = await fetch("/api/picks", {
-            headers: {
-              Authorization: `Bearer ${idToken}`,
-            },
-          });
-        } else {
-          res = await fetch("/api/picks");
-        }
-
+        const res = await fetch("/api/picks");
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
@@ -319,47 +297,60 @@ export default function PicksClient() {
         }
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
-          g.questions.map((q: ApiQuestion) => ({
-            id: q.id,
-            gameId: g.id,
-            match: g.match,
-            venue: g.venue ?? q.venue ?? "",
-            startTime: g.startTime ?? q.startTime ?? "",
-            quarter: q.quarter,
-            question: q.question,
-            status: q.status,
-            userPick: q.userPick,
-            yesPercent: q.yesPercent,
-            noPercent: q.noPercent,
-            sport: q.sport ?? g.sport ?? "AFL",
-            commentCount: q.commentCount ?? 0,
-            isSponsorQuestion: !!q.isSponsorQuestion,
-            correctOutcome: q.correctOutcome ?? null,
-          }))
+          g.questions.map((q: ApiQuestion) => {
+            const rawOutcome =
+              q.correctOutcome === "yes" ||
+              q.correctOutcome === "no" ||
+              q.correctOutcome === "void"
+                ? q.correctOutcome
+                : null;
+
+            const correctOutcome: QuestionRow["correctOutcome"] =
+              q.status === "final" || q.status === "void"
+                ? rawOutcome ?? null
+                : null;
+
+            let resultForUser: QuestionRow["resultForUser"] = null;
+            if (correctOutcome === "void") {
+              resultForUser = "void";
+            } else if (correctOutcome && q.userPick) {
+              resultForUser =
+                q.userPick === correctOutcome ? "win" : "loss";
+            }
+
+            return {
+              id: q.id,
+              gameId: g.id,
+              match: g.match,
+              venue: g.venue ?? q.venue ?? "",
+              startTime: g.startTime ?? q.startTime ?? "",
+              quarter: q.quarter,
+              question: q.question,
+              status: q.status,
+              userPick: q.userPick,
+              yesPercent: q.yesPercent,
+              noPercent: q.noPercent,
+              sport: q.sport ?? g.sport ?? "AFL",
+              commentCount: q.commentCount ?? 0,
+              isSponsorQuestion: !!q.isSponsorQuestion,
+              correctOutcome,
+              resultForUser,
+            };
+          })
         );
 
         setRows(flat);
-        // 👇 default to ALL
-        setFilteredRows(flat);
-
-        setUserStreak(
-          typeof data.userStreak === "number" ? data.userStreak : 0
-        );
-        setLeaderStreak(
-          typeof data.leaderStreak === "number" ? data.leaderStreak : 0
-        );
+        setFilteredRows(flat); // default ALL
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
-        setStreakError("Could not load streak data.");
       } finally {
         setLoading(false);
-        setStreakLoading(false);
       }
     };
 
     load();
-  }, [user]);
+  }, []);
 
   // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
@@ -435,14 +426,16 @@ export default function PicksClient() {
         setActiveOutcome(outcome);
 
         setRows((prev) =>
-          prev.map((r) =>
-            r.id === questionId ? { ...r, userPick: outcome } : r
-          )
+          prev.map((r) => ({
+            ...r,
+            userPick: r.id === questionId ? outcome : r.userPick,
+          }))
         );
         setFilteredRows((prev) =>
-          prev.map((r) =>
-            r.id === questionId ? { ...r, userPick: outcome } : r
-          )
+          prev.map((r) => ({
+            ...r,
+            userPick: r.id === questionId ? outcome : r.userPick,
+          }))
         );
       }
     } catch (err) {
@@ -450,7 +443,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Optional: also try to load from /api/user-picks (server copy) --------
+  // -------- Also load active pick from server copy --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -484,14 +477,16 @@ export default function PicksClient() {
           setActiveOutcome(outcome);
 
           setRows((prev) =>
-            prev.map((r) =>
-              r.id === questionId ? { ...r, userPick: outcome } : r
-            )
+            prev.map((r) => ({
+              ...r,
+              userPick: r.id === questionId ? outcome : r.userPick,
+            }))
           );
           setFilteredRows((prev) =>
-            prev.map((r) =>
-              r.id === questionId ? { ...r, userPick: outcome } : r
-            )
+            prev.map((r) => ({
+              ...r,
+              userPick: r.id === questionId ? outcome : r.userPick,
+            }))
           );
         }
       } catch (err) {
@@ -504,6 +499,51 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
+  // -------- Load streak progress (user vs leader) --------
+  useEffect(() => {
+    const loadStreaks = async () => {
+      try {
+        setStreakLoading(true);
+        setStreakError("");
+
+        const usersRef = collection(db, "users");
+        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
+        const topSnap = await getDocs(topQ);
+
+        let leaderVal: number | null = null;
+        topSnap.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const val =
+            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          leaderVal = val;
+        });
+        setLeaderStreak(leaderVal);
+
+        if (user) {
+          const userRef = doc(db, "users", user.uid);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const data = userSnap.data() as any;
+            const myVal =
+              typeof data.currentStreak === "number" ? data.currentStreak : 0;
+            setUserStreak(myVal);
+          } else {
+            setUserStreak(0);
+          }
+        } else {
+          setUserStreak(null);
+        }
+      } catch (err) {
+        console.error("Failed to load streak progress", err);
+        setStreakError("Could not load streak tracker.");
+      } finally {
+        setStreakLoading(false);
+      }
+    };
+
+    loadStreaks();
+  }, [user]);
+
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
@@ -513,18 +553,17 @@ export default function PicksClient() {
 
   // -------- Local Yes/No % based on streak pick only --------
   const getDisplayPercents = (row: QuestionRow) => {
-    const resultForUser = getResultForUser(row);
-
+    // If question has a final/void result, we show a 100 / 0 style view
     if (row.status === "final" || row.status === "void") {
-      if (!resultForUser || row.correctOutcome === "void") {
+      if (!row.resultForUser || row.correctOutcome === "void") {
         return { yes: 0, no: 0 };
       }
-      if (resultForUser === "win") {
+      if (row.resultForUser === "win") {
         return row.correctOutcome === "yes"
           ? { yes: 100, no: 0 }
           : { yes: 0, no: 100 };
       }
-      if (resultForUser === "loss") {
+      if (row.resultForUser === "loss") {
         return row.correctOutcome === "yes"
           ? { yes: 0, no: 100 }
           : { yes: 100, no: 0 };
@@ -532,6 +571,7 @@ export default function PicksClient() {
       return { yes: 0, no: 0 };
     }
 
+    // otherwise, live streak pick only
     if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
@@ -549,6 +589,7 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
+    // local UI selection
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -563,6 +604,7 @@ export default function PicksClient() {
       )
     );
 
+    // persist to localStorage
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
@@ -574,6 +616,7 @@ export default function PicksClient() {
       console.error("Failed to save pick to localStorage", err);
     }
 
+    // best-effort save to API (user's active streak pick)
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
@@ -900,7 +943,6 @@ export default function PicksClient() {
               : null;
 
           const useAflLayout = !!parsed && (homeTeam || awayTeam);
-          const resultForUser = getResultForUser(row);
 
           return (
             <div
@@ -989,7 +1031,7 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER */}
+                {/* QUARTER – mobile: "Quarter 1", desktop: "Q1" */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   <span className="block md:hidden">
                     Quarter {row.quarter}
@@ -999,7 +1041,7 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* QUESTION + COMMENTS + pills */}
+                {/* QUESTION + COMMENTS + tags */}
                 <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -1030,7 +1072,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* PICK / YES / NO + RESULT PILL */}
+                {/* PICK / YES / NO + result pill */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
@@ -1075,31 +1117,29 @@ export default function PicksClient() {
                       No
                     </button>
                   </div>
-
-                  {(row.status === "final" || row.status === "void") &&
-                    resultForUser && (
-                      <div className="mb-0.5">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            resultForUser === "win"
-                              ? "bg-emerald-400 text-black"
-                              : resultForUser === "loss"
-                              ? "bg-red-500 text-black"
-                              : "bg-slate-500 text-white"
-                          }`}
-                        >
-                          {resultForUser === "win"
-                            ? "You were right!"
-                            : resultForUser === "loss"
-                            ? "You missed this one"
-                            : "Void – no change"}
-                        </span>
-                      </div>
-                    )}
-
                   <div className="text-[11px] text-white/85">
                     Yes: {yesPct}% • No: {noPct}%
                   </div>
+
+                  {row.resultForUser && (
+                    <div className="mt-0.5">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          row.resultForUser === "win"
+                            ? "bg-emerald-400 text-black"
+                            : row.resultForUser === "loss"
+                            ? "bg-red-500 text-black"
+                            : "bg-slate-500 text-white"
+                        }`}
+                      >
+                        {row.resultForUser === "win"
+                          ? "You were right!"
+                          : row.resultForUser === "loss"
+                          ? "You missed this one"
+                          : "Void – no change"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
