@@ -29,8 +29,7 @@ type Scope =
   | "round-21"
   | "round-22"
   | "round-23"
-  | "finals"
-  | string; // we only really care about "overall" vs not
+  | "finals";
 
 type LeaderboardEntry = {
   uid: string;
@@ -38,12 +37,25 @@ type LeaderboardEntry = {
   username?: string;
   avatarUrl?: string;
   rank: number;
-  streak: number;
+  currentStreak: number;
+  longestStreak: number;
+  totalWins: number;
+  totalLosses: number;
+  winPct: number; // 0–1
+};
+
+type UserLifetimeStats = {
+  currentStreak: number;
+  longestStreak: number;
+  totalWins: number;
+  totalLosses: number;
+  winPct: number;
 };
 
 type LeaderboardApiResponse = {
   entries: LeaderboardEntry[];
   userEntry: LeaderboardEntry | null;
+  userLifetime: UserLifetimeStats | null;
 };
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -51,7 +63,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const url = new URL(req.url);
     const scope = (url.searchParams.get("scope") || "overall") as Scope;
 
-    // Identify current user (for highlighting / "You" row)
+    // Identify current user (for highlighting / lifetime box)
     let currentUid: string | null = null;
     const authHeader = req.headers.get("authorization");
     if (authHeader?.startsWith("Bearer ")) {
@@ -64,12 +76,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // We keep it simple: for "overall" use longestStreak, otherwise currentStreak.
     const useLongest = scope === "overall";
 
     const snap = await db.collection("users").get();
 
     const entries: LeaderboardEntry[] = [];
+    let userLifetime: UserLifetimeStats | null = null;
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as any;
@@ -78,11 +90,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const firstName = (data.firstName as string) || "";
       const surname = (data.surname as string) || "";
       const username = (data.username as string) || "";
-
-      // avatar can be stored as avatarUrl (profile page) or photoURL (copied from auth)
       const avatarUrl =
-        (data.avatarUrl as string | undefined) ||
-        (data.photoURL as string | undefined) ||
+        (data.avatarUrl as string) ||
+        (data.photoURL as string) ||
         "";
 
       const displayName =
@@ -94,31 +104,60 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         typeof data.currentStreak === "number" ? data.currentStreak : 0;
       const longestStreak =
         typeof data.longestStreak === "number" ? data.longestStreak : 0;
+      const totalWins =
+        typeof data.totalWins === "number" ? data.totalWins : 0;
+      const totalLosses =
+        typeof data.totalLosses === "number" ? data.totalLosses : 0;
+      const totalPicks =
+        typeof data.totalPicks === "number"
+          ? data.totalPicks
+          : totalWins + totalLosses;
 
-      const streak = useLongest ? longestStreak : currentStreak;
+      const games = totalPicks > 0 ? totalPicks : totalWins + totalLosses;
+      const winPct = games > 0 ? totalWins / games : 0;
 
-      entries.push({
+      const entry: LeaderboardEntry = {
         uid,
         displayName,
         username,
         avatarUrl,
-        rank: 0, // will be filled below
-        streak,
-      });
+        rank: 0,
+        currentStreak,
+        longestStreak,
+        totalWins,
+        totalLosses,
+        winPct,
+      };
+
+      entries.push(entry);
+
+      if (currentUid && uid === currentUid) {
+        userLifetime = {
+          currentStreak,
+          longestStreak,
+          totalWins,
+          totalLosses,
+          winPct,
+        };
+      }
     });
 
-    // Sort by streak desc, then name as tiebreaker
+    // Sort by relevant streak (overall = longest, otherwise current)
     entries.sort((a, b) => {
-      if (b.streak !== a.streak) return b.streak - a.streak;
+      const aVal = useLongest ? a.longestStreak : a.currentStreak;
+      const bVal = useLongest ? b.longestStreak : b.currentStreak;
+      if (bVal !== aVal) return bVal - aVal;
+      // tie-breaker: higher win% first
+      if (b.winPct !== a.winPct) return b.winPct - a.winPct;
       return a.displayName.localeCompare(b.displayName);
     });
 
-    // Assign ranks (1-based)
+    // Assign ranks
     entries.forEach((entry, index) => {
       entry.rank = index + 1;
     });
 
-    const topEntries = entries.slice(0, 50); // safety cap
+    const topEntries = entries.slice(0, 50);
 
     const userEntry =
       currentUid
@@ -130,6 +169,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const response: LeaderboardApiResponse = {
       entries: topEntries,
       userEntry,
+      userLifetime,
     };
 
     return NextResponse.json(response);
