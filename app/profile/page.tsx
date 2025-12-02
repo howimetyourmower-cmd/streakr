@@ -44,6 +44,9 @@ type ApiProfileStats = {
   state?: string;
   currentStreak: number;
   bestStreak: number;
+  wins: number;
+  losses: number;
+  totalPicks: number;
   correctPercentage: number; // 0–100
   roundsPlayed: number;
 };
@@ -315,6 +318,14 @@ export default function ProfilePage() {
 
   const displayBestStreak = stats?.bestStreak ?? form.longestStreak ?? 0;
 
+  const wins = stats?.wins ?? 0;
+  const losses = stats?.losses ?? 0;
+  const totalPicksFromApi = stats?.totalPicks ?? 0;
+  const totalPicks =
+    totalPicksFromApi > 0 ? totalPicksFromApi : wins + losses;
+  const winRateDecimal = totalPicks > 0 ? wins / totalPicks : 0;
+  const winRateDisplay = winRateDecimal.toFixed(3);
+
   const formatSettledAt = (iso?: string) => {
     if (!iso) return "";
     const d = new Date(iso);
@@ -581,7 +592,8 @@ export default function ProfilePage() {
             )}
 
             {!statsLoading && !statsError && (
-              <div className="space-y-4">
+              <div className="space-y-5">
+                {/* Current + longest tiles */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-800/80 border border-slate-700 px-4 py-4 text-center">
                     <p className="text-xs uppercase tracking-wide text-slate-400 mb-1">
@@ -607,8 +619,9 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
+                {/* Small numbers (correct % + rounds) */}
                 {stats && (
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-300">
+                  <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
                     <div>
                       <p className="text-[11px] uppercase tracking-wide text-slate-500">
                         Correct picks
@@ -624,6 +637,52 @@ export default function ProfilePage() {
                       <p className="mt-0.5 font-semibold">
                         {stats.roundsPlayed}
                       </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Lifetime record box (Best / Wins / Losses / Win rate) */}
+                {stats && (
+                  <div className="mt-1 rounded-xl bg-slate-950/70 border border-slate-700 px-4 py-4">
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">
+                      Lifetime record
+                    </p>
+                    <div className="grid grid-cols-4 gap-3 text-xs">
+                      <div>
+                        <p className="text-[11px] text-slate-500 mb-0.5">
+                          Best streak
+                        </p>
+                        <p className="text-lg font-semibold">
+                          {displayBestStreak}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-500 mb-0.5">
+                          Wins
+                        </p>
+                        <p className="text-lg font-semibold text-emerald-300">
+                          {wins}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-500 mb-0.5">
+                          Losses
+                        </p>
+                        <p className="text-lg font-semibold text-red-300">
+                          {losses}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-500 mb-0.5">
+                          Win rate
+                        </p>
+                        <p className="text-lg font-semibold">
+                          {winRateDisplay}
+                          <span className="text-[10px] text-slate-400 ml-1">
+                            ({totalPicks} picks)
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
