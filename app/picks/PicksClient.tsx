@@ -1166,7 +1166,7 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill under YES/NO buttons when question is final/void */}
+                 {/* Outcome pill under YES/NO buttons when question is final/void */}
 {(row.status === "final" || row.status === "void") &&
   row.correctOutcome &&
   row.userPick && (
@@ -1188,7 +1188,6 @@ export default function PicksClient() {
       </span>
     </div>
   )}
-
 
                   <div className="text-[11px] text-white/85">
                     Yes: {yesPct}% • No: {noPct}%
