@@ -52,8 +52,9 @@ async function updateStreaksForQuestion(
   // If void, we don’t change anything
   if (outcome === "void") return;
 
+  // 🔥 FIX: use the real picks collection + `pick` field
   const picksSnap = await db
-    .collection("userPicks")
+    .collection("picks")
     .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
@@ -65,11 +66,11 @@ async function updateStreaksForQuestion(
   picksSnap.forEach((pickDoc) => {
     const data = pickDoc.data() as {
       userId?: string;
-      outcome?: "yes" | "no";
+      pick?: "yes" | "no";
     };
 
     const userId = data.userId;
-    const pick = data.outcome; // user’s chosen side
+    const pick = data.pick;
 
     if (!userId || (pick !== "yes" && pick !== "no")) return;
 
@@ -91,8 +92,10 @@ async function updateStreaksForQuestion(
         longestStreak =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
         totalWins = typeof u.totalWins === "number" ? u.totalWins : 0;
-        totalLosses = typeof u.totalLosses === "number" ? u.totalLosses : 0;
-        totalPicks = typeof u.totalPicks === "number" ? u.totalPicks : 0;
+        totalLosses =
+          typeof u.totalLosses === "number" ? u.totalLosses : 0;
+        totalPicks =
+          typeof u.totalPicks === "number" ? u.totalPicks : 0;
       }
 
       // Correct pick → streak +1, win++
