@@ -30,7 +30,7 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  correctOutcome?: QuestionOutcome; // settlement result
+  correctOutcome?: QuestionOutcome; // 👈 settlement result
 };
 
 type ApiGame = {
@@ -45,8 +45,6 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
-  userStreak: number;
-  leaderStreak: number;
 };
 
 type SponsorQuestionConfig = {
@@ -110,8 +108,15 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
   }
 }
 
+/**
+ * Get pick stats for all questions.
+ *
+ * We deliberately do NOT filter by roundNumber here, because questionId
+ * is globally unique (e.g. "OR-G1-Q1") and some picks may be missing
+ * or have mismatched roundNumber. Using questionId only is safest.
+ */
 async function getPickStatsForRound(
-  roundNumber: number,
+  _roundNumber: number, // kept in signature for future use
   currentUserId: string | null
 ): Promise<{
   pickStats: Record<string, { yes: number; no: number; total: number }>;
@@ -122,10 +127,7 @@ async function getPickStatsForRound(
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
-    const snap = await db
-      .collection("picks")
-      .where("roundNumber", "==", roundNumber)
-      .get();
+    const snap = await db.collection("picks").get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as {
@@ -190,6 +192,7 @@ async function getQuestionStatusForRound(
 ): Promise<
   Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
 > {
+  // internal map keeps updatedAtMs so latest wins
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -206,6 +209,7 @@ async function getQuestionStatusForRound(
 
       if (!data.questionId || !data.status) return;
 
+      // Only keep an outcome if it's a real result (yes/no/void).
       let outcome: QuestionOutcome | undefined;
       if (
         data.outcome === "yes" ||
@@ -235,6 +239,7 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
+  // strip updatedAtMs before returning
   const finalMap: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome }
@@ -248,36 +253,6 @@ async function getQuestionStatusForRound(
   });
 
   return finalMap;
-}
-
-/**
- * Get currentStreak for the logged-in user and the highest currentStreak
- * across all users – for the streak header on the Picks page.
- */
-async function getStreaksForHeader(
-  currentUserId: string | null
-): Promise<{ userStreak: number; leaderStreak: number }> {
-  let userStreak = 0;
-  let leaderStreak = 0;
-
-  try {
-    const snap = await db.collection("users").get();
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as any;
-      const cs =
-        typeof data.currentStreak === "number" ? data.currentStreak : 0;
-
-      if (cs > leaderStreak) leaderStreak = cs;
-      if (currentUserId && docSnap.id === currentUserId) {
-        userStreak = cs;
-      }
-    });
-  } catch (error) {
-    console.error("[/api/picks] Error fetching streaks", error);
-  }
-
-  return { userStreak, leaderStreak };
 }
 
 // ─────────────────────────────────────────────
@@ -309,16 +284,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
-      const empty: PicksApiResponse = {
-        games: [],
-        roundNumber,
-        userStreak: 0,
-        leaderStreak: 0,
-      };
+      const empty: PicksApiResponse = { games: [], roundNumber };
       return NextResponse.json(empty);
     }
 
-    // 3) Identify user (for userPick & streaks)
+    // 3) Identify user (for userPick)
     const currentUserId = await getUserIdFromRequest(req);
 
     // 4) Sponsor config
@@ -334,12 +304,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
-    // 7) Streak header values
-    const { userStreak, leaderStreak } = await getStreaksForHeader(
-      currentUserId
-    );
-
-    // 8) Group rows into games and build final API shape
+    // 7) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
 
@@ -404,21 +369,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const response: PicksApiResponse = {
       games,
       roundNumber,
-      userStreak,
-      leaderStreak,
     };
 
     return NextResponse.json(response);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        games: [],
-        roundNumber: 0,
-        userStreak: 0,
-        leaderStreak: 0,
-      },
+      { error: "Internal server error", games: [], roundNumber: 0 },
       { status: 500 }
     );
   }
