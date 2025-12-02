@@ -32,13 +32,13 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
 
 /**
  * Recalculate streaks for all players who picked this question.
+ *
+ * We now use the `picks` collection (one doc per user & question):
+ *   { userId, roundNumber, questionId, pick: "yes" | "no" }
+ *
  * outcome:
  *   - "yes" / "no"  => correct answer
  *   - "void"        => does not change streak
- *
- * We now use the `picks` collection (one doc per user per question),
- * where documents look like:
- *   { userId, roundNumber, questionId, pick: "yes" | "no" }
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
@@ -162,8 +162,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // 🔙 Backwards-compat:
-    // old UI sometimes sends only { outcome: "yes" | "no" | "void" }
+    // Backwards-compat: old UI might send only { outcome: "yes" | "no" | "void" }
     if (
       !status &&
       outcome &&
