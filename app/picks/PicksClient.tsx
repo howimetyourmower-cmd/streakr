@@ -32,9 +32,8 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  // possible fields from /api/picks
   correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null; // raw outcome if API uses it
+  outcome?: "yes" | "no" | "void" | "lock" | null;
 };
 
 type ApiGame = {
@@ -58,10 +57,11 @@ type QuestionRow = {
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
-  sport: string; // text-only, e.g. "AFL"
+  sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
+  resultForUser?: "win" | "loss" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -225,21 +225,6 @@ function parseAflMatchTeams(match: string): {
 // localStorage key for persistence
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 
-/** helper: derive result for this user & question */
-function getResultForRow(
-  row: QuestionRow
-): "win" | "loss" | "void" | null {
-  if (row.status !== "final" && row.status !== "void") return null;
-
-  if (row.correctOutcome === "void") {
-    return "void";
-  }
-
-  if (!row.correctOutcome || !row.userPick) return null;
-
-  return row.userPick === row.correctOutcome ? "win" : "loss";
-}
-
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -269,8 +254,15 @@ export default function PicksClient() {
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   // streak progress tracker
-  const [userStreak, setUserStreak] = useState<number | null>(null);
-  const [leaderStreak, setLeaderStreak] = useState<number | null>(null);
+  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
+    null
+  );
+  const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
+    null
+  );
+  const [leaderLongestStreak, setLeaderLongestStreak] = useState<
+    number | null
+  >(null);
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
@@ -314,7 +306,6 @@ export default function PicksClient() {
 
         const flat: QuestionRow[] = data.games.flatMap((g: ApiGame) =>
           g.questions.map((q: ApiQuestion) => {
-            // normalise any outcome coming from the API when final/void
             const rawOutcome =
               q.correctOutcome ??
               (q.outcome === "yes" ||
@@ -327,6 +318,14 @@ export default function PicksClient() {
               q.status === "final" || q.status === "void"
                 ? rawOutcome ?? null
                 : null;
+
+            let resultForUser: QuestionRow["resultForUser"] = null;
+            if (correctOutcome === "void") {
+              resultForUser = "void";
+            } else if (correctOutcome && q.userPick) {
+              resultForUser =
+                q.userPick === correctOutcome ? "win" : "loss";
+            }
 
             return {
               id: q.id,
@@ -344,12 +343,13 @@ export default function PicksClient() {
               commentCount: q.commentCount ?? 0,
               isSponsorQuestion: !!q.isSponsorQuestion,
               correctOutcome,
+              resultForUser,
             };
           })
         );
 
         setRows(flat);
-        setFilteredRows(flat); // default to ALL
+        setFilteredRows(flat); // default "all"
       } catch (e) {
         console.error(e);
         setError("Failed to load picks");
@@ -452,7 +452,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Also load from /api/user-picks (server copy) --------
+  // -------- Optional: also try to load from /api/user-picks (server copy) --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -508,7 +508,7 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
-  // -------- Load streak progress (user vs leader) --------
+  // -------- Load streak progress (user vs leader, current/longest) --------
   useEffect(() => {
     const loadStreaks = async () => {
       try {
@@ -516,31 +516,40 @@ export default function PicksClient() {
         setStreakError("");
 
         const usersRef = collection(db, "users");
-        const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
+        const topQ = query(
+          usersRef,
+          orderBy("longestStreak", "desc"),
+          limit(1)
+        );
         const topSnap = await getDocs(topQ);
 
         let leaderVal: number | null = null;
         topSnap.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
-            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+            typeof data.longestStreak === "number" ? data.longestStreak : 0;
           leaderVal = val;
         });
-        setLeaderStreak(leaderVal);
+        setLeaderLongestStreak(leaderVal);
 
         if (user) {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
           if (userSnap.exists()) {
             const data = userSnap.data() as any;
-            const myVal =
+            const current =
               typeof data.currentStreak === "number" ? data.currentStreak : 0;
-            setUserStreak(myVal);
+            const longest =
+              typeof data.longestStreak === "number" ? data.longestStreak : 0;
+            setUserCurrentStreak(current);
+            setUserLongestStreak(longest);
           } else {
-            setUserStreak(0);
+            setUserCurrentStreak(0);
+            setUserLongestStreak(0);
           }
         } else {
-          setUserStreak(null);
+          setUserCurrentStreak(null);
+          setUserLongestStreak(null);
         }
       } catch (err) {
         console.error("Failed to load streak progress", err);
@@ -562,26 +571,23 @@ export default function PicksClient() {
 
   // -------- Local Yes/No % based on streak pick only --------
   const getDisplayPercents = (row: QuestionRow) => {
-    const resultForUser = getResultForRow(row);
-
-    // If question is final/void, show the "correct" side as 100% for this user
     if (row.status === "final" || row.status === "void") {
-      if (!resultForUser) {
+      if (!row.resultForUser || row.correctOutcome === "void") {
         return { yes: 0, no: 0 };
       }
-      if (resultForUser === "void") {
-        return { yes: 0, no: 0 };
+      if (row.resultForUser === "win") {
+        return row.correctOutcome === "yes"
+          ? { yes: 100, no: 0 }
+          : { yes: 0, no: 100 };
       }
-      if (row.correctOutcome === "yes") {
-        return { yes: 100, no: 0 };
-      }
-      if (row.correctOutcome === "no") {
-        return { yes: 0, no: 100 };
+      if (row.resultForUser === "loss") {
+        return row.correctOutcome === "yes"
+          ? { yes: 0, no: 100 }
+          : { yes: 100, no: 0 };
       }
       return { yes: 0, no: 0 };
     }
 
-    // otherwise, live streak pick only
     if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
@@ -599,7 +605,6 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
-    // local UI selection
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
@@ -614,7 +619,6 @@ export default function PicksClient() {
       )
     );
 
-    // persist to localStorage
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
@@ -626,7 +630,6 @@ export default function PicksClient() {
       console.error("Failed to save pick to localStorage", err);
     }
 
-    // best-effort save to API (user's active streak pick)
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
@@ -740,12 +743,15 @@ export default function PicksClient() {
     }
   };
 
-  // --- helper for progress ratio ---
-  const progressRatio = (() => {
-    if (!leaderStreak || leaderStreak <= 0) return 0;
-    const my = userStreak ?? 0;
-    return Math.max(0, Math.min(my / leaderStreak, 1));
-  })();
+  // --- helper for streak bar widths ---
+  const maxBarValue = Math.max(
+    userCurrentStreak ?? 0,
+    userLongestStreak ?? 0,
+    leaderLongestStreak ?? 0,
+    1
+  );
+  const barWidth = (val: number | null) =>
+    `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(
     () => rows.some((r) => r.isSponsorQuestion),
@@ -804,31 +810,37 @@ export default function PicksClient() {
 
       {/* STREAK PROGRESS TRACKER + SHARE */}
       <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div>
             <p className="text-[11px] uppercase tracking-wide text-white/60">
               Streak progress
             </p>
             <p className="text-xs sm:text-sm text-white/80 max-w-md">
-              {user
-                ? "See how your active streak stacks up against the ladder leader this round."
-                : "Log in to start your streak and see how you compare to the leaders."}
+              Track your current run, your best ever streak, and how far you
+              are behind the season leader.
             </p>
           </div>
 
           <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <p className="text-[11px] text-white/60">Your streak</p>
+                <p className="text-[11px] text-white/60">Current</p>
                 <p className="text-lg sm:text-xl font-bold text-orange-400">
-                  {user ? userStreak ?? 0 : "-"}
+                  {user ? userCurrentStreak ?? 0 : "-"}
                 </p>
               </div>
               <div className="h-8 w-px bg-white/10" />
-              <div>
-                <p className="text-[11px] text-white/60">Leader streak</p>
+              <div className="text-right">
+                <p className="text-[11px] text-white/60">Best</p>
+                <p className="text-lg sm:text-xl font-bold text-emerald-300">
+                  {user ? userLongestStreak ?? 0 : "-"}
+                </p>
+              </div>
+              <div className="h-8 w-px bg-white/10" />
+              <div className="text-right">
+                <p className="text-[11px] text-white/60">Leader</p>
                 <p className="text-lg sm:text-xl font-bold text-sky-300">
-                  {leaderStreak ?? "-"}
+                  {leaderLongestStreak ?? "-"}
                 </p>
               </div>
             </div>
@@ -843,39 +855,65 @@ export default function PicksClient() {
           </div>
         </div>
 
-        <div className="mt-1">
-          <div className="relative h-2 rounded-full bg-slate-900 overflow-hidden">
-            {leaderStreak && leaderStreak > 0 && (
-              <div className="absolute inset-0 bg-gradient-to-r from-sky-500 via-purple-500 to-orange-500 opacity-70" />
-            )}
-
-            {leaderStreak && leaderStreak > 0 && (
+        {/* Bars: Current / Longest / Leader */}
+        <div className="space-y-3">
+          <div>
+            <div className="flex justify-between text-[11px] text-white/70 mb-1">
+              <span>Current streak</span>
+              <span className="font-semibold text-orange-300">
+                {user ? userCurrentStreak ?? 0 : 0}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
               <div
-                className="absolute -top-1 h-4 w-[2px] bg-white rounded-full shadow-[0_0_10px_rgba(255,255,255,0.8)]"
-                style={{ left: `${progressRatio * 100}%` }}
+                className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
+                style={{ width: barWidth(userCurrentStreak) }}
               />
-            )}
+            </div>
           </div>
-          <div className="mt-1 flex justify-between text-[10px] text-white/50">
-            <span>0</span>
-            {leaderStreak && leaderStreak > 0 ? (
-              <span>{leaderStreak}+ leader</span>
-            ) : (
-              <span>Waiting for streaks…</span>
-            )}
+
+          <div>
+            <div className="flex justify-between text-[11px] text-white/70 mb-1">
+              <span>Longest streak</span>
+              <span className="font-semibold text-emerald-300">
+                {user ? userLongestStreak ?? 0 : 0}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600"
+                style={{ width: barWidth(userLongestStreak) }}
+              />
+            </div>
           </div>
-          {streakLoading && (
-            <p className="mt-1 text-[10px] text-white/50">
-              Loading streak data…
-            </p>
-          )}
-          {streakError && (
-            <p className="mt-1 text-[10px] text-red-400">{streakError}</p>
-          )}
-          {shareStatus && (
-            <p className="mt-1 text-[10px] text-sky-300">{shareStatus}</p>
-          )}
+
+          <div>
+            <div className="flex justify-between text-[11px] text-white/70 mb-1">
+              <span>Leader</span>
+              <span className="font-semibold text-sky-300">
+                {leaderLongestStreak ?? 0}
+              </span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
+                style={{ width: barWidth(leaderLongestStreak) }}
+              />
+            </div>
+          </div>
         </div>
+
+        {streakLoading && (
+          <p className="mt-2 text-[10px] text-white/50">
+            Loading streak data…
+          </p>
+        )}
+        {streakError && (
+          <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
+        )}
+        {shareStatus && (
+          <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
+        )}
       </div>
 
       {/* SPONSOR QUESTION INFO STRIP */}
@@ -953,8 +991,6 @@ export default function PicksClient() {
               : null;
 
           const useAflLayout = !!parsed && (homeTeam || awayTeam);
-
-          const resultForUser = getResultForRow(row);
 
           return (
             <div
@@ -1043,7 +1079,7 @@ export default function PicksClient() {
                   )}
                 </div>
 
-                {/* QUARTER – mobile: "Quarter 1", desktop: "Q1" */}
+                {/* QUARTER */}
                 <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
                   <span className="block md:hidden">
                     Quarter {row.quarter}
@@ -1053,7 +1089,7 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* QUESTION + COMMENTS + tags */}
+                {/* QUESTION + COMMENTS + pills */}
                 <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -1084,7 +1120,7 @@ export default function PicksClient() {
                   </div>
                 </div>
 
-                {/* PICK / YES / NO + RESULT */}
+                {/* PICK / YES / NO / RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
@@ -1129,30 +1165,32 @@ export default function PicksClient() {
                       No
                     </button>
                   </div>
-                  <div className="text-[11px] text-white/85">
-                    Yes: {yesPct}% • No: {noPct}%
-                  </div>
 
+                  {/* outcome pill under buttons when final/void */}
                   {(row.status === "final" || row.status === "void") &&
-                    resultForUser && (
-                      <div className="mt-1">
+                    row.resultForUser && (
+                      <div className="mb-0.5">
                         <span
                           className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                            resultForUser === "win"
+                            row.resultForUser === "win"
                               ? "bg-emerald-400 text-black"
-                              : resultForUser === "loss"
+                              : row.resultForUser === "loss"
                               ? "bg-red-500 text-black"
                               : "bg-slate-500 text-white"
                           }`}
                         >
-                          {resultForUser === "win"
+                          {row.resultForUser === "win"
                             ? "You were right!"
-                            : resultForUser === "loss"
+                            : row.resultForUser === "loss"
                             ? "You missed this one"
                             : "Void – no change"}
                         </span>
                       </div>
                     )}
+
+                  <div className="text-[11px] text-white/85">
+                    Yes: {yesPct}% • No: {noPct}%
+                  </div>
                 </div>
               </div>
             </div>
