@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useState, ChangeEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  ChangeEvent,
+} from "react";
 import { useAuth } from "@/hooks/useAuth";
 
 type Scope =
@@ -85,47 +91,74 @@ export default function LeaderboardsPage() {
 
   const isOverall = scope === "overall";
 
-  const loadLeaderboard = async (selectedScope: Scope) => {
-    try {
-      setLoading(true);
-      setError("");
+  // track whether we’ve done the first non-silent load
+  const hasLoadedRef = useRef(false);
 
-      let authHeader: Record<string, string> = {};
-      if (user) {
-        try {
-          const token = await user.getIdToken();
-          authHeader = { Authorization: `Bearer ${token}` };
-        } catch (err) {
-          console.error("Failed to get ID token for leaderboard", err);
+  const loadLeaderboard = useCallback(
+    async (selectedScope: Scope, options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
+
+      try {
+        if (!silent) {
+          setLoading(true);
+          setError("");
+        }
+
+        let authHeader: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch (err) {
+            console.error("Failed to get ID token for leaderboard", err);
+          }
+        }
+
+        const res = await fetch(`/api/leaderboard?scope=${selectedScope}`, {
+          headers: {
+            ...authHeader,
+          },
+        });
+
+        if (!res.ok) {
+          console.error("Leaderboard API error:", await res.text());
+          throw new Error("Failed to load leaderboard");
+        }
+
+        const data: LeaderboardApiResponse = await res.json();
+        setEntries(data.entries || []);
+        setUserEntry(data.userEntry || null);
+
+        hasLoadedRef.current = true;
+      } catch (err) {
+        console.error(err);
+        if (!silent) {
+          setError("Could not load leaderboard right now.");
+        }
+      } finally {
+        if (!silent) {
+          setLoading(false);
         }
       }
+    },
+    [user]
+  );
 
-      const res = await fetch(`/api/leaderboard?scope=${selectedScope}`, {
-        headers: {
-          ...authHeader,
-        },
-      });
-
-      if (!res.ok) {
-        console.error("Leaderboard API error:", await res.text());
-        throw new Error("Failed to load leaderboard");
-      }
-
-      const data: LeaderboardApiResponse = await res.json();
-      setEntries(data.entries || []);
-      setUserEntry(data.userEntry || null);
-    } catch (err) {
-      console.error(err);
-      setError("Could not load leaderboard right now.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // initial load + scope change
   useEffect(() => {
     loadLeaderboard(scope);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, user]);
+  }, [scope, loadLeaderboard]);
+
+  // silent auto-refresh every 15s (no flicker)
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+
+    const intervalId = setInterval(() => {
+      loadLeaderboard(scope, { silent: true });
+    }, 15000);
+
+    return () => clearInterval(intervalId);
+  }, [scope, loadLeaderboard]);
 
   const handleScopeChange = (event: ChangeEvent<HTMLSelectElement>) => {
     const value = event.target.value as Scope;
@@ -133,7 +166,6 @@ export default function LeaderboardsPage() {
   };
 
   const top10 = entries.slice(0, 10);
-
   const userOutsideTop10 =
     userEntry && top10.every((e) => e.uid !== userEntry.uid);
 
@@ -185,9 +217,9 @@ export default function LeaderboardsPage() {
       {/* Top 10 table */}
       <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-[#020617] to-[#020617] border border-slate-800 shadow-[0_24px_60px_rgba(0,0,0,0.8)] mb-6">
         <div className="grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-white/60 border-b border-slate-800">
-          <div className="col-span-2 sm:col-span-1">Rank</div>
-          <div className="col-span-6 sm:col-span-7">Player</div>
-          <div className="col-span-4 sm:col-span-4 text-right">
+          <div className="col-span-3 sm:col-span-2">Rank</div>
+          <div className="col-span-6 sm:col-span-6">Player</div>
+          <div className="col-span-3 sm:col-span-4 text-right">
             {isOverall ? "Longest streak" : "Streak this round"}
           </div>
         </div>
@@ -207,16 +239,24 @@ export default function LeaderboardsPage() {
               return (
                 <li
                   key={entry.uid}
-                  className={`grid grid-cols-12 px-4 py-3 items-center text-sm ${
+                  className={`grid grid-cols-12 px-4 py-3 items-center text-sm transform transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-slate-800/40 ${
                     isYou
                       ? "bg-gradient-to-r from-orange-500/10 via-sky-500/5 to-transparent"
                       : "bg-transparent"
                   }`}
                 >
-                  <div className="col-span-2 sm:col-span-1 font-semibold text-white/80">
-                    #{entry.rank}
+                  {/* Rank + crown for #1 */}
+                  <div className="col-span-3 sm:col-span-2 font-semibold text-white/80 flex items-center gap-1">
+                    <span>#{entry.rank}</span>
+                    {entry.rank === 1 && (
+                      <span className="text-yellow-300 text-lg" aria-label="Leader">
+                        👑
+                      </span>
+                    )}
                   </div>
-                  <div className="col-span-6 sm:col-span-7 flex items-center gap-2">
+
+                  {/* Player */}
+                  <div className="col-span-6 sm:col-span-6 flex items-center gap-2">
                     {hasAvatar ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -245,7 +285,9 @@ export default function LeaderboardsPage() {
                       )}
                     </div>
                   </div>
-                  <div className="col-span-4 sm:col-span-4 text-right font-bold text-sky-300">
+
+                  {/* Streak */}
+                  <div className="col-span-3 sm:col-span-4 text-right font-bold text-sky-300">
                     {entry.streak}
                   </div>
                 </li>
@@ -258,14 +300,23 @@ export default function LeaderboardsPage() {
       {/* Your position if outside top 10 */}
       {user ? (
         userOutsideTop10 && userEntry ? (
-          <div className="rounded-2xl bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent border border-orange-500/60 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)]">
+          <div className="rounded-2xl bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent border border-orange-500/60 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)] transform transition-all duration-300 ease-out">
             <p className="text-xs uppercase tracking-wide text-orange-300 mb-1">
               Your position
             </p>
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-semibold">
-                  #{userEntry.rank} – {userEntry.displayName}
+                <p className="text-sm font-semibold flex items-center gap-1">
+                  #{userEntry.rank}
+                  {userEntry.rank === 1 && (
+                    <span
+                      className="text-yellow-300 text-lg"
+                      aria-label="Leader"
+                    >
+                      👑
+                    </span>
+                  )}
+                  <span>– {userEntry.displayName}</span>
                 </p>
                 <p className="text-xs text-white/75">
                   Keep building your streak to climb the ladder.
