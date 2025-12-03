@@ -50,14 +50,14 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // ------- SPLASH / PRELOAD SEQUENCE -------
-  // Replace these paths with your 4 actual images
-  const splashImages = [
-    "/splash-1.jpg",
-    "/splash-2.jpg",
-    "/splash-3.jpg",
-    "/splash-4.jpg",
-  ];
+ // ------- SPLASH / PRELOAD SEQUENCE -------
+const splashImages = [
+  "/preload1.png",
+  "/preload2.png",
+  "/preload3.png",
+  "/preload4.png",
+];
+
 
   const [showSplash, setShowSplash] = useState(true);
   const [splashIndex, setSplashIndex] = useState(0);
