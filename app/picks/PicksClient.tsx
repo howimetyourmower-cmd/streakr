@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState, useMemo, useRef, ChangeEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  useCallback,
+  ChangeEvent,
+} from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
@@ -555,12 +562,15 @@ export default function PicksClient() {
   }, [user, rows.length]);
 
   // -------- Load streak progress (user vs leader, current/longest) --------
-  useEffect(() => {
-    const loadStreaks = async () => {
+  const loadStreaks = useCallback(
+    async (opts?: { silent?: boolean }) => {
       try {
-        setStreakLoading(true);
-        setStreakError("");
+        if (!opts?.silent) {
+          setStreakLoading(true);
+          setStreakError("");
+        }
 
+        // Leader longest streak
         const usersRef = collection(db, "users");
         const topQ = query(
           usersRef,
@@ -578,6 +588,7 @@ export default function PicksClient() {
         });
         setLeaderLongestStreak(leaderVal);
 
+        // Current user
         if (user) {
           const userRef = doc(db, "users", user.uid);
           const userSnap = await getDoc(userRef);
@@ -599,26 +610,31 @@ export default function PicksClient() {
         }
       } catch (err) {
         console.error("Failed to load streak progress", err);
-        setStreakError("Could not load streak tracker.");
+        if (!opts?.silent) {
+          setStreakError("Could not load streak tracker.");
+        }
       } finally {
-        setStreakLoading(false);
+        if (!opts?.silent) {
+          setStreakLoading(false);
+        }
       }
-    };
-
-    loadStreaks();
-  }, [user]);
-
-  // -------- Derive active streak question & lock state --------
-  const activeStreakRow = useMemo(
-    () =>
-      activeQuestionId
-        ? rows.find((r) => r.id === activeQuestionId) ?? null
-        : null,
-    [activeQuestionId, rows]
+    },
+    [user]
   );
 
-  // Player is globally locked from making ANY new picks while their streak pick is in-play (pending)
-  const isStreakInPlayLocked = activeStreakRow?.status === "pending";
+  // initial streak load
+  useEffect(() => {
+    loadStreaks();
+  }, [loadStreaks]);
+
+  // silent auto-refresh of streak progress every 15s
+  useEffect(() => {
+    const id = setInterval(() => {
+      loadStreaks({ silent: true });
+    }, 15000);
+
+    return () => clearInterval(id);
+  }, [loadStreaks]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -661,16 +677,7 @@ export default function PicksClient() {
       return;
     }
 
-    // Question itself must be open
     if (row.status !== "open") return;
-
-    // Global lock rule:
-    // Once your current streak pick has moved to 'pending' (in-play),
-    // you cannot change that pick or make new ones until it is settled.
-    if (isStreakInPlayLocked) {
-      // Silent no-op; we could add a toast later if you want.
-      return;
-    }
 
     // highlight this as the current streak pick
     setActiveQuestionId(row.id);
@@ -993,14 +1000,6 @@ export default function PicksClient() {
         {shareStatus && (
           <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
         )}
-
-        {isStreakInPlayLocked && activeStreakRow && (
-          <p className="mt-3 text-[11px] text-amber-300">
-            Your last streak pick (Q{activeStreakRow.quarter} –{" "}
-            {activeStreakRow.match}) is now in play. You&apos;ll be able to pick
-            again once this question is settled.
-          </p>
-        )}
       </div>
 
       {/* SPONSOR QUESTION INFO STRIP */}
@@ -1060,7 +1059,7 @@ export default function PicksClient() {
           const isNoActive = isActive && activeOutcome === "no";
           const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-          const isRowLocked = row.status !== "open";
+          const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
 
           const parsed =
@@ -1111,8 +1110,6 @@ export default function PicksClient() {
               : outcomeKind === "win"
               ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
               : "bg-red-500/15 border-red-400/60 text-red-300";
-
-          const isPickDisabled = isRowLocked || isStreakInPlayLocked;
 
           return (
             <div
@@ -1229,7 +1226,7 @@ export default function PicksClient() {
                         Streak Pick
                       </span>
                     )}
-                    {isRowLocked && (
+                    {isLocked && (
                       <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                         Locked
                       </span>
@@ -1248,7 +1245,7 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
-                      disabled={isPickDisabled}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
@@ -1257,7 +1254,7 @@ export default function PicksClient() {
                             : "bg-green-600 hover:bg-green-700"
                         }
                         ${
-                          isPickDisabled
+                          isLocked
                             ? "opacity-40 cursor-not-allowed hover:bg-green-600"
                             : ""
                         }
@@ -1269,7 +1266,7 @@ export default function PicksClient() {
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
-                      disabled={isPickDisabled}
+                      disabled={isLocked}
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
@@ -1278,7 +1275,7 @@ export default function PicksClient() {
                             : "bg-red-600 hover:bg-red-700"
                         }
                         ${
-                          isPickDisabled
+                          isLocked
                             ? "opacity-40 cursor-not-allowed hover:bg-red-600"
                             : ""
                         }
