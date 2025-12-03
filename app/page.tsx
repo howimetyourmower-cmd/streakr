@@ -58,7 +58,7 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  {/* ---------- SPLASH SCREEN ---------- */}
+ {/* ---------- SPLASH SCREEN ---------- */}
 {splashImages.length > 0 && showSplash && (
   <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
     <div className="relative w-full h-full max-w-[1200px] max-h-[675px]">
