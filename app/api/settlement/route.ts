@@ -31,13 +31,61 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
 }
 
 /**
- * Recalculate streaks for all players who picked this question.
- * outcome:
- *   - "yes" / "no"  => correct answer
- *   - "void"        => does not change streak
+ * Fetch all picks for a given question from both:
+ *  - `picks`      (current collection written by /api/user-picks, field `pick`)
+ *  - `userPicks`  (legacy collection, field `outcome`)
  *
- * We now use the `userPicks` collection, where documents look like:
- *   { userId, roundNumber, questionId, outcome: "yes" | "no" }
+ * Returns a normalised array of { userId, outcome: "yes" | "no" }.
+ */
+async function getPicksForQuestion(questionId: string): Promise<
+  { userId: string; outcome: "yes" | "no" }[]
+> {
+  const results: { userId: string; outcome: "yes" | "no" }[] = [];
+
+  // 1) Current collection: `picks` (written by /api/user-picks)
+  const [picksSnap, userPicksSnap] = await Promise.all([
+    db.collection("picks").where("questionId", "==", questionId).get(),
+    db.collection("userPicks").where("questionId", "==", questionId).get(),
+  ]);
+
+  // From `picks` collection (field: pick)
+  picksSnap.forEach((docSnap) => {
+    const data = docSnap.data() as any;
+    const userId = data.userId;
+    const pick = data.pick;
+
+    if (
+      typeof userId === "string" &&
+      (pick === "yes" || pick === "no")
+    ) {
+      results.push({ userId, outcome: pick });
+    }
+  });
+
+  // From legacy `userPicks` collection (field: outcome)
+  userPicksSnap.forEach((docSnap) => {
+    const data = docSnap.data() as any;
+    const userId = data.userId;
+    const out = data.outcome;
+
+    if (
+      typeof userId === "string" &&
+      (out === "yes" || out === "no")
+    ) {
+      results.push({ userId, outcome: out });
+    }
+  });
+
+  return results;
+}
+
+/**
+ * Apply streak changes for a settled question.
+ *
+ * outcome:
+ *  - "yes" / "no"  => correct answer; correct picks get +1 streak,
+ *                    incorrect picks reset to 0.
+ *  - "void"        => ignored for streak (no change).
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
@@ -47,29 +95,12 @@ async function updateStreaksForQuestion(
   // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
-  // IMPORTANT:
-  // Only filter by questionId so this works even if userPicks.roundNumber
-  // is missing or stored as a different type (string vs number).
-  const picksSnap = await db
-    .collection("userPicks")
-    .where("questionId", "==", questionId)
-    .get();
-
-  if (picksSnap.empty) return;
+  const picks = await getPicksForQuestion(questionId);
+  if (!picks.length) return;
 
   const updates: Promise<unknown>[] = [];
 
-  picksSnap.forEach((pickDoc) => {
-    const data = pickDoc.data() as {
-      userId?: string;
-      outcome?: "yes" | "no";
-    };
-
-    const userId = data.userId;
-    const pick = data.outcome; // user’s chosen side
-
-    if (!userId || (pick !== "yes" && pick !== "no")) return;
-
+  for (const { userId, outcome: pick } of picks) {
     const userRef = db.collection("users").doc(userId);
 
     const p = db.runTransaction(async (tx) => {
@@ -108,7 +139,7 @@ async function updateStreaksForQuestion(
     });
 
     updates.push(p);
-  });
+  }
 
   await Promise.all(updates);
 }
@@ -129,29 +160,14 @@ async function revertStreaksForQuestion(
 ) {
   if (previousOutcome === "void") return;
 
-  // Same as above: only filter by questionId for robustness.
-  const picksSnap = await db
-    .collection("userPicks")
-    .where("questionId", "==", questionId)
-    .get();
-
-  if (picksSnap.empty) return;
+  const picks = await getPicksForQuestion(questionId);
+  if (!picks.length) return;
 
   const updates: Promise<unknown>[] = [];
 
-  picksSnap.forEach((pickDoc) => {
-    const data = pickDoc.data() as {
-      userId?: string;
-      outcome?: "yes" | "no";
-    };
-
-    const userId = data.userId;
-    const pick = data.outcome;
-
-    if (!userId || (pick !== "yes" && pick !== "no")) return;
-
+  for (const { userId, outcome: pick } of picks) {
     // Only revert players who were previously CORRECT on this question.
-    if (pick !== previousOutcome) return;
+    if (pick !== previousOutcome) continue;
 
     const userRef = db.collection("users").doc(userId);
 
@@ -184,7 +200,7 @@ async function revertStreaksForQuestion(
     });
 
     updates.push(p);
-  });
+  }
 
   await Promise.all(updates);
 }
