@@ -898,7 +898,7 @@ export default function PicksClient() {
             </p>
             <p className="text-xs sm:text-sm text-white/80 max-w-md">
               Track your current run, your best ever streak, and how far you
-              are behind the season leader.
+              are behind the round leader.
             </p>
           </div>
 
