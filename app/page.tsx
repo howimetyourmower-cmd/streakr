@@ -40,7 +40,7 @@ type QuestionRow = {
   question: string;
 };
 
-// ---------- SPLASH IMAGES ----------
+// Splash images in /public
 const splashImages = [
   "/preload1.png",
   "/preload2.png",
@@ -58,22 +58,32 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
- {/* ---------- SPLASH SCREEN ---------- */}
-{splashImages.length > 0 && showSplash && (
-  <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
-    <div className="relative w-full h-full max-w-[1200px] max-h-[675px]">
-      <Image
-        src={splashImages[currentIndex]}
-        alt=""
-        fill
-        priority
-        className="object-contain"
-      />
-    </div>
-  </div>
-)}
+  // splash state
+  const [showSplash, setShowSplash] = useState(true);
+  const [currentSplashIndex, setCurrentSplashIndex] = useState(0);
 
-  // ---------- Date formatting ----------
+  // -------- Splash sequence ----------
+  useEffect(() => {
+    if (!showSplash) return;
+
+    const total = splashImages.length;
+    const intervalMs = 800; // how long each image shows (ms)
+
+    let index = 0;
+    const id = setInterval(() => {
+      index += 1;
+      if (index >= total) {
+        clearInterval(id);
+        setShowSplash(false); // hide overlay and reveal homepage
+      } else {
+        setCurrentSplashIndex(index);
+      }
+    }, intervalMs);
+
+    return () => clearInterval(id);
+  }, [showSplash]);
+
+  // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -95,7 +105,7 @@ export default function HomePage() {
     };
   };
 
-  // ---------- Load a preview of open questions ----------
+  // -------- Load a preview of open questions --------
   useEffect(() => {
     const load = async () => {
       try {
@@ -121,6 +131,7 @@ export default function HomePage() {
             }))
         );
 
+        // sort by start time then quarter
         flat.sort((a, b) => {
           const da = new Date(a.startTime).getTime();
           const db = new Date(b.startTime).getTime();
@@ -142,42 +153,42 @@ export default function HomePage() {
 
   const previewQuestions = questions.slice(0, 6);
 
+  // -------- Handle YES / NO clicks on homepage preview --------
   const handlePreviewPick = (questionId: string, outcome: "yes" | "no") => {
     if (!user) {
+      // Not logged in → show auth modal encouraging signup/login
       setShowAuthModal(true);
       return;
     }
 
+    // Logged in → send them to Picks page (they'll make the official pick there)
     router.push("/picks");
   };
 
   return (
-    <main className="min-h-screen bg-black text-white relative">
-
-      {/* ---------- SPLASH SCREEN ---------- */}
+    <main className="min-h-screen bg-black text-white relative overflow-hidden">
+      {/* SPLASH OVERLAY */}
       {showSplash && (
-        <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
           <div className="relative w-full h-full">
             <Image
-              src={splashImages[currentIndex]}
-              alt=""
+              src={splashImages[currentSplashIndex]}
+              alt="STREAKr splash"
               fill
               priority
-              className="object-cover w-full h-full"
+              className="object-contain"
             />
           </div>
         </div>
       )}
 
-      {/* ---------- MAIN PAGE CONTENT ---------- */}
+      {/* Page wrapper */}
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pb-16 pt-8 sm:pt-10">
-
-        {/* HERO */}
+        {/* HERO SECTION */}
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
-
-          {/* Left Text */}
+          {/* Left text block */}
           <div>
-
+            {/* Season / round meta */}
             <div className="mb-4">
               <span className="inline-flex items-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
                 AFL Season 2026
@@ -190,6 +201,7 @@ export default function HomePage() {
               </span>
             </div>
 
+            {/* Main heading */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
               Real{" "}
               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
@@ -203,6 +215,7 @@ export default function HomePage() {
               One wrong call and it&apos;s back to zero.
             </p>
 
+            {/* Prize pill */}
             <div className="inline-flex items-center gap-3 mb-6">
               <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
                 <span className="text-sm font-semibold text-orange-200">
@@ -214,6 +227,7 @@ export default function HomePage() {
               </span>
             </div>
 
+            {/* CTA buttons */}
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <Link
                 href="/picks"
@@ -235,7 +249,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* Right Hero Image */}
+          {/* Right hero image card */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
@@ -260,7 +274,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* PREVIEW QUESTIONS */}
+        {/* NEXT QUESTIONS PREVIEW */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -302,6 +316,7 @@ export default function HomePage() {
                   className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-sky-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
                 >
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    {/* Left: meta + question */}
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
                         <span className="font-semibold text-white/80">
@@ -321,6 +336,7 @@ export default function HomePage() {
                       </div>
                     </div>
 
+                    {/* Right: YES / NO buttons (match Picks page style, no glow) */}
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
                       <button
                         type="button"
@@ -367,8 +383,8 @@ export default function HomePage() {
               </p>
               <p className="text-sm text-white/80">
                 Every correct answer adds{" "}
-                <span className="font-semibold">+1</span> to your streak. One wrong
-                pick and your streak resets to{" "}
+                <span className="font-semibold">+1</span> to your streak. One
+                wrong pick and your streak resets to{" "}
                 <span className="font-semibold">0</span>.
               </p>
             </div>
@@ -385,13 +401,15 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* FOOTER */}
+        {/* SOCIAL + FOOTER */}
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
+          {/* Social bar */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <p className="text-xs sm:text-sm text-white/60 uppercase tracking-wide">
               Follow STREAKr
             </p>
             <div className="flex flex-wrap gap-3">
+              {/* Instagram */}
               <a
                 href="https://instagram.com/streakr"
                 target="_blank"
@@ -400,6 +418,8 @@ export default function HomePage() {
               >
                 Instagram
               </a>
+
+              {/* TikTok */}
               <a
                 href="https://www.tiktok.com/@streakr"
                 target="_blank"
@@ -408,6 +428,8 @@ export default function HomePage() {
               >
                 TikTok
               </a>
+
+              {/* Facebook */}
               <a
                 href="https://facebook.com/streakr"
                 target="_blank"
@@ -416,6 +438,8 @@ export default function HomePage() {
               >
                 Facebook
               </a>
+
+              {/* YouTube */}
               <a
                 href="https://www.youtube.com/@streakr"
                 target="_blank"
@@ -427,6 +451,7 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Legal line / FAQ link */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
               STREAKr is a free game of skill. No gambling. 18+ only. Prizes
@@ -442,7 +467,7 @@ export default function HomePage() {
         </footer>
       </div>
 
-      {/* AUTH MODAL */}
+      {/* AUTH REQUIRED MODAL (same style as PicksClient) */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
