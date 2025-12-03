@@ -173,7 +173,7 @@ export default function HomePage() {
             isPreloaderFading ? "opacity-0 pointer-events-none" : "opacity-100"
           }`}
         >
-          <div className="relative w-full h-full overflow-hidden">
+          <div className="relative w-full h-full overflow-hidden bg-black">
             <video
               src="/preloadervideo.mp4"
               autoPlay
@@ -181,9 +181,8 @@ export default function HomePage() {
               playsInline
               className="
                 absolute inset-0 w-full h-full
-                object-cover      /* MOBILE: fill screen */
-                md:object-contain /* DESKTOP: show full video */
-                md:bg-black       /* letterbox background */
+                object-contain   /* show entire video on all devices */
+                bg-black
               "
             />
 
