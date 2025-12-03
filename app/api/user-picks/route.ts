@@ -1,4 +1,4 @@
-// /src/app/api/user-picks/route.ts
+// /streakr/app/api/user-picks/route.ts
 export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
