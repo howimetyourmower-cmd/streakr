@@ -5,7 +5,6 @@ import {
   useState,
   useMemo,
   useRef,
-  useCallback,
   ChangeEvent,
 } from "react";
 import Link from "next/link";
@@ -17,8 +16,6 @@ import {
   onSnapshot,
   query,
   where,
-  getDoc,
-  getDocs,
   doc,
   orderBy,
   limit,
@@ -431,7 +428,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // silent auto refresh every 15s
+  // silent auto refresh every 15s for questions/picks
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -561,80 +558,78 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
-  // -------- Load streak progress (user vs leader, current/longest) --------
-  const loadStreaks = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      try {
-        if (!opts?.silent) {
-          setStreakLoading(true);
-          setStreakError("");
-        }
+  // -------- Realtime streak progress (user vs leader) from Firestore --------
 
-        // Leader longest streak
-        const usersRef = collection(db, "users");
-        const topQ = query(
-          usersRef,
-          orderBy("longestStreak", "desc"),
-          limit(1)
-        );
-        const topSnap = await getDocs(topQ);
+  // leader longestStreak – live
+  useEffect(() => {
+    setStreakLoading(true);
+    setStreakError("");
 
+    const usersRef = collection(db, "users");
+    const topQ = query(usersRef, orderBy("longestStreak", "desc"), limit(1));
+
+    const unsub = onSnapshot(
+      topQ,
+      (snapshot) => {
         let leaderVal: number | null = null;
-        topSnap.forEach((docSnap) => {
+        snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
             typeof data.longestStreak === "number" ? data.longestStreak : 0;
           leaderVal = val;
         });
         setLeaderLongestStreak(leaderVal);
-
-        // Current user
-        if (user) {
-          const userRef = doc(db, "users", user.uid);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data() as any;
-            const current =
-              typeof data.currentStreak === "number" ? data.currentStreak : 0;
-            const longest =
-              typeof data.longestStreak === "number" ? data.longestStreak : 0;
-            setUserCurrentStreak(current);
-            setUserLongestStreak(longest);
-          } else {
-            setUserCurrentStreak(0);
-            setUserLongestStreak(0);
-          }
-        } else {
-          setUserCurrentStreak(null);
-          setUserLongestStreak(null);
-        }
-      } catch (err) {
-        console.error("Failed to load streak progress", err);
-        if (!opts?.silent) {
-          setStreakError("Could not load streak tracker.");
-        }
-      } finally {
-        if (!opts?.silent) {
-          setStreakLoading(false);
-        }
+        setStreakLoading(false);
+      },
+      (err) => {
+        console.error("Leader streak listener error", err);
+        setStreakError("Could not load streak tracker.");
+        setStreakLoading(false);
       }
-    },
-    [user]
-  );
+    );
 
-  // initial streak load
+    return () => unsub();
+  }, []);
+
+  // current user streak – live
   useEffect(() => {
-    loadStreaks();
-  }, [loadStreaks]);
+    if (!user) {
+      setUserCurrentStreak(null);
+      setUserLongestStreak(null);
+      return;
+    }
 
-  // silent auto-refresh of streak progress every 15s
-  useEffect(() => {
-    const id = setInterval(() => {
-      loadStreaks({ silent: true });
-    }, 15000);
+    setStreakLoading(true);
+    setStreakError("");
 
-    return () => clearInterval(id);
-  }, [loadStreaks]);
+    const userRef = doc(db, "users", user.uid);
+
+    const unsub = onSnapshot(
+      userRef,
+      (userSnap) => {
+        if (userSnap.exists()) {
+          const data = userSnap.data() as any;
+          const current =
+            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          const longest =
+            typeof data.longestStreak === "number" ? data.longestStreak : 0;
+          setUserCurrentStreak(current);
+          setUserLongestStreak(longest);
+        } else {
+          setUserCurrentStreak(0);
+          setUserLongestStreak(0);
+        }
+        setStreakLoading(false);
+      },
+      (err) => {
+        console.error("User streak listener error", err);
+        setStreakError("Could not load streak tracker.");
+        setStreakLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [user]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -1222,7 +1217,7 @@ export default function PicksClient() {
                       Comments ({row.commentCount ?? 0})
                     </button>
                     {isActive && (
-                      <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+                      <span className="inline-flex items-center rounded-full bg-sky-500/90 text:black px-2 py-0.5 text-[10px] font-semibold">
                         Streak Pick
                       </span>
                     )}
