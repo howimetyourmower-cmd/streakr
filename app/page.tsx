@@ -58,26 +58,20 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // ---------- SPLASH SCREEN STATE ----------
-  const [showSplash, setShowSplash] = useState(true);
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  useEffect(() => {
-    if (!showSplash) return;
-
-    const interval = setInterval(() => {
-      setCurrentIndex((prev) => {
-        if (prev >= splashImages.length - 1) {
-          clearInterval(interval);
-          setTimeout(() => setShowSplash(false), 200);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 600);
-
-    return () => clearInterval(interval);
-  }, [showSplash]);
+  {/* ---------- SPLASH SCREEN ---------- */}
+{splashImages.length > 0 && showSplash && (
+  <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
+    <div className="relative w-full h-full max-w-[1200px] max-h-[675px]">
+      <Image
+        src={splashImages[currentIndex]}
+        alt=""
+        fill
+        priority
+        className="object-contain"
+      />
+    </div>
+  </div>
+)}
 
   // ---------- Date formatting ----------
   const formatStartDate = (iso: string) => {
