@@ -50,14 +50,18 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
- // ------- SPLASH / PRELOAD SEQUENCE -------
-const splashImages = [
-  "/preload1.png",
-  "/preload2.png",
-  "/preload3.png",
-  "/preload4.png",
-];
-
+{/* FULL-SCREEN SPLASH IMAGE */}
+<div className="absolute inset-0">
+  {splashImages[currentIndex] && (
+    <Image
+      src={splashImages[currentIndex]}
+      alt=""
+      fill
+      priority
+      className="object-cover w-full h-full"
+    />
+  )}
+</div>
 
   const [showSplash, setShowSplash] = useState(true);
   const [splashIndex, setSplashIndex] = useState(0);
