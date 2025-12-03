@@ -47,9 +47,11 @@ async function updateStreaksForQuestion(
   // If void, we don't change anyone's streak – question is just ignored.
   if (outcome === "void") return;
 
+  // IMPORTANT:
+  // Only filter by questionId so this works even if userPicks.roundNumber
+  // is missing or stored as a different type (string vs number).
   const picksSnap = await db
     .collection("userPicks")
-    .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
 
@@ -127,9 +129,9 @@ async function revertStreaksForQuestion(
 ) {
   if (previousOutcome === "void") return;
 
+  // Same as above: only filter by questionId for robustness.
   const picksSnap = await db
     .collection("userPicks")
-    .where("roundNumber", "==", roundNumber)
     .where("questionId", "==", questionId)
     .get();
 
