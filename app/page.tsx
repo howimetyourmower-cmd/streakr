@@ -50,6 +50,51 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  // ------- SPLASH / PRELOAD SEQUENCE -------
+  // Replace these paths with your 4 actual images
+  const splashImages = [
+    "/splash-1.jpg",
+    "/splash-2.jpg",
+    "/splash-3.jpg",
+    "/splash-4.jpg",
+  ];
+
+  const [showSplash, setShowSplash] = useState(true);
+  const [splashIndex, setSplashIndex] = useState(0);
+
+  useEffect(() => {
+    // If you ever want to disable the splash, just early-return here
+    if (!splashImages.length) {
+      setShowSplash(false);
+      return;
+    }
+
+    const IMAGE_DURATION = 800; // ms per image
+    let index = 0;
+
+    const interval = setInterval(() => {
+      index += 1;
+      if (index >= splashImages.length) {
+        clearInterval(interval);
+        setShowSplash(false);
+      } else {
+        setSplashIndex(index);
+      }
+    }, IMAGE_DURATION);
+
+    // Hard stop in case anything goes weird
+    const timeout = setTimeout(() => {
+      setShowSplash(false);
+      clearInterval(interval);
+    }, IMAGE_DURATION * splashImages.length + 200);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
@@ -132,6 +177,38 @@ export default function HomePage() {
     router.push("/picks");
   };
 
+  // ---------- SPLASH UI (full-screen) ----------
+  if (showSplash) {
+    return (
+      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+        <div className="relative w-full max-w-4xl aspect-[16/9] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.95)] bg-black">
+          <Image
+            src={splashImages[splashIndex]}
+            alt="STREAKr splash"
+            fill
+            priority
+            className="object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+          <div className="absolute bottom-6 left-6">
+            <p className="text-xs tracking-[0.3em] uppercase text-white/60 mb-1">
+              Welcome to
+            </p>
+            <h1 className="text-4xl sm:text-5xl font-extrabold">
+              <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.9)]">
+                STREAKr
+              </span>
+            </h1>
+            <p className="mt-2 text-sm text-white/70">
+              Make your pick. Build your streak. Don&apos;t get caught.
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  // ---------- MAIN HOMEPAGE ----------
   return (
     <main className="min-h-screen bg-black text-white">
       {/* Page wrapper */}
@@ -140,8 +217,6 @@ export default function HomePage() {
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
           {/* Left text block */}
           <div>
-            
-
             {/* Season / round meta */}
             <div className="mb-4">
               <span className="inline-flex items-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
@@ -165,8 +240,8 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Make your Pick, build your longest streak, and
-              climb the ladder. One wrong call and it&apos;s back to zero.
+              Make your Pick, build your longest streak, and climb the ladder.
+              One wrong call and it&apos;s back to zero.
             </p>
 
             {/* Prize pill */}
@@ -216,7 +291,7 @@ export default function HomePage() {
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
-                                   <p className="text-[11px] text-white/60">
+                  <p className="text-[11px] text-white/60">
                     Live streaks in every game.
                   </p>
                 </div>
@@ -336,8 +411,9 @@ export default function HomePage() {
                 2 · Build the streak
               </p>
               <p className="text-sm text-white/80">
-                Every correct answer adds <span className="font-semibold">+1</span>{" "}
-                to your streak. One wrong pick and your streak resets to{" "}
+                Every correct answer adds{" "}
+                <span className="font-semibold">+1</span> to your streak. One
+                wrong pick and your streak resets to{" "}
                 <span className="font-semibold">0</span>.
               </p>
             </div>
