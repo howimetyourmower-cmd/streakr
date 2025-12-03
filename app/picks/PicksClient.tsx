@@ -221,8 +221,11 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
-// localStorage key for persistence
+// localStorage keys
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
+const PICK_HISTORY_KEY = "streakr_pick_history_v1";
+
+type PickHistory = Record<string, "yes" | "no">;
 
 export default function PicksClient() {
   const { user } = useAuth();
@@ -239,6 +242,13 @@ export default function PicksClient() {
   // Single active streak pick (for highlight only)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
   const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
+
+  // local history of all picks (per device)
+  const [pickHistory, setPickHistory] = useState<PickHistory>({});
+  const pickHistoryRef = useRef<PickHistory>({});
+  useEffect(() => {
+    pickHistoryRef.current = pickHistory;
+  }, [pickHistory]);
 
   // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
@@ -273,7 +283,7 @@ export default function PicksClient() {
     Record<string, { yes?: number; no?: number }>
   >({});
 
-  // keep a ref of latest rows so fetchPicks can preserve userPick across refresh
+  // keep a ref of latest rows so fetchPicks can preserve stuff across refresh
   const rowsRef = useRef<QuestionRow[]>([]);
   useEffect(() => {
     rowsRef.current = rows;
@@ -301,13 +311,17 @@ export default function PicksClient() {
     };
   };
 
-  // ---- flatten API -> QuestionRow, preserving existing userPick if API omits it ----
-  const flattenApi = (data: PicksApiResponse, prevRows: QuestionRow[]): QuestionRow[] =>
+  // ---- flatten API -> QuestionRow, preserving picks from history/prevRows ----
+  const flattenApi = (
+    data: PicksApiResponse,
+    prevRows: QuestionRow[],
+    history: PickHistory
+  ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
+        const historyPick = history[q.id];
 
-        // prefer `correctOutcome`, fall back to `outcome`
         const rawOutcome =
           q.correctOutcome ??
           (q.outcome === "yes" || q.outcome === "no" || q.outcome === "void"
@@ -317,7 +331,7 @@ export default function PicksClient() {
         const correctOutcome: QuestionRow["correctOutcome"] =
           q.status === "final" || q.status === "void" ? rawOutcome ?? null : null;
 
-        // keep last non-zero % so they don’t reset to 0 on refresh
+        // remember non-zero % so they don’t reset to 0 on refresh
         if (typeof q.yesPercent === "number" || typeof q.noPercent === "number") {
           const prevPerc = lastPercentsRef.current[q.id] || {};
           lastPercentsRef.current[q.id] = {
@@ -338,8 +352,8 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          // if API doesn’t send userPick, keep whatever we already had locally
-          userPick: q.userPick ?? prev?.userPick,
+          // priority: API -> local history -> previous rows
+          userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
             typeof q.yesPercent === "number" ? q.yesPercent : remembered.yes,
           noPercent:
@@ -369,7 +383,11 @@ export default function PicksClient() {
         setRoundNumber(data.roundNumber);
       }
 
-      const flat = flattenApi(data, rowsRef.current);
+      const flat = flattenApi(
+        data,
+        rowsRef.current,
+        pickHistoryRef.current
+      );
 
       setRows(flat);
       setFilteredRows(
@@ -385,6 +403,22 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Load pick history from localStorage --------
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(PICK_HISTORY_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setPickHistory(parsed);
+      }
+    } catch (err) {
+      console.error("Failed to load pick history", err);
+    }
+  }, []);
+
+  // initial load
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -451,7 +485,7 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // -------- Local persistence from localStorage --------
+  // -------- Local persistence of *current* streak pick --------
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!rows.length) return;
@@ -600,7 +634,6 @@ export default function PicksClient() {
       return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
     }
 
-    // if everything else fails, default to 0/0 (or active streak 100/0)
     if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
       return { yes: 0, no: 0 };
     }
@@ -622,7 +655,7 @@ export default function PicksClient() {
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
-    // IMPORTANT: update local state so userPick is set on this row
+    // update local state so this question always has a userPick
     setRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
@@ -630,6 +663,20 @@ export default function PicksClient() {
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
 
+    // update local pick history (for all future loads/refresh)
+    setPickHistory((prev) => {
+      const next: PickHistory = { ...prev, [row.id]: pick };
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
+        }
+      } catch (err) {
+        console.error("Failed to persist pick history", err);
+      }
+      return next;
+    });
+
+    // persist "current" pick separately (for streak rules)
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
@@ -1007,14 +1054,16 @@ export default function PicksClient() {
           type OutcomeKind = "win" | "loss" | "void" | null;
           let outcomeKind: OutcomeKind = null;
 
-          if (row.status === "void" || row.correctOutcome === "void") {
-            outcomeKind = row.userPick ? "void" : null;
-          } else if (row.status === "final" && row.userPick) {
-            if (row.correctOutcome === "yes" || row.correctOutcome === "no") {
-              outcomeKind =
-                row.userPick === row.correctOutcome ? "win" : "loss";
-            } else {
+          if (row.userPick) {
+            if (row.status === "void" || row.correctOutcome === "void") {
               outcomeKind = "void";
+            } else if (row.status === "final") {
+              if (row.correctOutcome === "yes" || row.correctOutcome === "no") {
+                outcomeKind =
+                  row.userPick === row.correctOutcome ? "win" : "loss";
+              } else {
+                outcomeKind = "void";
+              }
             }
           }
 
@@ -1208,7 +1257,7 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill – for ALL final/void questions with a pick */}
+                  {/* Outcome pill – for ALL final/void questions you picked */}
                   {outcomeLabel && (
                     <div className="mt-2">
                       <span
