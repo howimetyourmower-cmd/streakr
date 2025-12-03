@@ -40,6 +40,14 @@ type QuestionRow = {
   question: string;
 };
 
+// ---------- SPLASH IMAGES ----------
+const splashImages = [
+  "/preload1.png",
+  "/preload2.png",
+  "/preload3.png",
+  "/preload4.png",
+];
+
 export default function HomePage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -50,56 +58,28 @@ export default function HomePage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-{/* FULL-SCREEN SPLASH IMAGE */}
-<div className="absolute inset-0">
-  {splashImages[currentIndex] && (
-    <Image
-      src={splashImages[currentIndex]}
-      alt=""
-      fill
-      priority
-      className="object-cover w-full h-full"
-    />
-  )}
-</div>
-
+  // ---------- SPLASH SCREEN STATE ----------
   const [showSplash, setShowSplash] = useState(true);
-  const [splashIndex, setSplashIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
 
   useEffect(() => {
-    // If you ever want to disable the splash, just early-return here
-    if (!splashImages.length) {
-      setShowSplash(false);
-      return;
-    }
-
-    const IMAGE_DURATION = 800; // ms per image
-    let index = 0;
+    if (!showSplash) return;
 
     const interval = setInterval(() => {
-      index += 1;
-      if (index >= splashImages.length) {
-        clearInterval(interval);
-        setShowSplash(false);
-      } else {
-        setSplashIndex(index);
-      }
-    }, IMAGE_DURATION);
+      setCurrentIndex((prev) => {
+        if (prev >= splashImages.length - 1) {
+          clearInterval(interval);
+          setTimeout(() => setShowSplash(false), 200);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 600);
 
-    // Hard stop in case anything goes weird
-    const timeout = setTimeout(() => {
-      setShowSplash(false);
-      clearInterval(interval);
-    }, IMAGE_DURATION * splashImages.length + 200);
+    return () => clearInterval(interval);
+  }, [showSplash]);
 
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // -------- Date formatting ----------
+  // ---------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -121,7 +101,7 @@ export default function HomePage() {
     };
   };
 
-  // -------- Load a preview of open questions --------
+  // ---------- Load a preview of open questions ----------
   useEffect(() => {
     const load = async () => {
       try {
@@ -147,7 +127,6 @@ export default function HomePage() {
             }))
         );
 
-        // sort by start time then quarter
         flat.sort((a, b) => {
           const da = new Date(a.startTime).getTime();
           const db = new Date(b.startTime).getTime();
@@ -169,59 +148,42 @@ export default function HomePage() {
 
   const previewQuestions = questions.slice(0, 6);
 
-  // -------- Handle YES / NO clicks on homepage preview --------
   const handlePreviewPick = (questionId: string, outcome: "yes" | "no") => {
     if (!user) {
-      // Not logged in → show auth modal encouraging signup/login
       setShowAuthModal(true);
       return;
     }
 
-    // Logged in → send them to Picks page (they'll make the official pick there)
     router.push("/picks");
   };
 
-  // ---------- SPLASH UI (full-screen) ----------
-  if (showSplash) {
-    return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="relative w-full max-w-4xl aspect-[16/9] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.95)] bg-black">
-          <Image
-            src={splashImages[splashIndex]}
-            alt="STREAKr splash"
-            fill
-            priority
-            className="object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-          <div className="absolute bottom-6 left-6">
-            <p className="text-xs tracking-[0.3em] uppercase text-white/60 mb-1">
-              Welcome to
-            </p>
-            <h1 className="text-4xl sm:text-5xl font-extrabold">
-              <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.9)]">
-                STREAKr
-              </span>
-            </h1>
-            <p className="mt-2 text-sm text-white/70">
-              Make your pick. Build your streak. Don&apos;t get caught.
-            </p>
+  return (
+    <main className="min-h-screen bg-black text-white relative">
+
+      {/* ---------- SPLASH SCREEN ---------- */}
+      {showSplash && (
+        <div className="fixed inset-0 z-[9999] bg-black flex items-center justify-center">
+          <div className="relative w-full h-full">
+            <Image
+              src={splashImages[currentIndex]}
+              alt=""
+              fill
+              priority
+              className="object-cover w-full h-full"
+            />
           </div>
         </div>
-      </main>
-    );
-  }
+      )}
 
-  // ---------- MAIN HOMEPAGE ----------
-  return (
-    <main className="min-h-screen bg-black text-white">
-      {/* Page wrapper */}
+      {/* ---------- MAIN PAGE CONTENT ---------- */}
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pb-16 pt-8 sm:pt-10">
-        {/* HERO SECTION */}
+
+        {/* HERO */}
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
-          {/* Left text block */}
+
+          {/* Left Text */}
           <div>
-            {/* Season / round meta */}
+
             <div className="mb-4">
               <span className="inline-flex items-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
                 AFL Season 2026
@@ -234,7 +196,6 @@ export default function HomePage() {
               </span>
             </div>
 
-            {/* Main heading */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
               Real{" "}
               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
@@ -248,7 +209,6 @@ export default function HomePage() {
               One wrong call and it&apos;s back to zero.
             </p>
 
-            {/* Prize pill */}
             <div className="inline-flex items-center gap-3 mb-6">
               <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
                 <span className="text-sm font-semibold text-orange-200">
@@ -260,7 +220,6 @@ export default function HomePage() {
               </span>
             </div>
 
-            {/* CTA buttons */}
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <Link
                 href="/picks"
@@ -282,7 +241,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          {/* Right hero image card */}
+          {/* Right Hero Image */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
@@ -307,7 +266,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* NEXT QUESTIONS PREVIEW */}
+        {/* PREVIEW QUESTIONS */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -349,7 +308,6 @@ export default function HomePage() {
                   className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-sky-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
                 >
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                    {/* Left: meta + question */}
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
                         <span className="font-semibold text-white/80">
@@ -369,7 +327,6 @@ export default function HomePage() {
                       </div>
                     </div>
 
-                    {/* Right: YES / NO buttons (match Picks page style, no glow) */}
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
                       <button
                         type="button"
@@ -416,8 +373,8 @@ export default function HomePage() {
               </p>
               <p className="text-sm text-white/80">
                 Every correct answer adds{" "}
-                <span className="font-semibold">+1</span> to your streak. One
-                wrong pick and your streak resets to{" "}
+                <span className="font-semibold">+1</span> to your streak. One wrong
+                pick and your streak resets to{" "}
                 <span className="font-semibold">0</span>.
               </p>
             </div>
@@ -434,15 +391,13 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* SOCIAL + FOOTER */}
+        {/* FOOTER */}
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
-          {/* Social bar */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <p className="text-xs sm:text-sm text-white/60 uppercase tracking-wide">
               Follow STREAKr
             </p>
             <div className="flex flex-wrap gap-3">
-              {/* Instagram */}
               <a
                 href="https://instagram.com/streakr"
                 target="_blank"
@@ -451,8 +406,6 @@ export default function HomePage() {
               >
                 Instagram
               </a>
-
-              {/* TikTok */}
               <a
                 href="https://www.tiktok.com/@streakr"
                 target="_blank"
@@ -461,8 +414,6 @@ export default function HomePage() {
               >
                 TikTok
               </a>
-
-              {/* Facebook */}
               <a
                 href="https://facebook.com/streakr"
                 target="_blank"
@@ -471,8 +422,6 @@ export default function HomePage() {
               >
                 Facebook
               </a>
-
-              {/* YouTube */}
               <a
                 href="https://www.youtube.com/@streakr"
                 target="_blank"
@@ -484,7 +433,6 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Legal line / FAQ link */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
               STREAKr is a free game of skill. No gambling. 18+ only. Prizes
@@ -500,7 +448,7 @@ export default function HomePage() {
         </footer>
       </div>
 
-      {/* AUTH REQUIRED MODAL (same style as PicksClient) */}
+      {/* AUTH MODAL */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
