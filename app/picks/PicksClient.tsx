@@ -258,7 +258,7 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // Single active streak pick (for highlight only)
+  // Single active streak pick (for highlight ONLY)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
     null
   );
@@ -571,7 +571,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // -------- Optional: also try to load from /api/user-picks --------
+  // -------- Also load from /api/user-picks just to highlight streak pick --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -592,17 +592,18 @@ export default function PicksClient() {
         });
         if (!res.ok) return;
 
-        const data = await res.json();
-        const questionId: string | undefined = data?.questionId;
-        const outcome: "yes" | "no" | undefined = data?.outcome;
+        const json = await res.json();
+        const questionId: string | undefined = json?.questionId;
+        const outcome: "yes" | "no" | undefined = json?.outcome;
 
         if (
           questionId &&
-          (outcome === "yes" || outcome === "no") &&
           rows.some((r) => r.id === questionId)
         ) {
           setActiveQuestionId(questionId);
-          setActiveOutcome(outcome);
+          if (outcome === "yes" || outcome === "no") {
+            setActiveOutcome(outcome);
+          }
         }
       } catch (err) {
         console.error("Failed to load user pick from API", err);
@@ -1208,18 +1209,17 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            // -------- Outcome pill (local calculation) --------
+            // -------- Outcome pill logic (device-independent) --------
             type OutcomeKind = "win" | "loss" | "void" | null;
             let outcomeKind: OutcomeKind = null;
 
-            if (row.userPick) {
-              const outcome = normaliseOutcome(row.correctOutcome);
-              if (row.status === "void" || outcome === "void") {
-                outcomeKind = "void";
-              } else if (row.status === "final" && outcome) {
-                outcomeKind =
-                  row.userPick === outcome ? "win" : "loss";
-              }
+            const outcome = normaliseOutcome(row.correctOutcome);
+
+            if (row.status === "void" || outcome === "void") {
+              outcomeKind = "void";
+            } else if (row.status === "final" && outcome && row.userPick) {
+              outcomeKind =
+                row.userPick === outcome ? "win" : "loss";
             }
 
             const outcomeLabel =
@@ -1412,7 +1412,7 @@ export default function PicksClient() {
                       </button>
                     </div>
 
-                    {/* Outcome pill – for ALL final/void questions you picked */}
+                    {/* Outcome pill – now purely API-driven, same on desktop + mobile */}
                     {outcomeLabel && (
                       <div className="mt-2">
                         <span
