@@ -282,6 +282,13 @@ export default function PicksClient() {
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
+  // 🎉 milestone + confetti
+  const [milestone, setMilestone] = useState<number | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [confettiPieces, setConfettiPieces] = useState<
+    { id: number; left: string; delay: number; duration: number }[]
+  >([]);
+
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
     Record<string, { yes?: number; no?: number }>
@@ -631,6 +638,34 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
+  // 🔥 Detect milestones: 10, 15, 20 win streak
+  useEffect(() => {
+    if (!userCurrentStreak) return;
+    if ([10, 15, 20].includes(userCurrentStreak)) {
+      setMilestone(userCurrentStreak);
+    }
+  }, [userCurrentStreak]);
+
+  // 🎊 When milestone set, generate confetti + auto-hide after a few seconds
+  useEffect(() => {
+    if (!milestone) return;
+
+    const pieces = Array.from({ length: 120 }).map((_, i) => ({
+      id: i,
+      left: `${Math.random() * 100}%`,
+      delay: Math.random() * 0.8,
+      duration: 2.5 + Math.random() * 1.5,
+    }));
+    setConfettiPieces(pieces);
+    setShowConfetti(true);
+
+    const timeout = setTimeout(() => {
+      setShowConfetti(false);
+    }, 3500);
+
+    return () => clearTimeout(timeout);
+  }, [milestone]);
+
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
@@ -876,7 +911,46 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white relative">
+      {/* 🎊 CONFETTI OVERLAY */}
+      {showConfetti && (
+        <>
+          <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
+            {confettiPieces.map((p) => {
+              const colors = ["#FF7A00", "#38BDF8", "#22C55E", "#F97316", "#E11D48"];
+              const color = colors[p.id % colors.length];
+              return (
+                <div
+                  key={p.id}
+                  className="absolute top-[-10%] h-2 w-1.5 rounded-sm"
+                  style={{
+                    left: p.left,
+                    backgroundColor: color,
+                    animation: `streakr-confetti-fall ${p.duration}s linear ${p.delay}s forwards`,
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          <style jsx global>{`
+            @keyframes streakr-confetti-fall {
+              0% {
+                transform: translate3d(0, -10vh, 0) rotateZ(0deg);
+                opacity: 1;
+              }
+              70% {
+                opacity: 1;
+              }
+              100% {
+                transform: translate3d(0, 110vh, 0) rotateZ(720deg);
+                opacity: 0;
+              }
+            }
+          `}</style>
+        </>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
@@ -1301,6 +1375,56 @@ export default function PicksClient() {
           );
         })}
       </div>
+
+      {/* 🔥 MILESTONE MODAL */}
+      {milestone && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+          <div className="bg-[#070B14] border border-orange-400/60 rounded-xl p-8 text-center w-full max-w-sm shadow-[0_0_45px_rgba(255,122,0,0.4)]">
+            <h2 className="text-3xl font-bold text-orange-400 mb-3 drop-shadow-[0_0_12px_rgba(255,122,0,0.9)]">
+              {milestone} WIN STREAK!
+            </h2>
+
+            <p className="text-white/85 mb-6 text-sm">
+              You're on fire 🔥{" "}
+              {milestone === 10 &&
+                "Top players rarely reach 10 — you're already elite."}
+              {milestone === 15 &&
+                "You’re entering weapon territory. Only killers hit 15."}
+              {milestone === 20 &&
+                "You’re legendary. This streak deserves to be seen."}
+            </p>
+
+            <button
+              onClick={async () => {
+                try {
+                  const shareData = {
+                    title: "STREAKr streak",
+                    text: `I'm on a ${milestone} win streak in STREAKr! How long can you last?`,
+                    url: "https://streakr.com.au",
+                  };
+                  if (typeof navigator !== "undefined" && (navigator as any).share) {
+                    await (navigator as any).share(shareData);
+                  }
+                } catch {
+                  // ignore
+                }
+              }}
+              className="w-full rounded-full bg-orange-500 hover:bg-orange-400 
+              text-black font-bold py-3 text-sm shadow-[0_0_18px_#FF7A00] mb-3"
+            >
+              Share my streak 🚀
+            </button>
+
+            <button
+              onClick={() => setMilestone(null)}
+              className="w-full rounded-full border border-white/30 text-white 
+              font-semibold py-3 text-sm hover:border-orange-300 hover:text-orange-300"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* AUTH REQUIRED MODAL */}
       {showAuthModal && (
