@@ -1017,7 +1017,7 @@ export default function PicksClient() {
           </div>
 
           <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between">
               <div className="text-right">
                 <p className="text-[11px] text-white/60">Current</p>
                 <p className="text-lg sm:text-xl font-bold text-orange-400">
