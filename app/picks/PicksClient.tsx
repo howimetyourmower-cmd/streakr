@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import {
@@ -282,12 +283,11 @@ export default function PicksClient() {
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
-  // 🎉 milestone + confetti
-  const [milestone, setMilestone] = useState<number | null>(null);
+  // 🎉 milestone + confetti state
   const [showConfetti, setShowConfetti] = useState(false);
-  const [confettiPieces, setConfettiPieces] = useState<
-    { id: number; left: string; delay: number; duration: number }[]
-  >([]);
+  const [showMilestoneModal, setShowMilestoneModal] = useState(false);
+  const [milestoneValue, setMilestoneValue] = useState<number | null>(null);
+  const prevLongestStreakRef = useRef<number | null>(null);
 
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
@@ -435,7 +435,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // silent auto refresh every 10s for questions/picks
+  // silent auto refresh every 15s for questions/picks
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -598,11 +598,12 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // current user streak – live
+  // current user streak – live + milestone detection
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
+      prevLongestStreakRef.current = null;
       return;
     }
 
@@ -620,11 +621,35 @@ export default function PicksClient() {
             typeof data.currentStreak === "number" ? data.currentStreak : 0;
           const longest =
             typeof data.longestStreak === "number" ? data.longestStreak : 0;
+
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
+
+          const prevLongest = prevLongestStreakRef.current;
+          prevLongestStreakRef.current = longest;
+
+          // Only fire milestones once we have a previous value
+          if (prevLongest !== null && longest > prevLongest) {
+            const milestones = [5, 10, 15, 20];
+            const unlocked = milestones.find(
+              (m) => prevLongest < m && longest >= m
+            );
+
+            if (unlocked) {
+              setMilestoneValue(unlocked);
+              setShowConfetti(true);
+              setShowMilestoneModal(true);
+
+              // stop confetti after a few seconds
+              setTimeout(() => {
+                setShowConfetti(false);
+              }, 6000);
+            }
+          }
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
+          prevLongestStreakRef.current = 0;
         }
         setStreakLoading(false);
       },
@@ -637,34 +662,6 @@ export default function PicksClient() {
 
     return () => unsub();
   }, [user]);
-
-  // 🔥 Detect milestones: 5, 10, 15, 20 win streak
-  useEffect(() => {
-    if (!userCurrentStreak) return;
-    if ([10, 15, 20].includes(userCurrentStreak)) {
-      setMilestone(userCurrentStreak);
-    }
-  }, [userCurrentStreak]);
-
-  // 🎊 When milestone set, generate confetti + auto-hide after a few seconds
-  useEffect(() => {
-    if (!milestone) return;
-
-    const pieces = Array.from({ length: 120 }).map((_, i) => ({
-      id: i,
-      left: `${Math.random() * 100}%`,
-      delay: Math.random() * 0.8,
-      duration: 2.5 + Math.random() * 1.5,
-    }));
-    setConfettiPieces(pieces);
-    setShowConfetti(true);
-
-    const timeout = setTimeout(() => {
-      setShowConfetti(false);
-    }, 3500);
-
-    return () => clearTimeout(timeout);
-  }, [milestone]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -911,50 +908,50 @@ export default function PicksClient() {
 
   // -------- Render --------
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white relative">
-      {/* 🎊 CONFETTI OVERLAY */}
+    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text-white min-h-screen bg-black text-white">
+      {/* 🎉 CONFETTI OVERLAY */}
       {showConfetti && (
-        <>
-          <div className="pointer-events-none fixed inset-0 z-40 overflow-hidden">
-            {confettiPieces.map((p) => {
-              const colors = ["#FF7A00", "#38BDF8", "#22C55E", "#F97316", "#E11D48"];
-              const color = colors[p.id % colors.length];
-              return (
-                <div
-                  key={p.id}
-                  className="absolute top-[-10%] h-2 w-1.5 rounded-sm"
-                  style={{
-                    left: p.left,
-                    backgroundColor: color,
-                    animation: `streakr-confetti-fall ${p.duration}s linear ${p.delay}s forwards`,
-                  }}
-                />
-              );
-            })}
-          </div>
+        <div className="fixed inset-0 pointer-events-none z-40">
+          <Confetti numberOfPieces={300} recycle={false} gravity={0.4} />
+        </div>
+      )}
 
-          <style jsx global>{`
-            @keyframes streakr-confetti-fall {
-              0% {
-                transform: translate3d(0, -10vh, 0) rotateZ(0deg);
-                opacity: 1;
-              }
-              70% {
-                opacity: 1;
-              }
-              100% {
-                transform: translate3d(0, 110vh, 0) rotateZ(720deg);
-                opacity: 0;
-              }
-            }
-          `}</style>
-        </>
+      {/* 🏅 STREAK MILESTONE MODAL */}
+      {showMilestoneModal && milestoneValue !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl text-center">
+            <h2 className="text-2xl font-bold mb-2 text-orange-400">
+              {milestoneValue === 5 && "🔥 5 in a row!"}
+              {milestoneValue === 10 && "💥 10-streak heater!"}
+              {milestoneValue === 15 && "🚀 15-streak on fire!"}
+              {milestoneValue === 20 && "🏆 20-streak elite club!"}
+            </h2>
+            <p className="text-sm text-white/80 mb-4">
+              Nice run. Share your streak with your mates and see who can last
+              the longest.
+            </p>
+            <button
+              type="button"
+              onClick={handleShare}
+              className="w-full mb-3 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold px-4 py-2 text-sm"
+            >
+              Share my streak
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowMilestoneModal(false)}
+              className="text-xs text-gray-400 hover:text-white"
+            >
+              Maybe later
+            </button>
+          </div>
+        </div>
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
-          <p className="text-sm text:white/70">
+          <p className="text-sm text-white/70">
             Current Round:{" "}
             <span className="font-semibold text-orange-400">
               {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
@@ -1124,15 +1121,15 @@ export default function PicksClient() {
           const { date, time } = formatStartDate(row.startTime);
 
           const isActive = row.id === activeQuestionId;
-          const isYesActive = isActive && activeOutcome === "yes";
-          const isNoActive = isActive && activeOutcome === "no";
+          const isYesSelected = row.userPick === "yes";
+          const isNoSelected = row.userPick === "no";
+          const isYesActive = isYesSelected;
+          const isNoActive = isNoSelected;
+
           const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
-
-          const isSelectedYes = row.userPick === "yes";
-          const isSelectedNo = row.userPick === "no";
 
           const parsed =
             row.sport.toUpperCase() === "AFL"
@@ -1294,7 +1291,7 @@ export default function PicksClient() {
                       Comments ({row.commentCount ?? 0})
                     </button>
                     {isActive && (
-                      <span className="inline-flex items-center rounded-full bg-sky-500/90 text:black px-2 py-0.5 text-[10px] font-semibold">
+                      <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
                         Streak Pick
                       </span>
                     )}
@@ -1314,7 +1311,6 @@ export default function PicksClient() {
                 {/* PICK / YES / NO / RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
-                    {/* YES BUTTON */}
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
@@ -1322,20 +1318,20 @@ export default function PicksClient() {
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
-                          isLocked
-                            ? isSelectedYes
-                              ? "bg-green-700 opacity-85 border-2 border-white cursor-default"
-                              : "bg-green-900 opacity-40 cursor-not-allowed"
-                            : isYesActive
+                          isYesActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-green-600 hover:bg-green-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+                            : ""
                         }
                       `}
                     >
                       Yes
                     </button>
 
-                    {/* NO BUTTON */}
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
@@ -1343,13 +1339,14 @@ export default function PicksClient() {
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
-                          isLocked
-                            ? isSelectedNo
-                              ? "bg-red-700 opacity-85 border-2 border-white cursor-default"
-                              : "bg-red-900 opacity-40 cursor-not-allowed"
-                            : isNoActive
+                          isNoActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-red-600 hover:bg-red-700"
+                        }
+                        ${
+                          isLocked
+                            ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+                            : ""
                         }
                       `}
                     >
@@ -1379,57 +1376,6 @@ export default function PicksClient() {
         })}
       </div>
 
-      {/* 🔥 MILESTONE MODAL */}
-      {milestone && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className="bg-[#070B14] border border-orange-400/60 rounded-xl p-8 text-center w-full max-w-sm shadow-[0_0_45px_rgba(255,122,0,0.4)]">
-            <h2 className="text-3xl font-bold text-orange-400 mb-3 drop-shadow-[0_0_12px_rgba(255,122,0,0.9)]">
-              {milestone} WIN STREAK!
-            </h2>
-
-            <p className="text-white/85 mb-6 text-sm">
-              {milestone === 5 &&
-              "Bang! 5 in a row. Share it with your mates! 🔥"}
-              {milestone === 10 &&
-                "Top players rarely reach 10 — you're already elite."}
-              {milestone === 15 &&
-                "You’re entering weapon territory. Only killers hit 15."}
-              {milestone === 20 &&
-                "You’re legendary. This streak deserves to be seen."}
-            </p>
-
-            <button
-              onClick={async () => {
-                try {
-                  const shareData = {
-                    title: "STREAKr streak",
-                    text: `I'm on a ${milestone} win streak in STREAKr! How long can you last?`,
-                    url: "https://streakr.com.au",
-                  };
-                  if (typeof navigator !== "undefined" && (navigator as any).share) {
-                    await (navigator as any).share(shareData);
-                  }
-                } catch {
-                  // ignore
-                }
-              }}
-              className="w-full rounded-full bg-orange-500 hover:bg-orange-400 
-              text-black font-bold py-3 text-sm shadow-[0_0_18px_#FF7A00] mb-3"
-            >
-              Share my streak 🚀
-            </button>
-
-            <button
-              onClick={() => setMilestone(null)}
-              className="w-full rounded-full border border-white/30 text-white 
-              font-semibold py-3 text-sm hover:border-orange-300 hover:text-orange-300"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* AUTH REQUIRED MODAL */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -1453,7 +1399,7 @@ export default function PicksClient() {
             <div className="flex flex-col sm:flex-row gap-3">
               <Link
                 href="/auth?mode=login&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text:black font-semibold text-sm px-4 py-2 transition-colors"
+                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                 onClick={() => setShowAuthModal(false)}
               >
                 Login
