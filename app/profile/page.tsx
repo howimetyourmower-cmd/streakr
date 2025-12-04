@@ -35,6 +35,8 @@ type UserDoc = {
   avatarUrl?: string;
   currentStreak?: number;
   longestStreak?: number;
+  // NEW: streak badges (e.g. { "3": true, "5": true })
+  streakBadges?: Record<string, boolean>;
 };
 
 /** What /api/profile returns in the stats block */
@@ -64,6 +66,45 @@ type ApiRecentPick = {
   settledAt?: string; // ISO string
 };
 
+// ---------- Streak badge config (same images as picks page) ----------
+
+const STREAK_MILESTONES = [3, 5, 10, 15, 20] as const;
+type StreakMilestone = (typeof STREAK_MILESTONES)[number];
+
+type StreakBadgeConfig = {
+  label: string;
+  tagline: string;
+  image: string;
+};
+
+const STREAK_BADGES: Record<StreakMilestone, StreakBadgeConfig> = {
+  3: {
+    label: "3 in a row",
+    tagline: "Keep building 😎",
+    image: "/badges/streak-3.png",
+  },
+  5: {
+    label: "On fire",
+    tagline: "Bang! You're on the money! 🔥",
+    image: "/badges/streak-5.png",
+  },
+  10: {
+    label: "Elite 10",
+    tagline: "That’s elite. 10 straight.",
+    image: "/badges/streak-10.png",
+  },
+  15: {
+    label: "Dominance",
+    tagline: "This run is getting ridiculous 💪🏻",
+    image: "/badges/streak-15.png",
+  },
+  20: {
+    label: "GOAT",
+    tagline: "What are we witnessing. GOAT 🏆",
+    image: "/badges/streak-20.png",
+  },
+};
+
 export default function ProfilePage() {
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -90,8 +131,13 @@ export default function ProfilePage() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [statsError, setStatsError] = useState("");
 
-  // NEW: the round code for the user’s active streak ("OR", "R1", etc)
+  // Round code for the user’s active streak ("OR", "R1", etc)
   const [activeRoundCode, setActiveRoundCode] = useState<string | null>(null);
+
+  // NEW: unlocked badges from Firestore user doc
+  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>(
+    {}
+  );
 
   // Redirect if not logged in
   useEffect(() => {
@@ -123,7 +169,15 @@ export default function ProfilePage() {
           avatarUrl: (data as any).avatarUrl ?? "",
           currentStreak: (data as any).currentStreak ?? 0,
           longestStreak: (data as any).longestStreak ?? 0,
+          streakBadges: (data as any).streakBadges ?? {},
         });
+
+        // Pull badges into local state
+        if ((data as any).streakBadges && typeof (data as any).streakBadges === "object") {
+          setUnlockedBadges((data as any).streakBadges as Record<string, boolean>);
+        } else {
+          setUnlockedBadges({});
+        }
 
         setInitialLoaded(true);
       } catch (err) {
@@ -186,7 +240,7 @@ export default function ProfilePage() {
     }
   }, [user]);
 
-  // NEW: load active streak question from /api/user-picks to detect the true round
+  // Load active streak question from /api/user-picks to detect the true round
   useEffect(() => {
     const loadActiveRound = async () => {
       try {
@@ -487,7 +541,7 @@ export default function ProfilePage() {
         </section>
       )}
 
-      {/* DETAILS + STATS */}
+      {/* DETAILS + STATS + BADGES */}
       <section className="grid gap-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.2fr)]">
         {/* FORM GRID (details card) */}
         <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-7 sm:py-6">
@@ -632,8 +686,9 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* STREAK STATS CARD */}
+        {/* STREAK STATS + BADGES */}
         <div className="space-y-4">
+          {/* STREAK SUMMARY CARD */}
           <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-6 sm:py-6">
             <h2 className="text-sm font-semibold text-slate-100 mb-4">
               Streak summary
@@ -744,6 +799,61 @@ export default function ProfilePage() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* STREAK BADGES CARD */}
+          <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-6 sm:py-6">
+            <h2 className="text-sm font-semibold text-slate-100 mb-3">
+              Streak badges
+            </h2>
+            <p className="text-[11px] text-slate-400 mb-3">
+              Unlock footy card–style badges as your streak climbs. These match
+              the big animations you see on the picks page.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+              {STREAK_MILESTONES.map((m) => {
+                const cfg = STREAK_BADGES[m];
+                const key = String(m);
+                const unlocked = !!unlockedBadges[key];
+
+                return (
+                  <div
+                    key={m}
+                    className={`rounded-xl border px-3 py-3 text-center text-xs transition ${
+                      unlocked
+                        ? "border-amber-400 bg-gradient-to-b from-amber-500/20 via-slate-900 to-black shadow-[0_0_30px_rgba(251,191,36,0.35)]"
+                        : "border-slate-700 bg-slate-900/60 opacity-70"
+                    }`}
+                  >
+                    <div className="mb-2 flex justify-center">
+                      <div className="relative w-20 h-28">
+                        <img
+                          src={cfg.image}
+                          alt={cfg.label}
+                          className={`w-full h-full object-contain rounded-lg ${
+                            unlocked ? "" : "grayscale"
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    <p className="font-semibold text-white text-[11px]">
+                      {cfg.label}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-slate-300">
+                      {cfg.tagline}
+                    </p>
+                    <p className="mt-1 text-[10px] font-semibold">
+                      {unlocked ? (
+                        <span className="text-emerald-300">Unlocked</span>
+                      ) : (
+                        <span className="text-slate-500">Locked</span>
+                      )}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       </section>
