@@ -1388,6 +1388,8 @@ export default function PicksClient() {
             </h2>
 
             <p className="text-white/85 mb-6 text-sm">
+              Bang! 5 in a row. Share it with your mates!
+              {milestone === 5 &&
               You're on fire 🔥{" "}
               {milestone === 10 &&
                 "Top players rarely reach 10 — you're already elite."}
