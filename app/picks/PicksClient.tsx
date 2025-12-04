@@ -9,7 +9,6 @@ import {
 } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import {
@@ -20,7 +19,6 @@ import {
   doc,
   orderBy,
   limit,
-  updateDoc,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -105,11 +103,17 @@ type AflTeamKey =
   | "west-coast"
   | "western-bulldogs";
 
-const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
+const AFL_TEAM_LOGOS: Record<
+  AflTeamKey,
+  { name: string; logo: string }
+> = {
   adelaide: { name: "Adelaide Crows", logo: "/afl-logos/adelaide.jpeg" },
   brisbane: { name: "Brisbane Lions", logo: "/afl-logos/brisbane.jpeg" },
   carlton: { name: "Carlton", logo: "/afl-logos/carlton.jpeg" },
-  collingwood: { name: "Collingwood", logo: "/afl-logos/collingwood.jpeg" },
+  collingwood: {
+    name: "Collingwood",
+    logo: "/afl-logos/collingwood.jpeg",
+  },
   essendon: { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
   fremantle: {
     name: "Fremantle Dockers",
@@ -120,9 +124,15 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
     name: "Gold Coast Suns",
     logo: "/afl-logos/gold-coast.jpeg",
   },
-  gws: { name: "GWS Giants", logo: "/afl-logos/gws.jpeg" },
+  gws: {
+    name: "GWS Giants",
+    logo: "/afl-logos/gws.jpeg",
+  },
   hawthorn: { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
-  melbourne: { name: "Melbourne Demons", logo: "/afl-logos/melbourne.jpeg" },
+  melbourne: {
+    name: "Melbourne Demons",
+    logo: "/afl-logos/melbourne.jpeg",
+  },
   "north-melbourne": {
     name: "North Melbourne Kangaroos",
     logo: "/afl-logos/north-melbourne.jpeg",
@@ -131,8 +141,14 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
     name: "Port Adelaide Power",
     logo: "/afl-logos/port-adelaide.jpeg",
   },
-  richmond: { name: "Richmond Tigers", logo: "/afl-logos/richmond.jpeg" },
-  "st-kilda": { name: "St Kilda Saints", logo: "/afl-logos/st-kilda.jpeg" },
+  richmond: {
+    name: "Richmond Tigers",
+    logo: "/afl-logos/richmond.jpeg",
+  },
+  "st-kilda": {
+    name: "St Kilda Saints",
+    logo: "/afl-logos/st-kilda.jpeg",
+  },
   sydney: { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
   "west-coast": {
     name: "West Coast Eagles",
@@ -164,7 +180,8 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
   if (s.includes("north melbourne") || s.includes("kangaroos"))
     return "north-melbourne";
-  if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
+  if (s.includes("port adelaide") || s.includes("power"))
+    return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
@@ -214,46 +231,6 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
-// ---------- Streak milestones / badges ----------
-
-const STREAK_MILESTONES = [3, 5, 10, 15, 20] as const;
-type StreakMilestone = (typeof STREAK_MILESTONES)[number];
-
-type StreakBadgeConfig = {
-  label: string;
-  description: string;
-  image: string;
-};
-
-const STREAK_BADGES: Record<StreakMilestone, StreakBadgeConfig> = {
-  3: {
-    label: "3 in a row",
-    description: "3 in a row – keep building 😎",
-    image: "/badges/streak-3.png",
-  },
-  5: {
-    label: "On Fire",
-    description: "Bang! You're on the money! 🔥",
-    image: "/badges/streak-5.png",
-  },
-  10: {
-    label: "Elite 10",
-    description: "That’s elite. 10 straight. Tell your mates 💪🏻",
-    image: "/badges/streak-10.png",
-  },
-  15: {
-    label: "Dominance",
-    description:
-      "This run is getting ridiculous. Dominance level unlocked. 💪🏻",
-    image: "/badges/streak-15.png",
-  },
-  20: {
-    label: "GOAT",
-    description: "What are we witnessing. GOAT 🏆",
-    image: "/badges/streak-20.png",
-  },
-};
-
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -296,25 +273,14 @@ export default function PicksClient() {
   const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
     null
   );
-  const [leaderLongestStreak, setLeaderLongestStreak] = useState<number | null>(
-    null
-  );
+  const [leaderLongestStreak, setLeaderLongestStreak] = useState<
+    number | null
+  >(null);
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
-
-  // confetti + window size
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
-
-  // milestone badge modal & unlocked badges
-  const [badgeModalMilestone, setBadgeModalMilestone] =
-    useState<StreakMilestone | null>(null);
-  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>(
-    {}
-  );
 
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
@@ -326,19 +292,6 @@ export default function PicksClient() {
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
-
-  // window size for confetti
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleResize = () =>
-      setWindowSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
@@ -638,16 +591,11 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // helpers to avoid firing milestones on very first snapshot
-  const prevStreakRef = useRef<number | null>(null);
-  const hasLoadedStreakRef = useRef(false);
-
   // current user streak – live
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
-      setUnlockedBadges({});
       return;
     }
 
@@ -667,25 +615,9 @@ export default function PicksClient() {
             typeof data.longestStreak === "number" ? data.longestStreak : 0;
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
-
-          if (data.streakBadges && typeof data.streakBadges === "object") {
-            setUnlockedBadges(data.streakBadges);
-          } else {
-            setUnlockedBadges({});
-          }
-
-          const prev = prevStreakRef.current;
-          prevStreakRef.current = current;
-
-          if (!hasLoadedStreakRef.current) {
-            hasLoadedStreakRef.current = true;
-          } else if (current > (prev ?? 0) && current >= 3) {
-            unlockBadgeForStreak(current);
-          }
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
-          setUnlockedBadges({});
         }
         setStreakLoading(false);
       },
@@ -697,43 +629,7 @@ export default function PicksClient() {
     );
 
     return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
-
-  // -------- unlock badge + show modal / confetti --------
-  const unlockBadgeForStreak = async (newStreak: number) => {
-    if (!user) return;
-
-    // find highest milestone <= newStreak
-    const milestone = [...STREAK_MILESTONES]
-      .sort((a, b) => b - a)
-      .find((m) => newStreak >= m);
-
-    if (!milestone) return;
-
-    const key = String(milestone);
-
-    // Option B behaviour: show modal + confetti every time you CLIMB past the
-    // milestone during this session, even if badge is already unlocked.
-    // But still ensure badge is stored as true in Firestore.
-    try {
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        [`streakBadges.${key}`]: true,
-      });
-
-      setUnlockedBadges((prev) => ({
-        ...prev,
-        [key]: true,
-      }));
-
-      setBadgeModalMilestone(milestone);
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 5000);
-    } catch (err) {
-      console.error("Failed to unlock badge", err);
-    }
-  };
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -981,16 +877,6 @@ export default function PicksClient() {
   // -------- Render --------
   return (
     <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
-      {/* CONFETTI OVERLAY */}
-      {showConfetti && windowSize.width > 0 && windowSize.height > 0 && (
-        <Confetti
-          width={windowSize.width}
-          height={windowSize.height}
-          numberOfPieces={220}
-          recycle={false}
-        />
-      )}
-
       <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
         <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
         {roundNumber !== null && (
@@ -1017,7 +903,7 @@ export default function PicksClient() {
           </div>
 
           <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
-         <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-4">
               <div className="text-right">
                 <p className="text-[11px] text-white/60">Current</p>
                 <p className="text-lg sm:text-xl font-bold text-orange-400">
@@ -1317,7 +1203,7 @@ export default function PicksClient() {
                   </span>
                 </div>
 
-                {/* QUESTION + COMMENTS + pills */}
+                {/* QUESTION + COMMENTS + tags + MOBILE OUTCOME PILL */}
                 <div className="col-span-9 md:col-span-2">
                   <div className="text-sm leading-snug font-medium">
                     {row.question}
@@ -1346,9 +1232,20 @@ export default function PicksClient() {
                       </span>
                     )}
                   </div>
+
+                  {/* MOBILE outcome pill */}
+                  {outcomeLabel && (
+                    <div className="mt-1 md:hidden">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                      >
+                        {outcomeLabel}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
-                {/* PICK / YES / NO / RESULT PILL */}
+                {/* PICK / YES / NO / DESKTOP RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
                     <button
@@ -1394,9 +1291,9 @@ export default function PicksClient() {
                     </button>
                   </div>
 
-                  {/* Outcome pill – for ALL final/void questions you picked */}
+                  {/* DESKTOP outcome pill – hidden on mobile */}
                   {outcomeLabel && (
-                    <div className="mt-2">
+                    <div className="mt-2 hidden md:block">
                       <span
                         className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
                       >
@@ -1405,7 +1302,7 @@ export default function PicksClient() {
                     </div>
                   )}
 
-                  <div className="text-[11px] text-white/85">
+                  <div className="text-[11px] text-white/85 mt-1">
                     Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
                     {Math.round(noPct ?? 0)}%
                   </div>
@@ -1531,76 +1428,6 @@ export default function PicksClient() {
                   ))}
                 </ul>
               )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BADGE / FOOTY CARD MODAL */}
-      {badgeModalMilestone && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="relative w-full max-w-sm px-4">
-            <div className="absolute inset-0 blur-3xl bg-orange-500/40 pointer-events-none" />
-            <div className="relative rounded-3xl bg-gradient-to-b from-sky-700 via-sky-900 to-black border border-white/40 shadow-[0_0_60px_rgba(0,0,0,0.9)] p-4">
-              <div className="flex justify-between items-start mb-2">
-                <p className="text-[10px] sm:text-xs font-semibold uppercase tracking-[0.18em] text-white/80">
-                  STREAKR LEVEL UNLOCKED
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setBadgeModalMilestone(null)}
-                  className="text-xs text-white/70 hover:text-white"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="mt-1 mb-3 rounded-2xl bg-gradient-to-b from-orange-500 via-red-600 to-black p-3 border border-white/60 shadow-[0_0_40px_rgba(248,113,113,0.8)]">
-                <div className="text-center text-[11px] font-bold uppercase tracking-[0.18em] text-white drop-shadow">
-                  You&apos;re on fire!
-                </div>
-
-                <div className="mt-1 flex flex-col items-center">
-                  <div className="text-6xl font-extrabold text-yellow-300 drop-shadow-[0_0_18px_rgba(250,250,115,0.9)]">
-                    {badgeModalMilestone}
-                  </div>
-                  <div className="mt-2 text-xs font-semibold text-white/90">
-                    STREAKR LEVEL {badgeModalMilestone}
-                  </div>
-                </div>
-
-                <div className="mt-3 flex justify-center">
-                  <div className="relative w-40 h-56">
-                    <Image
-                      src={STREAK_BADGES[badgeModalMilestone].image}
-                      alt={STREAK_BADGES[badgeModalMilestone].label}
-                      fill
-                      className="object-contain rounded-xl"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-sm text-white/90 text-center mb-3">
-                {STREAK_BADGES[badgeModalMilestone].description}
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBadgeModalMilestone(null)}
-                  className="flex-1 inline-flex items-center justify-center rounded-full bg-white text-black font-semibold text-sm py-2 hover:bg-slate-100 transition"
-                >
-                  Nice! Keep streaking
-                </button>
-                <Link
-                  href="/profile"
-                  className="flex-1 inline-flex items-center justify-center rounded-full border border-white/60 text-white font-semibold text-sm py-2 hover:bg-white/10 transition"
-                  onClick={() => setBadgeModalMilestone(null)}
-                >
-                  View my badges
-                </Link>
-              </div>
             </div>
           </div>
         </div>
