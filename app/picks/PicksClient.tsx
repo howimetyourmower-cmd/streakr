@@ -9,6 +9,7 @@ import {
 } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import {
@@ -231,6 +232,20 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
+const normaliseOutcome = (
+  val: any
+): "yes" | "no" | "void" | null => {
+  if (val == null) return null;
+  const s = String(val).toLowerCase();
+
+  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
+  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
+  if (["void", "cancelled", "canceled"].includes(s)) return "void";
+
+  return null;
+};
+
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -244,8 +259,11 @@ export default function PicksClient() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
   // Single active streak pick (for highlight only)
-  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
-  const [activeOutcome, setActiveOutcome] = useState<ActiveOutcome>(null);
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
+    null
+  );
+  const [activeOutcome, setActiveOutcome] =
+    useState<ActiveOutcome>(null);
 
   // local history of all picks (per device)
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
@@ -282,6 +300,17 @@ export default function PicksClient() {
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
+  // Confetti + milestone modals
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [streakLevelModal, setStreakLevelModal] = useState<
+    3 | 5 | 10 | 15 | 20 | null
+  >(null);
+  const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
+  const [windowSize, setWindowSize] = useState({
+    width: 0,
+    height: 0,
+  });
+
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
     Record<string, { yes?: number; no?: number }>
@@ -292,6 +321,20 @@ export default function PicksClient() {
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  // window size for confetti
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      setWindowSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
@@ -326,22 +369,31 @@ export default function PicksClient() {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
+        // normalise whatever backend sends as outcome
         const rawOutcome =
-          q.correctOutcome ??
-          (q.outcome === "yes" || q.outcome === "no" || q.outcome === "void"
-            ? q.outcome
-            : null);
+          normaliseOutcome(q.correctOutcome) ??
+          normaliseOutcome(q.outcome);
 
         const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void" ? rawOutcome ?? null : null;
+          q.status === "final" || q.status === "void"
+            ? rawOutcome
+            : null;
 
         // remember non-zero % so they don’t reset to 0 on refresh
-        if (typeof q.yesPercent === "number" || typeof q.noPercent === "number") {
+        if (
+          typeof q.yesPercent === "number" ||
+          typeof q.noPercent === "number"
+        ) {
           const prevPerc = lastPercentsRef.current[q.id] || {};
           lastPercentsRef.current[q.id] = {
             yes:
-              typeof q.yesPercent === "number" ? q.yesPercent : prevPerc.yes,
-            no: typeof q.noPercent === "number" ? q.noPercent : prevPerc.no,
+              typeof q.yesPercent === "number"
+                ? q.yesPercent
+                : prevPerc.yes,
+            no:
+              typeof q.noPercent === "number"
+                ? q.noPercent
+                : prevPerc.no,
           };
         }
 
@@ -359,9 +411,13 @@ export default function PicksClient() {
           // priority: API -> local history -> previous rows
           userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
-            typeof q.yesPercent === "number" ? q.yesPercent : remembered.yes,
+            typeof q.yesPercent === "number"
+              ? q.yesPercent
+              : remembered.yes,
           noPercent:
-            typeof q.noPercent === "number" ? q.noPercent : remembered.no,
+            typeof q.noPercent === "number"
+              ? q.noPercent
+              : remembered.no,
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
@@ -575,7 +631,9 @@ export default function PicksClient() {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
-            typeof data.longestStreak === "number" ? data.longestStreak : 0;
+            typeof data.longestStreak === "number"
+              ? data.longestStreak
+              : 0;
           leaderVal = val;
         });
         setLeaderLongestStreak(leaderVal);
@@ -610,9 +668,13 @@ export default function PicksClient() {
         if (userSnap.exists()) {
           const data = userSnap.data() as any;
           const current =
-            typeof data.currentStreak === "number" ? data.currentStreak : 0;
+            typeof data.currentStreak === "number"
+              ? data.currentStreak
+              : 0;
           const longest =
-            typeof data.longestStreak === "number" ? data.longestStreak : 0;
+            typeof data.longestStreak === "number"
+              ? data.longestStreak
+              : 0;
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
         } else {
@@ -630,6 +692,25 @@ export default function PicksClient() {
 
     return () => unsub();
   }, [user]);
+
+  // -------- Streak milestone celebration (3,5,10,15,20) --------
+  useEffect(() => {
+    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
+      return;
+
+    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
+      3, 5, 10, 15, 20,
+    ];
+    const hit = milestones.find((m) => userCurrentStreak === m);
+    if (!hit) return;
+
+    setLastCelebratedStreak(userCurrentStreak);
+    setStreakLevelModal(hit);
+    setShowConfetti(true);
+
+    const timer = setTimeout(() => setShowConfetti(false), 5000);
+    return () => clearTimeout(timer);
+  }, [userCurrentStreak, lastCelebratedStreak]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -691,7 +772,10 @@ export default function PicksClient() {
       const next: PickHistory = { ...prev, [row.id]: pick };
       try {
         if (typeof window !== "undefined") {
-          window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
+          window.localStorage.setItem(
+            PICK_HISTORY_KEY,
+            JSON.stringify(next)
+          );
         }
       } catch (err) {
         console.error("Failed to persist pick history", err);
@@ -869,569 +953,664 @@ export default function PicksClient() {
       setShareStatus("Could not share right now.");
     }
 
-    if (shareStatus) {
-      setTimeout(() => setShareStatus(""), 3000);
+    setTimeout(() => setShareStatus(""), 3000);
+  };
+
+  // -------- Streak level modal content --------
+  const getStreakModalContent = () => {
+    if (!streakLevelModal) return null;
+
+    switch (streakLevelModal) {
+      case 3:
+        return {
+          title: "3 in a row!",
+          subtitle: "Keep building 😎",
+          body: "Nice start. You’re building momentum – keep your head and stack that streak.",
+        };
+      case 5:
+        return {
+          title: "Bang! 5 straight!",
+          subtitle: "You’re on the money 🔥",
+          body: "That’s a serious run. Lock in, stay sharp and push for double digits.",
+        };
+      case 10:
+        return {
+          title: "Streak Level 10",
+          subtitle: "That’s elite 💪🏻",
+          body: "Ten straight is no joke. You’ve earned your first STREAKr badge – make sure your mates know about it.",
+        };
+      case 15:
+        return {
+          title: "15 in a row",
+          subtitle: "Dominance level unlocked 💪🏻",
+          body: "This run is getting ridiculous. You’re in rare air now – every pick is appointment viewing.",
+        };
+      case 20:
+        return {
+          title: "20 straight",
+          subtitle: "What are we witnessing? GOAT 🏆",
+          body: "Twenty in a row is all-time. You’ve unlocked legendary STREAKr status – screenshotted or it didn’t happen.",
+        };
+      default:
+        return null;
     }
   };
 
   // -------- Render --------
+  const streakModalContent = getStreakModalContent();
+
   return (
-    <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 text:white min-h-screen bg-black text-white">
-      <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
-        <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-        {roundNumber !== null && (
-          <p className="text-sm text:white/70">
-            Current Round:{" "}
-            <span className="font-semibold text-orange-400">
-              {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
-            </span>
-          </p>
-        )}
-      </div>
-
-      {/* STREAK PROGRESS TRACKER + SHARE */}
-      <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-wide text-white/60">
-              Streak progress
-            </p>
-            <p className="text-xs sm:text-sm text-white/80 max-w-md">
-              Track your current run, your best ever streak, and how far you
-              are behind the round leader.
-            </p>
-          </div>
-
-          <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
-            <div className="flex items-center gap-4">
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Current</p>
-                <p className="text-lg sm:text-xl font-bold text-orange-400">
-                  {user ? userCurrentStreak ?? 0 : "-"}
-                </p>
-              </div>
-              <div className="h-8 w-px bg-white/10" />
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Best</p>
-                <p className="text-lg sm:text-xl font-bold text-emerald-300">
-                  {user ? userLongestStreak ?? 0 : "-"}
-                </p>
-              </div>
-              <div className="h-8 w-px bg-white/10" />
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Leader</p>
-                <p className="text-lg sm:text-xl font-bold text-sky-300">
-                  {leaderLongestStreak ?? "-"}
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={handleShare}
-              className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
-            >
-              Share my streak
-            </button>
-          </div>
-        </div>
-
-        {/* Bars: Current / Longest / Leader */}
-        <div className="space-y-3">
-          <div>
-            <div className="flex justify-between text-[11px] text-white/70 mb-1">
-              <span>Current streak</span>
-              <span className="font-semibold text-orange-300">
-                {user ? userCurrentStreak ?? 0 : 0}
-              </span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
-                style={{ width: barWidth(userCurrentStreak) }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between text-[11px] text-white/70 mb-1">
-              <span>Longest streak</span>
-              <span className="font-semibold text-emerald-300">
-                {user ? userLongestStreak ?? 0 : 0}
-              </span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600"
-                style={{ width: barWidth(userLongestStreak) }}
-              />
-            </div>
-          </div>
-
-          <div>
-            <div className="flex justify-between text-[11px] text-white/70 mb-1">
-              <span>Leader</span>
-              <span className="font-semibold text-sky-300">
-                {leaderLongestStreak ?? 0}
-              </span>
-            </div>
-            <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
-                style={{ width: barWidth(leaderLongestStreak) }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {streakLoading && (
-          <p className="mt-2 text-[10px] text-white/50">
-            Loading streak data…
-          </p>
-        )}
-        {streakError && (
-          <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
-        )}
-        {shareStatus && (
-          <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
-        )}
-      </div>
-
-      {/* SPONSOR QUESTION INFO STRIP */}
-      {hasSponsorQuestion && (
-        <div className="mb-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-          <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
-            Sponsor Question
-          </span>
-          <span className="text-[12px] sm:text-[13px]">
-            Look for the{" "}
-            <span className="font-semibold">Sponsor Question</span> tag. Get it
-            right to go into the draw for this round&apos;s $100 sponsor gift
-            card.*
-          </span>
-        </div>
+    <>
+      {/* CONFETTI OVERLAY */}
+      {showConfetti && windowSize.width > 0 && (
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          numberOfPieces={350}
+          recycle={false}
+        />
       )}
 
-      {error && <p className="text-red-500 mb-2">{error}</p>}
+      <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
+        <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
+          <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
+          {roundNumber !== null && (
+            <p className="text-sm text-white/70">
+              Current Round:{" "}
+              <span className="font-semibold text-orange-400">
+                {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
+              </span>
+            </p>
+          )}
+        </div>
 
-      {/* FILTER BUTTONS */}
-      <div className="flex flex-wrap gap-2 mb-6">
-        {(["all", "open", "final", "pending", "void"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => applyFilter(f === "all" ? "all" : f)}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-              activeFilter === f
-                ? "bg-orange-500"
-                : "bg-gray-700 hover:bg-gray-600"
-            }`}
-          >
-            {f.toUpperCase()}
-          </button>
-        ))}
-      </div>
+        {/* STREAK PROGRESS TRACKER + SHARE */}
+        <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-white/60">
+                Streak progress
+              </p>
+              <p className="text-xs sm:text-sm text-white/80 max-w-md">
+                Track your current run, your best ever streak, and how far you
+                are behind the round leader.
+              </p>
+            </div>
 
-      {/* HEADER ROW (desktop) */}
-      <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
-        <div className="col-span-2">START</div>
-        <div className="col-span-1">SPORT</div>
-        <div className="col-span-1">STATUS</div>
-        <div className="col-span-3">MATCH • VENUE</div>
-        <div className="col-span-1 text-center">QUARTER</div>
-        <div className="col-span-2">QUESTION</div>
-        <div className="col-span-2 text-right">PICK • YES% • NO%</div>
-      </div>
+            <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-[11px] text-white/60">Current</p>
+                  <p className="text-lg sm:text-xl font-bold text-orange-400">
+                    {user ? userCurrentStreak ?? 0 : "-"}
+                  </p>
+                </div>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="text-right">
+                  <p className="text-[11px] text-white/60">Best</p>
+                  <p className="text-lg sm:text-xl font-bold text-emerald-300">
+                    {user ? userLongestStreak ?? 0 : "-"}
+                  </p>
+                </div>
+                <div className="h-8 w-px bg-white/10" />
+                <div className="text-right">
+                  <p className="text-[11px] text-white/60">Leader</p>
+                  <p className="text-lg sm:text-xl font-bold text-sky-300">
+                    {leaderLongestStreak ?? "-"}
+                  </p>
+                </div>
+              </div>
 
-      {loading && <p>Loading…</p>}
+              <button
+                type="button"
+                onClick={handleShare}
+                className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
+              >
+                Share my streak
+              </button>
+            </div>
+          </div>
 
-      {/* ROWS */}
-      <div className="space-y-2">
-        {filteredRows.map((row) => {
-          const { date, time } = formatStartDate(row.startTime);
+          {/* Bars: Current / Longest / Leader */}
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-[11px] text-white/70 mb-1">
+                <span>Current streak</span>
+                <span className="font-semibold text-orange-300">
+                  {user ? userCurrentStreak ?? 0 : 0}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
+                  style={{ width: barWidth(userCurrentStreak) }}
+                />
+              </div>
+            </div>
 
-          const isActive = row.id === activeQuestionId;
-          const isYesActive = isActive && activeOutcome === "yes";
-          const isNoActive = isActive && activeOutcome === "no";
-          const { yes: yesPct, no: noPct } = getDisplayPercents(row);
+            <div>
+              <div className="flex justify-between text-[11px] text-white/70 mb-1">
+                <span>Longest streak</span>
+                <span className="font-semibold text-emerald-300">
+                  {user ? userLongestStreak ?? 0 : 0}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600"
+                  style={{ width: barWidth(userLongestStreak) }}
+                />
+              </div>
+            </div>
 
-          const isLocked = row.status !== "open";
-          const isSponsor = !!row.isSponsorQuestion;
+            <div>
+              <div className="flex justify-between text-[11px] text-white/70 mb-1">
+                <span>Leader</span>
+                <span className="font-semibold text-sky-300">
+                  {leaderLongestStreak ?? 0}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
+                  style={{ width: barWidth(leaderLongestStreak) }}
+                />
+              </div>
+            </div>
+          </div>
 
-          const parsed =
-            row.sport.toUpperCase() === "AFL"
-              ? parseAflMatchTeams(row.match)
-              : null;
+          {streakLoading && (
+            <p className="mt-2 text-[10px] text-white/50">
+              Loading streak data…
+            </p>
+          )}
+          {streakError && (
+            <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
+          )}
+          {shareStatus && (
+            <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
+          )}
+        </div>
 
-          const homeTeam =
-            parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
-              ? AFL_TEAM_LOGOS[parsed.homeKey]
-              : null;
-          const awayTeam =
-            parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
-              ? AFL_TEAM_LOGOS[parsed.awayKey]
-              : null;
+        {/* SPONSOR QUESTION INFO STRIP */}
+        {hasSponsorQuestion && (
+          <div className="mb-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+            <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
+              Sponsor Question
+            </span>
+            <span className="text-[12px] sm:text-[13px]">
+              Look for the{" "}
+              <span className="font-semibold">Sponsor Question</span> tag. Get
+              it right to go into the draw for this round&apos;s $100 sponsor
+              gift card.*
+            </span>
+          </div>
+        )}
 
-          const useAflLayout = !!parsed && (homeTeam || awayTeam);
+        {error && <p className="text-red-500 mb-2">{error}</p>}
 
-          // -------- Outcome pill (local calculation) --------
-          type OutcomeKind = "win" | "loss" | "void" | null;
-          let outcomeKind: OutcomeKind = null;
+        {/* FILTER BUTTONS */}
+        <div className="flex flex-wrap gap-2 mb-6">
+          {(["all", "open", "final", "pending", "void"] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => applyFilter(f === "all" ? "all" : f)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
+                activeFilter === f
+                  ? "bg-orange-500"
+                  : "bg-gray-700 hover:bg-gray-600"
+              }`}
+            >
+              {f.toUpperCase()}
+            </button>
+          ))}
+        </div>
 
-          if (row.userPick) {
-            if (row.status === "void" || row.correctOutcome === "void") {
-              outcomeKind = "void";
-            } else if (row.status === "final") {
-              if (row.correctOutcome === "yes" || row.correctOutcome === "no") {
-                outcomeKind =
-                  row.userPick === row.correctOutcome ? "win" : "loss";
-              } else {
+        {/* HEADER ROW (desktop) */}
+        <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
+          <div className="col-span-2">START</div>
+          <div className="col-span-1">SPORT</div>
+          <div className="col-span-1">STATUS</div>
+          <div className="col-span-3">MATCH • VENUE</div>
+          <div className="col-span-1 text-center">QUARTER</div>
+          <div className="col-span-2">QUESTION</div>
+          <div className="col-span-2 text-right">PICK • YES% • NO%</div>
+        </div>
+
+        {loading && <p>Loading…</p>}
+
+        {/* ROWS */}
+        <div className="space-y-2">
+          {filteredRows.map((row) => {
+            const { date, time } = formatStartDate(row.startTime);
+
+            const isActive = row.id === activeQuestionId;
+            const isYesActive = isActive && activeOutcome === "yes";
+            const isNoActive = isActive && activeOutcome === "no";
+            const { yes: yesPct, no: noPct } = getDisplayPercents(row);
+
+            const isLocked = row.status !== "open";
+            const isSponsor = !!row.isSponsorQuestion;
+
+            const parsed =
+              row.sport.toUpperCase() === "AFL"
+                ? parseAflMatchTeams(row.match)
+                : null;
+
+            const homeTeam =
+              parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
+                ? AFL_TEAM_LOGOS[parsed.homeKey]
+                : null;
+            const awayTeam =
+              parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
+                ? AFL_TEAM_LOGOS[parsed.awayKey]
+                : null;
+
+            const useAflLayout = !!parsed && (homeTeam || awayTeam);
+
+            // -------- Outcome pill (local calculation) --------
+            type OutcomeKind = "win" | "loss" | "void" | null;
+            let outcomeKind: OutcomeKind = null;
+
+            if (row.userPick) {
+              const outcome = normaliseOutcome(row.correctOutcome);
+              if (row.status === "void" || outcome === "void") {
                 outcomeKind = "void";
+              } else if (row.status === "final" && outcome) {
+                outcomeKind =
+                  row.userPick === outcome ? "win" : "loss";
               }
             }
-          }
 
-          const outcomeLabel =
-            outcomeKind === "void"
-              ? "Question voided – no streak change"
-              : outcomeKind === "win"
-              ? "You were right!"
-              : outcomeKind === "loss"
-              ? "Wrong pick"
-              : null;
+            const outcomeLabel =
+              outcomeKind === "void"
+                ? "Question voided – no streak change"
+                : outcomeKind === "win"
+                ? "You were right!"
+                : outcomeKind === "loss"
+                ? "Wrong pick"
+                : null;
 
-          const outcomeClasses =
-            outcomeKind === "void"
-              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
-              : outcomeKind === "win"
-              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
-              : "bg-red-500/15 border-red-400/60 text-red-300";
+            const outcomeClasses =
+              outcomeKind === "void"
+                ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
+                : outcomeKind === "win"
+                ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
+                : "bg-red-500/15 border-red-400/60 text-red-300";
 
-          return (
-            <div
-              key={row.id}
-              className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
-            >
-              <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
-                {/* START */}
-                <div className="col-span-12 md:col-span-2">
-                  <div className="text-sm font-semibold">{date}</div>
-                  <div className="text-[11px] text-white/80">
-                    {time} AEDT
+            return (
+              <div
+                key={row.id}
+                className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
+              >
+                <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
+                  {/* START */}
+                  <div className="col-span-12 md:col-span-2">
+                    <div className="text-sm font-semibold">{date}</div>
+                    <div className="text-[11px] text-white/80">
+                      {time} AEDT
+                    </div>
                   </div>
-                </div>
 
-                {/* SPORT */}
-                <div className="col-span-6 md:col-span-1 flex items-center">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
-                    {row.sport}
-                  </span>
-                </div>
+                  {/* SPORT */}
+                  <div className="col-span-6 md:col-span-1 flex items-center">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
+                      {row.sport}
+                    </span>
+                  </div>
 
-                {/* STATUS */}
-                <div className="col-span-6 md:col-span-1">
-                  <span
-                    className={`${statusClasses(
-                      row.status
-                    )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
-                  >
-                    {row.status.toUpperCase()}
-                  </span>
-                </div>
+                  {/* STATUS */}
+                  <div className="col-span-6 md:col-span-1">
+                    <span
+                      className={`${statusClasses(
+                        row.status
+                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
+                    >
+                      {row.status.toUpperCase()}
+                    </span>
+                  </div>
 
-                {/* MATCH + VENUE */}
-                <div className="col-span-12 md:col-span-3">
-                  {useAflLayout ? (
-                    <>
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1 min-w-0">
-                          {homeTeam && (
-                            <Image
-                              src={homeTeam.logo}
-                              alt={homeTeam.name}
-                              width={32}
-                              height={32}
-                              className="rounded-full border border-white/20 bg-black/60"
-                            />
-                          )}
-                          <span className="text-sm font-semibold truncate">
-                            {parsed?.homeLabel || homeTeam?.name || ""}
+                  {/* MATCH + VENUE */}
+                  <div className="col-span-12 md:col-span-3">
+                    {useAflLayout ? (
+                      <>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1 min-w-0">
+                            {homeTeam && (
+                              <Image
+                                src={homeTeam.logo}
+                                alt={homeTeam.name}
+                                width={32}
+                                height={32}
+                                className="rounded-full border border-white/20 bg-black/60"
+                              />
+                            )}
+                            <span className="text-sm font-semibold truncate">
+                              {parsed?.homeLabel || homeTeam?.name || ""}
+                            </span>
+                          </div>
+
+                          <span className="text-xs uppercase tracking-wide text-white/70">
+                            vs
                           </span>
-                        </div>
 
-                        <span className="text-xs uppercase tracking-wide text-white/70">
-                          vs
+                          <div className="flex items-center gap-1 min-w-0">
+                            <span className="text-sm font-semibold truncate">
+                              {parsed?.awayLabel || awayTeam?.name || ""}
+                            </span>
+                            {awayTeam && (
+                              <Image
+                                src={awayTeam.logo}
+                                alt={awayTeam.name}
+                                width={32}
+                                height={32}
+                                className="rounded-full border border-white/20 bg-black/60"
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-white/80 mt-0.5">
+                          {row.venue}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="text-sm font-semibold">
+                          {row.match}
+                        </div>
+                        <div className="text-[11px] text-white/80">
+                          {row.venue}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* QUARTER */}
+                  <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
+                    <span className="block md:hidden">
+                      Quarter {row.quarter}
+                    </span>
+                    <span className="hidden md:inline">
+                      Quarter {row.quarter}
+                    </span>
+                  </div>
+
+                  {/* QUESTION + COMMENTS + pills */}
+                  <div className="col-span-9 md:col-span-2">
+                    <div className="text-sm leading-snug font-medium">
+                      {row.question}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => openComments(row)}
+                        className="text-[11px] text-sky-300 underline"
+                      >
+                        Comments ({row.commentCount ?? 0})
+                      </button>
+                      {isActive && (
+                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+                          Streak Pick
                         </span>
-
-                        <div className="flex items-center gap-1 min-w-0">
-                          <span className="text-sm font-semibold truncate">
-                            {parsed?.awayLabel || awayTeam?.name || ""}
-                          </span>
-                          {awayTeam && (
-                            <Image
-                              src={awayTeam.logo}
-                              alt={awayTeam.name}
-                              width={32}
-                              height={32}
-                              className="rounded-full border border-white/20 bg-black/60"
-                            />
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-[11px] text-white/80 mt-0.5">
-                        {row.venue}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="text-sm font-semibold">
-                        {row.match}
-                      </div>
-                      <div className="text-[11px] text-white/80">
-                        {row.venue}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* QUARTER */}
-                <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                  <span className="block md:hidden">
-                    Quarter {row.quarter}
-                  </span>
-                  <span className="hidden md:inline">
-                    Quarter {row.quarter}
-                  </span>
-                </div>
-
-                {/* QUESTION + COMMENTS + tags + MOBILE OUTCOME PILL */}
-                <div className="col-span-9 md:col-span-2">
-                  <div className="text-sm leading-snug font-medium">
-                    {row.question}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => openComments(row)}
-                      className="text-[11px] text-sky-300 underline"
-                    >
-                      Comments ({row.commentCount ?? 0})
-                    </button>
-                    {isActive && (
-                      <span className="inline-flex items-center rounded-full bg-sky-500/90 text:black px-2 py-0.5 text-[10px] font-semibold">
-                        Streak Pick
-                      </span>
-                    )}
-                    {isLocked && (
-                      <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                        Locked
-                      </span>
-                    )}
-                    {isSponsor && (
-                      <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                        Sponsor Question
-                      </span>
-                    )}
-                  </div>
-
-                  {/* MOBILE outcome pill */}
-                  {outcomeLabel && (
-                    <div className="mt-1 md:hidden">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
-                      >
-                        {outcomeLabel}
-                      </span>
+                      )}
+                      {isLocked && (
+                        <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                          Locked
+                        </span>
+                      )}
+                      {isSponsor && (
+                        <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                          Sponsor Question
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
-
-                {/* PICK / YES / NO / DESKTOP RESULT PILL */}
-                <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                  <div className="flex gap-2 mb-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "yes")}
-                      disabled={isLocked}
-                      className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                        ${
-                          isYesActive
-                            ? "bg-sky-500 text-black ring-2 ring-white"
-                            : "bg-green-600 hover:bg-green-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-40 cursor-not-allowed hover:bg-green-600"
-                            : ""
-                        }
-                      `}
-                    >
-                      Yes
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handlePick(row, "no")}
-                      disabled={isLocked}
-                      className={`
-                        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                        ${
-                          isNoActive
-                            ? "bg-sky-500 text-black ring-2 ring-white"
-                            : "bg-red-600 hover:bg-red-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-40 cursor-not-allowed hover:bg-red-600"
-                            : ""
-                        }
-                      `}
-                    >
-                      No
-                    </button>
                   </div>
 
-                  {/* DESKTOP outcome pill – hidden on mobile */}
-                  {outcomeLabel && (
-                    <div className="mt-2 hidden md:block">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                  {/* PICK / YES / NO / RESULT PILL */}
+                  <div className="col-span-12 md:col-span-2 flex flex-col items-end">
+                    <div className="flex gap-2 mb-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handlePick(row, "yes")}
+                        disabled={isLocked}
+                        className={`
+                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                          ${
+                            isYesActive
+                              ? "bg-sky-500 text-black ring-2 ring-white"
+                              : "bg-green-600 hover:bg-green-700"
+                          }
+                          ${
+                            isLocked
+                              ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+                              : ""
+                          }
+                        `}
                       >
-                        {outcomeLabel}
-                      </span>
-                    </div>
-                  )}
+                        Yes
+                      </button>
 
-                  <div className="text-[11px] text-white/85 mt-1">
-                    Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
-                    {Math.round(noPct ?? 0)}%
+                      <button
+                        type="button"
+                        onClick={() => handlePick(row, "no")}
+                        disabled={isLocked}
+                        className={`
+                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+                          ${
+                            isNoActive
+                              ? "bg-sky-500 text-black ring-2 ring-white"
+                              : "bg-red-600 hover:bg-red-700"
+                          }
+                          ${
+                            isLocked
+                              ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+                              : ""
+                          }
+                        `}
+                      >
+                        No
+                      </button>
+                    </div>
+
+                    {/* Outcome pill – for ALL final/void questions you picked */}
+                    {outcomeLabel && (
+                      <div className="mt-2">
+                        <span
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                        >
+                          {outcomeLabel}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="text-[11px] text-white/85">
+                      Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
+                      {Math.round(noPct ?? 0)}%
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* AUTH REQUIRED MODAL */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Log in to play</h2>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(false)}
-                className="text-sm text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak
-              and appear on the leaderboard.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href="/auth?mode=login&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text:black font-semibold text-sm px-4 py-2 transition-colors"
-                onClick={() => setShowAuthModal(false)}
-              >
-                Login
-              </Link>
-
-              <Link
-                href="/auth?mode=signup&returnTo=/picks"
-                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-                onClick={() => setShowAuthModal(false)}
-              >
-                Sign up
-              </Link>
-            </div>
-          </div>
+            );
+          })}
         </div>
-      )}
 
-      {/* COMMENT DRAWER */}
-      {commentsOpenFor && (
-        <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
-          <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h2 className="text-lg font-semibold mb-1">
-                  Comments – Q{commentsOpenFor.quarter}
-                </h2>
-                <p className="text-sm text-gray-300">
-                  {commentsOpenFor.question}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeComments}
-                className="text-sm text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="mb-4">
-              <textarea
-                value={commentText}
-                onChange={handleCommentChange}
-                rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                placeholder="Add your comment…"
-              />
-              {commentsError && (
-                <p className="text-xs text-red-500 mt-1">{commentsError}</p>
-              )}
-              <div className="flex justify-end mt-2">
+        {/* AUTH REQUIRED MODAL */}
+        {showAuthModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+            <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
+              <div className="flex items-start justify-between mb-4">
+                <h2 className="text-lg font-semibold">Log in to play</h2>
                 <button
                   type="button"
-                  onClick={submitComment}
-                  disabled={submittingComment || !commentText.trim()}
-                  className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
+                  onClick={() => setShowAuthModal(false)}
+                  className="text-sm text-gray-400 hover:text-white"
                 >
-                  {submittingComment ? "Posting…" : "Post"}
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-sm text-white/70 mb-4">
+                You need a free STREAKr account to make picks, build your streak
+                and appear on the leaderboard.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Link
+                  href="/auth?mode=login&returnTo=/picks"
+                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                  onClick={() => setShowAuthModal(false)}
+                >
+                  Login
+                </Link>
+
+                <Link
+                  href="/auth?mode=signup&returnTo=/picks"
+                  className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                  onClick={() => setShowAuthModal(false)}
+                >
+                  Sign up
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* COMMENT DRAWER */}
+        {commentsOpenFor && (
+          <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
+            <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-semibold mb-1">
+                    Comments – Q{commentsOpenFor.quarter}
+                  </h2>
+                  <p className="text-sm text-gray-300">
+                    {commentsOpenFor.question}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeComments}
+                  className="text-sm text-gray-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mb-4">
+                <textarea
+                  value={commentText}
+                  onChange={handleCommentChange}
+                  rows={3}
+                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  placeholder="Add your comment…"
+                />
+                {commentsError && (
+                  <p className="text-xs text-red-500 mt-1">
+                    {commentsError}
+                  </p>
+                )}
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="button"
+                    onClick={submitComment}
+                    disabled={submittingComment || !commentText.trim()}
+                    className="px-4 py-1.5 rounded-md text-sm font-semibold bg-orange-500 disabled:bg-gray-600"
+                  >
+                    {submittingComment ? "Posting…" : "Post"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
+                {commentsLoading ? (
+                  <p className="text-sm text-gray-400">
+                    Loading comments…
+                  </p>
+                ) : comments.length === 0 ? (
+                  <p className="text-sm text-gray-400">
+                    No comments yet. Be the first!
+                  </p>
+                ) : (
+                  <ul className="space-y-3">
+                    {comments.map((c) => (
+                      <li
+                        key={c.id}
+                        className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
+                      >
+                        <div className="flex justify-between mb-1">
+                          <span className="font-semibold">
+                            {c.displayName || "User"}
+                          </span>
+                          {c.createdAt && (
+                            <span className="text-[11px] text-gray-400">
+                              {c.createdAt}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-100">{c.body}</p>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* STREAK LEVEL MODAL */}
+        {streakLevelModal && streakModalContent && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+            <div className="relative w-full max-w-md rounded-3xl bg-[#020617] border border-orange-500/60 shadow-[0_0_80px_rgba(248,113,22,0.85)] px-6 py-6 overflow-hidden">
+              {/* glowing frame */}
+              <div className="pointer-events-none absolute inset-0 rounded-3xl border border-orange-400/30 shadow-[0_0_40px_rgba(248,113,22,0.65)]" />
+
+              {/* Stylised badge card in the middle */}
+              <div className="relative mx-auto mb-4 mt-2 w-40 h-56 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-white/10 flex flex-col items-center justify-center shadow-[0_0_40px_rgba(15,23,42,0.9)]">
+                <div className="absolute inset-x-4 top-4 text-center text-[11px] font-bold uppercase tracking-wide text-slate-200">
+                  Streak Level
+                </div>
+                <div className="mt-4 text-5xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.9)]">
+                  {streakLevelModal}
+                </div>
+                <div className="mt-3 h-10 w-10 rounded-full bg-gradient-to-tr from-orange-500 via-yellow-400 to-amber-500 flex items-center justify-center text-2xl">
+                  🏉
+                </div>
+                <div className="mt-3 px-3 py-1 rounded-full bg-black/40 text-[11px] font-semibold tracking-wide text-slate-100">
+                  STREAKr Badge
+                </div>
+              </div>
+
+              <h2 className="relative text-xl font-extrabold text-white text-center">
+                {streakModalContent.title}
+              </h2>
+              <p className="relative mt-1 text-sm text-orange-200 text-center">
+                {streakModalContent.subtitle}
+              </p>
+              <p className="relative mt-3 text-sm text-slate-100 text-center">
+                {streakModalContent.body}
+              </p>
+
+              <div className="relative mt-5 flex flex-col sm:flex-row gap-3 justify-center">
+                <button
+                  type="button"
+                  onClick={() => setStreakLevelModal(null)}
+                  className="inline-flex items-center justify-center rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400"
+                >
+                  Keep playing
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-2 text-sm font-semibold text-white hover:border-orange-400 hover:text-orange-300"
+                >
+                  Share this streak
                 </button>
               </div>
             </div>
-
-            <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
-              {commentsLoading ? (
-                <p className="text-sm text-gray-400">Loading comments…</p>
-              ) : comments.length === 0 ? (
-                <p className="text-sm text-gray-400">
-                  No comments yet. Be the first!
-                </p>
-              ) : (
-                <ul className="space-y-3">
-                  {comments.map((c) => (
-                    <li
-                      key={c.id}
-                      className="bg-[#0b1220] rounded-md px-3 py-2 text-sm"
-                    >
-                      <div className="flex justify-between mb-1">
-                        <span className="font-semibold">
-                          {c.displayName || "User"}
-                        </span>
-                        {c.createdAt && (
-                          <span className="text-[11px] text-gray-400">
-                            {c.createdAt}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-100">{c.body}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }
