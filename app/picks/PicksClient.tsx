@@ -435,7 +435,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // silent auto refresh every 15s for questions/picks
+  // silent auto refresh every 10s for questions/picks
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -638,7 +638,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // 🔥 Detect milestones: 10, 15, 20 win streak
+  // 🔥 Detect milestones: 5, 10, 15, 20 win streak
   useEffect(() => {
     if (!userCurrentStreak) return;
     if ([10, 15, 20].includes(userCurrentStreak)) {
