@@ -1131,6 +1131,9 @@ export default function PicksClient() {
           const isLocked = row.status !== "open";
           const isSponsor = !!row.isSponsorQuestion;
 
+          const isSelectedYes = row.userPick === "yes";
+          const isSelectedNo = row.userPick === "no";
+
           const parsed =
             row.sport.toUpperCase() === "AFL"
               ? parseAflMatchTeams(row.match)
@@ -1311,6 +1314,7 @@ export default function PicksClient() {
                 {/* PICK / YES / NO / RESULT PILL */}
                 <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                   <div className="flex gap-2 mb-0.5">
+                    {/* YES BUTTON */}
                     <button
                       type="button"
                       onClick={() => handlePick(row, "yes")}
@@ -1318,20 +1322,20 @@ export default function PicksClient() {
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
-                          isYesActive
+                          isLocked
+                            ? isSelectedYes
+                              ? "bg-green-700 opacity-85 border-2 border-white cursor-default"
+                              : "bg-green-900 opacity-40 cursor-not-allowed"
+                            : isYesActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-green-600 hover:bg-green-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-40 cursor-not-allowed hover:bg-green-600"
-                            : ""
                         }
                       `}
                     >
                       Yes
                     </button>
 
+                    {/* NO BUTTON */}
                     <button
                       type="button"
                       onClick={() => handlePick(row, "no")}
@@ -1339,14 +1343,13 @@ export default function PicksClient() {
                       className={`
                         px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
                         ${
-                          isNoActive
+                          isLocked
+                            ? isSelectedNo
+                              ? "bg-red-700 opacity-85 border-2 border-white cursor-default"
+                              : "bg-red-900 opacity-40 cursor-not-allowed"
+                            : isNoActive
                             ? "bg-sky-500 text-black ring-2 ring-white"
                             : "bg-red-600 hover:bg-red-700"
-                        }
-                        ${
-                          isLocked
-                            ? "opacity-40 cursor-not-allowed hover:bg-red-600"
-                            : ""
                         }
                       `}
                     >
