@@ -1354,7 +1354,7 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  {/* QUESTION + COMMENTS + mobile outcome pill */}
+                  {/* QUESTION + COMMENTS */}
                   <div className="col-span-9 md:col-span-2">
                     <div className="text-sm leading-snug font-medium">
                       {row.question}
@@ -1383,22 +1383,11 @@ export default function PicksClient() {
                         </span>
                       )}
                     </div>
-
-                    {/* Mobile-only outcome pill (under question) */}
-                    {outcomeLabel && (
-                      <div className="mt-1 md:hidden">
-                        <span
-                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
-                        >
-                          {outcomeLabel}
-                        </span>
-                      </div>
-                    )}
                   </div>
 
-                  {/* PICK / YES / NO / RESULT PILL */}
-                  <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                    <div className="flex gap-2 mb-0.5">
+                  {/* PICK / YES / NO / OUTCOME PILL */}
+                  <div className="col-span-12 md:col-span-2 flex flex-col items-end gap-1">
+                    <div className="flex gap-2">
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
@@ -1442,9 +1431,9 @@ export default function PicksClient() {
                       </button>
                     </div>
 
-                    {/* Desktop outcome pill – aligned with buttons */}
+                    {/* Outcome pill – visible on ALL breakpoints */}
                     {outcomeLabel && (
-                      <div className="mt-2 hidden md:block">
+                      <div className="mt-1 self-stretch md:self-auto flex justify-end">
                         <span
                           className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
                         >
@@ -1532,7 +1521,7 @@ export default function PicksClient() {
                   value={commentText}
                   onChange={handleCommentChange}
                   rows={3}
-                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="Add your comment…"
                 />
                 {commentsError && (
