@@ -1,3 +1,4 @@
+// /app/picks/PicksClient.tsx
 "use client";
 
 import {
@@ -20,9 +21,11 @@ import {
   doc,
   orderBy,
   limit,
+  setDoc,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type StreakMilestone = 3 | 5 | 10 | 15 | 20;
 
 type ApiQuestion = {
   id: string;
@@ -297,14 +300,19 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
+  // user streak badges from Firestore
+  const [userBadges, setUserBadges] = useState<Record<string, boolean>>(
+    {}
+  );
+  const [badgesLoaded, setBadgesLoaded] = useState(false);
+
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
   // Confetti + milestone modals
   const [showConfetti, setShowConfetti] = useState(false);
-  const [streakLevelModal, setStreakLevelModal] = useState<
-    3 | 5 | 10 | 15 | 20 | null
-  >(null);
+  const [streakLevelModal, setStreakLevelModal] =
+    useState<StreakMilestone | null>(null);
   const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
   const [windowSize, setWindowSize] = useState({
     width: 0,
@@ -650,11 +658,13 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // current user streak – live
+  // current user streak + badges – live
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
+      setUserBadges({});
+      setBadgesLoaded(true);
       return;
     }
 
@@ -676,18 +686,27 @@ export default function PicksClient() {
             typeof data.longestStreak === "number"
               ? data.longestStreak
               : 0;
+          const badges =
+            data.streakBadges && typeof data.streakBadges === "object"
+              ? (data.streakBadges as Record<string, boolean>)
+              : {};
+
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
+          setUserBadges(badges);
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
+          setUserBadges({});
         }
+        setBadgesLoaded(true);
         setStreakLoading(false);
       },
       (err) => {
         console.error("User streak listener error", err);
         setStreakError("Could not load streak tracker.");
         setStreakLoading(false);
+        setBadgesLoaded(true);
       }
     );
 
@@ -696,22 +715,47 @@ export default function PicksClient() {
 
   // -------- Streak milestone celebration (3,5,10,15,20) --------
   useEffect(() => {
+    if (!badgesLoaded) return;
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
 
-    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
-      3, 5, 10, 15, 20,
-    ];
+    const milestones: StreakMilestone[] = [3, 5, 10, 15, 20];
     const hit = milestones.find((m) => userCurrentStreak === m);
     if (!hit) return;
 
     setLastCelebratedStreak(userCurrentStreak);
-    setStreakLevelModal(hit);
-    setShowConfetti(true);
 
-    const timer = setTimeout(() => setShowConfetti(false), 5000);
-    return () => clearTimeout(timer);
-  }, [userCurrentStreak, lastCelebratedStreak]);
+    const badgeKey = String(hit);
+    const alreadyUnlocked = !!userBadges[badgeKey];
+
+    // New badge: show modal + confetti, save to Firestore
+    if (!alreadyUnlocked) {
+      setStreakLevelModal(hit);
+      if (user) {
+        const userRef = doc(db, "users", user.uid);
+        const newBadges = { ...userBadges, [badgeKey]: true };
+        setUserBadges(newBadges);
+        setDoc(
+          userRef,
+          { streakBadges: newBadges },
+          { merge: true }
+        ).catch((err) =>
+          console.error("Failed to save streak badge", err)
+        );
+      }
+    }
+
+    // Confetti always when you newly hit the milestone this round
+    setShowConfetti(true);
+    const timer = window.setTimeout(() => setShowConfetti(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [
+    userCurrentStreak,
+    lastCelebratedStreak,
+    userBadges,
+    badgesLoaded,
+    user,
+  ]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -997,9 +1041,9 @@ export default function PicksClient() {
     }
   };
 
-  // -------- Render --------
   const streakModalContent = getStreakModalContent();
 
+  // -------- Render --------
   return (
     <>
       {/* CONFETTI OVERLAY */}
@@ -1212,31 +1256,35 @@ export default function PicksClient() {
             // -------- Outcome pill logic (device-independent) --------
             type OutcomeKind = "win" | "loss" | "void" | null;
             let outcomeKind: OutcomeKind = null;
+            let outcomeLabel: string | null = null;
 
-            const outcome = normaliseOutcome(row.correctOutcome);
-
-            if (row.status === "void" || outcome === "void") {
+            if (row.status === "void") {
               outcomeKind = "void";
-            } else if (row.status === "final" && outcome && row.userPick) {
-              outcomeKind =
-                row.userPick === outcome ? "win" : "loss";
-            }
+              outcomeLabel = "Question voided – no streak change";
+            } else if (row.status === "final") {
+              const outcome = normaliseOutcome(row.correctOutcome);
+              if (row.userPick && outcome) {
+                outcomeKind =
+                  row.userPick === outcome ? "win" : "loss";
+              }
 
-            const outcomeLabel =
-              outcomeKind === "void"
-                ? "Question voided – no streak change"
-                : outcomeKind === "win"
-                ? "You were right!"
-                : outcomeKind === "loss"
-                ? "Wrong pick"
-                : null;
+              if (outcomeKind === "win") {
+                outcomeLabel = "You were right!";
+              } else if (outcomeKind === "loss") {
+                outcomeLabel = "Wrong pick";
+              } else {
+                outcomeLabel = "Finalised";
+              }
+            }
 
             const outcomeClasses =
               outcomeKind === "void"
                 ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
                 : outcomeKind === "win"
                 ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
-                : "bg-red-500/15 border-red-400/60 text-red-300";
+                : outcomeKind === "loss"
+                ? "bg-red-500/15 border-red-400/60 text-red-300"
+                : "bg-slate-700/40 border-slate-400/40 text-slate-100";
 
             return (
               <div
@@ -1366,7 +1414,7 @@ export default function PicksClient() {
                       )}
                     </div>
 
-                    {/* Outcome pill now lives here so it always appears on mobile */}
+                    {/* Outcome pill – same DOM for desktop + mobile */}
                     {outcomeLabel && (
                       <div className="mt-1">
                         <span
@@ -1378,7 +1426,7 @@ export default function PicksClient() {
                     )}
                   </div>
 
-                  {/* PICK / YES / NO / PERCENTS (no pill here anymore) */}
+                  {/* PICK / YES / NO / PERCENTS */}
                   <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                     <div className="flex gap-2 mb-0.5">
                       <button
