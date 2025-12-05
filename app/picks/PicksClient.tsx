@@ -992,9 +992,9 @@ export default function PicksClient() {
           numberOfPieces={350}
           recycle={false}
         />
-      )}
-      <div...div>
-    /}
+    />
+    )}
+      
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
         <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
           <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
