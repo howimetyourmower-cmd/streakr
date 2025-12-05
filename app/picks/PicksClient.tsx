@@ -1306,102 +1306,95 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  {/* QUESTION + COMMENTS */}
-                  <div className="col-span-9 md:col-span-2">
-                    <div className="text-sm leading-snug font-medium">
-                      {row.question}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => openComments(row)}
-                        className="text-[11px] text-sky-300 underline"
-                      >
-                        Comments ({row.commentCount ?? 0})
-                      </button>
-                      {isActive && (
-                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
-                          Streak Pick
-                        </span>
-                      )}
-                      {isLocked && (
-                        <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          Locked
-                        </span>
-                      )}
-                      {isSponsor && (
-                        <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
-                          Sponsor Question
-                        </span>
-                      )}
-                    </div>
-                  </div>
+{/* QUESTION + COMMENTS + OUTCOME PILL */}
+<div className="col-span-12 md:col-span-2">
+  <div className="text-sm leading-snug font-medium">
+    {row.question}
+  </div>
 
-                  {/* PICK / YES / NO / OUTCOME PILL */}
-                  <div className="col-span-12 md:col-span-2 flex flex-col items-end gap-1">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handlePick(row, "yes")}
-                        disabled={isLocked}
-                        className={`
-                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                          ${
-                            isYesActive
-                              ? "bg-sky-500 text-black ring-2 ring-white"
-                              : "bg-green-600 hover:bg-green-700"
-                          }
-                          ${
-                            isLocked
-                              ? "opacity-40 cursor-not-allowed hover:bg-green-600"
-                              : ""
-                          }
-                        `}
-                      >
-                        Yes
-                      </button>
+  <div className="flex flex-wrap items-center gap-2 mt-0.5">
+    <button
+      type="button"
+      onClick={() => openComments(row)}
+      className="text-[11px] text-sky-300 underline"
+    >
+      Comments ({row.commentCount ?? 0})
+    </button>
 
-                      <button
-                        type="button"
-                        onClick={() => handlePick(row, "no")}
-                        disabled={isLocked}
-                        className={`
-                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                          ${
-                            isNoActive
-                              ? "bg-sky-500 text-black ring-2 ring-white"
-                              : "bg-red-600 hover:bg-red-700"
-                          }
-                          ${
-                            isLocked
-                              ? "opacity-40 cursor-not-allowed hover:bg-red-600"
-                              : ""
-                          }
-                        `}
-                      >
-                        No
-                      </button>
-                    </div>
+    {isActive && (
+      <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+        Streak Pick
+      </span>
+    )}
 
-                    {/* Outcome pill – ALWAYS visible if we have a label */}
-                    {outcomeLabel && (
-                      <span
-                        className={`mt-1 inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${outcomeClasses}`}
-                      >
-                        {outcomeLabel}
-                      </span>
-                    )}
+    {isLocked && (
+      <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+        Locked
+      </span>
+    )}
 
-                    <div className="text-[11px] text-white/85">
-                      Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
-                      {Math.round(noPct ?? 0)}%
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+    {isSponsor && (
+      <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+        Sponsor Question
+      </span>
+    )}
+  </div>
+
+  {/* Outcome pill lives HERE now so it always shows on mobile */}
+  {outcomeLabel && (
+    <div className="mt-1">
+      <span
+        className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${outcomeClasses}`}
+      >
+        {outcomeLabel}
+      </span>
+    </div>
+  )}
+</div>
+
+
+                 {/* PICK / YES / NO / PERCENTS */}
+<div className="col-span-12 md:col-span-2 flex flex-col items-end gap-1">
+  <div className="flex gap-2">
+    <button
+      type="button"
+      onClick={() => handlePick(row, "yes")}
+      disabled={isLocked}
+      className={`
+        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+        ${isYesActive
+          ? "bg-sky-500 text-black ring-2 ring-white"
+          : "bg-green-600 hover:bg-green-700"}
+        ${isLocked
+          ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+          : ""}
+      `}
+    >
+      Yes
+    </button>
+
+    <button
+      type="button"
+      onClick={() => handlePick(row, "no")}
+      disabled={isLocked}
+      className={`
+        px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
+        ${isNoActive
+          ? "bg-sky-500 text-black ring-2 ring-white"
+          : "bg-red-600 hover:bg-red-700"}
+        ${isLocked
+          ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+          : ""}
+      `}
+    >
+      No
+    </button>
+  </div>
+
+  <div className="text-[11px] text-white/85">
+    Yes: {Math.round(yesPct ?? 0)}% • No: {Math.round(noPct ?? 0)}%
+  </div>
+</div>
 
         {/* AUTH MODAL */}
         {showAuthModal && (
