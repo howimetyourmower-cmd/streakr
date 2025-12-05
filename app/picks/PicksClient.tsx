@@ -295,7 +295,6 @@ export default function PicksClient() {
   const [leaderLongestStreak, setLeaderLongestStreak] = useState<
     number | null
   >(null);
-  const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
   // share button status
@@ -625,9 +624,6 @@ export default function PicksClient() {
 
   // leader longestStreak – live
   useEffect(() => {
-    setStreakLoading(true);
-    setStreakError("");
-
     const usersRef = collection(db, "users");
     const topQ = query(usersRef, orderBy("longestStreak", "desc"), limit(1));
 
@@ -644,12 +640,10 @@ export default function PicksClient() {
           leaderVal = val;
         });
         setLeaderLongestStreak(leaderVal);
-        setStreakLoading(false);
       },
       (err) => {
         console.error("Leader streak listener error", err);
         setStreakError("Could not load streak tracker.");
-        setStreakLoading(false);
       }
     );
 
@@ -664,9 +658,6 @@ export default function PicksClient() {
       setStreakBadges({});
       return;
     }
-
-    setStreakLoading(true);
-    setStreakError("");
 
     const userRef = doc(db, "users", user.uid);
 
@@ -695,12 +686,10 @@ export default function PicksClient() {
           setUserLongestStreak(0);
           setStreakBadges({});
         }
-        setStreakLoading(false);
       },
       (err) => {
         console.error("User streak listener error", err);
         setStreakError("Could not load streak tracker.");
-        setStreakLoading(false);
       }
     );
 
@@ -1155,11 +1144,6 @@ export default function PicksClient() {
             </div>
           </div>
 
-          {streakLoading && (
-            <p className="mt-2 text-[10px] text-white/50">
-              Loading streak data…
-            </p>
-          )}
           {streakError && (
             <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
           )}
@@ -1548,7 +1532,7 @@ export default function PicksClient() {
                   value={commentText}
                   onChange={handleCommentChange}
                   rows={3}
-                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="Add your comment…"
                 />
                 {commentsError && (
