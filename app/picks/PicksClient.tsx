@@ -20,6 +20,7 @@ import {
   doc,
   orderBy,
   limit,
+  setDoc,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -310,6 +311,11 @@ export default function PicksClient() {
     width: 0,
     height: 0,
   });
+
+  // lifetime streak badges pulled from user doc
+  const [streakBadges, setStreakBadges] = useState<
+    Record<string, boolean>
+  >({});
 
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
@@ -650,11 +656,12 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // current user streak – live
+  // current user streak + badges – live
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
+      setStreakBadges({});
       return;
     }
 
@@ -676,11 +683,17 @@ export default function PicksClient() {
             typeof data.longestStreak === "number"
               ? data.longestStreak
               : 0;
+          const badges =
+            data.streakBadges && typeof data.streakBadges === "object"
+              ? (data.streakBadges as Record<string, boolean>)
+              : {};
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
+          setStreakBadges(badges);
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
+          setStreakBadges({});
         }
         setStreakLoading(false);
       },
@@ -696,8 +709,10 @@ export default function PicksClient() {
 
   // -------- Streak milestone celebration (3,5,10,15,20) --------
   useEffect(() => {
-    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
-      return;
+    if (!userCurrentStreak || userCurrentStreak <= 0) return;
+
+    // avoid re-triggering for the same streak value
+    if (userCurrentStreak === lastCelebratedStreak) return;
 
     const milestones: Array<3 | 5 | 10 | 15 | 20> = [
       3, 5, 10, 15, 20,
@@ -706,12 +721,32 @@ export default function PicksClient() {
     if (!hit) return;
 
     setLastCelebratedStreak(userCurrentStreak);
-    setStreakLevelModal(hit);
-    setShowConfetti(true);
 
+    const badgeKey = String(hit);
+    const alreadyHasBadge = !!streakBadges[badgeKey];
+
+    // Always show confetti when a milestone is hit
+    setShowConfetti(true);
     const timer = setTimeout(() => setShowConfetti(false), 5000);
+
+    // Show the badge modal only the first time this milestone is hit (lifetime)
+    if (!alreadyHasBadge && user) {
+      setStreakLevelModal(hit);
+
+      const userRef = doc(db, "users", user.uid);
+      setDoc(
+        userRef,
+        {
+          [`streakBadges.${badgeKey}`]: true,
+        } as any,
+        { merge: true }
+      ).catch((err) =>
+        console.error("Failed to record streak badge", err)
+      );
+    }
+
     return () => clearTimeout(timer);
-  }, [userCurrentStreak, lastCelebratedStreak]);
+  }, [userCurrentStreak, streakBadges, lastCelebratedStreak, user]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
