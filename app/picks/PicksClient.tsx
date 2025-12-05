@@ -27,6 +27,8 @@ import {
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type StreakMilestone = 3 | 5 | 10 | 15 | 20;
 
+type QuestionResult = "correct" | "wrong" | "pending" | "void";
+
 type ApiQuestion = {
   id: string;
   quarter: number;
@@ -40,6 +42,11 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
+
+  // NEW: result from API – per-user outcome for this question
+  result?: QuestionResult;
+
+  // older / backend fields we still support
   correctOutcome?: "yes" | "no" | "void" | null;
   outcome?: "yes" | "no" | "void" | "lock" | null;
 };
@@ -68,6 +75,11 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
+
+  // Result as sent from API (preferred source of truth)
+  result?: QuestionResult;
+
+  // Fallback outcome fields
   correctOutcome?: "yes" | "no" | "void" | null;
 };
 
@@ -429,6 +441,10 @@ export default function PicksClient() {
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
+
+          // NEW: copy result from API if present
+          result: q.result ?? prev?.result,
+
           correctOutcome,
         };
       })
@@ -1258,10 +1274,18 @@ export default function PicksClient() {
             let outcomeKind: OutcomeKind = null;
             let outcomeLabel: string | null = null;
 
-            if (row.status === "void") {
+            // 1) Result from API (preferred, works across devices)
+            if (row.result === "void" || row.status === "void") {
               outcomeKind = "void";
               outcomeLabel = "Question voided – no streak change";
+            } else if (row.result === "correct") {
+              outcomeKind = "win";
+              outcomeLabel = "You were right!";
+            } else if (row.result === "wrong") {
+              outcomeKind = "loss";
+              outcomeLabel = "Wrong pick";
             } else if (row.status === "final") {
+              // 2) Fallback – infer from userPick + correctOutcome
               const outcome = normaliseOutcome(row.correctOutcome);
               if (row.userPick && outcome) {
                 outcomeKind =
@@ -1506,7 +1530,7 @@ export default function PicksClient() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
                   href="/auth?mode=login&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                  className="elf-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
                   Login
