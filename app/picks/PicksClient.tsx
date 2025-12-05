@@ -20,6 +20,7 @@ import {
   doc,
   orderBy,
   limit,
+  setDoc,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -297,6 +298,12 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
+  // user badges + lastRoundCelebrated from Firestore
+  const [userBadges, setUserBadges] = useState<Record<string, boolean>>({});
+  const [lastRoundCelebratedMap, setLastRoundCelebratedMap] = useState<
+    Record<string, string>
+  >({});
+
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
@@ -305,7 +312,6 @@ export default function PicksClient() {
   const [streakLevelModal, setStreakLevelModal] = useState<
     3 | 5 | 10 | 15 | 20 | null
   >(null);
-  const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
   const [windowSize, setWindowSize] = useState({
     width: 0,
     height: 0,
@@ -650,11 +656,13 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // current user streak – live
+  // current user streak – live, plus badges + lastRoundCelebrated
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
+      setUserBadges({});
+      setLastRoundCelebratedMap({});
       return;
     }
 
@@ -676,11 +684,19 @@ export default function PicksClient() {
             typeof data.longestStreak === "number"
               ? data.longestStreak
               : 0;
+          const badges = (data.badges ?? {}) as Record<string, boolean>;
+          const lastRoundCelebrated = (data.lastRoundCelebrated ??
+            {}) as Record<string, string>;
+
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
+          setUserBadges(badges);
+          setLastRoundCelebratedMap(lastRoundCelebrated);
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
+          setUserBadges({});
+          setLastRoundCelebratedMap({});
         }
         setStreakLoading(false);
       },
@@ -694,24 +710,67 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // -------- Streak milestone celebration (3,5,10,15,20) --------
+  // -------- Streak milestone celebration (3,5,10,15,20) with Firestore badges + per-round confetti --------
   useEffect(() => {
-    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
-      return;
+    if (!user) return;
+    if (!userCurrentStreak || userCurrentStreak <= 0) return;
 
-    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
-      3, 5, 10, 15, 20,
-    ];
+    const milestones: Array<3 | 5 | 10 | 15 | 20> = [3, 5, 10, 15, 20];
     const hit = milestones.find((m) => userCurrentStreak === m);
     if (!hit) return;
 
-    setLastCelebratedStreak(userCurrentStreak);
-    setStreakLevelModal(hit);
-    setShowConfetti(true);
+    const levelKey = `level${hit}`; // badges.level3, etc
+    const roundKey = String(hit); // "3", "5", ...
 
-    const timer = setTimeout(() => setShowConfetti(false), 5000);
-    return () => clearTimeout(timer);
-  }, [userCurrentStreak, lastCelebratedStreak]);
+    const currentRoundCode =
+      roundNumber === null
+        ? "R?"
+        : roundNumber === 0
+        ? "OR"
+        : `R${roundNumber}`;
+
+    const alreadyBadge = !!userBadges?.[levelKey];
+    const lastRoundForLevel = lastRoundCelebratedMap?.[roundKey];
+
+    const shouldCelebrate = lastRoundForLevel !== currentRoundCode;
+
+    const run = async () => {
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const updates: Record<string, any> = {};
+
+        // Lifetime badge – only ever set from false/undefined -> true
+        if (!alreadyBadge) {
+          updates[`badges.${levelKey}`] = true;
+        }
+
+        // Per-round confetti – only once per round per level
+        if (shouldCelebrate) {
+          updates[`lastRoundCelebrated.${roundKey}`] = currentRoundCode;
+        }
+
+        if (Object.keys(updates).length > 0) {
+          await setDoc(userRef, updates, { merge: true });
+        }
+
+        if (shouldCelebrate) {
+          setStreakLevelModal(hit);
+          setShowConfetti(true);
+          setTimeout(() => setShowConfetti(false), 5000);
+        }
+      } catch (err) {
+        console.error("Failed to update badges/celebration", err);
+      }
+    };
+
+    run();
+  }, [
+    user,
+    userCurrentStreak,
+    roundNumber,
+    userBadges,
+    lastRoundCelebratedMap,
+  ]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -965,32 +1024,32 @@ export default function PicksClient() {
       case 3:
         return {
           title: "3 in a row!",
-          subtitle: "Keep building 😎",
-          body: "Nice start. You’re building momentum – keep your head and stack that streak.",
+          subtitle: "Nice run this round 😎",
+          body: "You’re building momentum in this round – keep your head and stack that streak.",
         };
       case 5:
         return {
           title: "Bang! 5 straight!",
           subtitle: "You’re on the money 🔥",
-          body: "That’s a serious run. Lock in, stay sharp and push for double digits.",
+          body: "This round’s run is heating up. Lock in, stay sharp and push for double digits.",
         };
       case 10:
         return {
           title: "Streak Level 10",
           subtitle: "That’s elite 💪🏻",
-          body: "Ten straight is no joke. You’ve earned your first STREAKr badge – make sure your mates know about it.",
+          body: "Ten straight in this round is no joke. Keep it rolling and see how far you can take this run.",
         };
       case 15:
         return {
           title: "15 in a row",
           subtitle: "Dominance level unlocked 💪🏻",
-          body: "This run is getting ridiculous. You’re in rare air now – every pick is appointment viewing.",
+          body: "This round’s streak is getting ridiculous. You’re in rare air now – every pick is appointment viewing.",
         };
       case 20:
         return {
           title: "20 straight",
           subtitle: "What are we witnessing? GOAT 🏆",
-          body: "Twenty in a row is all-time. You’ve unlocked legendary STREAKr status – screenshotted or it didn’t happen.",
+          body: "Twenty in a row this round is all-time. You’re in legendary STREAKr territory.",
         };
       default:
         return null;
@@ -1367,7 +1426,7 @@ export default function PicksClient() {
                   </div>
 
                   {/* PICK / YES / NO / RESULT PILL */}
-                  <div className="col-span-12 md:col-span-2 flex flex-col items-end">
+                  <div className="col-span-12 md:col-span-2 flex flex-col items-start md:items-end">
                     <div className="flex gap-2 mb-0.5">
                       <button
                         type="button"
@@ -1412,7 +1471,7 @@ export default function PicksClient() {
                       </button>
                     </div>
 
-                    {/* Outcome pill – now purely API-driven, same on desktop + mobile */}
+                    {/* Outcome pill – API-driven, same on desktop + mobile, sits under buttons on small screens */}
                     {outcomeLabel && (
                       <div className="mt-2">
                         <span
@@ -1423,7 +1482,7 @@ export default function PicksClient() {
                       </div>
                     )}
 
-                    <div className="text-[11px] text-white/85">
+                    <div className="mt-1 text-[11px] text-white/85">
                       Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
                       {Math.round(noPct ?? 0)}%
                     </div>
