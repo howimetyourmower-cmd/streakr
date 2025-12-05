@@ -20,7 +20,6 @@ import {
   doc,
   orderBy,
   limit,
-  setDoc,
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -82,10 +81,6 @@ type Comment = {
 };
 
 type ActiveOutcome = "yes" | "no" | null;
-
-// ---------- Streak milestones & badges ----------
-const STREAK_MILESTONES = [3, 5, 10, 15, 20] as const;
-type StreakMilestone = (typeof STREAK_MILESTONES)[number];
 
 // ---------- AFL team logo helpers ----------
 
@@ -231,11 +226,13 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
+// localStorage keys
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
 ): "yes" | "no" | "void" | null => {
@@ -261,18 +258,21 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
+  // Single active streak pick (for highlight ONLY)
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
     null
   );
   const [activeOutcome, setActiveOutcome] =
     useState<ActiveOutcome>(null);
 
+  // local history of all picks (per device)
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
   const pickHistoryRef = useRef<PickHistory>({});
   useEffect(() => {
     pickHistoryRef.current = pickHistory;
   }, [pickHistory]);
 
+  // comments state
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -281,8 +281,10 @@ export default function PicksClient() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
+  // auth modal
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  // streak progress tracker
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
     null
   );
@@ -295,8 +297,10 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
+  // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
+  // Confetti + milestone modals
   const [showConfetti, setShowConfetti] = useState(false);
   const [streakLevelModal, setStreakLevelModal] = useState<
     3 | 5 | 10 | 15 | 20 | null
@@ -307,19 +311,18 @@ export default function PicksClient() {
     height: 0,
   });
 
-  const [unlockedBadges, setUnlockedBadges] = useState<
-    Record<string, boolean>
-  >({});
-
+  // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
     Record<string, { yes?: number; no?: number }>
   >({});
 
+  // keep a ref of latest rows so fetchPicks can preserve stuff across refresh
   const rowsRef = useRef<QuestionRow[]>([]);
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
 
+  // window size for confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
@@ -333,6 +336,7 @@ export default function PicksClient() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // -------- Date formatting ----------
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -354,6 +358,7 @@ export default function PicksClient() {
     };
   };
 
+  // ---- flatten API -> QuestionRow, preserving picks from history/prevRows ----
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
@@ -364,6 +369,7 @@ export default function PicksClient() {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
+        // normalise whatever backend sends as outcome
         const rawOutcome =
           normaliseOutcome(q.correctOutcome) ??
           normaliseOutcome(q.outcome);
@@ -373,6 +379,7 @@ export default function PicksClient() {
             ? rawOutcome
             : null;
 
+        // remember non-zero % so they don’t reset to 0 on refresh
         if (
           typeof q.yesPercent === "number" ||
           typeof q.noPercent === "number"
@@ -401,6 +408,7 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
+          // priority: API -> local history -> previous rows
           userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
             typeof q.yesPercent === "number"
@@ -418,6 +426,7 @@ export default function PicksClient() {
       })
     );
 
+  // -------- Fetch picks (initial + silent refresh) --------
   const fetchPicks = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
       setLoading(true);
@@ -454,6 +463,7 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Load pick history from localStorage --------
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -468,11 +478,13 @@ export default function PicksClient() {
     }
   }, []);
 
+  // initial load
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // silent auto refresh every 15s for questions/picks
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -481,6 +493,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // -------- Live comment counts from Firestore --------
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   useEffect(() => {
@@ -532,6 +545,7 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
+  // -------- Local persistence of *current* streak pick --------
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!rows.length) return;
@@ -557,6 +571,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
+  // -------- Also load from /api/user-picks just to highlight streak pick --------
   useEffect(() => {
     const loadServerPick = async () => {
       if (!user) {
@@ -600,6 +615,9 @@ export default function PicksClient() {
     }
   }, [user, rows.length]);
 
+  // -------- Realtime streak progress (user vs leader) from Firestore --------
+
+  // leader longestStreak – live
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -632,11 +650,11 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
+  // current user streak – live
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
-      setUnlockedBadges({});
       return;
     }
 
@@ -660,16 +678,9 @@ export default function PicksClient() {
               : 0;
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
-
-          if (data.streakBadges && typeof data.streakBadges === "object") {
-            setUnlockedBadges(data.streakBadges as Record<string, boolean>);
-          } else {
-            setUnlockedBadges({});
-          }
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
-          setUnlockedBadges({});
         }
         setStreakLoading(false);
       },
@@ -683,67 +694,33 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
+  // -------- Streak milestone celebration (3,5,10,15,20) --------
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
 
-    const hit = STREAK_MILESTONES.find(
-      (m) => userCurrentStreak === m
-    );
+    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
+      3, 5, 10, 15, 20,
+    ];
+    const hit = milestones.find((m) => userCurrentStreak === m);
     if (!hit) return;
 
-    const milestoneKey = String(hit);
-    const alreadyUnlocked = !!unlockedBadges[milestoneKey];
-
-    const roundKey = roundNumber ?? -1;
-    const localKey = `streakr_confetti_v1_${roundKey}_${milestoneKey}`;
-    let alreadyConfettiThisRound = false;
-
-    if (typeof window !== "undefined") {
-      alreadyConfettiThisRound =
-        window.localStorage.getItem(localKey) === "1";
-    }
-
-    if (!alreadyConfettiThisRound) {
-      setShowConfetti(true);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(localKey, "1");
-      }
-      setTimeout(() => setShowConfetti(false), 5000);
-    }
-
-    if (!alreadyUnlocked && user) {
-      setStreakLevelModal(hit);
-      const userRef = doc(db, "users", user.uid);
-      const nextBadges = {
-        ...(unlockedBadges || {}),
-        [milestoneKey]: true,
-      };
-      setUnlockedBadges(nextBadges);
-      setDoc(
-        userRef,
-        { streakBadges: nextBadges },
-        { merge: true }
-      ).catch((err) =>
-        console.error("Failed to save streak badge", err)
-      );
-    }
-
     setLastCelebratedStreak(userCurrentStreak);
-  }, [
-    userCurrentStreak,
-    lastCelebratedStreak,
-    unlockedBadges,
-    roundNumber,
-    user,
-  ]);
+    setStreakLevelModal(hit);
+    setShowConfetti(true);
 
+    const timer = setTimeout(() => setShowConfetti(false), 5000);
+    return () => clearTimeout(timer);
+  }, [userCurrentStreak, lastCelebratedStreak]);
+
+  // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
     if (f === "all") setFilteredRows(rows);
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
+  // -------- Yes/No % display --------
   const getDisplayPercents = (row: QuestionRow) => {
     const serverYes =
       typeof row.yesPercent === "number" ? row.yesPercent : undefined;
@@ -770,6 +747,7 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
+  // -------- Save Pick via /api/user-picks + localStorage --------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
@@ -778,9 +756,11 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
+    // highlight this as the current streak pick
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
 
+    // update local state so this question always has a userPick
     setRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
@@ -788,6 +768,7 @@ export default function PicksClient() {
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
 
+    // update local pick history (for all future loads/refresh)
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev, [row.id]: pick };
       try {
@@ -803,6 +784,7 @@ export default function PicksClient() {
       return next;
     });
 
+    // persist "current" pick separately (for streak rules)
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(
@@ -837,6 +819,7 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Status pill styling --------
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
@@ -852,6 +835,7 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Comment drawer logic --------
   const openComments = async (row: QuestionRow) => {
     setCommentsOpenFor(row);
     setComments([]);
@@ -925,6 +909,7 @@ export default function PicksClient() {
     }
   };
 
+  // --- helper for streak bar widths ---
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
     userLongestStreak ?? 0,
@@ -939,6 +924,7 @@ export default function PicksClient() {
     [rows]
   );
 
+  // -------- Share handler --------
   const handleShare = async () => {
     try {
       const shareUrl =
@@ -971,6 +957,7 @@ export default function PicksClient() {
     setTimeout(() => setShareStatus(""), 3000);
   };
 
+  // -------- Streak level modal content --------
   const getStreakModalContent = () => {
     if (!streakLevelModal) return null;
 
@@ -1010,10 +997,12 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Render --------
   const streakModalContent = getStreakModalContent();
 
   return (
     <>
+      {/* CONFETTI OVERLAY */}
       {showConfetti && windowSize.width > 0 && (
         <Confetti
           width={windowSize.width}
@@ -1022,9 +1011,6 @@ export default function PicksClient() {
           recycle={false}
         />
       )}
-      <div>...</div>
-    </>
-    )
 
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
         <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
@@ -1086,6 +1072,7 @@ export default function PicksClient() {
             </div>
           </div>
 
+          {/* Bars: Current / Longest / Leader */}
           <div className="space-y-3">
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
@@ -1146,6 +1133,7 @@ export default function PicksClient() {
           )}
         </div>
 
+        {/* SPONSOR QUESTION INFO STRIP */}
         {hasSponsorQuestion && (
           <div className="mb-4 rounded-xl bg-gradient-to-r from-amber-500/20 via-amber-400/10 to-transparent border border-amber-500/40 px-4 py-3 text-xs sm:text-sm text-amber-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
             <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
@@ -1162,6 +1150,7 @@ export default function PicksClient() {
 
         {error && <p className="text-red-500 mb-2">{error}</p>}
 
+        {/* FILTER BUTTONS */}
         <div className="flex flex-wrap gap-2 mb-6">
           {(["all", "open", "final", "pending", "void"] as const).map((f) => (
             <button
@@ -1178,6 +1167,7 @@ export default function PicksClient() {
           ))}
         </div>
 
+        {/* HEADER ROW (desktop) */}
         <div className="hidden md:grid grid-cols-12 text-gray-300 text-xs mb-2 px-2">
           <div className="col-span-2">START</div>
           <div className="col-span-1">SPORT</div>
@@ -1190,6 +1180,7 @@ export default function PicksClient() {
 
         {loading && <p>Loading…</p>}
 
+        {/* ROWS */}
         <div className="space-y-2">
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
@@ -1218,6 +1209,7 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
+            // -------- Outcome pill logic (device-independent) --------
             type OutcomeKind = "win" | "loss" | "void" | null;
             let outcomeKind: OutcomeKind = null;
 
@@ -1343,7 +1335,7 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  {/* QUESTION + COMMENTS + MOBILE OUTCOME PILL */}
+                  {/* QUESTION + COMMENTS + mobile outcome pill */}
                   <div className="col-span-9 md:col-span-2">
                     <div className="text-sm leading-snug font-medium">
                       {row.question}
@@ -1373,11 +1365,11 @@ export default function PicksClient() {
                       )}
                     </div>
 
-                    {/* MOBILE-ONLY OUTCOME PILL */}
+                    {/* Mobile-only outcome pill (under question) */}
                     {outcomeLabel && (
                       <div className="mt-1 md:hidden">
                         <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${outcomeClasses}`}
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
                         >
                           {outcomeLabel}
                         </span>
@@ -1385,7 +1377,7 @@ export default function PicksClient() {
                     )}
                   </div>
 
-                  {/* PICK / YES / NO / DESKTOP OUTCOME PILL */}
+                  {/* PICK / YES / NO / RESULT PILL */}
                   <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                     <div className="flex gap-2 mb-0.5">
                       <button
@@ -1431,7 +1423,7 @@ export default function PicksClient() {
                       </button>
                     </div>
 
-                    {/* DESKTOP-ONLY OUTCOME PILL */}
+                    {/* Desktop outcome pill – aligned with buttons */}
                     {outcomeLabel && (
                       <div className="mt-2 hidden md:block">
                         <span
@@ -1442,7 +1434,7 @@ export default function PicksClient() {
                       </div>
                     )}
 
-                    <div className="text-[11px] text-white/85 mt-1">
+                    <div className="text-[11px] text-white/85">
                       Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
                       {Math.round(noPct ?? 0)}%
                     </div>
@@ -1453,7 +1445,7 @@ export default function PicksClient() {
           })}
         </div>
 
-        {/* AUTH MODAL */}
+        {/* AUTH REQUIRED MODAL */}
         {showAuthModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
             <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
@@ -1496,7 +1488,7 @@ export default function PicksClient() {
 
         {/* COMMENT DRAWER */}
         {commentsOpenFor && (
-          <div className="fixed inset-0 z-40 bg-black/60",".flex justify-end">
+          <div className="fixed inset-0 z-40 bg-black/60 flex justify-end">
             <div className="w-full max-w-md h-full bg-[#050816] p-6 flex flex-col">
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -1581,8 +1573,10 @@ export default function PicksClient() {
         {streakLevelModal && streakModalContent && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
             <div className="relative w-full max-w-md rounded-3xl bg-[#020617] border border-orange-500/60 shadow-[0_0_80px_rgba(248,113,22,0.85)] px-6 py-6 overflow-hidden">
+              {/* glowing frame */}
               <div className="pointer-events-none absolute inset-0 rounded-3xl border border-orange-400/30 shadow-[0_0_40px_rgba(248,113,22,0.65)]" />
 
+              {/* Stylised badge card in the middle */}
               <div className="relative mx-auto mb-4 mt-2 w-40 h-56 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-white/10 flex flex-col items-center justify-center shadow-[0_0_40px_rgba(15,23,42,0.9)]">
                 <div className="absolute inset-x-4 top-4 text-center text-[11px] font-bold uppercase tracking-wide text-slate-200">
                   Streak Level
