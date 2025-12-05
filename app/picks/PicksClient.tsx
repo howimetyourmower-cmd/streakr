@@ -1,4 +1,3 @@
-// /app/picks/PicksClient.tsx
 "use client";
 
 import {
@@ -25,9 +24,6 @@ import {
 } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
-type StreakMilestone = 3 | 5 | 10 | 15 | 20;
-
-type QuestionResult = "correct" | "wrong" | "pending" | "void";
 
 type ApiQuestion = {
   id: string;
@@ -42,11 +38,6 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-
-  // NEW: result from API – per-user outcome for this question
-  result?: QuestionResult;
-
-  // older / backend fields we still support
   correctOutcome?: "yes" | "no" | "void" | null;
   outcome?: "yes" | "no" | "void" | "lock" | null;
 };
@@ -75,11 +66,6 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-
-  // Result as sent from API (preferred source of truth)
-  result?: QuestionResult;
-
-  // Fallback outcome fields
   correctOutcome?: "yes" | "no" | "void" | null;
 };
 
@@ -312,24 +298,24 @@ export default function PicksClient() {
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
-  // user streak badges from Firestore
-  const [userBadges, setUserBadges] = useState<Record<string, boolean>>(
-    {}
-  );
-  const [badgesLoaded, setBadgesLoaded] = useState(false);
-
   // share button status
   const [shareStatus, setShareStatus] = useState<string>("");
 
   // Confetti + milestone modals
   const [showConfetti, setShowConfetti] = useState(false);
-  const [streakLevelModal, setStreakLevelModal] =
-    useState<StreakMilestone | null>(null);
+  const [streakLevelModal, setStreakLevelModal] = useState<
+    3 | 5 | 10 | 15 | 20 | null
+  >(null);
   const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
   const [windowSize, setWindowSize] = useState({
     width: 0,
     height: 0,
   });
+
+  // unlocked badges from Firestore user doc
+  const [unlockedBadges, setUnlockedBadges] = useState<
+    Record<string, boolean>
+  >({});
 
   // remember last non-zero percentages so they don’t flash to 0
   const lastPercentsRef = useRef<
@@ -441,10 +427,6 @@ export default function PicksClient() {
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
-
-          // NEW: copy result from API if present
-          result: q.result ?? prev?.result,
-
           correctOutcome,
         };
       })
@@ -674,13 +656,12 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
-  // current user streak + badges – live
+  // current user streak – live (and badges)
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
       setUserLongestStreak(null);
-      setUserBadges({});
-      setBadgesLoaded(true);
+      setUnlockedBadges({});
       return;
     }
 
@@ -709,20 +690,18 @@ export default function PicksClient() {
 
           setUserCurrentStreak(current);
           setUserLongestStreak(longest);
-          setUserBadges(badges);
+          setUnlockedBadges(badges);
         } else {
           setUserCurrentStreak(0);
           setUserLongestStreak(0);
-          setUserBadges({});
+          setUnlockedBadges({});
         }
-        setBadgesLoaded(true);
         setStreakLoading(false);
       },
       (err) => {
         console.error("User streak listener error", err);
         setStreakError("Could not load streak tracker.");
         setStreakLoading(false);
-        setBadgesLoaded(true);
       }
     );
 
@@ -731,47 +710,57 @@ export default function PicksClient() {
 
   // -------- Streak milestone celebration (3,5,10,15,20) --------
   useEffect(() => {
-    if (!badgesLoaded) return;
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
 
-    const milestones: StreakMilestone[] = [3, 5, 10, 15, 20];
+    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
+      3, 5, 10, 15, 20,
+    ];
     const hit = milestones.find((m) => userCurrentStreak === m);
     if (!hit) return;
 
-    setLastCelebratedStreak(userCurrentStreak);
+    let timer: any;
 
-    const badgeKey = String(hit);
-    const alreadyUnlocked = !!userBadges[badgeKey];
+    const run = async () => {
+      const key = String(hit);
+      const alreadyUnlocked = !!unlockedBadges[key];
 
-    // New badge: show modal + confetti, save to Firestore
-    if (!alreadyUnlocked) {
-      setStreakLevelModal(hit);
-      if (user) {
-        const userRef = doc(db, "users", user.uid);
-        const newBadges = { ...userBadges, [badgeKey]: true };
-        setUserBadges(newBadges);
-        setDoc(
-          userRef,
-          { streakBadges: newBadges },
-          { merge: true }
-        ).catch((err) =>
-          console.error("Failed to save streak badge", err)
-        );
+      setLastCelebratedStreak(userCurrentStreak);
+      setShowConfetti(true);
+
+      // Only show the big badge modal the first time this milestone
+      // is ever unlocked; afterwards it's confetti only.
+      if (!alreadyUnlocked) {
+        setStreakLevelModal(hit);
+
+        if (user) {
+          try {
+            const userRef = doc(db, "users", user.uid);
+            await setDoc(
+              userRef,
+              {
+                streakBadges: {
+                  ...(unlockedBadges || {}),
+                  [key]: true,
+                },
+              },
+              { merge: true }
+            );
+          } catch (err) {
+            console.error("Failed to persist streak badge", err);
+          }
+        }
       }
-    }
 
-    // Confetti always when you newly hit the milestone this round
-    setShowConfetti(true);
-    const timer = window.setTimeout(() => setShowConfetti(false), 5000);
-    return () => window.clearTimeout(timer);
-  }, [
-    userCurrentStreak,
-    lastCelebratedStreak,
-    userBadges,
-    badgesLoaded,
-    user,
-  ]);
+      timer = setTimeout(() => setShowConfetti(false), 5000);
+    };
+
+    run();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [userCurrentStreak, lastCelebratedStreak, unlockedBadges, user]);
 
   // -------- Filtering --------
   const applyFilter = (f: QuestionStatus | "all") => {
@@ -1057,9 +1046,9 @@ export default function PicksClient() {
     }
   };
 
+  // -------- Render --------
   const streakModalContent = getStreakModalContent();
 
-  // -------- Render --------
   return (
     <>
       {/* CONFETTI OVERLAY */}
@@ -1248,6 +1237,8 @@ export default function PicksClient() {
             const isActive = row.id === activeQuestionId;
             const isYesActive = isActive && activeOutcome === "yes";
             const isNoActive = isActive && activeOutcome === "no";
+            const isYesPicked = row.userPick === "yes";
+            const isNoPicked = row.userPick === "no";
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
             const isLocked = row.status !== "open";
@@ -1270,35 +1261,36 @@ export default function PicksClient() {
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
             // -------- Outcome pill logic (device-independent) --------
-            type OutcomeKind = "win" | "loss" | "void" | null;
+            type OutcomeKind =
+              | "win"
+              | "loss"
+              | "void"
+              | "settled-no-result"
+              | null;
             let outcomeKind: OutcomeKind = null;
-            let outcomeLabel: string | null = null;
 
-            // 1) Result from API (preferred, works across devices)
-            if (row.result === "void" || row.status === "void") {
+            const outcome = normaliseOutcome(
+              (row.correctOutcome as any) ?? (row as any).outcome
+            );
+
+            if (row.status === "void" || outcome === "void") {
               outcomeKind = "void";
-              outcomeLabel = "Question voided – no streak change";
-            } else if (row.result === "correct") {
-              outcomeKind = "win";
-              outcomeLabel = "You were right!";
-            } else if (row.result === "wrong") {
-              outcomeKind = "loss";
-              outcomeLabel = "Wrong pick";
-            } else if (row.status === "final") {
-              // 2) Fallback – infer from userPick + correctOutcome
-              const outcome = normaliseOutcome(row.correctOutcome);
-              if (row.userPick && outcome) {
-                outcomeKind =
-                  row.userPick === outcome ? "win" : "loss";
-              }
+            } else if (row.status === "final" && outcome && row.userPick) {
+              outcomeKind =
+                row.userPick === outcome ? "win" : "loss";
+            } else if (row.status === "final" && !outcome) {
+              outcomeKind = "settled-no-result";
+            }
 
-              if (outcomeKind === "win") {
-                outcomeLabel = "You were right!";
-              } else if (outcomeKind === "loss") {
-                outcomeLabel = "Wrong pick";
-              } else {
-                outcomeLabel = "Finalised";
-              }
+            let outcomeLabel: string | null = null;
+            if (outcomeKind === "void") {
+              outcomeLabel = "Question voided – no streak change";
+            } else if (outcomeKind === "win") {
+              outcomeLabel = "You were right!";
+            } else if (outcomeKind === "loss") {
+              outcomeLabel = "Wrong pick";
+            } else if (outcomeKind === "settled-no-result") {
+              outcomeLabel = "Finalised";
             }
 
             const outcomeClasses =
@@ -1308,7 +1300,31 @@ export default function PicksClient() {
                 ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
                 : outcomeKind === "loss"
                 ? "bg-red-500/15 border-red-400/60 text-red-300"
-                : "bg-slate-700/40 border-slate-400/40 text-slate-100";
+                : "bg-slate-700/60 border-slate-500/60 text-slate-100";
+
+            const yesButtonClasses = [
+              "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
+              isYesActive
+                ? "bg-sky-500 text-black border-white ring-2 ring-white"
+                : `bg-green-600 hover:bg-green-700 ${
+                    isYesPicked ? "border-white" : "border-transparent"
+                  }`,
+              isLocked
+                ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+                : "",
+            ].join(" ");
+
+            const noButtonClasses = [
+              "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
+              isNoActive
+                ? "bg-sky-500 text-black border-white ring-2 ring-white"
+                : `bg-red-600 hover:bg-red-700 ${
+                    isNoPicked ? "border-white" : "border-transparent"
+                  }`,
+              isLocked
+                ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+                : "",
+            ].join(" ");
 
             return (
               <div
@@ -1407,12 +1423,11 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  {/* QUESTION + COMMENTS + OUTCOME PILL */}
+                  {/* QUESTION + COMMENTS + pills */}
                   <div className="col-span-9 md:col-span-2">
                     <div className="text-sm leading-snug font-medium">
                       {row.question}
                     </div>
-
                     <div className="flex flex-wrap items-center gap-2 mt-0.5">
                       <button
                         type="button"
@@ -1437,39 +1452,16 @@ export default function PicksClient() {
                         </span>
                       )}
                     </div>
-
-                    {/* Outcome pill – same DOM for desktop + mobile */}
-                    {outcomeLabel && (
-                      <div className="mt-1">
-                        <span
-                          className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold ${outcomeClasses}`}
-                        >
-                          {outcomeLabel}
-                        </span>
-                      </div>
-                    )}
                   </div>
 
-                  {/* PICK / YES / NO / PERCENTS */}
+                  {/* PICK / YES / NO / RESULT PILL */}
                   <div className="col-span-12 md:col-span-2 flex flex-col items-end">
                     <div className="flex gap-2 mb-0.5">
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
                         disabled={isLocked}
-                        className={`
-                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                          ${
-                            isYesActive
-                              ? "bg-sky-500 text-black ring-2 ring-white"
-                              : "bg-green-600 hover:bg-green-700"
-                          }
-                          ${
-                            isLocked
-                              ? "opacity-40 cursor-not-allowed hover:bg-green-600"
-                              : ""
-                          }
-                        `}
+                        className={yesButtonClasses}
                       >
                         Yes
                       </button>
@@ -1478,23 +1470,22 @@ export default function PicksClient() {
                         type="button"
                         onClick={() => handlePick(row, "no")}
                         disabled={isLocked}
-                        className={`
-                          px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition
-                          ${
-                            isNoActive
-                              ? "bg-sky-500 text-black ring-2 ring-white"
-                              : "bg-red-600 hover:bg-red-700"
-                          }
-                          ${
-                            isLocked
-                              ? "opacity-40 cursor-not-allowed hover:bg-red-600"
-                              : ""
-                          }
-                        `}
+                        className={noButtonClasses}
                       >
                         No
                       </button>
                     </div>
+
+                    {/* Outcome pill – same on desktop + mobile */}
+                    {outcomeLabel && (
+                      <div className="mt-2">
+                        <span
+                          className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                        >
+                          {outcomeLabel}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="text-[11px] text-white/85">
                       Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
@@ -1530,7 +1521,7 @@ export default function PicksClient() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
                   href="/auth?mode=login&returnTo=/picks"
-                  className="elf-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
                   Login
