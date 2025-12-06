@@ -80,16 +80,16 @@ type StreakBadgeConfig = {
 const STREAK_BADGES: Record<StreakMilestone, StreakBadgeConfig> = {
   3: {
     label: "3 in a row",
-    tagline: "Keep building 😎",
+    tagline: "Keep Building 😎",
     image: "/badges/streak-3.png",
   },
   5: {
-    label: "On fire",
+    label: "On Fire",
     tagline: "Bang! You're on the money! 🔥",
     image: "/badges/streak-5.png",
   },
   10: {
-    label: "Elite 10",
+    label: "Elite",
     tagline: "That’s elite. 10 straight.",
     image: "/badges/streak-10.png",
   },
