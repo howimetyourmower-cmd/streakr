@@ -1,12 +1,19 @@
-// app/venues/[venueId]/admin/page.tsx
+// app/venues/[venueId]/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  query,
+  where,
+} from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -20,28 +27,36 @@ type VenueLeague = {
   location?: string;
   description?: string;
   subscriptionStatus: SubscriptionStatus;
-  venueAdminEmail?: string | null;
-  venueAdminUid?: string | null;
   prizesHeadline?: string;
   prizesBody?: string;
 };
 
-export default function VenueAdminPage() {
+type MemberRow = {
+  uid: string;
+  displayName: string;
+  username?: string;
+  avatarUrl?: string;
+  currentStreak: number;
+  longestStreak: number;
+  lifetimeWins: number;
+  lifetimeLosses: number;
+  lifetimePicks: number;
+};
+
+export default function VenueLeaderboardPage() {
   const params = useParams();
   const router = useRouter();
-  const { user, isAdmin, loading } = useAuth();
+  const { user } = useAuth();
 
   const venueId = params?.venueId as string | undefined;
 
   const [venue, setVenue] = useState<VenueLeague | null>(null);
+  const [members, setMembers] = useState<MemberRow[]>([]);
   const [loadingVenue, setLoadingVenue] = useState(true);
+  const [loadingMembers, setLoadingMembers] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [prizesHeadline, setPrizesHeadline] = useState("");
-  const [prizesBody, setPrizesBody] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
-
+  // Load venue details once
   useEffect(() => {
     if (!venueId) return;
 
@@ -53,7 +68,7 @@ export default function VenueAdminPage() {
         const ref = doc(db, "venueLeagues", venueId);
         const snap = await getDoc(ref);
         if (!snap.exists()) {
-          setError("Venue league not found.");
+          setError("This venue league could not be found.");
           setVenue(null);
           setLoadingVenue(false);
           return;
@@ -63,7 +78,7 @@ export default function VenueAdminPage() {
         const subscriptionStatus: SubscriptionStatus =
           (data.subscriptionStatus as SubscriptionStatus) ?? "active";
 
-        const v: VenueLeague = {
+        setVenue({
           id: snap.id,
           name: data.name ?? "Venue League",
           code: data.code ?? "",
@@ -71,15 +86,9 @@ export default function VenueAdminPage() {
           location: data.location ?? undefined,
           description: data.description ?? undefined,
           subscriptionStatus,
-          venueAdminEmail: data.venueAdminEmail ?? null,
-          venueAdminUid: data.venueAdminUid ?? null,
           prizesHeadline: data.prizesHeadline ?? undefined,
           prizesBody: data.prizesBody ?? undefined,
-        };
-
-        setVenue(v);
-        setPrizesHeadline(v.prizesHeadline ?? "");
-        setPrizesBody(v.prizesBody ?? "");
+        });
       } catch (err) {
         console.error("Failed to load venue league", err);
         setError("Failed to load venue league.");
@@ -92,258 +101,344 @@ export default function VenueAdminPage() {
     loadVenue();
   }, [venueId]);
 
-  // who can edit: STREAKr admin OR venue admin (uid match OR email match)
-  const canEdit = (() => {
-    if (!user || !venue) return false;
-    if (isAdmin) return true;
+  // Live members / players in this venue league
+  useEffect(() => {
+    if (!venueId) return;
 
-    const email = (user.email ?? "").toLowerCase();
-    const venueEmail = (venue.venueAdminEmail ?? "").toLowerCase();
+    setLoadingMembers(true);
+    setError((prev) => prev); // keep any venue error
 
-    if (venue.venueAdminUid && venue.venueAdminUid === user.uid) return true;
-    if (email && venueEmail && email === venueEmail) return true;
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, where("venueLeagueIds", "array-contains", venueId));
 
-    return false;
-  })();
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rows: MemberRow[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
 
-  const handleSave = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!venue) return;
-    if (!canEdit) return;
+          const displayName: string =
+            data.displayName ||
+            data.username ||
+            data.name ||
+            data.email ||
+            "Player";
 
-    setSaving(true);
-    setError(null);
-    setSaveSuccess(null);
+          return {
+            uid: docSnap.id,
+            displayName,
+            username: data.username || undefined,
+            avatarUrl: data.avatarUrl || undefined,
+            currentStreak: Number(data.currentStreak ?? 0),
+            longestStreak: Number(data.longestStreak ?? 0),
+            lifetimeWins: Number(data.lifetimeWins ?? data.totalWins ?? 0),
+            lifetimeLosses: Number(
+              data.lifetimeLosses ?? data.totalLosses ?? 0
+            ),
+            lifetimePicks: Number(
+              data.lifetimePicks ?? data.totalPicks ?? 0
+            ),
+          };
+        });
 
-    try {
-      const ref = doc(db, "venueLeagues", venue.id);
-      await updateDoc(ref, {
-        prizesHeadline: prizesHeadline.trim() || null,
-        prizesBody: prizesBody.trim() || null,
-      });
+        setMembers(rows);
+        setLoadingMembers(false);
+      },
+      (err) => {
+        console.error("Failed to load venue members", err);
+        setMembers([]);
+        setLoadingMembers(false);
+        setError("Failed to load venue leaderboard.");
+      }
+    );
 
-      setSaveSuccess("Prizes updated for this venue.");
-    } catch (err) {
-      console.error("Failed to update venue prizes", err);
-      setError("Failed to save prizes. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
+    return () => unsub();
+  }, [venueId]);
 
-  if (loading || loadingVenue) {
+  // Derived sorted leaderboard with ranks
+  const sortedMembers = useMemo(() => {
+    if (!members.length) return [];
+
+    const copy = [...members];
+
+    copy.sort((a, b) => {
+      if (b.currentStreak !== a.currentStreak) {
+        return b.currentStreak - a.currentStreak;
+      }
+      if (b.lifetimeWins !== a.lifetimeWins) {
+        return b.lifetimeWins - a.lifetimeWins;
+      }
+      return b.lifetimePicks - a.lifetimePicks;
+    });
+
+    return copy;
+  }, [members]);
+
+  const memberCount = members.length;
+
+  if (!venueId) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
-          <p className="text-sm text-slate-400">Loading venue admin…</p>
-        </div>
+      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen">
+        <p className="text-sm text-white/70">
+          No venue id provided. Try navigating from the Venue Leagues page.
+        </p>
       </div>
     );
   }
 
-  if (!venueId || !venue) {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
-        <div className="max-w-md rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 px-6 py-8 shadow-xl border border-slate-700/70">
-          <h1 className="text-2xl font-semibold mb-3">Venue not found</h1>
-          <p className="text-sm text-slate-400 mb-4">
-            We couldn&apos;t find that venue league. Try opening it again from
-            the admin console.
-          </p>
-          <Link
-            href="/admin/venues"
-            className="inline-flex items-center justify-center rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-black hover:bg-amber-400 transition"
-          >
-            Back to venue list
-          </Link>
-        </div>
-      </div>
-    );
-  }
+  const isInactive =
+    venue && venue.subscriptionStatus !== "active";
 
-  if (!user || (!canEdit && !isAdmin)) {
-    // they are logged in but not venue admin; show read-only info & link back
-    return (
-      <div className="min-h-[60vh] bg-[#050814] text-slate-100">
-        <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-          <Link
-            href="/admin/venues"
-            className="text-xs text-slate-400 hover:text-slate-200"
-          >
-            ← Back to venue list
-          </Link>
-
-          <div className="rounded-2xl bg-gradient-to-br from-slate-950/80 to-slate-900/80 border border-slate-800 px-5 py-6 shadow-lg shadow-black/40 space-y-3">
-            <h1 className="text-2xl font-semibold">
-              {venue.name}
-            </h1>
-            {(venue.venueName || venue.location) && (
-              <p className="text-sm text-slate-300">
-                {[venue.venueName, venue.location].filter(Boolean).join(" · ")}
-              </p>
-            )}
-            <p className="text-sm text-slate-400">
-              This page is for venue admins only. Ask STREAKr or your account
-              manager if you need access to edit prizes and promotions.
-            </p>
-            <div className="text-xs text-slate-500 space-y-1">
-              <p>
-                Venue code:{" "}
-                <span className="font-mono bg-slate-900/90 border border-slate-700 rounded px-2 py-[2px]">
-                  {venue.code}
-                </span>
-              </p>
-              {venue.venueAdminEmail && (
-                <p>Registered venue admin email: {venue.venueAdminEmail}</p>
-              )}
-            </div>
-            <Link
-              href={`/venues/${venue.id}`}
-              className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm px-4 py-2 mt-2 transition"
-            >
-              View public leaderboard
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const hasPrizes =
+    !!venue?.prizesHeadline || !!venue?.prizesBody;
 
   return (
-    <div className="min-h-[60vh] bg-[#050814] text-slate-100">
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
       {/* Top bar */}
-      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950/80 via-slate-900/80 to-slate-950/80">
-        <div className="mx-auto max-w-4xl px-4 py-8">
-          <p className="text-xs tracking-[0.2em] uppercase text-slate-500 mb-2">
-            Venue admin
-          </p>
-          <h1 className="text-3xl md:text-4xl font-semibold mb-2">
-            {venue.name}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => router.push("/picks")}
+          className="text-xs sm:text-sm text-orange-400 hover:text-orange-300"
+        >
+          ← Back to Picks
+        </button>
+        <span className="text-[11px] text-white/50 uppercase tracking-wide">
+          Venue league
+        </span>
+      </div>
+
+      {/* Header card */}
+      <div className="rounded-2xl bg-gradient-to-r from-[#020617] via-[#020617] to-black border border-slate-800 shadow-[0_24px_60px_rgba(0,0,0,0.8)] px-4 py-4 sm:px-6 sm:py-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl sm:text-3xl font-bold">
+            {loadingVenue
+              ? "Loading venue…"
+              : venue?.name ?? "Venue league"}
           </h1>
-          {(venue.venueName || venue.location) && (
-            <p className="text-sm text-slate-300 mb-2">
-              {[venue.venueName, venue.location]
-                .filter(Boolean)
-                .join(" · ")}
+          {venue?.venueName && (
+            <p className="text-sm text-white/70">
+              {venue.venueName}
+              {venue.location ? ` • ${venue.location}` : ""}
             </p>
           )}
-          <p className="text-xs text-slate-400">
-            Manage prizes and promotions for this STREAKr venue league. Any
-            changes you make here update the public venue leaderboard instantly.
-          </p>
+          {!venue?.venueName && venue?.location && (
+            <p className="text-sm text-white/70">{venue.location}</p>
+          )}
+          {venue?.description && (
+            <p className="text-xs text-white/60 max-w-xl">
+              {venue.description}
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-col items-start sm:items-end gap-2">
+          <div className="flex items-center gap-3 text-xs">
+            <div className="flex flex-col items-start sm:items-end">
+              <span className="text-[11px] uppercase tracking-wide text-white/60">
+                Players checked in
+              </span>
+              <span className="text-xl font-semibold">
+                {loadingMembers ? "…" : memberCount}
+              </span>
+            </div>
+          </div>
+          {venue && (
+            <span
+              className={`inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[10px] font-semibold uppercase tracking-wide ${
+                venue.subscriptionStatus === "active"
+                  ? "border-emerald-400/60 text-emerald-300 bg-emerald-500/10"
+                  : venue.subscriptionStatus === "paused"
+                  ? "border-amber-400/60 text-amber-300 bg-amber-500/10"
+                  : "border-red-400/60 text-red-300 bg-red-500/10"
+              }`}
+            >
+              {venue.subscriptionStatus === "active"
+                ? "Active venue"
+                : venue.subscriptionStatus === "paused"
+                ? "Paused"
+                : "Inactive"}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Content */}
-      <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <Link
-            href="/admin/venues"
-            className="text-xs text-slate-400 hover:text-slate-200"
-          >
-            ← Back to venue list
-          </Link>
-          <div className="flex flex-col items-end gap-1 text-[11px] text-slate-400">
-            <span>
-              Signed in as{" "}
-              <span className="font-medium text-slate-100">
-                {user.email ?? user.uid}
-              </span>
-            </span>
-            <span className="text-slate-500">
-              Venue code:{" "}
-              <span className="font-mono bg-slate-900/80 border border-slate-700 rounded px-2 py-[2px]">
-                {venue.code}
-              </span>
-            </span>
+      {isInactive && (
+        <div className="rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3 text-xs sm:text-sm text-red-200">
+          This venue league is currently inactive. Players can&apos;t join or
+          earn venue-specific rewards until it&apos;s reactivated by STREAKr.
+        </div>
+      )}
+
+      {/* Prizes banner (venue-controlled) */}
+      {hasPrizes && (
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-orange-500 via-amber-400 to-orange-600 border border-orange-300 px-4 py-3 sm:px-6 sm:py-4 shadow-[0_18px_60px_rgba(248,146,35,0.6)]">
+          <div className="pointer-events-none absolute -right-10 -top-10 h-28 w-40 rounded-full bg-white/10 blur-xl" />
+          <div className="pointer-events-none absolute -left-8 -bottom-8 h-24 w-24 rounded-full bg-black/10 blur-xl" />
+          <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-black/20 border border-white/40 text-xl">
+                🏆
+              </div>
+              <div>
+                <div className="inline-flex items-center rounded-full bg-black/25 border border-white/40 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide text-white/90 mb-1">
+                  Venue prize spotlight
+                </div>
+                {venue?.prizesHeadline && (
+                  <p className="text-sm sm:text-base font-semibold text-white leading-snug">
+                    {venue.prizesHeadline}
+                  </p>
+                )}
+              </div>
+            </div>
+            {venue?.prizesBody && (
+              <p className="text-[11px] sm:text-xs md:text-sm text-black/90 sm:text-right max-w-md whitespace-pre-line bg-white/10 sm:bg-transparent rounded-md sm:rounded-none px-2 sm:px-0 py-1 sm:py-0">
+                {venue.prizesBody}
+              </p>
+            )}
           </div>
         </div>
+      )}
 
-        <form
-          onSubmit={handleSave}
-          className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/80 px-5 py-6 shadow-lg shadow-black/40 space-y-5"
-        >
-          {error && (
-            <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-              {error}
-            </p>
+      {error && (
+        <p className="text-sm text-red-400 mb-2">{error}</p>
+      )}
+
+      {/* Leaderboard */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Venue leaderboard</h2>
+          <p className="text-[11px] text-white/60">
+            Sorted by current streak, then wins, then total picks.
+          </p>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl bg-[#020617] border border-slate-800 shadow-[0_18px_50px_rgba(0,0,0,0.85)]">
+          {/* Desktop header */}
+          <div className="hidden sm:grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-white/60 border-b border-slate-800">
+            <div className="col-span-4">Player</div>
+            <div className="col-span-2 text-right">Current</div>
+            <div className="col-span-2 text-right">Best</div>
+            <div className="col-span-1 text-right">Wins</div>
+            <div className="col-span-1 text-right">Losses</div>
+            <div className="col-span-2 text-right">Total picks</div>
+          </div>
+
+          {loadingMembers ? (
+            <div className="px-4 py-5 text-sm text-white/70">
+              Loading venue leaderboard…
+            </div>
+          ) : sortedMembers.length === 0 ? (
+            <div className="px-4 py-5 text-sm text-white/70">
+              No players in this venue league yet. Join from the Venue Leagues
+              page using this venue’s code to appear here.
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-800">
+              {sortedMembers.map((m, index) => {
+                const isYou = user && m.uid === user.uid;
+                const rank = index + 1;
+                const hasAvatar =
+                  typeof m.avatarUrl === "string" &&
+                  m.avatarUrl.trim().length > 0;
+
+                return (
+                  <li
+                    key={m.uid}
+                    className={`px-4 py-3 text-sm sm:grid sm:grid-cols-12 sm:items-center flex flex-col gap-2 ${
+                      isYou
+                        ? "bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent"
+                        : "bg-transparent"
+                    }`}
+                  >
+                    {/* Player + rank */}
+                    <div className="sm:col-span-4 flex items-center gap-3">
+                      <div className="flex items-center justify-center h-7 w-7 rounded-full bg-slate-800 border border-slate-600 text-[11px] font-semibold text-white/80">
+                        #{rank}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {hasAvatar ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={m.avatarUrl as string}
+                            alt={m.displayName}
+                            className="h-7 w-7 rounded-full border border-white/20 object-cover"
+                          />
+                        ) : (
+                          <div className="h-7 w-7 rounded-full bg-slate-700 flex items-center justify-center text-[11px] font-bold">
+                            {m.displayName.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          <span className="font-medium">
+                            {m.displayName}
+                            {isYou && (
+                              <span className="ml-1 text-[11px] text-orange-300 font-semibold">
+                                (You)
+                              </span>
+                            )}
+                          </span>
+                          {m.username && (
+                            <span className="text-[11px] text-white/60">
+                              @{m.username}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stats (desktop layout) */}
+                    <div className="hidden sm:block sm:col-span-2 text-right font-semibold text-sky-300">
+                      {m.currentStreak}
+                    </div>
+                    <div className="hidden sm:block sm:col-span-2 text-right font-semibold text-emerald-300">
+                      {m.longestStreak}
+                    </div>
+                    <div className="hidden sm:block sm:col-span-1 text-right">
+                      {m.lifetimeWins}
+                    </div>
+                    <div className="hidden sm:block sm:col-span-1 text-right">
+                      {m.lifetimeLosses}
+                    </div>
+                    <div className="hidden sm:block sm:col-span-2 text-right">
+                      {m.lifetimePicks}
+                    </div>
+
+                    {/* Mobile stats layout */}
+                    <div className="sm:hidden grid grid-cols-3 gap-2 text-xs text-white/75 mt-1">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] uppercase tracking-wide text-white/50">
+                          Current
+                        </span>
+                        <span className="font-semibold text-sky-300">
+                          {m.currentStreak}
+                        </span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] uppercase tracking-wide text-white/50">
+                          Best
+                        </span>
+                        <span className="font-semibold text-emerald-300">
+                          {m.longestStreak}
+                        </span>
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] uppercase tracking-wide text-white/50">
+                          W / L / Picks
+                        </span>
+                        <span>
+                          {m.lifetimeWins}–{m.lifetimeLosses} ·{" "}
+                          {m.lifetimePicks}
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {saveSuccess && (
-            <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-              {saveSuccess}
-            </p>
-          )}
-
-          <section className="space-y-3">
-            <h2 className="text-base md:text-lg font-semibold text-slate-50">
-              Prizes & promotions
-            </h2>
-            <p className="text-xs text-slate-400 max-w-md">
-              Tell players what they&apos;re playing for in your venue. This
-              copy appears on your public venue leaderboard under the
-              &quot;Venue prizes&quot; section.
-            </p>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300">
-                Prizes headline
-              </label>
-              <input
-                type="text"
-                value={prizesHeadline}
-                onChange={(e) => setPrizesHeadline(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
-                placeholder="E.g. Win a $50 bar tab every Friday"
-              />
-              <p className="text-[11px] text-slate-500">
-                Short, punchy line that grabs attention on the leaderboard.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-300">
-                Prizes description
-              </label>
-              <textarea
-                value={prizesBody}
-                onChange={(e) => setPrizesBody(e.target.value)}
-                rows={4}
-                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
-                placeholder={`E.g.\nTop streak for each round wins a $50 bar tab.\nTie-breaker: earliest streak.\nSeason-long champ gets a $200 voucher.`}
-              />
-              <p className="text-[11px] text-slate-500">
-                Explain how players win, tie-break rules, and any season-long
-                prizes. You can update this anytime.
-              </p>
-            </div>
-          </section>
-
-          <section className="border-t border-slate-800 pt-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-slate-400">
-            <div className="max-w-md space-y-1">
-              <p>
-                Everything you write here is{" "}
-                <span className="text-slate-100 font-medium">
-                  visible to players
-                </span>{" "}
-                on your venue leaderboard.
-              </p>
-              <p>
-                Keep it clear and honest. If you have detailed T&amp;Cs, mention
-                where players can find them (e.g. at the bar or on your
-                website).
-              </p>
-            </div>
-            <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm px-5 py-2.5 transition disabled:opacity-60"
-            >
-              {saving ? "Saving prizes…" : "Save prizes"}
-            </button>
-          </section>
-        </form>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
