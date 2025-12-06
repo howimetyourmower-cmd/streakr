@@ -788,7 +788,7 @@ export default function ProfilePage() {
     </div>
   </div>
 </section>
-
+                    }
 
           {/* STREAK BADGES CARD */}
           <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-6 sm:py-6">
