@@ -30,9 +30,9 @@ type ProfileData = {
   phone?: string;
   gender?: string;
   favouriteAflTeam?: string;
-  avatarUrl?: string;
+  avatarUrl?: string; // new name
+  photoURL?: string; // legacy name
 
-  // streak + stats
   currentStreak?: number;
   longestStreak?: number;
   lifetimeBestStreak?: number;
@@ -40,7 +40,6 @@ type ProfileData = {
   lifetimeLosses?: number;
   roundsPlayed?: number;
 
-  // badges
   streakBadges?: Record<string, boolean>;
 };
 
@@ -80,14 +79,11 @@ export default function ProfilePage() {
   );
   const [isEditing, setIsEditing] = useState(false);
   const [formValues, setFormValues] = useState<ProfileData>({});
+  const [localBadges, setLocalBadges] = useState<
+    Record<string, boolean>
+  >({});
 
-  // extra: keep a local copy of badges so UI updates instantly
-  const [localBadges, setLocalBadges] = useState<Record<
-    string,
-    boolean
-  >>({});
-
-  // Auth listener (safety net)
+  // Auth listener
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setAuthUser(u);
@@ -114,7 +110,6 @@ export default function ProfilePage() {
         if (snap.exists()) {
           data = (snap.data() as ProfileData) || {};
         } else {
-          // Create shell so fields exist
           data = {
             username: user.displayName || "",
             firstName: "",
@@ -168,7 +163,6 @@ export default function ProfilePage() {
 
   const toggleEditing = () => {
     if (isEditing) {
-      // reset form
       setFormValues({
         username: profile.username || "",
         firstName: profile.firstName || "",
@@ -280,6 +274,13 @@ export default function ProfilePage() {
       ? Math.round((lifetimeWins / totalPicks) * 100)
       : 0;
 
+  // Avatar: accept multiple field names / auth photo
+  const avatarUrl =
+    profile.avatarUrl ||
+    profile.photoURL ||
+    authUser?.photoURL ||
+    "";
+
   if (loading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
@@ -316,13 +317,13 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* Logged in strip */}
+        {/* Top strip with avatar + controls */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12 rounded-full overflow-hidden border border-white/20 bg-slate-900">
-              {profile.avatarUrl ? (
+              {avatarUrl ? (
                 <Image
-                  src={profile.avatarUrl}
+                  src={avatarUrl}
                   alt="Avatar"
                   fill
                   className="object-cover"
@@ -403,7 +404,8 @@ export default function ProfilePage() {
                 {currentStreak}
               </p>
               <p className="text-[11px] text-white/60 mt-1">
-                How many correct picks in a row you&apos;re on right now.
+                How many correct picks in a row you&apos;re on right
+                now.
               </p>
             </div>
             <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
@@ -430,7 +432,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Lifetime record (no win-rate %) */}
+          {/* Lifetime record – no win-rate block */}
           <div className="rounded-2xl bg-slate-950/90 border border-slate-700 px-4 py-4 mb-6">
             <h2 className="text-sm font-semibold mb-1">
               Lifetime record
@@ -497,35 +499,30 @@ export default function ProfilePage() {
                 title="3 in a row"
                 subtitle="Keep building 😎"
                 unlocked={!!localBadges["3"]}
-                imageSrc="/badges/streakr-3.png"
               />
               <BadgeCard
                 level={5}
                 title="On Fire"
                 subtitle="Bang! You're on the money! 🔥"
                 unlocked={!!localBadges["5"]}
-                imageSrc="/badges/streakr-5.png"
               />
               <BadgeCard
                 level={10}
                 title="Elite"
                 subtitle="That's elite. 10 straight 🏆"
                 unlocked={!!localBadges["10"]}
-                imageSrc="/badges/streakr-10.png"
               />
               <BadgeCard
                 level={15}
                 title="Dominance"
                 subtitle="This run is getting ridiculous 💪"
                 unlocked={!!localBadges["15"]}
-                imageSrc="/badges/streakr-15.png"
               />
               <BadgeCard
                 level={20}
                 title="Legendary"
                 subtitle="20 straight. GOAT status. 🐐"
                 unlocked={!!localBadges["20"]}
-                imageSrc="/badges/streakr-20.png"
               />
             </div>
           </div>
@@ -691,7 +688,6 @@ type BadgeProps = {
   title: string;
   subtitle: string;
   unlocked: boolean;
-  imageSrc: string;
 };
 
 function BadgeCard({
@@ -699,8 +695,9 @@ function BadgeCard({
   title,
   subtitle,
   unlocked,
-  imageSrc,
 }: BadgeProps) {
+  const imageSrc = `/badges/streakr-${level}.png`; // expects public/badges/streakr-3.png etc.
+
   return (
     <div
       className={`relative rounded-2xl px-3 py-3 text-xs flex flex-col items-center text-center ${
