@@ -89,7 +89,7 @@ const STREAK_BADGES: Record<StreakMilestone, StreakBadgeConfig> = {
     image: "/badges/streak-5.png",
   },
   10: {
-    label: "Elite",
+    label: "Elite 🚀",
     tagline: "That’s elite. 10 straight.",
     image: "/badges/streak-10.png",
   },
