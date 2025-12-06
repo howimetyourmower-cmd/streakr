@@ -1,344 +1,192 @@
-// app/admin/venues/new/page.tsx
+// app/admin/page.tsx
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useState, FormEvent } from "react";
 import Link from "next/link";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
-type SubscriptionStatus = "active" | "paused" | "cancelled";
+type AdminTool = {
+  title: string;
+  description: string;
+  href: string;
+  badge?: string;
+};
 
-function generateCode(length = 6): string {
-  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
-}
+const ADMIN_TOOLS: AdminTool[] = [
+  {
+    title: "Rounds & publishing",
+    description:
+      "Upload questions for each round and control when they go live on the Picks page.",
+    href: "/admin/rounds",
+    badge: "Primary",
+  },
+  {
+    title: "Season settings",
+    description:
+      "Set which round is currently active for AFL 2026. Updates live via Firestore.",
+    href: "/admin/settings",
+  },
+  {
+    title: "Settlement console",
+    description:
+      "Lock questions and settle results (YES / NO / VOID). Updates player streaks and picks.",
+    href: "/admin/settlement",
+  },
+  {
+    title: "Marketing list",
+    description:
+      "View and export players who have opted in to marketing communications.",
+    href: "/admin/marketing",
+    badge: "New",
+  },
+  {
+    title: "Venue leagues",
+    description:
+      "Create and manage venue leagues for pubs, clubs and sports bars. Controls subscription status and join codes.",
+    href: "/admin/venues/new",
+    badge: "Venues",
+  },
+];
 
-export default function AdminCreateVenueLeaguePage() {
-  const { user } = useAuth();
+export default function AdminDashboardPage() {
+  const { user, isAdmin, loading } = useAuth();
 
-  const [name, setName] = useState("");
-  const [venueName, setVenueName] = useState("");
-  const [location, setLocation] = useState("");
-  const [venueAdminUid, setVenueAdminUid] = useState("");
-  const [code, setCode] = useState<string>(() => generateCode(6));
-  const [subscriptionStatus] = useState<SubscriptionStatus>("active");
-  const [notes, setNotes] = useState("");
-
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [createdVenueId, setCreatedVenueId] = useState<string | null>(null);
-
-  const handleRegenerateCode = () => {
-    setCode(generateCode(6));
-  };
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setCreatedVenueId(null);
-
-    const trimmedName = name.trim();
-    const trimmedVenueName = venueName.trim();
-    const trimmedLocation = location.trim();
-    const trimmedAdminUid = venueAdminUid.trim();
-    const trimmedCode = code.trim().toUpperCase();
-    const trimmedNotes = notes.trim();
-
-    if (!user) {
-      setError("You must be logged in as a Streakr admin to create a venue league.");
-      return;
-    }
-
-    if (!trimmedName) {
-      setError("Venue league name is required.");
-      return;
-    }
-
-    if (!trimmedAdminUid) {
-      setError("Venue admin UID is required.");
-      return;
-    }
-
-    if (!trimmedCode || trimmedCode.length < 4) {
-      setError("Please provide a valid code (at least 4 characters).");
-      return;
-    }
-
-    setCreating(true);
-
-    try {
-      const venueLeaguesRef = collection(db, "venueLeagues");
-      const docRef = await addDoc(venueLeaguesRef, {
-        name: trimmedName,
-        venueName: trimmedVenueName || null,
-        location: trimmedLocation || null,
-        code: trimmedCode,
-        venueAdminUid: trimmedAdminUid,
-        subscriptionStatus,
-        createdAt: serverTimestamp(),
-        createdBy: user.uid,
-        notes: trimmedNotes || null,
-      });
-
-      setCreatedVenueId(docRef.id);
-      setSuccess("Venue league created successfully.");
-      setName("");
-      setVenueName("");
-      setLocation("");
-      setVenueAdminUid("");
-      setNotes("");
-      setCode(generateCode(6));
-    } catch (err) {
-      console.error("Failed to create venue league", err);
-      setError("Failed to create venue league. Please try again.");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  const isAdmin = !!user; // Actual admin check should be enforced in Firestore rules / higher-level guard.
-
-  if (!isAdmin) {
+  if (loading) {
     return (
-      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-4">
-        <Link
-          href="/admin"
-          className="text-sm text-sky-400 hover:text-sky-300"
-        >
-          ← Back to admin
-        </Link>
-        <div className="rounded-2xl bg-red-500/10 border border-red-500/50 px-4 py-3">
-          <p className="text-sm text-red-200">
-            You don&apos;t have access to this page. Venue leagues can only be created by Streakr admins.
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+          <p className="text-sm text-slate-400">Checking admin access…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || !isAdmin) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
+        <div className="max-w-md rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 px-6 py-8 shadow-xl border border-slate-700/70">
+          <h1 className="text-2xl font-semibold mb-3">Admin access only</h1>
+          <p className="text-sm text-slate-400 mb-4">
+            This page is restricted to STREAKr admins. If you think you should
+            have access, double-check that you&apos;re logged in with the
+            correct email.
           </p>
+          <Link
+            href="/"
+            className="inline-flex items-center justify-center rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-black hover:bg-amber-400 transition"
+          >
+            Back to home
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <Link
-            href="/admin"
-            className="text-sm text-sky-400 hover:text-sky-300"
-          >
-            ← Back to admin
-          </Link>
-          <h1 className="text-2xl sm:text-3xl font-bold">
-            Create Venue League
-          </h1>
-          <p className="text-sm text-white/70 max-w-2xl">
-            This screen is for Streakr staff only. You control which venues run
-            a league, who their venue admin is, and when their subscription is
-            active.
+    <div className="min-h-[60vh] bg-[#050814] text-slate-100">
+      {/* Top bar / heading */}
+      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950/80 via-slate-900/80 to-slate-950/80">
+        <div className="mx-auto max-w-6xl px-4 py-8">
+          <p className="text-xs tracking-[0.2em] uppercase text-slate-500 mb-2">
+            Admin
           </p>
-        </div>
-
-        <div className="hidden sm:flex flex-col items-end text-xs text-white/60">
-          <span className="uppercase tracking-wide text-[10px]">
-            Subscription control
-          </span>
-          <span>Created venue leagues start as &quot;active&quot;.</span>
-          <span>Use Firestore / admin tools to pause or cancel later.</span>
+          <h1 className="text-3xl md:text-4xl font-semibold mb-3">
+            STREAKr control centre
+          </h1>
+          <p className="text-sm md:text-base text-slate-400 max-w-2xl">
+            Manage rounds, publishing, settlements and marketing from one
+            place. Changes here update the live game in real time, so use with
+            care.
+          </p>
         </div>
       </div>
 
-      <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4 shadow-[0_24px_60px_rgba(0,0,0,0.8)]">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Venue details</h2>
-          <span className="inline-flex items-center gap-1 rounded-full bg-white/5 border border-orange-500/40 text-orange-300 px-2 py-1 text-[11px] uppercase tracking-wide">
-            Streakr Admin
-          </span>
+      {/* Content */}
+      <div className="mx-auto max-w-6xl px-4 py-8 space-y-8">
+        {/* Logged-in summary */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+              Logged in as
+            </p>
+            <p className="text-sm text-slate-200 mt-1">
+              {user?.email ?? "Unknown user"}
+            </p>
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/5 px-3 py-1">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-xs font-medium text-emerald-300">
+              Admin mode enabled
+            </span>
+          </div>
         </div>
 
-        {error && (
-          <p className="text-sm text-red-300 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-            {error}
-          </p>
-        )}
+        {/* Tool grid */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-300 mb-3">
+            Quick actions
+          </h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {ADMIN_TOOLS.map((tool) => (
+              <Link
+                key={tool.href}
+                href={tool.href}
+                className="group rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/80 p-4 shadow-lg shadow-black/40 hover:border-amber-500/70 hover:shadow-amber-500/20 transition"
+              >
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <h3 className="text-base font-semibold text-slate-50">
+                    {tool.title}
+                  </h3>
+                  {tool.badge && (
+                    <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300 border border-amber-400/30">
+                      {tool.badge}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                  {tool.description}
+                </p>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-amber-300 group-hover:text-amber-200 font-medium">
+                    Open console
+                  </span>
+                  <span className="text-slate-500 group-hover:text-slate-300">
+                    &rarr;
+                  </span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
 
-        {success && (
-          <div className="space-y-2">
-            <p className="text-sm text-emerald-300 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-              {success}
+        {/* Notes / safety block */}
+        <section className="mt-4">
+          <div className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-xs text-slate-400">
+            <p className="font-semibold text-slate-300 mb-1">
+              Admin safety notes
             </p>
-            {createdVenueId && (
-              <div className="text-xs text-white/70 border border-white/10 rounded-md bg-black/30 px-3 py-2 space-y-1">
-                <p>
-                  <span className="font-semibold text-white/80">
-                    Venue ID:
-                  </span>{" "}
-                  <span className="font-mono">{createdVenueId}</span>
-                </p>
-                <p>
-                  <span className="font-semibold text-white/80">
-                    Code:
-                  </span>{" "}
-                  <span className="font-mono">{code}</span>
-                </p>
-                <p>
-                  Share the code with the venue so patrons can join. You can
-                  open the public venue leaderboard at{" "}
-                  <span className="font-mono">
-                    /venues/{createdVenueId}
-                  </span>{" "}
-                  once configured.
-                </p>
-              </div>
-            )}
+            <ul className="list-disc pl-4 space-y-1">
+              <li>
+                <span className="text-slate-300">Publish questions</span> only
+                when you&apos;re happy they&apos;re final for that round.
+              </li>
+              <li>
+                Use the <span className="text-slate-300">Settlement console</span>{" "}
+                carefully – settling a question updates all affected streaks.
+              </li>
+              <li>
+                You can change the{" "}
+                <span className="text-slate-300">current round</span> at any
+                time from Season settings without redeploying.
+              </li>
+              <li>
+                Export the{" "}
+                <span className="text-slate-300">Marketing list</span> regularly
+                if you&apos;re syncing to external email tools.
+              </li>
+            </ul>
           </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-sm">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                League name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. The Royal Hotel STREAKr League"
-              />
-              <p className="text-[11px] text-white/50">
-                Public-facing league name shown inside the app and on leaderboards.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Venue name (optional)
-              </label>
-              <input
-                type="text"
-                value={venueName}
-                onChange={(e) => setVenueName(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. The Royal Hotel"
-              />
-              <p className="text-[11px] text-white/50">
-                Used in admin tools and on some venue-facing screens.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Location (optional)
-              </label>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. Richmond, VIC"
-              />
-              <p className="text-[11px] text-white/50">
-                Helps you identify venues internally (suburb, city, state).
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70 flex items-center justify-between">
-                <span>Venue admin UID</span>
-              </label>
-              <input
-                type="text"
-                value={venueAdminUid}
-                onChange={(e) => setVenueAdminUid(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="Firebase auth UID for venue admin"
-              />
-              <p className="text-[11px] text-white/50">
-                This user will get access to the venue admin portal for this league.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)]">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70 flex items-center justify-between">
-                <span>Venue code</span>
-                <button
-                  type="button"
-                  onClick={handleRegenerateCode}
-                  className="text-[11px] text-sky-400 hover:text-sky-300"
-                >
-                  Regenerate
-                </button>
-              </label>
-              <input
-                type="text"
-                value={code}
-                onChange={(e) =>
-                  setCode(e.target.value.toUpperCase())
-                }
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm font-mono tracking-[0.3em] uppercase focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                maxLength={10}
-              />
-              <p className="text-[11px] text-white/50">
-                4–10 characters. Shown on posters / table tents. Players use
-                this to join the venue league.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Internal notes (optional)
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="Contract terms, sponsorship details, billing notes, etc."
-              />
-              <p className="text-[11px] text-white/50">
-                Visible only to Streakr admins inside your tools.
-              </p>
-            </div>
-          </div>
-
-          <div className="border-t border-white/10 pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="text-xs text-white/60 space-y-1">
-              <p>
-                <span className="font-semibold text-white/80">
-                  Subscription status:
-                </span>{" "}
-                <span className="uppercase tracking-wide text-[11px] text-emerald-300">
-                  {subscriptionStatus}
-                </span>
-              </p>
-              <p>
-                Use your admin tooling / Firestore to pause or cancel this
-                venue if payment stops. When paused, venue vouchers and new
-                joins should be disabled while the leaderboard remains read-only.
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              disabled={creating}
-              className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-5 py-2.5 transition-colors disabled:opacity-60"
-            >
-              {creating ? "Creating venue league…" : "Create venue league"}
-            </button>
-          </div>
-        </form>
+        </section>
       </div>
     </div>
   );
