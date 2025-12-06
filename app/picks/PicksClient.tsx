@@ -1299,6 +1299,11 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
+            // 🔑 NEW: also look at pickHistory so mobile can see your pick
+            const historyPick = pickHistoryRef.current[row.id];
+            const userPickForOutcome =
+              row.userPick ?? historyPick ?? null;
+
             type OutcomeKind =
               | "win"
               | "loss"
@@ -1315,13 +1320,13 @@ export default function PicksClient() {
             if (row.status === "void" || outcome === "void") {
               outcomeKind = "void";
             } else if (row.status === "final") {
-              if (row.correctPick === true) {
+              if (row.correctPick === true && userPickForOutcome) {
                 outcomeKind = "win";
-              } else if (row.correctPick === false) {
+              } else if (row.correctPick === false && userPickForOutcome) {
                 outcomeKind = "loss";
-              } else if (outcome && row.userPick) {
+              } else if (outcome && userPickForOutcome) {
                 outcomeKind =
-                  row.userPick === outcome ? "win" : "loss";
+                  userPickForOutcome === outcome ? "win" : "loss";
               } else {
                 outcomeKind = "settled-no-result";
               }
@@ -1603,7 +1608,7 @@ export default function PicksClient() {
                   value={commentText}
                   onChange={handleCommentChange}
                   rows={3}
-                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none_focus:ring-2 focus:ring-orange-500"
+                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                   placeholder="Add your comment…"
                 />
                 {commentsError && (
