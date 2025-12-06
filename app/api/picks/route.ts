@@ -7,9 +7,6 @@ import rounds2026 from "@/data/rounds-2026.json";
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
-// Per-user result that the client will use for the outcome pill
-type UserResult = "win" | "loss" | "void" | null;
-
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
   Round: string; // "OR", "R1", "R2", ...
@@ -29,12 +26,19 @@ type ApiQuestion = {
   status: QuestionStatus;
   sport: string;
   isSponsorQuestion?: boolean;
+
+  // user data
   userPick?: "yes" | "no";
+
+  // crowd stats
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  correctOutcome?: QuestionOutcome; // settlement result
-  userResult?: UserResult; // 👈 per-user result for outcome pill
+
+  // settlement data
+  correctOutcome?: QuestionOutcome;       // result of the question
+  outcome?: QuestionOutcome;             // duplicate for backwards compat
+  correctPick?: boolean | null;          // did CURRENT user get it right?
 };
 
 type ApiGame = {
@@ -120,7 +124,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
  * or have mismatched roundNumber. Using questionId only is safest.
  */
 async function getPickStatsForRound(
-  _roundNumber: number, // kept in signature for future use
+  _roundNumber: number,
   currentUserId: string | null
 ): Promise<{
   pickStats: Record<string, { yes: number; no: number; total: number }>;
@@ -196,7 +200,6 @@ async function getQuestionStatusForRound(
 ): Promise<
   Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
 > {
-  // internal map keeps updatedAtMs so latest wins
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -213,7 +216,6 @@ async function getQuestionStatusForRound(
 
       if (!data.questionId || !data.status) return;
 
-      // Only keep an outcome if it's a real result (yes/no/void).
       let outcome: QuestionOutcome | undefined;
       if (
         data.outcome === "yes" ||
@@ -243,7 +245,6 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  // strip updatedAtMs before returning
   const finalMap: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome }
@@ -351,28 +352,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const effectiveStatus = statusInfo?.status ?? jsonStatus;
       const correctOutcome = statusInfo?.outcome;
 
-      // Per-user result used by the front-end pill
-      let userResult: UserResult = null;
       const userPick = userPicks[questionId];
 
-      if (effectiveStatus === "void") {
-        // Question void: everybody "void"
-        userResult = "void";
-      } else if (effectiveStatus === "final") {
-        if (correctOutcome === "void") {
-          userResult = "void";
-        } else if (
-          (correctOutcome === "yes" || correctOutcome === "no") &&
-          (userPick === "yes" || userPick === "no")
-        ) {
-          userResult = userPick === correctOutcome ? "win" : "loss";
-        } else {
-          // final but user never picked, or no outcome yet -> null
-          userResult = null;
-        }
-      } else {
-        // open / pending: no pill yet
-        userResult = null;
+      let correctPick: boolean | null = null;
+      if (correctOutcome && userPick) {
+        correctPick = userPick === correctOutcome;
       }
 
       const apiQuestion: ApiQuestion = {
@@ -387,7 +371,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
-        userResult,
+        outcome: correctOutcome, // backwards compatibility
+        correctPick,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
