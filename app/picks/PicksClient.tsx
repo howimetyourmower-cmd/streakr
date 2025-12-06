@@ -38,6 +38,7 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
+  correctPick?: boolean; // true = you were right, false = you were wrong
   correctOutcome?: "yes" | "no" | "void" | null;
   outcome?: "yes" | "no" | "void" | "lock" | null;
 };
@@ -66,6 +67,7 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
+  correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
 };
 
