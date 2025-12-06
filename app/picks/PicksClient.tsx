@@ -38,9 +38,9 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  correctPick?: boolean; // true = you were right, false = you were wrong
-  correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null;
+  correctPick?: boolean; // for "you were right"
+  correctOutcome?: "yes" | "no" | "void" | boolean | null;
+  outcome?: "yes" | "no" | "void" | "lock" | boolean | null;
 };
 
 type ApiGame = {
@@ -235,7 +235,7 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
-// Normalise any backend outcome value into "yes" | "no" | "void" | null
+// Normalise any backend outcome *string* into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
 ): "yes" | "no" | "void" | null => {
@@ -354,6 +354,7 @@ export default function PicksClient() {
     };
   };
 
+  // ---------- FLATTEN + DERIVE correctPick ----------
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
@@ -363,15 +364,37 @@ export default function PicksClient() {
       g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
+        const mergedUserPick: "yes" | "no" | undefined =
+          q.userPick ?? historyPick ?? prev?.userPick;
 
-        const rawOutcome =
-          normaliseOutcome(q.correctOutcome) ??
-          normaliseOutcome(q.outcome);
+        // support boolean correctPick and boolean correctOutcome, plus string outcomes
+        let rawOutcome =
+          normaliseOutcome(
+            typeof q.correctOutcome === "string"
+              ? q.correctOutcome
+              : typeof q.outcome === "string"
+              ? q.outcome
+              : null
+          ) ?? null;
+
+        let derivedCorrectPick: boolean | null =
+          typeof q.correctPick === "boolean"
+            ? q.correctPick
+            : typeof q.correctOutcome === "boolean"
+            ? q.correctOutcome
+            : null;
+
+        // If we have outcome yes/no + userPick but no boolean yet, derive it.
+        if (
+          derivedCorrectPick === null &&
+          rawOutcome &&
+          (mergedUserPick === "yes" || mergedUserPick === "no")
+        ) {
+          derivedCorrectPick = mergedUserPick === rawOutcome;
+        }
 
         const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void"
-            ? rawOutcome
-            : null;
+          q.status === "final" || q.status === "void" ? rawOutcome : null;
 
         if (
           typeof q.yesPercent === "number" ||
@@ -401,7 +424,7 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          userPick: q.userPick ?? historyPick ?? prev?.userPick,
+          userPick: mergedUserPick,
           yesPercent:
             typeof q.yesPercent === "number"
               ? q.yesPercent
@@ -414,10 +437,9 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          // NEW: persist boolean result from API so we can show “You were right!” everywhere
           correctPick:
-            typeof q.correctPick === "boolean"
-              ? q.correctPick
+            derivedCorrectPick !== null
+              ? derivedCorrectPick
               : prev?.correctPick ?? null,
         };
       })
@@ -1303,20 +1325,16 @@ export default function PicksClient() {
               | "settled-no-result"
               | null;
 
-            const outcomeStr = normaliseOutcome(
-              (row.correctOutcome as any) ?? (row as any).outcome
-            );
+            // unified outcome logic – always prefer boolean correctPick
+            const outcomeStr = row.correctOutcome;
 
             let outcomeKind: OutcomeKind = null;
 
-            // NEW unified outcome logic that prefers correctPick
-            if (row.status === "void") {
+            if (row.status === "void" || outcomeStr === "void") {
               outcomeKind = "void";
             } else if (row.status === "final") {
               if (typeof row.correctPick === "boolean") {
                 outcomeKind = row.correctPick ? "win" : "loss";
-              } else if (outcomeStr === "void") {
-                outcomeKind = "void";
               } else if (outcomeStr && row.userPick) {
                 outcomeKind =
                   row.userPick === outcomeStr ? "win" : "loss";
