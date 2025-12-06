@@ -26,19 +26,13 @@ type ApiQuestion = {
   status: QuestionStatus;
   sport: string;
   isSponsorQuestion?: boolean;
-
-  // user data
   userPick?: "yes" | "no";
-
-  // crowd stats
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-
-  // settlement data
-  correctOutcome?: QuestionOutcome;       // result of the question
-  outcome?: QuestionOutcome;             // duplicate for backwards compat
-  correctPick?: boolean | null;          // did CURRENT user get it right?
+  correctOutcome?: QuestionOutcome; // settlement result
+  outcome?: QuestionOutcome;        // duplicate for safety
+  correctPick?: boolean | null;     // did current user get it right?
 };
 
 type ApiGame = {
@@ -64,7 +58,8 @@ type QuestionStatusDoc = {
   roundNumber: number;
   questionId: string;
   status: QuestionStatus;
-  outcome?: QuestionOutcome | "lock";
+  outcome?: QuestionOutcome | "lock" | string; // we’ll normalise
+  result?: QuestionOutcome | "lock" | string;  // legacy support
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
@@ -76,6 +71,25 @@ const rows: JsonRow[] = rounds2026 as JsonRow[];
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
+}
+
+// Normalise any outcome-ish value to "yes" | "no" | "void" | undefined
+function normaliseOutcomeValue(
+  val: unknown
+): QuestionOutcome | undefined {
+  if (typeof val !== "string") return undefined;
+  const s = val.trim().toLowerCase();
+
+  if (s === "yes" || s === "y" || s === "correct" || s === "win") {
+    return "yes";
+  }
+  if (s === "no" || s === "n" || s === "wrong" || s === "loss") {
+    return "no";
+  }
+  if (s === "void" || s === "cancelled" || s === "canceled") {
+    return "void";
+  }
+  return undefined;
 }
 
 // ─────────────────────────────────────────────
@@ -194,6 +208,10 @@ async function getCommentCountsForRound(
 /**
  * Read questionStatus, but if multiple docs exist for the same questionId,
  * we ALWAYS use the one with the latest updatedAt.
+ *
+ * We now:
+ *  - accept both `outcome` and `result` fields
+ *  - normalise case (e.g. "YES", "Yes" → "yes")
  */
 async function getQuestionStatusForRound(
   roundNumber: number
@@ -216,14 +234,11 @@ async function getQuestionStatusForRound(
 
       if (!data.questionId || !data.status) return;
 
-      let outcome: QuestionOutcome | undefined;
-      if (
-        data.outcome === "yes" ||
-        data.outcome === "no" ||
-        data.outcome === "void"
-      ) {
-        outcome = data.outcome;
-      }
+      // grab either outcome or result, then normalise
+      const rawOutcome =
+        (data.outcome as string | undefined) ??
+        (data.result as string | undefined);
+      const outcome = normaliseOutcomeValue(rawOutcome);
 
       const updatedAtMs =
         data.updatedAt &&
@@ -350,7 +365,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
 
       const effectiveStatus = statusInfo?.status ?? jsonStatus;
-      const correctOutcome = statusInfo?.outcome;
+
+      // final outcome (yes/no/void) for this question, if known
+      const correctOutcome =
+        effectiveStatus === "final" || effectiveStatus === "void"
+          ? statusInfo?.outcome
+          : undefined;
 
       const userPick = userPicks[questionId];
 
@@ -371,7 +391,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
-        outcome: correctOutcome, // backwards compatibility
+        outcome: correctOutcome, // duplicate to be extra safe
         correctPick,
       };
 
