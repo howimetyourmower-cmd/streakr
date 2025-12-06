@@ -42,7 +42,6 @@ async function getPicksForQuestion(questionId: string): Promise<
 > {
   const results: { userId: string; outcome: "yes" | "no" }[] = [];
 
-  // 1) Current collection: `picks` (written by /api/user-picks)
   const [picksSnap, userPicksSnap] = await Promise.all([
     db.collection("picks").where("questionId", "==", questionId).get(),
     db.collection("userPicks").where("questionId", "==", questionId).get(),
@@ -54,10 +53,7 @@ async function getPicksForQuestion(questionId: string): Promise<
     const userId = data.userId;
     const pick = data.pick;
 
-    if (
-      typeof userId === "string" &&
-      (pick === "yes" || pick === "no")
-    ) {
+    if (typeof userId === "string" && (pick === "yes" || pick === "no")) {
       results.push({ userId, outcome: pick });
     }
   });
@@ -68,10 +64,7 @@ async function getPicksForQuestion(questionId: string): Promise<
     const userId = data.userId;
     const out = data.outcome;
 
-    if (
-      typeof userId === "string" &&
-      (out === "yes" || out === "no")
-    ) {
+    if (typeof userId === "string" && (out === "yes" || out === "no")) {
       results.push({ userId, outcome: out });
     }
   });
@@ -151,7 +144,8 @@ async function updateStreaksForQuestion(
  * any user who was previously CORRECT on that result will have their
  * currentStreak reduced by 1 (down to a minimum of 0).
  *
- * We intentionally do NOT touch longestStreak so "best ever" stays as a record.
+ * If that streak was ALSO their longestStreak, we reduce longestStreak by 1
+ * as well so the "record run" stays accurate.
  */
 async function revertStreaksForQuestion(
   roundNumber: number,
@@ -174,25 +168,31 @@ async function revertStreaksForQuestion(
     const p = db.runTransaction(async (tx) => {
       const snap = await tx.get(userRef);
 
-      let currentStreak = 0;
-      let longestStreak = 0;
+      let oldCurrent = 0;
+      let oldLongest = 0;
 
       if (snap.exists) {
         const u = snap.data() as any;
-        currentStreak =
+        oldCurrent =
           typeof u.currentStreak === "number" ? u.currentStreak : 0;
-        longestStreak =
+        oldLongest =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
       }
 
       // Revert the +1 we previously gave them for this result.
-      currentStreak = Math.max(0, currentStreak - 1);
+      const newCurrent = Math.max(0, oldCurrent - 1);
+
+      // If we are undoing part of their record run, shrink longest too.
+      let newLongest = oldLongest;
+      if (oldLongest > 0 && oldCurrent === oldLongest) {
+        newLongest = Math.max(0, oldLongest - 1);
+      }
 
       tx.set(
         userRef,
         {
-          currentStreak,
-          longestStreak,
+          currentStreak: newCurrent,
+          longestStreak: newLongest,
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -335,10 +335,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("[/api/settlement] Error:", error);
+    console.error("[/api/settlement] Unexpected error", error);
     return NextResponse.json(
-      { error: "Failed to update settlement" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
 }
+
