@@ -3,24 +3,24 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState, FormEvent } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   collection,
   doc,
-  onSnapshot,
-  addDoc,
-  updateDoc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
+  updateDoc,
   where,
-  limit,
   arrayUnion,
-  serverTimestamp,
+  increment,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
+
+type SubscriptionStatus = "active" | "paused" | "cancelled";
 
 type VenueLeague = {
   id: string;
@@ -28,165 +28,92 @@ type VenueLeague = {
   code: string;
   venueName?: string;
   location?: string;
+  subscriptionStatus: SubscriptionStatus;
 };
 
-function generateCode(length = 6): string {
-  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let i = 0; i < length; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
-}
+export default function VenueLeaguesPage() {
+  const { user, loading } = useAuth();
 
-export default function VenuesPage() {
-  const { user } = useAuth();
-
-  // Create venue league
-  const [newName, setNewName] = useState("");
-  const [newVenueName, setNewVenueName] = useState("");
-  const [newLocation, setNewLocation] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
-
-  // Join venue league
   const [joinCode, setJoinCode] = useState("");
-  const [joining, setJoining] = useState(false);
+  const [joinLoading, setJoinLoading] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
-  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
 
-  // User's venue leagues
   const [venues, setVenues] = useState<VenueLeague[]>([]);
-  const [venuesLoading, setVenuesLoading] = useState(false);
+  const [venuesLoading, setVenuesLoading] = useState(true);
   const [venuesError, setVenuesError] = useState<string | null>(null);
 
-  // Load user's venue leagues from users/{uid}.venueLeagueIds[]
-  useEffect(() => {
-    if (!user) {
-      setVenues([]);
-      return;
-    }
+  const [userVenueIds, setUserVenueIds] = useState<string[]>([]);
 
+  const [searchTerm, setSearchTerm] = useState("");
+
+  // 🔹 Subscribe to all venue leagues (for search + "your venues" rendering)
+  useEffect(() => {
     setVenuesLoading(true);
     setVenuesError(null);
+
+    const venuesRef = collection(db, "venueLeagues");
+    const qVenues = query(venuesRef);
+
+    const unsub = onSnapshot(
+      qVenues,
+      (snap) => {
+        const list: VenueLeague[] = snap.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const subscriptionStatus: SubscriptionStatus =
+            (data.subscriptionStatus as SubscriptionStatus) ?? "active";
+
+          return {
+            id: docSnap.id,
+            name: data.name ?? "Venue League",
+            code: data.code ?? "",
+            venueName: data.venueName ?? data.venue ?? undefined,
+            location: data.location ?? undefined,
+            subscriptionStatus,
+          };
+        });
+        setVenues(list);
+        setVenuesLoading(false);
+      },
+      (err) => {
+        console.error("Failed to load venue leagues", err);
+        setVenues([]);
+        setVenuesLoading(false);
+        setVenuesError("Failed to load venue leagues.");
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
+  // 🔹 Watch current user's venueLeagueIds so "Your venue leagues" stays live
+  useEffect(() => {
+    if (!user) {
+      setUserVenueIds([]);
+      return;
+    }
 
     const userRef = doc(db, "users", user.uid);
     const unsub = onSnapshot(
       userRef,
-      async (snap) => {
-        try {
-          if (!snap.exists()) {
-            setVenues([]);
-            setVenuesLoading(false);
-            return;
-          }
-
-          const data = snap.data() as any;
-          const venueLeagueIds: string[] = Array.isArray(
-            data.venueLeagueIds
-          )
-            ? data.venueLeagueIds
-            : [];
-
-          if (venueLeagueIds.length === 0) {
-            setVenues([]);
-            setVenuesLoading(false);
-            return;
-          }
-
-          const results: VenueLeague[] = [];
-          for (const id of venueLeagueIds) {
-            try {
-              const vSnap = await getDoc(doc(db, "venueLeagues", id));
-              if (!vSnap.exists()) continue;
-              const vData = vSnap.data() as any;
-              results.push({
-                id: vSnap.id,
-                name: vData.name ?? "Venue League",
-                code: vData.code ?? "",
-                venueName: vData.venueName ?? vData.venue ?? undefined,
-                location: vData.location ?? undefined,
-              });
-            } catch (err) {
-              console.error("Failed to load venue league", err);
-            }
-          }
-
-          setVenues(results);
-          setVenuesLoading(false);
-        } catch (err) {
-          console.error("Failed to process user venues", err);
-          setVenues([]);
-          setVenuesLoading(false);
-          setVenuesError("Failed to load your venue leagues.");
+      (snap) => {
+        if (!snap.exists()) {
+          setUserVenueIds([]);
+          return;
         }
+        const data = snap.data() as any;
+        const ids: string[] = Array.isArray(data.venueLeagueIds)
+          ? data.venueLeagueIds
+          : [];
+        setUserVenueIds(ids);
       },
       (err) => {
-        console.error("User venues snapshot error", err);
-        setVenues([]);
-        setVenuesLoading(false);
-        setVenuesError("Failed to load your venue leagues.");
+        console.error("Failed to watch user venueLeagueIds", err);
+        setUserVenueIds([]);
       }
     );
 
-    return () => {
-      unsub();
-    };
+    return () => unsub();
   }, [user]);
-
-  const handleCreateVenue = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!user) {
-      setCreateError("You need to be logged in to create a venue league.");
-      return;
-    }
-
-    const trimmedName = newName.trim();
-    const trimmedVenueName = newVenueName.trim();
-    const trimmedLocation = newLocation.trim();
-
-    if (!trimmedName) {
-      setCreateError("Give your venue league a name.");
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
-    setCreateSuccess(null);
-
-    try {
-      const code = generateCode(6);
-
-      const venuesRef = collection(db, "venueLeagues");
-      const venueDoc = await addDoc(venuesRef, {
-        name: trimmedName,
-        venueName: trimmedVenueName || null,
-        location: trimmedLocation || null,
-        code,
-        managerUid: user.uid,
-        createdAt: serverTimestamp(),
-      });
-
-      // Attach venue to user
-      const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, {
-        venueLeagueIds: arrayUnion(venueDoc.id),
-      });
-
-      setCreateSuccess(
-        `Venue league created. Code: ${code} – share it with players at your venue.`
-      );
-      setNewName("");
-      setNewVenueName("");
-      setNewLocation("");
-    } catch (err) {
-      console.error("Failed to create venue league", err);
-      setCreateError("Failed to create venue league. Please try again.");
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleJoinVenue = async (e: FormEvent) => {
     e.preventDefault();
@@ -195,264 +122,276 @@ export default function VenuesPage() {
       return;
     }
 
-    const code = joinCode.trim().toUpperCase();
-    if (!code || code.length < 4) {
-      setJoinError("Enter a valid venue code.");
+    const trimmedCode = joinCode.trim().toUpperCase();
+    if (!trimmedCode || trimmedCode.length < 4) {
+      setJoinError("Please enter a valid venue code.");
       return;
     }
 
-    setJoining(true);
+    setJoinLoading(true);
     setJoinError(null);
-    setJoinSuccess(null);
 
     try {
+      // Find venue by code
       const venuesRef = collection(db, "venueLeagues");
-      const q = query(venuesRef, where("code", "==", code), limit(1));
-      const snap = await getDocs(q);
+      const qByCode = query(venuesRef, where("code", "==", trimmedCode));
+      const snap = await getDocs(qByCode);
 
       if (snap.empty) {
-        setJoinError("No venue league found with that code.");
-        setJoining(false);
+        setJoinError("No venue found with that code. Double-check with the bar staff.");
+        setJoinLoading(false);
         return;
       }
 
       const venueDoc = snap.docs[0];
+      const venueData = venueDoc.data() as any;
       const venueId = venueDoc.id;
+      const subscriptionStatus: SubscriptionStatus =
+        (venueData.subscriptionStatus as SubscriptionStatus) ?? "active";
 
-      // Attach venue to user
+      if (subscriptionStatus !== "active") {
+        setJoinError(
+          "This venue league is currently inactive. Ask the venue about their STREAKr status."
+        );
+        setJoinLoading(false);
+        return;
+      }
+
+      // Check if user already in this venue
       const userRef = doc(db, "users", user.uid);
+      const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? (userSnap.data() as any) : {};
+      const existingIds: string[] = Array.isArray(userData.venueLeagueIds)
+        ? userData.venueLeagueIds
+        : [];
+
+      if (existingIds.includes(venueId)) {
+        // Already joined — no-op, but send them to leaderboard
+        setJoinLoading(false);
+        setJoinCode("");
+        window.location.href = `/venues/${venueId}`;
+        return;
+      }
+
+      // Add venue to user's venueLeagueIds
       await updateDoc(userRef, {
         venueLeagueIds: arrayUnion(venueId),
       });
 
-      const vData = venueDoc.data() as any;
-      setJoinSuccess(
-        `Joined ${vData.name ?? "Venue League"}. You’ll now appear on their venue leaderboard.`
-      );
+      // Bump venue memberCount (best effort)
+      try {
+        await updateDoc(doc(db, "venueLeagues", venueId), {
+          memberCount: increment(1),
+        });
+      } catch (err) {
+        console.warn("Failed to increment venue memberCount", err);
+      }
+
+      setJoinLoading(false);
       setJoinCode("");
+      // Go straight to the venue leaderboard
+      window.location.href = `/venues/${venueId}`;
     } catch (err) {
       console.error("Failed to join venue league", err);
-      setJoinError("Failed to join venue league. Please try again.");
-    } finally {
-      setJoining(false);
+      setJoinError("Something went wrong joining the venue. Please try again.");
+      setJoinLoading(false);
     }
   };
 
+  // 🔹 Derive user's venues from all venues + venueLeagueIds
+  const userVenues = useMemo(() => {
+    if (!userVenueIds.length || !venues.length) return [];
+    const idSet = new Set(userVenueIds);
+    return venues.filter((v) => idSet.has(v.id));
+  }, [userVenueIds, venues]);
+
+  // 🔹 Search active venues by name or location
+  const filteredVenues = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    const base = venues.filter(
+      (v) => v.subscriptionStatus === "active"
+    );
+
+    if (!term) return base;
+
+    return base.filter((v) => {
+      const name = v.name?.toLowerCase() ?? "";
+      const venueName = v.venueName?.toLowerCase() ?? "";
+      const location = v.location?.toLowerCase() ?? "";
+      return (
+        name.includes(term) ||
+        venueName.includes(term) ||
+        location.includes(term)
+      );
+    });
+  }, [venues, searchTerm]);
+
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
-      <div className="flex items-center justify-between gap-2">
+      {/* Header */}
+      <div className="space-y-2 mb-2">
         <h1 className="text-3xl sm:text-4xl font-bold">Venue Leagues</h1>
-        <Link
-          href="/picks"
-          className="text-sm text-orange-400 hover:text-orange-300"
-        >
-          Back to picks
-        </Link>
+        <p className="text-sm text-white/70 max-w-2xl">
+          Run STREAKr inside pubs, clubs and sporting venues. Players build the
+          same streak as general play – but each venue has its own live ladder
+          for bragging rights and promotions.
+        </p>
       </div>
 
-      <p className="text-sm text-white/70 max-w-2xl">
-        Run STREAKr inside pubs, clubs and sporting venues. Players build the
-        same streak as general play – but each venue also gets its own ladder
-        for bragging rights and promotions.
-      </p>
-
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)]">
-        {/* Create / Join column */}
-        <div className="space-y-4">
-          {/* Create venue league */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-lg font-semibold">Create a venue league</h2>
-            {!user && (
-              <p className="text-xs text-white/70">
-                Log in to create a venue league for your pub or club.
-              </p>
-            )}
-
-            {user && (
-              <>
-                {createError && (
-                  <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                    {createError}
-                  </p>
-                )}
-                {createSuccess && (
-                  <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-                    {createSuccess}
-                  </p>
-                )}
-
-                <form
-                  onSubmit={handleCreateVenue}
-                  className="space-y-3 text-sm"
-                >
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-white/70">
-                      League name
-                    </label>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                      placeholder="E.g. The Royal Hotel STREAKr"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-white/70">
-                      Venue name (optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newVenueName}
-                      onChange={(e) => setNewVenueName(e.target.value)}
-                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                      placeholder="E.g. The Royal Hotel"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-white/70">
-                      Location (optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={newLocation}
-                      onChange={(e) => setNewLocation(e.target.value)}
-                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                      placeholder="E.g. Richmond, VIC"
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={creating}
-                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
-                  >
-                    {creating ? "Creating…" : "Create venue league"}
-                  </button>
-                </form>
-              </>
-            )}
-          </div>
-
-          {/* Join venue league */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-lg font-semibold">Join a venue league</h2>
-            <p className="text-xs text-white/70">
-              Enter the 6-character code from your venue to appear on their
-              leaderboard.
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* LEFT COLUMN: Join + Search */}
+        <div className="space-y-5">
+          {/* Join by code */}
+          <div className="rounded-2xl bg-gradient-to-br from-[#020617] to-[#020617] border border-slate-800 px-4 py-5 shadow-[0_18px_50px_rgba(0,0,0,0.8)]">
+            <h2 className="text-lg font-semibold mb-1">Join a venue league</h2>
+            <p className="text-xs text-white/65 mb-4">
+              Enter the 6-character code from table tents, posters or bar staff
+              to appear on this venue&apos;s leaderboard.
             </p>
 
-            {joinError && (
-              <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                {joinError}
-              </p>
-            )}
-            {joinSuccess && (
-              <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-                {joinSuccess}
-              </p>
-            )}
+            <form onSubmit={handleJoinVenue} className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs text-white/70">
+                  Venue code from your pub or club
+                </label>
+                <input
+                  type="text"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  maxLength={6}
+                  className="w-full rounded-md bg-black/60 border border-slate-700 px-3 py-2 text-sm tracking-[0.25em] uppercase font-mono focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+                  placeholder="ABC123"
+                />
+              </div>
 
-            <form
-              onSubmit={handleJoinVenue}
-              className="flex flex-col sm:flex-row gap-2 text-sm"
-            >
-              <input
-                type="text"
-                value={joinCode}
-                onChange={(e) =>
-                  setJoinCode(e.target.value.toUpperCase())
-                }
-                className="flex-1 rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm tracking-[0.3em] font-mono uppercase focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="VENUEC"
-                maxLength={8}
-              />
+              {joinError && (
+                <p className="text-xs text-red-400">{joinError}</p>
+              )}
+
               <button
                 type="submit"
-                disabled={joining}
-                className="inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
+                disabled={joinLoading}
+                className="inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-4 py-2 transition disabled:opacity-60"
               >
-                {joining ? "Joining…" : "Join venue"}
+                {joinLoading ? "Joining…" : "Join venue"}
               </button>
             </form>
           </div>
+
+          {/* Search venues */}
+          <div className="rounded-2xl bg-gradient-to-br from-[#020617] to-[#020617] border border-slate-800 px-4 py-5 shadow-[0_18px_40px_rgba(0,0,0,0.75)]">
+            <h2 className="text-lg font-semibold mb-1">Find a venue</h2>
+            <p className="text-xs text-white/65 mb-3">
+              Search partner venues by name or suburb. You&apos;ll still need
+              the venue code (from staff or signage) to actually join.
+            </p>
+
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full rounded-md bg-black/60 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80 mb-3"
+              placeholder="E.g. Royal Hotel, Richmond"
+            />
+
+            {venuesLoading && (
+              <p className="text-xs text-white/60">Loading venues…</p>
+            )}
+            {venuesError && (
+              <p className="text-xs text-red-400">{venuesError}</p>
+            )}
+
+            {!venuesLoading && !venuesError && filteredVenues.length === 0 && (
+              <p className="text-xs text-white/60">
+                No partner venues match that search yet.
+              </p>
+            )}
+
+            {!venuesLoading && !venuesError && filteredVenues.length > 0 && (
+              <ul className="mt-2 space-y-2 max-h-64 overflow-y-auto text-xs">
+                {filteredVenues.map((v) => (
+                  <li
+                    key={v.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-black/40 border border-slate-700 px-3 py-2"
+                  >
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-white">
+                        {v.name}
+                      </span>
+                      {(v.venueName || v.location) && (
+                        <span className="text-[11px] text-white/60">
+                          {[v.venueName, v.location]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      )}
+                    </div>
+                    <Link
+                      href={`/venues/${v.id}`}
+                      className="text-[11px] font-semibold text-orange-300 hover:text-orange-200"
+                    >
+                      View leaderboard →
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
-        {/* Venues list column */}
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
+        {/* RIGHT COLUMN: Your venue leagues */}
+        <div className="rounded-2xl bg-gradient-to-br from-[#020617] to-[#020617] border border-slate-800 px-4 py-5 shadow-[0_18px_50px_rgba(0,0,0,0.8)] flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-2 mb-1">
             <h2 className="text-lg font-semibold">Your venue leagues</h2>
-            <span className="text-[11px] text-white/60">
-              Each venue has its own live leaderboard.
-            </span>
+            {user && (
+              <span className="text-[11px] text-white/60">
+                Signed in as{" "}
+                <span className="font-medium text-white">
+                  {user.email ?? user.uid}
+                </span>
+              </span>
+            )}
           </div>
 
-          {venuesError && (
-            <p className="text-sm text-red-400">{venuesError}</p>
-          )}
-
-          {venuesLoading && !venuesError && (
-            <p className="text-sm text-white/70">Loading venues…</p>
-          )}
-
-          {!venuesLoading && venues.length === 0 && (
+          {!user && (
             <p className="text-sm text-white/70">
-              You&apos;re not in any venue leagues yet. Create one for your
-              venue or join using a code.
+              Log in to see the venues you&apos;ve joined and view their
+              leaderboards.
             </p>
           )}
 
-          {!venuesLoading && venues.length > 0 && (
-            <ul className="space-y-3 text-sm">
-              {venues.map((v) => (
+          {user && userVenues.length === 0 && (
+            <p className="text-sm text-white/70">
+              You&apos;re not in any venue leagues yet. Join one with a code or
+              ask staff if they&apos;re running a STREAKr Venue League.
+            </p>
+          )}
+
+          {user && userVenues.length > 0 && (
+            <ul className="mt-1 space-y-2 text-sm">
+              {userVenues.map((v) => (
                 <li
                   key={v.id}
-                  className="rounded-2xl bg-black/20 border border-white/10 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex items-center justify-between gap-2 rounded-lg bg-black/40 border border-slate-700 px-3 py-2"
                 >
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{v.name}</span>
-                    </div>
-                    {v.venueName && (
-                      <span className="text-xs text-white/70">
-                        {v.venueName}
-                        {v.location ? ` • ${v.location}` : ""}
+                  <div className="flex flex-col">
+                    <span className="font-semibold text-white">
+                      {v.name}
+                    </span>
+                    {(v.venueName || v.location) && (
+                      <span className="text-xs text-white/60">
+                        {[v.venueName, v.location]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                     )}
-                    {!v.venueName && v.location && (
-                      <span className="text-xs text-white/70">
-                        {v.location}
-                      </span>
-                    )}
-                    <div className="flex items-center gap-2 text-xs text-white/70">
-                      <span className="uppercase tracking-wide text-[10px]">
-                        Code
-                      </span>
-                      <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-1">
-                        {v.code}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          navigator.clipboard.writeText(v.code)
-                        }
-                        className="text-sky-400 hover:text-sky-300"
-                      >
-                        Copy
-                      </button>
-                    </div>
                   </div>
-
-                  <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
-                    <Link
-                      href={`/venues/${v.id}`}
-                      className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-xs px-4 py-1.5 transition-colors"
-                    >
-                      View leaderboard
-                    </Link>
-                  </div>
+                  <Link
+                    href={`/venues/${v.id}`}
+                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-[11px] px-3 py-1 transition"
+                  >
+                    View leaderboard
+                  </Link>
                 </li>
               ))}
             </ul>
