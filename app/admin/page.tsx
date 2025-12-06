@@ -42,7 +42,7 @@ const ADMIN_TOOLS: AdminTool[] = [
     title: "Venue leagues",
     description:
       "Create and manage venue leagues for pubs, clubs and sports bars. Controls subscription status and join codes.",
-    href: "/admin/venues/new",
+    href: "/admin/venues",
     badge: "Venues",
   },
 ];
