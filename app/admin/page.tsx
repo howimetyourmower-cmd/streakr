@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -36,6 +37,13 @@ const ADMIN_TOOLS: AdminTool[] = [
       "View and export players who have opted in to marketing communications.",
     href: "/admin/marketing",
     badge: "New",
+  },
+  {
+    title: "Venue leagues",
+    description:
+      "Create and manage venue leagues for pubs, clubs and sports bars. Controls subscription status and join codes.",
+    href: "/admin/venues/new",
+    badge: "Venues",
   },
 ];
 
