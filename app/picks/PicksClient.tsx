@@ -452,6 +452,7 @@ export default function PicksClient() {
     }
   };
 
+  // Load pick history from localStorage (per device)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -466,11 +467,13 @@ export default function PicksClient() {
     }
   }, []);
 
+  // Initial picks
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-refresh
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -481,6 +484,7 @@ export default function PicksClient() {
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
+  // Comment-count live updates
   useEffect(() => {
     if (!questionIds.length) return;
 
@@ -530,6 +534,7 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
+  // Restore active pick (local)
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!rows.length) return;
@@ -555,15 +560,14 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
+  // NEW: Load picks from backend and merge into history so pills work on every device
   useEffect(() => {
-    const loadServerPick = async () => {
+    const loadServerPicks = async () => {
       if (!user) {
         setActiveQuestionId(null);
         setActiveOutcome(null);
         return;
       }
-
-      if (!rows.length) return;
 
       try {
         const idToken = await user.getIdToken();
@@ -573,31 +577,108 @@ export default function PicksClient() {
             Authorization: `Bearer ${idToken}`,
           },
         });
-        if (!res.ok) return;
+
+        if (!res.ok) {
+          console.warn("user-picks GET not ok", await res.text());
+          return;
+        }
 
         const json = await res.json();
-        const questionId: string | undefined = json?.questionId;
-        const outcome: "yes" | "no" | undefined = json?.outcome;
 
-        if (
-          questionId &&
-          rows.some((r) => r.id === questionId)
-        ) {
-          setActiveQuestionId(questionId);
-          if (outcome === "yes" || outcome === "no") {
-            setActiveOutcome(outcome);
+        let historyFromApi: PickHistory = {};
+
+        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
+        if (Array.isArray(json?.picks)) {
+          for (const p of json.picks) {
+            const qid = p?.questionId;
+            if (!qid) continue;
+            const raw =
+              typeof p.outcome === "string"
+                ? p.outcome.toLowerCase()
+                : "";
+            const outcome =
+              raw === "yes" || raw === "no"
+                ? (raw as "yes" | "no")
+                : null;
+            if (!outcome) continue;
+            historyFromApi[qid] = outcome;
           }
         }
+
+        // Legacy shape: { questionId, outcome }
+        if (
+          json?.questionId &&
+          json?.outcome &&
+          !Array.isArray(json?.picks)
+        ) {
+          const raw = String(json.outcome).toLowerCase();
+          const outcome =
+            raw === "yes" || raw === "no"
+              ? (raw as "yes" | "no")
+              : null;
+          if (outcome) {
+            historyFromApi[json.questionId] = outcome;
+          }
+        }
+
+        if (Object.keys(historyFromApi).length) {
+          setPickHistory((prev) => {
+            const merged: PickHistory = {
+              ...prev,
+              ...historyFromApi,
+            };
+            try {
+              if (typeof window !== "undefined") {
+                window.localStorage.setItem(
+                  PICK_HISTORY_KEY,
+                  JSON.stringify(merged)
+                );
+              }
+            } catch (err) {
+              console.error("Failed to persist merged pick history", err);
+            }
+            return merged;
+          });
+        }
+
+        // Determine active pick (for streak highlighting)
+        let activeFromApi =
+          json?.currentPick || json?.activePick || null;
+        if (!activeFromApi && !Array.isArray(json?.picks)) {
+          // legacy: the whole object is the active pick
+          activeFromApi = json;
+        }
+
+        const activeQid = activeFromApi?.questionId;
+        let activeOutcomeFromApi: "yes" | "no" | null = null;
+        if (typeof activeFromApi?.outcome === "string") {
+          const raw = activeFromApi.outcome.toLowerCase();
+          if (raw === "yes" || raw === "no") {
+            activeOutcomeFromApi = raw as "yes" | "no";
+          }
+        }
+
+        if (activeQid) {
+          setActiveQuestionId(activeQid);
+        }
+        if (activeOutcomeFromApi) {
+          setActiveOutcome(activeOutcomeFromApi);
+        }
+
+        // Re-flatten rows once so row.userPick is populated from merged history
+        if (rowsRef.current.length) {
+          fetchPicks({ silent: true });
+        }
       } catch (err) {
-        console.error("Failed to load user pick from API", err);
+        console.error("Failed to load picks from API", err);
       }
     };
 
-    if (user) {
-      loadServerPick();
-    }
-  }, [user, rows.length]);
+    loadServerPicks();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
+  // Streak leader listener
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -630,6 +711,7 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
+  // User streak listener
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
@@ -681,6 +763,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
+  // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -1211,7 +1294,6 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            // -------- Outcome pill logic (fixed) --------
             type OutcomeKind =
               | "win"
               | "loss"
@@ -1232,7 +1314,6 @@ export default function PicksClient() {
                 outcomeKind =
                   row.userPick === outcome ? "win" : "loss";
               } else {
-                // FINAL but missing either pick or outcome – still show a pill
                 outcomeKind = "settled-no-result";
               }
             }
