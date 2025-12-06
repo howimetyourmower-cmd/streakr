@@ -1,3 +1,4 @@
+// components/Navbar.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -70,14 +71,9 @@ export default function Navbar() {
   return (
     <header className="w-full border-b border-white/10 bg-black">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        
         {/* LOGO */}
         <Link href="/" className="flex items-center gap-3">
-          <img
-            src="/streakrlogo.jpg"
-            alt="STREAKr"
-            className="h-14 w-auto"
-          />
+          <img src="/streakrlogo.jpg" alt="STREAKr" className="h-14 w-auto" />
           <span className="font-bold text-3xl tracking-tight">
             STREAK<span className="text-orange-400">r</span>
           </span>
@@ -85,14 +81,30 @@ export default function Navbar() {
 
         {/* DESKTOP NAV */}
         <div className="hidden md:flex items-center gap-8 text-sm">
-          <Link href="/picks" className="hover:text-orange-400">Picks</Link>
-          <Link href="/leaderboards" className="hover:text-orange-400">Leaderboards</Link>
-          <Link href="/leagues" className="hover:text-orange-400">Leagues</Link>
-          <Link href="/rewards" className="hover:text-orange-400">Rewards</Link>
-          <Link href="/faq" className="hover:text-orange-400">FAQ</Link>
+          <Link href="/picks" className="hover:text-orange-400">
+            Picks
+          </Link>
+          <Link href="/leaderboards" className="hover:text-orange-400">
+            Leaderboards
+          </Link>
+          <Link href="/leagues" className="hover:text-orange-400">
+            Leagues
+          </Link>
+          <Link href="/venues" className="hover:text-orange-400">
+            Venue Leagues
+          </Link>
+          <Link href="/rewards" className="hover:text-orange-400">
+            Rewards
+          </Link>
+          <Link href="/faq" className="hover:text-orange-400">
+            FAQ
+          </Link>
 
           {/* AVATAR + NAME */}
-          <Link href={user ? "/profile" : "/auth"} className="flex items-center gap-2">
+          <Link
+            href={user ? "/profile" : "/auth"}
+            className="flex items-center gap-2"
+          >
             <div className="h-8 w-8 rounded-full overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
               <img
                 src={currentAvatarSrc}
@@ -118,18 +130,30 @@ export default function Navbar() {
             </div>
           </button>
         </div>
-
       </nav>
 
       {/* MOBILE MENU */}
       {menuOpen && (
         <div className="md:hidden bg-black/95 border-t border-white/10">
           <div className="mx-auto max-w-6xl px-4 py-4 flex flex-col gap-4 text-sm">
-            <Link href="/picks" onClick={() => setMenuOpen(false)}>Picks</Link>
-            <Link href="/leaderboards" onClick={() => setMenuOpen(false)}>Leaderboards</Link>
-            <Link href="/leagues" onClick={() => setMenuOpen(false)}>Leagues</Link>
-            <Link href="/rewards" onClick={() => setMenuOpen(false)}>Rewards</Link>
-            <Link href="/faq" onClick={() => setMenuOpen(false)}>FAQ</Link>
+            <Link href="/picks" onClick={() => setMenuOpen(false)}>
+              Picks
+            </Link>
+            <Link href="/leaderboards" onClick={() => setMenuOpen(false)}>
+              Leaderboards
+            </Link>
+            <Link href="/leagues" onClick={() => setMenuOpen(false)}>
+              Leagues
+            </Link>
+            <Link href="/venues" onClick={() => setMenuOpen(false)}>
+              Venue Leagues
+            </Link>
+            <Link href="/rewards" onClick={() => setMenuOpen(false)}>
+              Rewards
+            </Link>
+            <Link href="/faq" onClick={() => setMenuOpen(false)}>
+              FAQ
+            </Link>
 
             {/* MOBILE PROFILE */}
             <div className="mt-4 flex items-center justify-between">
@@ -141,7 +165,9 @@ export default function Navbar() {
                     className="h-full w-full object-cover"
                   />
                 </div>
-                <span className="text-xs truncate max-w-[120px]">{label}</span>
+                <span className="text-xs truncate max-w-[120px]">
+                  {label}
+                </span>
               </div>
 
               <Link
@@ -155,7 +181,6 @@ export default function Navbar() {
           </div>
         </div>
       )}
-
     </header>
   );
 }
