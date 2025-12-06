@@ -27,6 +27,8 @@ type VenueLeague = {
   location?: string;
   description?: string;
   subscriptionStatus: SubscriptionStatus;
+  prizesHeadline?: string;
+  prizesBody?: string;
 };
 
 type MemberRow = {
@@ -84,6 +86,8 @@ export default function VenueLeaderboardPage() {
           location: data.location ?? undefined,
           description: data.description ?? undefined,
           subscriptionStatus,
+          prizesHeadline: data.prizesHeadline ?? undefined,
+          prizesBody: data.prizesBody ?? undefined,
         });
       } catch (err) {
         console.error("Failed to load venue league", err);
@@ -185,6 +189,9 @@ export default function VenueLeaderboardPage() {
   const isInactive =
     venue && venue.subscriptionStatus !== "active";
 
+  const hasPrizes =
+    !!venue?.prizesHeadline || !!venue?.prizesBody;
+
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
       {/* Top bar */}
@@ -260,6 +267,25 @@ export default function VenueLeaderboardPage() {
         <div className="rounded-xl border border-red-500/50 bg-red-500/10 px-4 py-3 text-xs sm:text-sm text-red-200">
           This venue league is currently inactive. Players can&apos;t join or
           earn venue-specific rewards until it&apos;s reactivated by STREAKr.
+        </div>
+      )}
+
+      {/* Prizes card (venue-controlled) */}
+      {hasPrizes && (
+        <div className="rounded-2xl bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-sky-500/10 border border-amber-400/70 px-4 py-4 sm:px-6 sm:py-4 shadow-[0_18px_50px_rgba(0,0,0,0.85)]">
+          <h2 className="text-sm sm:text-base font-semibold text-amber-200 mb-1">
+            Venue prizes
+          </h2>
+          {venue?.prizesHeadline && (
+            <p className="text-sm sm:text-base font-semibold text-white mb-1.5">
+              {venue.prizesHeadline}
+            </p>
+          )}
+          {venue?.prizesBody && (
+            <p className="text-xs sm:text-sm text-white/85 whitespace-pre-line">
+              {venue.prizesBody}
+            </p>
+          )}
         </div>
       )}
 
