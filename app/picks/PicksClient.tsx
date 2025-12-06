@@ -25,6 +25,8 @@ import {
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
+type UserResult = "win" | "loss" | "void" | null;
+
 type ApiQuestion = {
   id: string;
   quarter: number;
@@ -38,9 +40,8 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  correctPick?: boolean; // for "you were right"
-  correctOutcome?: "yes" | "no" | "void" | boolean | null;
-  outcome?: "yes" | "no" | "void" | "lock" | boolean | null;
+  // backend-calculated per-user result
+  userResult?: UserResult;
 };
 
 type ApiGame = {
@@ -67,8 +68,8 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-  correctPick?: boolean | null;
-  correctOutcome?: "yes" | "no" | "void" | null;
+  // front-end uses this for the pill
+  userResult?: UserResult;
 };
 
 type PicksApiResponse = {
@@ -235,10 +236,8 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
-// Normalise any backend outcome *string* into "yes" | "no" | "void" | null
-const normaliseOutcome = (
-  val: any
-): "yes" | "no" | "void" | null => {
+// (still used in a couple of places – harmless)
+const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   if (val == null) return null;
   const s = String(val).toLowerCase();
 
@@ -354,7 +353,6 @@ export default function PicksClient() {
     };
   };
 
-  // ---------- FLATTEN + DERIVE correctPick ----------
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
@@ -364,37 +362,6 @@ export default function PicksClient() {
       g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
-        const mergedUserPick: "yes" | "no" | undefined =
-          q.userPick ?? historyPick ?? prev?.userPick;
-
-        // support boolean correctPick and boolean correctOutcome, plus string outcomes
-        let rawOutcome =
-          normaliseOutcome(
-            typeof q.correctOutcome === "string"
-              ? q.correctOutcome
-              : typeof q.outcome === "string"
-              ? q.outcome
-              : null
-          ) ?? null;
-
-        let derivedCorrectPick: boolean | null =
-          typeof q.correctPick === "boolean"
-            ? q.correctPick
-            : typeof q.correctOutcome === "boolean"
-            ? q.correctOutcome
-            : null;
-
-        // If we have outcome yes/no + userPick but no boolean yet, derive it.
-        if (
-          derivedCorrectPick === null &&
-          rawOutcome &&
-          (mergedUserPick === "yes" || mergedUserPick === "no")
-        ) {
-          derivedCorrectPick = mergedUserPick === rawOutcome;
-        }
-
-        const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void" ? rawOutcome : null;
 
         if (
           typeof q.yesPercent === "number" ||
@@ -424,7 +391,7 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          userPick: mergedUserPick,
+          userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
             typeof q.yesPercent === "number"
               ? q.yesPercent
@@ -436,11 +403,7 @@ export default function PicksClient() {
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
-          correctOutcome,
-          correctPick:
-            derivedCorrectPick !== null
-              ? derivedCorrectPick
-              : prev?.correctPick ?? null,
+          userResult: q.userResult ?? prev?.userResult ?? null,
         };
       })
     );
@@ -662,7 +625,10 @@ export default function PicksClient() {
                 );
               }
             } catch (err) {
-              console.error("Failed to persist merged pick history", err);
+              console.error(
+                "Failed to persist merged pick history",
+                err
+              );
             }
             return merged;
           });
@@ -1113,6 +1079,46 @@ export default function PicksClient() {
 
   const streakModalContent = getStreakModalContent();
 
+  // -------- Outcome pill helpers (NEW SIMPLE LOGIC) --------
+
+  type OutcomeKind =
+    | "hidden"
+    | "win"
+    | "loss"
+    | "void"
+    | "finalised-no-result";
+
+  const getOutcomeKind = (
+    status: QuestionStatus,
+    userResult: UserResult
+  ): OutcomeKind => {
+    if (status !== "final" && status !== "void") return "hidden";
+
+    if (status === "void") return "void";
+
+    // status === "final"
+    if (userResult === "win") return "win";
+    if (userResult === "loss") return "loss";
+    if (userResult === "void") return "void";
+
+    return "finalised-no-result";
+  };
+
+  const getOutcomeLabel = (kind: OutcomeKind): string | null => {
+    switch (kind) {
+      case "win":
+        return "You were right!";
+      case "loss":
+        return "Wrong pick";
+      case "void":
+        return "Question voided – no streak change";
+      case "finalised-no-result":
+        return "Finalised";
+      default:
+        return null;
+    }
+  };
+
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
@@ -1318,41 +1324,11 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            type OutcomeKind =
-              | "win"
-              | "loss"
-              | "void"
-              | "settled-no-result"
-              | null;
-
-            // unified outcome logic – always prefer boolean correctPick
-            const outcomeStr = row.correctOutcome;
-
-            let outcomeKind: OutcomeKind = null;
-
-            if (row.status === "void" || outcomeStr === "void") {
-              outcomeKind = "void";
-            } else if (row.status === "final") {
-              if (typeof row.correctPick === "boolean") {
-                outcomeKind = row.correctPick ? "win" : "loss";
-              } else if (outcomeStr && row.userPick) {
-                outcomeKind =
-                  row.userPick === outcomeStr ? "win" : "loss";
-              } else {
-                outcomeKind = "settled-no-result";
-              }
-            }
-
-            let outcomeLabel: string | null = null;
-            if (outcomeKind === "void") {
-              outcomeLabel = "Question voided – no streak change";
-            } else if (outcomeKind === "win") {
-              outcomeLabel = "You were right!";
-            } else if (outcomeKind === "loss") {
-              outcomeLabel = "Wrong pick";
-            } else if (outcomeKind === "settled-no-result") {
-              outcomeLabel = "Finalised";
-            }
+            const outcomeKind = getOutcomeKind(
+              row.status,
+              row.userResult ?? null
+            );
+            const outcomeLabel = getOutcomeLabel(outcomeKind);
 
             const outcomeClasses =
               outcomeKind === "void"
