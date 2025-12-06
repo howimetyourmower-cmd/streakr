@@ -418,7 +418,6 @@ export default function PicksClient() {
       })
     );
 
-  // 🔑 KEY FIX: include user token when calling /api/picks
   const fetchPicks = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
       setLoading(true);
@@ -426,20 +425,7 @@ export default function PicksClient() {
     }
 
     try {
-      let headers: HeadersInit = {};
-
-      if (user) {
-        try {
-          const idToken = await user.getIdToken();
-          headers = {
-            Authorization: `Bearer ${idToken}`,
-          };
-        } catch (tokenErr) {
-          console.error("Failed to get ID token for /api/picks", tokenErr);
-        }
-      }
-
-      const res = await fetch("/api/picks", { headers });
+      const res = await fetch("/api/picks");
       if (!res.ok) throw new Error("API error");
 
       const data: PicksApiResponse = await res.json();
@@ -483,20 +469,20 @@ export default function PicksClient() {
     }
   }, []);
 
-  // Initial picks (and whenever user changes so API can return userPick)
+  // Initial picks
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, []);
 
-  // Auto-refresh (ensure interval sees latest user/token)
+  // Auto-refresh
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
     }, 15000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, []);
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
@@ -576,7 +562,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // NEW: Load picks from backend and merge into history so pills work on every device
+  // Load picks from backend and merge into history so pills work on every device
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
@@ -779,7 +765,13 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Streak celebration (confetti + badge modal once per level)
+  // Reset celebration guard when the ROUND changes
+  useEffect(() => {
+    if (roundNumber === null) return;
+    setLastCelebratedStreak(0);
+  }, [roundNumber]);
+
+  // Streak celebration (confetti once per round, badges lifetime)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -1139,6 +1131,9 @@ export default function PicksClient() {
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
                 Track your current run, your best ever streak, and how far you
                 are behind the round leader.
+              </p>
+              <p className="mt-1 text-[10px] text-white/50">
+                Confetti milestones reset each round. Badges are yours for life.
               </p>
             </div>
 
