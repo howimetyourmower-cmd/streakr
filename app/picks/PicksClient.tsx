@@ -25,8 +25,6 @@ import {
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-type UserResult = "win" | "loss" | "void" | null;
-
 type ApiQuestion = {
   id: string;
   quarter: number;
@@ -40,8 +38,11 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  // backend-calculated per-user result
-  userResult?: UserResult;
+
+  // settlement data from API
+  correctOutcome?: "yes" | "no" | "void" | null;
+  outcome?: "yes" | "no" | "void" | null;
+  correctPick?: boolean | null;
 };
 
 type ApiGame = {
@@ -68,8 +69,10 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-  // front-end uses this for the pill
-  userResult?: UserResult;
+
+  // settlement
+  correctOutcome?: "yes" | "no" | "void" | null;
+  correctPick?: boolean | null;
 };
 
 type PicksApiResponse = {
@@ -236,8 +239,10 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
-// (still used in a couple of places – harmless)
-const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
+const normaliseOutcome = (
+  val: any
+): "yes" | "no" | "void" | null => {
   if (val == null) return null;
   const s = String(val).toLowerCase();
 
@@ -363,6 +368,15 @@ export default function PicksClient() {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
+        const rawOutcome =
+          normaliseOutcome(q.correctOutcome) ??
+          normaliseOutcome(q.outcome);
+
+        const correctOutcome: QuestionRow["correctOutcome"] =
+          q.status === "final" || q.status === "void"
+            ? rawOutcome
+            : null;
+
         if (
           typeof q.yesPercent === "number" ||
           typeof q.noPercent === "number"
@@ -403,7 +417,11 @@ export default function PicksClient() {
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
-          userResult: q.userResult ?? prev?.userResult ?? null,
+          correctOutcome,
+          correctPick:
+            typeof q.correctPick === "boolean"
+              ? q.correctPick
+              : prev?.correctPick ?? null,
         };
       })
     );
@@ -625,10 +643,7 @@ export default function PicksClient() {
                 );
               }
             } catch (err) {
-              console.error(
-                "Failed to persist merged pick history",
-                err
-              );
+              console.error("Failed to persist merged pick history", err);
             }
             return merged;
           });
@@ -1079,46 +1094,6 @@ export default function PicksClient() {
 
   const streakModalContent = getStreakModalContent();
 
-  // -------- Outcome pill helpers (NEW SIMPLE LOGIC) --------
-
-  type OutcomeKind =
-    | "hidden"
-    | "win"
-    | "loss"
-    | "void"
-    | "finalised-no-result";
-
-  const getOutcomeKind = (
-    status: QuestionStatus,
-    userResult: UserResult
-  ): OutcomeKind => {
-    if (status !== "final" && status !== "void") return "hidden";
-
-    if (status === "void") return "void";
-
-    // status === "final"
-    if (userResult === "win") return "win";
-    if (userResult === "loss") return "loss";
-    if (userResult === "void") return "void";
-
-    return "finalised-no-result";
-  };
-
-  const getOutcomeLabel = (kind: OutcomeKind): string | null => {
-    switch (kind) {
-      case "win":
-        return "You were right!";
-      case "loss":
-        return "Wrong pick";
-      case "void":
-        return "Question voided – no streak change";
-      case "finalised-no-result":
-        return "Finalised";
-      default:
-        return null;
-    }
-  };
-
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
@@ -1324,11 +1299,44 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            const outcomeKind = getOutcomeKind(
-              row.status,
-              row.userResult ?? null
-            );
-            const outcomeLabel = getOutcomeLabel(outcomeKind);
+            type OutcomeKind =
+              | "win"
+              | "loss"
+              | "void"
+              | "settled-no-result"
+              | null;
+
+            const outcome =
+              normaliseOutcome(row.correctOutcome) ??
+              normaliseOutcome((row as any).outcome);
+
+            let outcomeKind: OutcomeKind = null;
+
+            if (row.status === "void" || outcome === "void") {
+              outcomeKind = "void";
+            } else if (row.status === "final") {
+              if (row.correctPick === true) {
+                outcomeKind = "win";
+              } else if (row.correctPick === false) {
+                outcomeKind = "loss";
+              } else if (outcome && row.userPick) {
+                outcomeKind =
+                  row.userPick === outcome ? "win" : "loss";
+              } else {
+                outcomeKind = "settled-no-result";
+              }
+            }
+
+            let outcomeLabel: string | null = null;
+            if (outcomeKind === "void") {
+              outcomeLabel = "Question voided – no streak change";
+            } else if (outcomeKind === "win") {
+              outcomeLabel = "You were right!";
+            } else if (outcomeKind === "loss") {
+              outcomeLabel = "Wrong pick";
+            } else if (outcomeKind === "settled-no-result") {
+              outcomeLabel = "Finalised";
+            }
 
             const outcomeClasses =
               outcomeKind === "void"
@@ -1595,7 +1603,7 @@ export default function PicksClient() {
                   value={commentText}
                   onChange={handleCommentChange}
                   rows={3}
-                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  className="w-full rounded-md bg-[#0b1220] border border-gray-700 px-3 py-2 text-sm focus:outline-none_focus:ring-2 focus:ring-orange-500"
                   placeholder="Add your comment…"
                 />
                 {commentsError && (
