@@ -414,6 +414,11 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
+          // NEW: persist boolean result from API so we can show “You were right!” everywhere
+          correctPick:
+            typeof q.correctPick === "boolean"
+              ? q.correctPick
+              : prev?.correctPick ?? null,
         };
       })
     );
@@ -562,7 +567,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // NEW: Load picks from backend and merge into history so pills work on every device
+  // Load picks from backend and merge into history so pills work on every device
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
@@ -589,7 +594,6 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
-        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -607,7 +611,6 @@ export default function PicksClient() {
           }
         }
 
-        // Legacy shape: { questionId, outcome }
         if (
           json?.questionId &&
           json?.outcome &&
@@ -643,11 +646,9 @@ export default function PicksClient() {
           });
         }
 
-        // Determine active pick (for streak highlighting)
         let activeFromApi =
           json?.currentPick || json?.activePick || null;
         if (!activeFromApi && !Array.isArray(json?.picks)) {
-          // legacy: the whole object is the active pick
           activeFromApi = json;
         }
 
@@ -667,7 +668,6 @@ export default function PicksClient() {
           setActiveOutcome(activeOutcomeFromApi);
         }
 
-        // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -1303,18 +1303,23 @@ export default function PicksClient() {
               | "settled-no-result"
               | null;
 
-            const outcome = normaliseOutcome(
+            const outcomeStr = normaliseOutcome(
               (row.correctOutcome as any) ?? (row as any).outcome
             );
 
             let outcomeKind: OutcomeKind = null;
 
-            if (row.status === "void" || outcome === "void") {
+            // NEW unified outcome logic that prefers correctPick
+            if (row.status === "void") {
               outcomeKind = "void";
             } else if (row.status === "final") {
-              if (outcome && row.userPick) {
+              if (typeof row.correctPick === "boolean") {
+                outcomeKind = row.correctPick ? "win" : "loss";
+              } else if (outcomeStr === "void") {
+                outcomeKind = "void";
+              } else if (outcomeStr && row.userPick) {
                 outcomeKind =
-                  row.userPick === outcome ? "win" : "loss";
+                  row.userPick === outcomeStr ? "win" : "loss";
               } else {
                 outcomeKind = "settled-no-result";
               }
