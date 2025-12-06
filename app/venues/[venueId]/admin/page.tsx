@@ -3,10 +3,10 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState, FormEvent } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { useParams, useRouter } from "next/navigation";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -15,66 +15,46 @@ type SubscriptionStatus = "active" | "paused" | "cancelled";
 type VenueLeague = {
   id: string;
   name: string;
-  code?: string;
+  code: string;
   venueName?: string;
   location?: string;
   description?: string;
   subscriptionStatus: SubscriptionStatus;
-  venueAdminUid: string;
-  promoHeadline?: string;
-  joinOfferEnabled?: boolean;
-  joinOfferDescription?: string;
-  milestone3Enabled?: boolean;
-  milestone3Reward?: string;
-  milestone5Enabled?: boolean;
-  milestone5Reward?: string;
-  milestone10Enabled?: boolean;
-  milestone10Reward?: string;
+  venueAdminEmail?: string | null;
+  venueAdminUid?: string | null;
+  prizesHeadline?: string;
+  prizesBody?: string;
 };
 
 export default function VenueAdminPage() {
   const params = useParams();
-  const venueId = params?.venueId as string;
-  const { user } = useAuth();
-  const currentUid = user?.uid ?? null;
+  const router = useRouter();
+  const { user, isAdmin, loading } = useAuth();
+
+  const venueId = params?.venueId as string | undefined;
 
   const [venue, setVenue] = useState<VenueLeague | null>(null);
   const [loadingVenue, setLoadingVenue] = useState(true);
-  const [venueError, setVenueError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // form state
-  const [name, setName] = useState("");
-  const [venueName, setVenueName] = useState("");
-  const [location, setLocation] = useState("");
-  const [description, setDescription] = useState("");
-  const [promoHeadline, setPromoHeadline] = useState("");
-  const [joinOfferEnabled, setJoinOfferEnabled] = useState(false);
-  const [joinOfferDescription, setJoinOfferDescription] = useState("");
-  const [milestone3Enabled, setMilestone3Enabled] = useState(false);
-  const [milestone3Reward, setMilestone3Reward] = useState("");
-  const [milestone5Enabled, setMilestone5Enabled] = useState(false);
-  const [milestone5Reward, setMilestone5Reward] = useState("");
-  const [milestone10Enabled, setMilestone10Enabled] = useState(false);
-  const [milestone10Reward, setMilestone10Reward] = useState("");
-
+  const [prizesHeadline, setPrizesHeadline] = useState("");
+  const [prizesBody, setPrizesBody] = useState("");
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
-  // Load venue league
   useEffect(() => {
     if (!venueId) return;
 
-    setLoadingVenue(true);
-    setVenueError(null);
+    const loadVenue = async () => {
+      setLoadingVenue(true);
+      setError(null);
 
-    const venueRef = doc(db, "venueLeagues", venueId);
-    const unsub = onSnapshot(
-      venueRef,
-      (snap) => {
+      try {
+        const ref = doc(db, "venueLeagues", venueId);
+        const snap = await getDoc(ref);
         if (!snap.exists()) {
+          setError("Venue league not found.");
           setVenue(null);
-          setVenueError("Venue league not found.");
           setLoadingVenue(false);
           return;
         }
@@ -86,549 +66,284 @@ export default function VenueAdminPage() {
         const v: VenueLeague = {
           id: snap.id,
           name: data.name ?? "Venue League",
-          code: data.code ?? undefined,
+          code: data.code ?? "",
           venueName: data.venueName ?? data.venue ?? undefined,
           location: data.location ?? undefined,
           description: data.description ?? undefined,
           subscriptionStatus,
-          venueAdminUid: data.venueAdminUid ?? data.managerUid ?? "",
-          promoHeadline: data.promoHeadline ?? undefined,
-          joinOfferEnabled: data.joinOfferEnabled ?? false,
-          joinOfferDescription: data.joinOfferDescription ?? undefined,
-          milestone3Enabled: data.milestone3Enabled ?? false,
-          milestone3Reward: data.milestone3Reward ?? undefined,
-          milestone5Enabled: data.milestone5Enabled ?? false,
-          milestone5Reward: data.milestone5Reward ?? undefined,
-          milestone10Enabled: data.milestone10Enabled ?? false,
-          milestone10Reward: data.milestone10Reward ?? undefined,
+          venueAdminEmail: data.venueAdminEmail ?? null,
+          venueAdminUid: data.venueAdminUid ?? null,
+          prizesHeadline: data.prizesHeadline ?? undefined,
+          prizesBody: data.prizesBody ?? undefined,
         };
 
         setVenue(v);
-
-        // Seed form fields
-        setName(v.name ?? "");
-        setVenueName(v.venueName ?? "");
-        setLocation(v.location ?? "");
-        setDescription(v.description ?? "");
-        setPromoHeadline(v.promoHeadline ?? "");
-        setJoinOfferEnabled(!!v.joinOfferEnabled);
-        setJoinOfferDescription(v.joinOfferDescription ?? "");
-        setMilestone3Enabled(!!v.milestone3Enabled);
-        setMilestone3Reward(v.milestone3Reward ?? "");
-        setMilestone5Enabled(!!v.milestone5Enabled);
-        setMilestone5Reward(v.milestone5Reward ?? "");
-        setMilestone10Enabled(!!v.milestone10Enabled);
-        setMilestone10Reward(v.milestone10Reward ?? "");
-
-        setLoadingVenue(false);
-      },
-      (err) => {
-        console.error("Failed to load venue league (admin)", err);
+        setPrizesHeadline(v.prizesHeadline ?? "");
+        setPrizesBody(v.prizesBody ?? "");
+      } catch (err) {
+        console.error("Failed to load venue league", err);
+        setError("Failed to load venue league.");
         setVenue(null);
-        setVenueError("Failed to load venue league.");
+      } finally {
         setLoadingVenue(false);
       }
-    );
+    };
 
-    return () => unsub();
+    loadVenue();
   }, [venueId]);
 
-  const isVenueAdmin =
-    !!venue && !!currentUid && currentUid === venue.venueAdminUid;
-  const subscriptionStatus: SubscriptionStatus =
-    venue?.subscriptionStatus ?? "active";
+  // who can edit: STREAKr admin OR venue admin (uid match OR email match)
+  const canEdit = (() => {
+    if (!user || !venue) return false;
+    if (isAdmin) return true;
 
-  const statusLabel =
-    subscriptionStatus === "active"
-      ? "Active"
-      : subscriptionStatus === "paused"
-      ? "Paused"
-      : "Cancelled";
+    const email = (user.email ?? "").toLowerCase();
+    const venueEmail = (venue.venueAdminEmail ?? "").toLowerCase();
 
-  const statusClass =
-    subscriptionStatus === "active"
-      ? "text-emerald-300 border-emerald-400/60 bg-emerald-500/10"
-      : subscriptionStatus === "paused"
-      ? "text-amber-300 border-amber-400/60 bg-amber-500/10"
-      : "text-red-300 border-red-400/60 bg-red-500/10";
+    if (venue.venueAdminUid && venue.venueAdminUid === user.uid) return true;
+    if (email && venueEmail && email === venueEmail) return true;
+
+    return false;
+  })();
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    setSaveError(null);
-    setSaveSuccess(null);
-
-    if (!venue) {
-      setSaveError("Venue not loaded.");
-      return;
-    }
-    if (!isVenueAdmin) {
-      setSaveError("You do not have permission to update this venue.");
-      return;
-    }
-
-    const trimmedName = name.trim();
-    const trimmedVenueName = venueName.trim();
-    const trimmedLocation = location.trim();
-    const trimmedDescription = description.trim();
-    const trimmedPromo = promoHeadline.trim();
-    const trimmedJoinOfferDescription = joinOfferDescription.trim();
-    const trimmedM3 = milestone3Reward.trim();
-    const trimmedM5 = milestone5Reward.trim();
-    const trimmedM10 = milestone10Reward.trim();
-
-    if (!trimmedName) {
-      setSaveError("League name is required.");
-      return;
-    }
+    if (!venue) return;
+    if (!canEdit) return;
 
     setSaving(true);
+    setError(null);
+    setSaveSuccess(null);
 
     try {
-      const venueRef = doc(db, "venueLeagues", venue.id);
-      await updateDoc(venueRef, {
-        name: trimmedName,
-        venueName: trimmedVenueName || null,
-        location: trimmedLocation || null,
-        description: trimmedDescription || null,
-        promoHeadline: trimmedPromo || null,
-        joinOfferEnabled: joinOfferEnabled,
-        joinOfferDescription:
-          joinOfferEnabled && trimmedJoinOfferDescription
-            ? trimmedJoinOfferDescription
-            : null,
-        milestone3Enabled: milestone3Enabled,
-        milestone3Reward:
-          milestone3Enabled && trimmedM3 ? trimmedM3 : null,
-        milestone5Enabled: milestone5Enabled,
-        milestone5Reward:
-          milestone5Enabled && trimmedM5 ? trimmedM5 : null,
-        milestone10Enabled: milestone10Enabled,
-        milestone10Reward:
-          milestone10Enabled && trimmedM10 ? trimmedM10 : null,
+      const ref = doc(db, "venueLeagues", venue.id);
+      await updateDoc(ref, {
+        prizesHeadline: prizesHeadline.trim() || null,
+        prizesBody: prizesBody.trim() || null,
       });
 
-      setSaveSuccess("Venue settings updated.");
+      setSaveSuccess("Prizes updated for this venue.");
     } catch (err) {
-      console.error("Failed to update venue league (admin)", err);
-      setSaveError("Failed to update venue. Please try again.");
+      console.error("Failed to update venue prizes", err);
+      setError("Failed to save prizes. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
-  if (loadingVenue && !venue && !venueError) {
+  if (loading || loadingVenue) {
     return (
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen">
-        <p className="text-sm text-white/70">Loading venue…</p>
-      </div>
-    );
-  }
-
-  if (!venue) {
-    return (
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-4">
-        <Link
-          href="/venues"
-          className="text-sm text-sky-400 hover:text-sky-300"
-        >
-          ← Back to venues
-        </Link>
-        <p className="text-sm text-red-400">
-          {venueError ?? "Venue league not found or no longer available."}
-        </p>
-      </div>
-    );
-  }
-
-  if (!currentUid || !isVenueAdmin) {
-    return (
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <Link
-            href={`/venues/${venue.id}`}
-            className="text-sm text-sky-400 hover:text-sky-300"
-          >
-            ← Back to venue leaderboard
-          </Link>
-          <Link
-            href="/venues"
-            className="text-sm text-orange-400 hover:text-orange-300"
-          >
-            Venue list
-          </Link>
-        </div>
-        <div className="rounded-2xl bg-red-500/10 border border-red-500/60 px-4 py-3">
-          <h1 className="text-lg font-semibold mb-1">
-            No access to venue admin
-          </h1>
-          <p className="text-sm text-red-100">
-            You are not the assigned venue admin for this league. Please contact
-            Streakr or the venue owner if you believe this is incorrect.
-          </p>
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 rounded-full border-2 border-slate-500 border-t-transparent animate-spin" />
+          <p className="text-sm text-slate-400">Loading venue admin…</p>
         </div>
       </div>
     );
   }
 
-  const headerTitle = venue.name ?? "Venue League";
-
-  return (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
-      {/* Top nav */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/venues/${venue.id}`}
-            className="text-sm text-sky-400 hover:text-sky-300"
-          >
-            ← Back to venue leaderboard
-          </Link>
-          <h1 className="text-2xl sm:text-3xl font-bold">
-            Venue Admin – {headerTitle}
-          </h1>
-          <p className="text-sm text-white/70 max-w-2xl">
-            Configure how STREAKr runs at your venue. Update your branding,
-            promo headline and voucher offers. Subscription status is controlled
-            by Streakr.
+  if (!venueId || !venue) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center bg-[#050814] text-slate-200">
+        <div className="max-w-md rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 px-6 py-8 shadow-xl border border-slate-700/70">
+          <h1 className="text-2xl font-semibold mb-3">Venue not found</h1>
+          <p className="text-sm text-slate-400 mb-4">
+            We couldn&apos;t find that venue league. Try opening it again from
+            the admin console.
           </p>
-        </div>
-
-        <div className="flex flex-col items-end gap-1 text-xs text-white/60">
-          <div className="flex items-center gap-2">
-            <span className="uppercase tracking-wide text-[10px]">
-              Venue status
-            </span>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${statusClass}`}
-            >
-              {statusLabel}
-            </span>
-          </div>
-          <span className="text-[11px]">
-            Subscription controlled by Streakr HQ.
-          </span>
+          <Link
+            href="/admin/venues"
+            className="inline-flex items-center justify-center rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-black hover:bg-amber-400 transition"
+          >
+            Back to venue list
+          </Link>
         </div>
       </div>
+    );
+  }
 
-      <form
-        onSubmit={handleSave}
-        className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-5 shadow-[0_24px_60px_rgba(0,0,0,0.8)] text-sm"
-      >
-        {/* Errors / success */}
-        {saveError && (
-          <p className="text-sm text-red-300 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-            {saveError}
-          </p>
-        )}
-        {saveSuccess && (
-          <p className="text-sm text-emerald-300 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-            {saveSuccess}
-          </p>
-        )}
+  if (!user || (!canEdit && !isAdmin)) {
+    // they are logged in but not venue admin; show read-only info & link back
+    return (
+      <div className="min-h-[60vh] bg-[#050814] text-slate-100">
+        <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
+          <Link
+            href="/admin/venues"
+            className="text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← Back to venue list
+          </Link>
 
-        {/* Basic venue details */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base sm:text-lg font-semibold">
-              Venue details
-            </h2>
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/5 border border-orange-500/40 text-orange-300 px-2 py-1 text-[11px] uppercase tracking-wide">
-              Venue Admin
-            </span>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                League name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. The Royal Hotel STREAKr League"
-              />
-              <p className="text-[11px] text-white/50">
-                Shown to players in the app and on your leaderboard.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Venue name (optional)
-              </label>
-              <input
-                type="text"
-                value={venueName}
-                onChange={(e) => setVenueName(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. The Royal Hotel"
-              />
-              <p className="text-[11px] text-white/50">
-                Appears in some venue-facing screens and internal tools.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Location (optional)
-              </label>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. Richmond, VIC"
-              />
-              <p className="text-[11px] text-white/50">
-                Helps players recognise they&apos;re in the right venue.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Short description (optional)
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. Weekly STREAKr comp during every AFL round. Venue prizes announced on the chalkboard."
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Promo & voucher configuration */}
-        <div className="space-y-3 border-t border-white/10 pt-4">
-          <h2 className="text-base sm:text-lg font-semibold">
-            Promo headline & vouchers
-          </h2>
-
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-white/70">
-              Promo headline (optional)
-            </label>
-            <input
-              type="text"
-              value={promoHeadline}
-              onChange={(e) => setPromoHeadline(e.target.value)}
-              className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-              placeholder='E.g. "Win a $50 bar tab every round"'
-            />
-            <p className="text-[11px] text-white/50">
-              This line can be surfaced on your Streakr screens and marketing
-              assets.
-            </p>
-          </div>
-
-          {/* Join offer */}
-          <div className="rounded-xl bg-black/30 border border-white/10 px-3 py-3 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold">First-time join offer</p>
-                <p className="text-[11px] text-white/60">
-                  Reward players the first time they join your venue league
-                  (e.g. 2-for-1 drink).
-                </p>
-              </div>
-              <label className="inline-flex items-center gap-2 text-xs">
-                <span className="text-white/70">Enabled</span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setJoinOfferEnabled((prev) => !prev)
-                  }
-                  className={`w-10 h-6 flex items-center rounded-full px-1 transition-colors ${
-                    joinOfferEnabled
-                      ? "bg-emerald-500"
-                      : "bg-slate-600"
-                  }`}
-                >
-                  <div
-                    className={`w-4 h-4 rounded-full bg-white transform transition-transform ${
-                      joinOfferEnabled ? "translate-x-4" : ""
-                    }`}
-                  />
-                </button>
-              </label>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Join offer description
-              </label>
-              <input
-                type="text"
-                value={joinOfferDescription}
-                onChange={(e) =>
-                  setJoinOfferDescription(e.target.value)
-                }
-                disabled={!joinOfferEnabled}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder='E.g. "2-for-1 house beer when you join STREAKr at this venue"'
-              />
-              <p className="text-[11px] text-white/50">
-                What the staff will honour when a new player shows their
-                first-time voucher.
-              </p>
-            </div>
-          </div>
-
-          {/* Milestone rewards */}
-          <div className="rounded-xl bg-black/30 border border-white/10 px-3 py-3 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold">Streak milestone rewards</p>
-              <p className="text-[11px] text-white/60">
-                Choose simple rewards for big streak moments while playing at
-                your venue.
-              </p>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 text-[11px]">
-              {/* 3 streak */}
-              <div className="rounded-lg bg-[#050816]/80 border border-white/10 px-3 py-2 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="uppercase tracking-wide text-[10px] text-white/60">
-                    Streak 3
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMilestone3Enabled((prev) => !prev)
-                    }
-                    className={`w-10 h-6 flex items-center rounded-full px-1 transition-colors ${
-                      milestone3Enabled
-                        ? "bg-emerald-500"
-                        : "bg-slate-600"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transform transition-transform ${
-                        milestone3Enabled ? "translate-x-4" : ""
-                      }`}
-                    />
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={milestone3Reward}
-                  onChange={(e) =>
-                    setMilestone3Reward(e.target.value)
-                  }
-                  disabled={!milestone3Enabled}
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-2 py-1.5 text-xs disabled:opacity-60 focus:outline-none focus:ring-1 focus:ring-orange-500/70 focus:border-orange-500/70"
-                  placeholder="E.g. Free chips"
-                />
-              </div>
-
-              {/* 5 streak */}
-              <div className="rounded-lg bg-[#050816]/80 border border-white/10 px-3 py-2 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="uppercase tracking-wide text-[10px] text-white/60">
-                    Streak 5
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMilestone5Enabled((prev) => !prev)
-                    }
-                    className={`w-10 h-6 flex items-center rounded-full px-1 transition-colors ${
-                      milestone5Enabled
-                        ? "bg-emerald-500"
-                        : "bg-slate-600"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transform transition-transform ${
-                        milestone5Enabled ? "translate-x-4" : ""
-                      }`}
-                    />
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={milestone5Reward}
-                  onChange={(e) =>
-                    setMilestone5Reward(e.target.value)
-                  }
-                  disabled={!milestone5Enabled}
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-2 py-1.5 text-xs disabled:opacity-60 focus:outline-none focus:ring-1 focus:ring-orange-500/70 focus:border-orange-500/70"
-                  placeholder="E.g. 2-for-1 drink"
-                />
-              </div>
-
-              {/* 10 streak */}
-              <div className="rounded-lg bg-[#050816]/80 border border-white/10 px-3 py-2 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="uppercase tracking-wide text-[10px] text-white/60">
-                    Streak 10
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMilestone10Enabled((prev) => !prev)
-                    }
-                    className={`w-10 h-6 flex items-center rounded-full px-1 transition-colors ${
-                      milestone10Enabled
-                        ? "bg-emerald-500"
-                        : "bg-slate-600"
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transform transition-transform ${
-                        milestone10Enabled ? "translate-x-4" : ""
-                      }`}
-                    />
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={milestone10Reward}
-                  onChange={(e) =>
-                    setMilestone10Reward(e.target.value)
-                  }
-                  disabled={!milestone10Enabled}
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-2 py-1.5 text-xs disabled:opacity-60 focus:outline-none focus:ring-1 focus:ring-orange-500/70 focus:border-orange-500/70"
-                  placeholder="E.g. Free jug or $20 food credit"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Save bar */}
-        <div className="border-t border-white/10 pt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-white/60">
-          <div className="space-y-1 max-w-md">
-            <p>
-              <span className="font-semibold text-white/80">
-                Reminder:
-              </span>{" "}
-              You&apos;re configuring what your staff will honour when players
-              show vouchers in venue. Make sure staff are briefed on each
-              reward.
-            </p>
-            {subscriptionStatus !== "active" && (
-              <p className="text-red-300">
-                This venue league is not currently active. Offers won&apos;t be
-                issued until Streakr reactivates your subscription.
+          <div className="rounded-2xl bg-gradient-to-br from-slate-950/80 to-slate-900/80 border border-slate-800 px-5 py-6 shadow-lg shadow-black/40 space-y-3">
+            <h1 className="text-2xl font-semibold">
+              {venue.name}
+            </h1>
+            {(venue.venueName || venue.location) && (
+              <p className="text-sm text-slate-300">
+                {[venue.venueName, venue.location].filter(Boolean).join(" · ")}
               </p>
             )}
+            <p className="text-sm text-slate-400">
+              This page is for venue admins only. Ask STREAKr or your account
+              manager if you need access to edit prizes and promotions.
+            </p>
+            <div className="text-xs text-slate-500 space-y-1">
+              <p>
+                Venue code:{" "}
+                <span className="font-mono bg-slate-900/90 border border-slate-700 rounded px-2 py-[2px]">
+                  {venue.code}
+                </span>
+              </p>
+              {venue.venueAdminEmail && (
+                <p>Registered venue admin email: {venue.venueAdminEmail}</p>
+              )}
+            </div>
+            <Link
+              href={`/venues/${venue.id}`}
+              className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm px-4 py-2 mt-2 transition"
+            >
+              View public leaderboard
+            </Link>
           </div>
-
-          <button
-            type="submit"
-            disabled={saving}
-            className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-5 py-2.5 transition-colors disabled:opacity-60"
-          >
-            {saving ? "Saving settings…" : "Save changes"}
-          </button>
         </div>
-      </form>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-[60vh] bg-[#050814] text-slate-100">
+      {/* Top bar */}
+      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950/80 via-slate-900/80 to-slate-950/80">
+        <div className="mx-auto max-w-4xl px-4 py-8">
+          <p className="text-xs tracking-[0.2em] uppercase text-slate-500 mb-2">
+            Venue admin
+          </p>
+          <h1 className="text-3xl md:text-4xl font-semibold mb-2">
+            {venue.name}
+          </h1>
+          {(venue.venueName || venue.location) && (
+            <p className="text-sm text-slate-300 mb-2">
+              {[venue.venueName, venue.location]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+          <p className="text-xs text-slate-400">
+            Manage prizes and promotions for this STREAKr venue league. Any
+            changes you make here update the public venue leaderboard instantly.
+          </p>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href="/admin/venues"
+            className="text-xs text-slate-400 hover:text-slate-200"
+          >
+            ← Back to venue list
+          </Link>
+          <div className="flex flex-col items-end gap-1 text-[11px] text-slate-400">
+            <span>
+              Signed in as{" "}
+              <span className="font-medium text-slate-100">
+                {user.email ?? user.uid}
+              </span>
+            </span>
+            <span className="text-slate-500">
+              Venue code:{" "}
+              <span className="font-mono bg-slate-900/80 border border-slate-700 rounded px-2 py-[2px]">
+                {venue.code}
+              </span>
+            </span>
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleSave}
+          className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/80 px-5 py-6 shadow-lg shadow-black/40 space-y-5"
+        >
+          {error && (
+            <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+              {error}
+            </p>
+          )}
+          {saveSuccess && (
+            <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
+              {saveSuccess}
+            </p>
+          )}
+
+          <section className="space-y-3">
+            <h2 className="text-base md:text-lg font-semibold text-slate-50">
+              Prizes & promotions
+            </h2>
+            <p className="text-xs text-slate-400 max-w-md">
+              Tell players what they&apos;re playing for in your venue. This
+              copy appears on your public venue leaderboard under the
+              &quot;Venue prizes&quot; section.
+            </p>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Prizes headline
+              </label>
+              <input
+                type="text"
+                value={prizesHeadline}
+                onChange={(e) => setPrizesHeadline(e.target.value)}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder="E.g. Win a $50 bar tab every Friday"
+              />
+              <p className="text-[11px] text-slate-500">
+                Short, punchy line that grabs attention on the leaderboard.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Prizes description
+              </label>
+              <textarea
+                value={prizesBody}
+                onChange={(e) => setPrizesBody(e.target.value)}
+                rows={4}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder={`E.g.\nTop streak for each round wins a $50 bar tab.\nTie-breaker: earliest streak.\nSeason-long champ gets a $200 voucher.`}
+              />
+              <p className="text-[11px] text-slate-500">
+                Explain how players win, tie-break rules, and any season-long
+                prizes. You can update this anytime.
+              </p>
+            </div>
+          </section>
+
+          <section className="border-t border-slate-800 pt-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs text-slate-400">
+            <div className="max-w-md space-y-1">
+              <p>
+                Everything you write here is{" "}
+                <span className="text-slate-100 font-medium">
+                  visible to players
+                </span>{" "}
+                on your venue leaderboard.
+              </p>
+              <p>
+                Keep it clear and honest. If you have detailed T&amp;Cs, mention
+                where players can find them (e.g. at the bar or on your
+                website).
+              </p>
+            </div>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm px-5 py-2.5 transition disabled:opacity-60"
+            >
+              {saving ? "Saving prizes…" : "Save prizes"}
+            </button>
+          </section>
+        </form>
+      </div>
     </div>
   );
 }
