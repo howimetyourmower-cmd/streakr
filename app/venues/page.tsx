@@ -1,19 +1,23 @@
-// /app/venues/page.tsx
+// app/venues/page.tsx
 "use client";
+
+export const dynamic = "force-dynamic";
 
 import { useEffect, useState, FormEvent } from "react";
 import Link from "next/link";
 import {
   collection,
-  query,
-  where,
+  doc,
   onSnapshot,
   addDoc,
   updateDoc,
-  doc,
-  setDoc,
-  serverTimestamp,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  limit,
   arrayUnion,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -21,480 +25,439 @@ import { useAuth } from "@/hooks/useAuth";
 type VenueLeague = {
   id: string;
   name: string;
-  venueName: string;
-  joinCode: string;
-  createdBy: string;
-  createdAt?: Date | null;
-  memberCount: number;
+  code: string;
+  venueName?: string;
+  location?: string;
 };
 
-function generateJoinCode(length = 6): string {
+function generateCode(length = 6): string {
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let out = "";
   for (let i = 0; i < length; i++) {
-    out += chars[Math.floor(Math.random() * chars.length)];
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return out;
 }
 
-export default function VenueLeaguesPage() {
+export default function VenuesPage() {
   const { user } = useAuth();
 
-  const [myLeagues, setMyLeagues] = useState<VenueLeague[]>([]);
-  const [loadingLeagues, setLoadingLeagues] = useState(false);
-  const [leaguesError, setLeaguesError] = useState("");
+  // Create venue league
+  const [newName, setNewName] = useState("");
+  const [newVenueName, setNewVenueName] = useState("");
+  const [newLocation, setNewLocation] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
-  const [createName, setCreateName] = useState("");
-  const [createVenueName, setCreateVenueName] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
-  const [createMessage, setCreateMessage] = useState("");
-
+  // Join venue league
   const [joinCode, setJoinCode] = useState("");
-  const [isJoining, setIsJoining] = useState(false);
-  const [joinMessage, setJoinMessage] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
 
-  // ────────────────────────────────────────────
-  // Load leagues the current user is a member of
-  // ────────────────────────────────────────────
+  // User's venue leagues
+  const [venues, setVenues] = useState<VenueLeague[]>([]);
+  const [venuesLoading, setVenuesLoading] = useState(false);
+  const [venuesError, setVenuesError] = useState<string | null>(null);
+
+  // Load user's venue leagues from users/{uid}.venueLeagueIds[]
   useEffect(() => {
     if (!user) {
-      setMyLeagues([]);
+      setVenues([]);
       return;
     }
 
-    setLoadingLeagues(true);
-    setLeaguesError("");
+    setVenuesLoading(true);
+    setVenuesError(null);
 
-    const leaguesRef = collection(db, "venueLeagues");
-    const qRef = query(
-      leaguesRef,
-      where("memberIds", "array-contains", user.uid)
-    );
-
+    const userRef = doc(db, "users", user.uid);
     const unsub = onSnapshot(
-      qRef,
-      (snapshot) => {
-        const list: VenueLeague[] = [];
+      userRef,
+      async (snap) => {
+        try {
+          if (!snap.exists()) {
+            setVenues([]);
+            setVenuesLoading(false);
+            return;
+          }
 
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
+          const data = snap.data() as any;
+          const venueLeagueIds: string[] = Array.isArray(
+            data.venueLeagueIds
+          )
+            ? data.venueLeagueIds
+            : [];
 
-          list.push({
-            id: docSnap.id,
-            name: data.name || "Venue league",
-            venueName: data.venueName || "",
-            joinCode: data.joinCode || "",
-            createdBy: data.createdBy || "",
-            createdAt: data.createdAt?.toDate
-              ? data.createdAt.toDate()
-              : null,
-            memberCount:
-              Array.isArray(data.memberIds) &&
-              data.memberIds.filter(Boolean).length > 0
-                ? data.memberIds.filter(Boolean).length
-                : 1,
-          });
-        });
+          if (venueLeagueIds.length === 0) {
+            setVenues([]);
+            setVenuesLoading(false);
+            return;
+          }
 
-        // Sort: leagues you own first, then by name
-        list.sort((a, b) => {
-          if (a.createdBy === user.uid && b.createdBy !== user.uid) return -1;
-          if (b.createdBy === user.uid && a.createdBy !== user.uid) return 1;
-          return a.name.localeCompare(b.name);
-        });
+          const results: VenueLeague[] = [];
+          for (const id of venueLeagueIds) {
+            try {
+              const vSnap = await getDoc(doc(db, "venueLeagues", id));
+              if (!vSnap.exists()) continue;
+              const vData = vSnap.data() as any;
+              results.push({
+                id: vSnap.id,
+                name: vData.name ?? "Venue League",
+                code: vData.code ?? "",
+                venueName: vData.venueName ?? vData.venue ?? undefined,
+                location: vData.location ?? undefined,
+              });
+            } catch (err) {
+              console.error("Failed to load venue league", err);
+            }
+          }
 
-        setMyLeagues(list);
-        setLoadingLeagues(false);
+          setVenues(results);
+          setVenuesLoading(false);
+        } catch (err) {
+          console.error("Failed to process user venues", err);
+          setVenues([]);
+          setVenuesLoading(false);
+          setVenuesError("Failed to load your venue leagues.");
+        }
       },
       (err) => {
-        console.error("venueLeagues listener error", err);
-        setLeaguesError("Could not load your venue leagues.");
-        setLoadingLeagues(false);
+        console.error("User venues snapshot error", err);
+        setVenues([]);
+        setVenuesLoading(false);
+        setVenuesError("Failed to load your venue leagues.");
       }
     );
 
-    return () => unsub();
+    return () => {
+      unsub();
+    };
   }, [user]);
 
-  // ────────────────────────────────────────────
-  // Create a new venue league (owner flow)
-  // ────────────────────────────────────────────
-  const handleCreateLeague = async (e: FormEvent) => {
+  const handleCreateVenue = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) {
-      setCreateMessage("You need to be logged in to create a league.");
+      setCreateError("You need to be logged in to create a venue league.");
       return;
     }
 
-    const trimmedName = createName.trim();
-    const trimmedVenue = createVenueName.trim();
+    const trimmedName = newName.trim();
+    const trimmedVenueName = newVenueName.trim();
+    const trimmedLocation = newLocation.trim();
 
-    if (!trimmedName || !trimmedVenue) {
-      setCreateMessage("Please add a league name and venue name.");
+    if (!trimmedName) {
+      setCreateError("Give your venue league a name.");
       return;
     }
+
+    setCreating(true);
+    setCreateError(null);
+    setCreateSuccess(null);
 
     try {
-      setIsCreating(true);
-      setCreateMessage("");
+      const code = generateCode(6);
 
-      const joinCode = generateJoinCode(6);
-
-      const leaguesRef = collection(db, "venueLeagues");
-      const docRef = await addDoc(leaguesRef, {
+      const venuesRef = collection(db, "venueLeagues");
+      const venueDoc = await addDoc(venuesRef, {
         name: trimmedName,
-        venueName: trimmedVenue,
-        joinCode,
-        createdBy: user.uid,
+        venueName: trimmedVenueName || null,
+        location: trimmedLocation || null,
+        code,
+        managerUid: user.uid,
         createdAt: serverTimestamp(),
-        memberIds: [user.uid],
       });
 
-      // Also tag the league on the user document for future use
+      // Attach venue to user
       const userRef = doc(db, "users", user.uid);
-      await setDoc(
-        userRef,
-        {
-          venueLeagueIds: arrayUnion(docRef.id),
-        },
-        { merge: true }
-      );
+      await updateDoc(userRef, {
+        venueLeagueIds: arrayUnion(venueDoc.id),
+      });
 
-      setCreateMessage(
-        `League created. Your join code is ${joinCode}. Share this with players at your venue.`
+      setCreateSuccess(
+        `Venue league created. Code: ${code} – share it with players at your venue.`
       );
-      setCreateName("");
-      setCreateVenueName("");
+      setNewName("");
+      setNewVenueName("");
+      setNewLocation("");
     } catch (err) {
-      console.error("create venue league error", err);
-      setCreateMessage("Could not create league right now. Try again.");
+      console.error("Failed to create venue league", err);
+      setCreateError("Failed to create venue league. Please try again.");
     } finally {
-      setIsCreating(false);
-      // auto-clear message after a few seconds
-      setTimeout(() => setCreateMessage(""), 6000);
+      setCreating(false);
     }
   };
 
-  // ────────────────────────────────────────────
-  // Join a venue league by code
-  // ────────────────────────────────────────────
-  const handleJoinLeague = async (e: FormEvent) => {
+  const handleJoinVenue = async (e: FormEvent) => {
     e.preventDefault();
     if (!user) {
-      setJoinMessage("You need to be logged in to join a league.");
+      setJoinError("You need to be logged in to join a venue league.");
       return;
     }
 
     const code = joinCode.trim().toUpperCase();
-    if (!code) {
-      setJoinMessage("Enter a join code from your venue.");
+    if (!code || code.length < 4) {
+      setJoinError("Enter a valid venue code.");
       return;
     }
 
+    setJoining(true);
+    setJoinError(null);
+    setJoinSuccess(null);
+
     try {
-      setIsJoining(true);
-      setJoinMessage("");
+      const venuesRef = collection(db, "venueLeagues");
+      const q = query(venuesRef, where("code", "==", code), limit(1));
+      const snap = await getDocs(q);
 
-      const leaguesRef = collection(db, "venueLeagues");
-      const qRef = query(leaguesRef, where("joinCode", "==", code));
-      const snap = await new Promise<ReturnType<typeof qRef["withConverter"]>>(
-        (resolve, reject) => {
-          // little helper to use getDocs style without importing it
-          onSnapshot(
-            qRef,
-            (s) => {
-              resolve(s as any);
-            },
-            (err) => reject(err)
-          );
-        }
-      );
-
-      let foundDoc = null as any;
-
-      (snap as any).forEach((docSnap: any) => {
-        if (!foundDoc) foundDoc = docSnap;
-      });
-
-      if (!foundDoc) {
-        setJoinMessage("No league found with that code.");
+      if (snap.empty) {
+        setJoinError("No venue league found with that code.");
+        setJoining(false);
         return;
       }
 
-      const leagueId = foundDoc.id;
-      const leagueData = foundDoc.data() as any;
+      const venueDoc = snap.docs[0];
+      const venueId = venueDoc.id;
 
-      // if already a member, no-op
-      const memberIds: string[] = Array.isArray(leagueData.memberIds)
-        ? leagueData.memberIds
-        : [];
-      if (memberIds.includes(user.uid)) {
-        setJoinMessage("You’re already in this venue league.");
-        return;
-      }
-
-      // Add user to league
-      const leagueRef = doc(db, "venueLeagues", leagueId);
-      await updateDoc(leagueRef, {
-        memberIds: arrayUnion(user.uid),
-      });
-
-      // Also track on user document
+      // Attach venue to user
       const userRef = doc(db, "users", user.uid);
-      await setDoc(
-        userRef,
-        {
-          venueLeagueIds: arrayUnion(leagueId),
-        },
-        { merge: true }
-      );
+      await updateDoc(userRef, {
+        venueLeagueIds: arrayUnion(venueId),
+      });
 
-      setJoinMessage(`Joined ${leagueData.name} at ${leagueData.venueName}.`);
+      const vData = venueDoc.data() as any;
+      setJoinSuccess(
+        `Joined ${vData.name ?? "Venue League"}. You’ll now appear on their venue leaderboard.`
+      );
       setJoinCode("");
     } catch (err) {
-      console.error("join venue league error", err);
-      setJoinMessage("Could not join league. Double-check the code.");
+      console.error("Failed to join venue league", err);
+      setJoinError("Failed to join venue league. Please try again.");
     } finally {
-      setIsJoining(false);
-      setTimeout(() => setJoinMessage(""), 6000);
+      setJoining(false);
     }
   };
 
-  // ────────────────────────────────────────────
-  // RENDER
-  // ────────────────────────────────────────────
   return (
-    <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 text-white">
-      <header className="mb-6 sm:mb-8">
-        <h1 className="text-3xl sm:text-4xl font-extrabold mb-1">
-          Venue leagues
-        </h1>
-        <p className="text-sm sm:text-base text-white/75 max-w-2xl">
-          Pubs, clubs and venues can run their own STREAKr competitions.
-          Create a league for your venue, share the join code, and track who’s
-          on top each round.
-        </p>
-      </header>
+    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen space-y-6">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-3xl sm:text-4xl font-bold">Venue Leagues</h1>
+        <Link
+          href="/picks"
+          className="text-sm text-orange-400 hover:text-orange-300"
+        >
+          Back to picks
+        </Link>
+      </div>
 
-      {!user && (
-        <div className="mb-6 rounded-xl border border-orange-400/60 bg-orange-500/10 px-4 py-3 text-sm">
-          <p className="font-semibold mb-1">
-            You&apos;re not logged in.
-          </p>
-          <p className="text-white/80 mb-2">
-            Log in or create a free account to create or join venue leagues.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/auth?mode=login&returnTo=/venues"
-              className="inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-1.5 text-xs font-semibold text-black hover:bg-orange-400"
-            >
-              Log in
-            </Link>
-            <Link
-              href="/auth?mode=signup&returnTo=/venues"
-              className="inline-flex items-center justify-center rounded-full border border-white/30 px-4 py-1.5 text-xs font-semibold hover:border-orange-400 hover:text-orange-200"
-            >
-              Sign up
-            </Link>
-          </div>
-        </div>
-      )}
+      <p className="text-sm text-white/70 max-w-2xl">
+        Run STREAKr inside pubs, clubs and sporting venues. Players build the
+        same streak as general play – but each venue also gets its own ladder
+        for bragging rights and promotions.
+      </p>
 
-      {/* MAIN GRID */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* LEFT: leagues list */}
-        <section className="rounded-2xl bg-[#020617] border border-slate-700/80 shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg sm:text-xl font-semibold">
-              Your venue leagues
-            </h2>
-            {loadingLeagues && (
-              <span className="text-[11px] text-white/60">
-                Loading…
-              </span>
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1.6fr)]">
+        {/* Create / Join column */}
+        <div className="space-y-4">
+          {/* Create venue league */}
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+            <h2 className="text-lg font-semibold">Create a venue league</h2>
+            {!user && (
+              <p className="text-xs text-white/70">
+                Log in to create a venue league for your pub or club.
+              </p>
+            )}
+
+            {user && (
+              <>
+                {createError && (
+                  <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+                    {createError}
+                  </p>
+                )}
+                {createSuccess && (
+                  <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
+                    {createSuccess}
+                  </p>
+                )}
+
+                <form
+                  onSubmit={handleCreateVenue}
+                  className="space-y-3 text-sm"
+                >
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-white/70">
+                      League name
+                    </label>
+                    <input
+                      type="text"
+                      value={newName}
+                      onChange={(e) => setNewName(e.target.value)}
+                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                      placeholder="E.g. The Royal Hotel STREAKr"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-white/70">
+                      Venue name (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newVenueName}
+                      onChange={(e) => setNewVenueName(e.target.value)}
+                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                      placeholder="E.g. The Royal Hotel"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-white/70">
+                      Location (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newLocation}
+                      onChange={(e) => setNewLocation(e.target.value)}
+                      className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                      placeholder="E.g. Richmond, VIC"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
+                  >
+                    {creating ? "Creating…" : "Create venue league"}
+                  </button>
+                </form>
+              </>
             )}
           </div>
 
-          {leaguesError && (
-            <p className="text-xs text-red-400 mb-3">{leaguesError}</p>
-          )}
-
-          {user && myLeagues.length === 0 && !loadingLeagues && (
-            <p className="text-sm text-white/70">
-              You&apos;re not in any venue leagues yet. Create one for your
-              venue, or join with a code from your local.
+          {/* Join venue league */}
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+            <h2 className="text-lg font-semibold">Join a venue league</h2>
+            <p className="text-xs text-white/70">
+              Enter the 6-character code from your venue to appear on their
+              leaderboard.
             </p>
-          )}
 
-          {!user && (
-            <p className="text-sm text-white/70">
-              Log in to see leagues you&apos;re a member of.
-            </p>
-          )}
-
-          {user && myLeagues.length > 0 && (
-            <ul className="space-y-3">
-              {myLeagues.map((league) => {
-                const isOwner = league.createdBy === user.uid;
-
-                return (
-                  <li
-                    key={league.id}
-                    className="rounded-xl border border-slate-600/70 bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-slate-950/90 px-4 py-3 flex flex-col gap-2"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm sm:text-base font-semibold">
-                          {league.name}
-                        </p>
-                        <p className="text-xs text-white/70">
-                          {league.venueName}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="text-[11px] text-white/60">
-                          Members
-                        </span>
-                        <span className="text-sm font-semibold">
-                          {league.memberCount}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 justify-between">
-                      <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                        <span className="inline-flex items-center rounded-full bg-slate-800/90 border border-slate-500/70 px-2 py-0.5">
-                          <span className="uppercase tracking-wide text-white/70 mr-1">
-                            Code
-                          </span>
-                          <span className="font-semibold">
-                            {league.joinCode}
-                          </span>
-                        </span>
-                        {isOwner && (
-                          <span className="inline-flex items-center rounded-full bg-amber-500/15 border border-amber-400/60 px-2 py-0.5 text-[10px] font-semibold text-amber-200 uppercase tracking-wide">
-                            Venue owner
-                          </span>
-                        )}
-                      </div>
-
-                      <Link
-                        href={`/leagues/${league.id}`}
-                        className="text-[11px] sm:text-xs font-semibold text-sky-300 hover:text-sky-200 underline underline-offset-2"
-                      >
-                        View venue leaderboard
-                      </Link>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-
-        {/* RIGHT: create / join panels */}
-        <section className="space-y-4">
-          {/* CREATE */}
-          <div className="rounded-2xl bg-[#020617] border border-emerald-500/40 shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-4 sm:p-6">
-            <h2 className="text-lg sm:text-xl font-semibold mb-1">
-              Create a venue league
-            </h2>
-            <p className="text-xs sm:text-sm text-white/70 mb-4">
-              For pub / club / venue managers. We&apos;ll generate a join
-              code you can display on screens or posters for your customers.
-            </p>
+            {joinError && (
+              <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+                {joinError}
+              </p>
+            )}
+            {joinSuccess && (
+              <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
+                {joinSuccess}
+              </p>
+            )}
 
             <form
-              onSubmit={handleCreateLeague}
-              className="space-y-3 text-sm"
+              onSubmit={handleJoinVenue}
+              className="flex flex-col sm:flex-row gap-2 text-sm"
             >
-              <div className="space-y-1">
-                <label className="block text-[11px] uppercase tracking-wide text-white/60">
-                  League name
-                </label>
-                <input
-                  type="text"
-                  value={createName}
-                  onChange={(e) => setCreateName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="Example: Thursday Night Tipping"
-                  disabled={!user || isCreating}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] uppercase tracking-wide text-white/60">
-                  Venue name
-                </label>
-                <input
-                  type="text"
-                  value={createVenueName}
-                  onChange={(e) => setCreateVenueName(e.target.value)}
-                  className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="Example: The Railway Hotel, Richmond"
-                  disabled={!user || isCreating}
-                />
-              </div>
-
+              <input
+                type="text"
+                value={joinCode}
+                onChange={(e) =>
+                  setJoinCode(e.target.value.toUpperCase())
+                }
+                className="flex-1 rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm tracking-[0.3em] font-mono uppercase focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                placeholder="VENUEC"
+                maxLength={8}
+              />
               <button
                 type="submit"
-                disabled={!user || isCreating}
-                className="mt-1 inline-flex items-center justify-center rounded-full bg-emerald-500 px-4 py-2 text-xs sm:text-sm font-semibold text-black hover:bg-emerald-400 disabled:bg-slate-700 disabled:text-slate-300"
+                disabled={joining}
+                className="inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
               >
-                {isCreating ? "Creating…" : "Create league"}
+                {joining ? "Joining…" : "Join venue"}
               </button>
-
-              {createMessage && (
-                <p className="text-[11px] mt-2 text-emerald-300">
-                  {createMessage}
-                </p>
-              )}
             </form>
           </div>
+        </div>
 
-          {/* JOIN */}
-          <div className="rounded-2xl bg-[#020617] border border-sky-500/40 shadow-[0_20px_50px_rgba(0,0,0,0.85)] p-4 sm:p-6">
-            <h2 className="text-lg sm:text-xl font-semibold mb-1">
-              Join with a venue code
-            </h2>
-            <p className="text-xs sm:text-sm text-white/70 mb-4">
-              Got a code from your local? Enter it here to join their venue
-              leaderboard and compete for weekly prizes.
+        {/* Venues list column */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Your venue leagues</h2>
+            <span className="text-[11px] text-white/60">
+              Each venue has its own live leaderboard.
+            </span>
+          </div>
+
+          {venuesError && (
+            <p className="text-sm text-red-400">{venuesError}</p>
+          )}
+
+          {venuesLoading && !venuesError && (
+            <p className="text-sm text-white/70">Loading venues…</p>
+          )}
+
+          {!venuesLoading && venues.length === 0 && (
+            <p className="text-sm text-white/70">
+              You&apos;re not in any venue leagues yet. Create one for your
+              venue or join using a code.
             </p>
+          )}
 
-            <form onSubmit={handleJoinLeague} className="space-y-3">
-              <div className="space-y-1">
-                <label className="block text-[11px] uppercase tracking-wide text-white/60">
-                  Join code
-                </label>
-                <input
-                  type="text"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                  className="w-full rounded-lg bg-slate-900 border border-slate-600 px-3 py-2 text-sm tracking-[0.25em] text-center font-semibold focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  placeholder="ABC123"
-                  maxLength={8}
-                  disabled={!user || isJoining}
-                />
-              </div>
+          {!venuesLoading && venues.length > 0 && (
+            <ul className="space-y-3 text-sm">
+              {venues.map((v) => (
+                <li
+                  key={v.id}
+                  className="rounded-2xl bg-black/20 border border-white/10 px-4 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{v.name}</span>
+                    </div>
+                    {v.venueName && (
+                      <span className="text-xs text-white/70">
+                        {v.venueName}
+                        {v.location ? ` • ${v.location}` : ""}
+                      </span>
+                    )}
+                    {!v.venueName && v.location && (
+                      <span className="text-xs text-white/70">
+                        {v.location}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-white/70">
+                      <span className="uppercase tracking-wide text-[10px]">
+                        Code
+                      </span>
+                      <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-1">
+                        {v.code}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigator.clipboard.writeText(v.code)
+                        }
+                        className="text-sky-400 hover:text-sky-300"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
 
-              <button
-                type="submit"
-                disabled={!user || isJoining}
-                className="inline-flex items-center justify-center rounded-full bg-sky-500 px-4 py-2 text-xs sm:text-sm font-semibold text-black hover:bg-sky-400 disabled:bg-slate-700 disabled:text-slate-300"
-              >
-                {isJoining ? "Joining…" : "Join league"}
-              </button>
-
-              {joinMessage && (
-                <p className="text-[11px] mt-2 text-sky-300">
-                  {joinMessage}
-                </p>
-              )}
-            </form>
-          </div>
-        </section>
+                  <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
+                    <Link
+                      href={`/venues/${v.id}`}
+                      className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-xs px-4 py-1.5 transition-colors"
+                    >
+                      View leaderboard
+                    </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );
