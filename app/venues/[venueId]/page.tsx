@@ -245,9 +245,55 @@ export default function VenuesPage() {
         venueLeagueIds: arrayUnion(venueId),
       });
 
-      setJoinSuccess(
-        `Joined ${vData.name ?? "Venue League"}. You’ll now appear on their venue leaderboard.`
-      );
+      // --- First-time join voucher (if configured on venue) ---
+      let issuedJoinVoucher = false;
+      let issuedJoinVoucherDescription = "";
+
+      if (vData.joinOfferEnabled && vData.joinOfferDescription) {
+        try {
+          const vouchersRef = collection(
+            db,
+            "users",
+            user.uid,
+            "vouchers"
+          );
+          const existingQ = query(
+            vouchersRef,
+            where("venueId", "==", venueId),
+            where("type", "==", "join"),
+            limit(1)
+          );
+          const existingSnap = await getDocs(existingQ);
+
+          if (existingSnap.empty) {
+            await addDoc(vouchersRef, {
+              venueId,
+              venueName: vData.venueName ?? vData.name ?? null,
+              type: "join",
+              status: "active",
+              description: vData.joinOfferDescription,
+              createdAt: serverTimestamp(),
+              source: "venue-join",
+            });
+
+            issuedJoinVoucher = true;
+            issuedJoinVoucherDescription = vData.joinOfferDescription;
+          }
+        } catch (voucherErr) {
+          console.error("Failed to issue join voucher", voucherErr);
+          // Do not block joining on voucher errors.
+        }
+      }
+
+      let successMessage = `Joined ${
+        vData.name ?? "Venue League"
+      }. You’ll now appear on their venue leaderboard.`;
+
+      if (issuedJoinVoucher && issuedJoinVoucherDescription) {
+        successMessage += ` You also unlocked: ${issuedJoinVoucherDescription}. Show your voucher in the app at the bar to redeem.`;
+      }
+
+      setJoinSuccess(successMessage);
       setJoinCode("");
     } catch (err) {
       console.error("Failed to join venue league", err);
