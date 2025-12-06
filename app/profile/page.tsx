@@ -750,52 +750,45 @@ export default function ProfilePage() {
                       </div>
                     </div>
 
-                    {/* Lifetime record row */}
-                    <div className="mt-4 rounded-xl bg-slate-800/80 border border-slate-700 px-4 py-4">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-400 mb-2">
-                        Lifetime record
-                      </p>
-                      <div className="grid grid-cols-4 gap-3 text-xs text-slate-200">
-                        <div>
-                          <p className="text-[11px] text-slate-500 mb-1">
-                            Best streak
-                          </p>
-                          <p className="font-semibold">
-                            {stats.bestStreak}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[11px] text-slate-500 mb-1">
-                            Wins
-                          </p>
-                          <p className="font-semibold">
-                            {lifetimeWins}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[11px] text-slate-500 mb-1">
-                            Losses
-                          </p>
-                          <p className="font-semibold">
-                            {lifetimeLosses}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[11px] text-slate-500 mb-1">
-                            Win rate
-                          </p>
-                          <p className="font-semibold">
-                           
-                            </span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+{/* LIFETIME RECORD */}
+<section className="mt-6 rounded-2xl bg-slate-900/70 border border-slate-700/60 px-4 py-4 sm:px-6 sm:py-5">
+  <h3 className="text-sm font-semibold text-slate-100 mb-3">
+    Lifetime record
+  </h3>
+
+  <div className="grid grid-cols-3 gap-4 text-center text-xs sm:text-sm text-slate-200">
+    {/* Best streak */}
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">
+        Best streak
+      </p>
+      <p className="mt-1 text-2xl font-extrabold text-orange-400">
+        {longestStreak ?? 0}
+      </p>
+    </div>
+
+    {/* Wins */}
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">
+        Wins
+      </p>
+      <p className="mt-1 text-2xl font-extrabold text-emerald-300">
+        {totalWins ?? 0}
+      </p>
+    </div>
+
+    {/* Losses */}
+    <div>
+      <p className="text-[11px] uppercase tracking-wide text-slate-400">
+        Losses
+      </p>
+      <p className="mt-1 text-2xl font-extrabold text-red-300">
+        {totalLosses ?? 0}
+      </p>
+    </div>
+  </div>
+</section>
+
 
           {/* STREAK BADGES CARD */}
           <div className="rounded-2xl bg-slate-900/80 border border-slate-700/80 px-5 py-5 sm:px-6 sm:py-6">
