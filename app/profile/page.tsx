@@ -785,11 +785,7 @@ export default function ProfilePage() {
                             Win rate
                           </p>
                           <p className="font-semibold">
-                            {lifetimePicks > 0
-                              ? lifetimeWinRate.toFixed(3)
-                              : "0.000"}{" "}
-                            <span className="text-[10px] text-slate-400">
-                              ({lifetimePicks} picks)
+                           
                             </span>
                           </p>
                         </div>
