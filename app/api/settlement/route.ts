@@ -73,20 +73,23 @@ async function getPicksForQuestion(questionId: string): Promise<
 }
 
 /**
- * Apply streak changes for a settled question.
+ * Apply streak + lifetime stats changes for a settled question.
  *
  * outcome:
- *  - "yes" / "no"  => correct answer; correct picks get +1 streak,
- *                    incorrect picks reset to 0.
- *  - "void"        => ignored for streak (no change).
+ *  - "yes" / "no"  => correct answer; correct picks get +1 streak & +1 win,
+ *                    incorrect picks reset streak to 0 & +1 loss.
+ *  - "void"        => ignored for streak/stats (no change).
+ *
+ * Also:
+ *  - roundsPlayed is incremented once per round per user, the first time
+ *    they appear in a non-void final result for that round.
  */
 async function updateStreaksForQuestion(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
 ) {
-  // If void, we don't change anyone's streak – question is just ignored.
-  if (outcome === "void") return;
+  if (outcome === "void") return; // void does not affect streak or stats
 
   const picks = await getPicksForQuestion(questionId);
   if (!picks.length) return;
@@ -101,6 +104,10 @@ async function updateStreaksForQuestion(
 
       let currentStreak = 0;
       let longestStreak = 0;
+      let lifetimeWins = 0;
+      let lifetimeLosses = 0;
+      let roundsPlayed = 0;
+      let roundsPlayedRounds: number[] = [];
 
       if (snap.exists) {
         const u = snap.data() as any;
@@ -108,27 +115,54 @@ async function updateStreaksForQuestion(
           typeof u.currentStreak === "number" ? u.currentStreak : 0;
         longestStreak =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
+        lifetimeWins =
+          typeof u.lifetimeWins === "number" ? u.lifetimeWins : 0;
+        lifetimeLosses =
+          typeof u.lifetimeLosses === "number" ? u.lifetimeLosses : 0;
+        roundsPlayed =
+          typeof u.roundsPlayed === "number" ? u.roundsPlayed : 0;
+        roundsPlayedRounds = Array.isArray(u.roundsPlayedRounds)
+          ? u.roundsPlayedRounds
+          : [];
       }
 
-      // If user picked the correct outcome, streak +1; otherwise reset to 0.
-      if (pick === outcome) {
+      const wasCorrect = pick === outcome;
+
+      // Streak logic
+      if (wasCorrect) {
         currentStreak += 1;
         if (currentStreak > longestStreak) {
           longestStreak = currentStreak;
         }
+        lifetimeWins += 1;
       } else {
         currentStreak = 0;
+        lifetimeLosses += 1;
       }
 
-      tx.set(
-        userRef,
-        {
-          currentStreak,
-          longestStreak,
-          lastUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
+      // Rounds played – once per round per user
+      let shouldUpdateRounds = false;
+      let newRoundsPlayed = roundsPlayed;
+
+      if (!roundsPlayedRounds.includes(roundNumber)) {
+        shouldUpdateRounds = true;
+        newRoundsPlayed = roundsPlayed + 1;
+      }
+
+      const payload: any = {
+        currentStreak,
+        longestStreak,
+        lifetimeWins,
+        lifetimeLosses,
+        lastUpdatedAt: FieldValue.serverTimestamp(),
+      };
+
+      if (shouldUpdateRounds) {
+        payload.roundsPlayed = newRoundsPlayed;
+        payload.roundsPlayedRounds = FieldValue.arrayUnion(roundNumber);
+      }
+
+      tx.set(userRef, payload, { merge: true });
     });
 
     updates.push(p);
@@ -138,14 +172,17 @@ async function updateStreaksForQuestion(
 }
 
 /**
- * Revert the streak effect for this question when a FINAL result is reopened.
+ * Revert the streak + lifetime stats effect for this question when a FINAL
+ * result is reopened or changed.
  *
- * If the question *used to be* final_yes / final_no and is now reopened,
- * any user who was previously CORRECT on that result will have their
- * currentStreak reduced by 1 (down to a minimum of 0).
+ * If the question *used to be* final_yes / final_no and is now reopened
+ * (or changed to a different outcome), we:
+ *  - subtract 1 from lifetimeWins for previously-correct picks
+ *  - subtract 1 from lifetimeLosses for previously-incorrect picks
+ *  - reduce currentStreak by 1 for previously-correct picks (min 0)
  *
- * If that streak was ALSO their longestStreak, we reduce longestStreak by 1
- * as well so the "record run" stays accurate.
+ * We intentionally do NOT touch longestStreak so "best ever" stays as a record.
+ * We also never decrement roundsPlayed – once you've played a round, it counts.
  */
 async function revertStreaksForQuestion(
   roundNumber: number,
@@ -160,39 +197,44 @@ async function revertStreaksForQuestion(
   const updates: Promise<unknown>[] = [];
 
   for (const { userId, outcome: pick } of picks) {
-    // Only revert players who were previously CORRECT on this question.
-    if (pick !== previousOutcome) continue;
-
     const userRef = db.collection("users").doc(userId);
 
     const p = db.runTransaction(async (tx) => {
       const snap = await tx.get(userRef);
 
-      let oldCurrent = 0;
-      let oldLongest = 0;
+      let currentStreak = 0;
+      let longestStreak = 0;
+      let lifetimeWins = 0;
+      let lifetimeLosses = 0;
 
       if (snap.exists) {
         const u = snap.data() as any;
-        oldCurrent =
+        currentStreak =
           typeof u.currentStreak === "number" ? u.currentStreak : 0;
-        oldLongest =
+        longestStreak =
           typeof u.longestStreak === "number" ? u.longestStreak : 0;
+        lifetimeWins =
+          typeof u.lifetimeWins === "number" ? u.lifetimeWins : 0;
+        lifetimeLosses =
+          typeof u.lifetimeLosses === "number" ? u.lifetimeLosses : 0;
       }
 
-      // Revert the +1 we previously gave them for this result.
-      const newCurrent = Math.max(0, oldCurrent - 1);
+      const wasCorrect = pick === previousOutcome;
 
-      // If we are undoing part of their record run, shrink longest too.
-      let newLongest = oldLongest;
-      if (oldLongest > 0 && oldCurrent === oldLongest) {
-        newLongest = Math.max(0, oldLongest - 1);
+      if (wasCorrect) {
+        currentStreak = Math.max(0, currentStreak - 1);
+        lifetimeWins = Math.max(0, lifetimeWins - 1);
+      } else {
+        lifetimeLosses = Math.max(0, lifetimeLosses - 1);
       }
 
       tx.set(
         userRef,
         {
-          currentStreak: newCurrent,
-          longestStreak: newLongest,
+          currentStreak,
+          longestStreak,
+          lifetimeWins,
+          lifetimeLosses,
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -221,7 +263,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ── Look up previous status/outcome so we can detect reopen ──
+    // ── Look up previous status/outcome so we can detect reopen / changes ──
     const qsRef = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
@@ -308,11 +350,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
-    // ── Apply streak changes for FINAL results ───────────────────
+    // ── Apply / revert streak + lifetime stats ───────────────────
+
+    // 1) If this question is now FINAL, apply stats.
     if (
       status === "final" &&
       (outcome === "yes" || outcome === "no" || outcome === "void")
     ) {
+      // If it was previously FINAL with a different outcome, revert that first.
+      if (
+        prevStatus === "final" &&
+        prevOutcome &&
+        prevOutcome !== outcome
+      ) {
+        await revertStreaksForQuestion(
+          roundNumber,
+          questionId,
+          prevOutcome
+        );
+      }
+
       await updateStreaksForQuestion(
         roundNumber,
         questionId,
@@ -320,11 +377,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ── Revert streak changes if we REOPEN a previously-final question ──
+    // 2) If we REOPEN a previously-final question, revert its effect.
     if (
       status === "open" &&
       prevStatus === "final" &&
-      (prevOutcome === "yes" || prevOutcome === "no" || prevOutcome === "void")
+      (prevOutcome === "yes" ||
+        prevOutcome === "no" ||
+        prevOutcome === "void")
+    ) {
+      await revertStreaksForQuestion(
+        roundNumber,
+        questionId,
+        prevOutcome as QuestionOutcome
+      );
+    }
+
+    // 3) If we mark a previously-final question as VOID, also revert.
+    if (
+      status === "void" &&
+      prevStatus === "final" &&
+      (prevOutcome === "yes" || prevOutcome === "no")
     ) {
       await revertStreaksForQuestion(
         roundNumber,
@@ -342,4 +414,3 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 }
-
