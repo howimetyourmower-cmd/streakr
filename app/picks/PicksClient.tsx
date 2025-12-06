@@ -38,11 +38,9 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-
-  // settlement data from API
+  correctPick?: boolean; // true = you were right, false = you were wrong
   correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | null;
-  correctPick?: boolean | null;
+  outcome?: "yes" | "no" | "void" | "lock" | null;
 };
 
 type ApiGame = {
@@ -69,10 +67,8 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-
-  // settlement
-  correctOutcome?: "yes" | "no" | "void" | null;
   correctPick?: boolean | null;
+  correctOutcome?: "yes" | "no" | "void" | null;
 };
 
 type PicksApiResponse = {
@@ -418,14 +414,11 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          correctPick:
-            typeof q.correctPick === "boolean"
-              ? q.correctPick
-              : prev?.correctPick ?? null,
         };
       })
     );
 
+  // 🔑 KEY FIX: include user token when calling /api/picks
   const fetchPicks = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
       setLoading(true);
@@ -433,7 +426,20 @@ export default function PicksClient() {
     }
 
     try {
-      const res = await fetch("/api/picks");
+      let headers: HeadersInit = {};
+
+      if (user) {
+        try {
+          const idToken = await user.getIdToken();
+          headers = {
+            Authorization: `Bearer ${idToken}`,
+          };
+        } catch (tokenErr) {
+          console.error("Failed to get ID token for /api/picks", tokenErr);
+        }
+      }
+
+      const res = await fetch("/api/picks", { headers });
       if (!res.ok) throw new Error("API error");
 
       const data: PicksApiResponse = await res.json();
@@ -477,20 +483,20 @@ export default function PicksClient() {
     }
   }, []);
 
-  // Initial picks
+  // Initial picks (and whenever user changes so API can return userPick)
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
-  // Auto-refresh
+  // Auto-refresh (ensure interval sees latest user/token)
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
     }, 15000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
@@ -570,7 +576,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // Load picks from backend and merge into history so pills work on every device
+  // NEW: Load picks from backend and merge into history so pills work on every device
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
@@ -597,6 +603,7 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
+        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -614,6 +621,7 @@ export default function PicksClient() {
           }
         }
 
+        // Legacy shape: { questionId, outcome }
         if (
           json?.questionId &&
           json?.outcome &&
@@ -649,9 +657,11 @@ export default function PicksClient() {
           });
         }
 
+        // Determine active pick (for streak highlighting)
         let activeFromApi =
           json?.currentPick || json?.activePick || null;
         if (!activeFromApi && !Array.isArray(json?.picks)) {
+          // legacy: the whole object is the active pick
           activeFromApi = json;
         }
 
@@ -671,6 +681,7 @@ export default function PicksClient() {
           setActiveOutcome(activeOutcomeFromApi);
         }
 
+        // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -1299,11 +1310,6 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            // 🔑 NEW: also look at pickHistory so mobile can see your pick
-            const historyPick = pickHistoryRef.current[row.id];
-            const userPickForOutcome =
-              row.userPick ?? historyPick ?? null;
-
             type OutcomeKind =
               | "win"
               | "loss"
@@ -1311,22 +1317,18 @@ export default function PicksClient() {
               | "settled-no-result"
               | null;
 
-            const outcome =
-              normaliseOutcome(row.correctOutcome) ??
-              normaliseOutcome((row as any).outcome);
+            const outcome = normaliseOutcome(
+              (row.correctOutcome as any) ?? (row as any).outcome
+            );
 
             let outcomeKind: OutcomeKind = null;
 
             if (row.status === "void" || outcome === "void") {
               outcomeKind = "void";
             } else if (row.status === "final") {
-              if (row.correctPick === true && userPickForOutcome) {
-                outcomeKind = "win";
-              } else if (row.correctPick === false && userPickForOutcome) {
-                outcomeKind = "loss";
-              } else if (outcome && userPickForOutcome) {
+              if (outcome && row.userPick) {
                 outcomeKind =
-                  userPickForOutcome === outcome ? "win" : "loss";
+                  row.userPick === outcome ? "win" : "loss";
               } else {
                 outcomeKind = "settled-no-result";
               }
