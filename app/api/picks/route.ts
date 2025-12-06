@@ -7,6 +7,9 @@ import rounds2026 from "@/data/rounds-2026.json";
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
+// Per-user result that the client will use for the outcome pill
+type UserResult = "win" | "loss" | "void" | null;
+
 // This matches the flat JSON rows in rounds-2026.json
 type JsonRow = {
   Round: string; // "OR", "R1", "R2", ...
@@ -30,7 +33,8 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-  correctOutcome?: QuestionOutcome; // 👈 settlement result
+  correctOutcome?: QuestionOutcome; // settlement result
+  userResult?: UserResult; // 👈 per-user result for outcome pill
 };
 
 type ApiGame = {
@@ -347,6 +351,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const effectiveStatus = statusInfo?.status ?? jsonStatus;
       const correctOutcome = statusInfo?.outcome;
 
+      // Per-user result used by the front-end pill
+      let userResult: UserResult = null;
+      const userPick = userPicks[questionId];
+
+      if (effectiveStatus === "void") {
+        // Question void: everybody "void"
+        userResult = "void";
+      } else if (effectiveStatus === "final") {
+        if (correctOutcome === "void") {
+          userResult = "void";
+        } else if (
+          (correctOutcome === "yes" || correctOutcome === "no") &&
+          (userPick === "yes" || userPick === "no")
+        ) {
+          userResult = userPick === correctOutcome ? "win" : "loss";
+        } else {
+          // final but user never picked, or no outcome yet -> null
+          userResult = null;
+        }
+      } else {
+        // open / pending: no pill yet
+        userResult = null;
+      }
+
       const apiQuestion: ApiQuestion = {
         id: questionId,
         quarter: row.Quarter,
@@ -354,11 +382,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         status: effectiveStatus,
         sport: "AFL",
         isSponsorQuestion: !!isSponsorQuestion,
-        userPick: userPicks[questionId],
+        userPick,
         yesPercent,
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
+        userResult,
       };
 
       gamesByKey[gameKey].questions.push(apiQuestion);
