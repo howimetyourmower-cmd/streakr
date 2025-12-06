@@ -302,7 +302,7 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold">
-                Next Available&apos;s Questions
+                Next Available Questions
               </h2>
               <p className="text-sm text-white/70">
                 A preview of some open questions. Jump into Picks to lock in
