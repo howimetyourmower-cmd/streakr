@@ -7,7 +7,6 @@ import {
   ChangeEvent,
   FormEvent,
 } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
 import {
@@ -31,7 +30,7 @@ type ProfileData = {
   gender?: string;
   favouriteAflTeam?: string;
   avatarUrl?: string; // new name
-  photoURL?: string; // legacy name
+  photoURL?: string; // legacy
 
   currentStreak?: number;
   longestStreak?: number;
@@ -108,7 +107,27 @@ export default function ProfilePage() {
         let data: ProfileData;
 
         if (snap.exists()) {
-          data = (snap.data() as ProfileData) || {};
+          const firestoreData = (snap.data() as any) || {};
+
+          // Map existing boolean fields like badges_level3 etc
+          const levelBadges: Record<string, boolean> = {};
+          [3, 5, 10, 15, 20].forEach((lvl) => {
+            const key = `badges_level${lvl}`;
+            if (firestoreData[key] === true) {
+              levelBadges[String(lvl)] = true;
+            }
+          });
+
+          const streakBadges: Record<string, boolean> =
+            firestoreData.streakBadges || {};
+          const mergedBadges = { ...streakBadges, ...levelBadges };
+
+          data = {
+            ...firestoreData,
+            streakBadges: mergedBadges,
+          } as ProfileData;
+
+          setLocalBadges(mergedBadges);
         } else {
           data = {
             username: user.displayName || "",
@@ -129,10 +148,10 @@ export default function ProfilePage() {
             streakBadges: {},
           };
           await setDoc(userRef, data, { merge: true });
+          setLocalBadges({});
         }
 
         setProfile(data);
-        setLocalBadges(data.streakBadges || {});
         setFormValues({
           username: data.username || "",
           firstName: data.firstName || "",
@@ -190,11 +209,11 @@ export default function ProfilePage() {
 
     try {
       const userRef = doc(db, "users", user.uid);
+
+      // DO NOT allow username or DOB to change from UI
       await updateDoc(userRef, {
-        username: formValues.username || "",
         firstName: formValues.firstName || "",
         lastName: formValues.lastName || "",
-        dateOfBirth: formValues.dateOfBirth || "",
         suburb: formValues.suburb || "",
         state: formValues.state || "",
         phone: formValues.phone || "",
@@ -204,7 +223,13 @@ export default function ProfilePage() {
 
       setProfile((prev) => ({
         ...prev,
-        ...formValues,
+        firstName: formValues.firstName || "",
+        lastName: formValues.lastName || "",
+        suburb: formValues.suburb || "",
+        state: formValues.state || "",
+        phone: formValues.phone || "",
+        gender: formValues.gender || "",
+        favouriteAflTeam: formValues.favouriteAflTeam || "",
       }));
       setIsEditing(false);
       setSuccessMessage("Profile updated.");
@@ -274,7 +299,7 @@ export default function ProfilePage() {
       ? Math.round((lifetimeWins / totalPicks) * 100)
       : 0;
 
-  // Avatar: accept multiple field names / auth photo
+  // Avatar source
   const avatarUrl =
     profile.avatarUrl ||
     profile.photoURL ||
@@ -317,16 +342,15 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {/* Top strip with avatar + controls */}
+        {/* Top strip */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12 rounded-full overflow-hidden border border-white/20 bg-slate-900">
               {avatarUrl ? (
-                <Image
+                <img
                   src={avatarUrl}
                   alt="Avatar"
-                  fill
-                  className="object-cover"
+                  className="h-full w-full object-cover"
                 />
               ) : (
                 <div className="h-full w-full flex items-center justify-center text-xl">
@@ -392,9 +416,9 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* PANEL 1 – STATS + LIFETIME + BADGES */}
+        {/* PANEL 1 – STATS, LIFETIME, BADGES */}
         <section className="rounded-2xl bg-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] p-4 sm:p-6 mb-6">
-          {/* Top three cards */}
+          {/* top 3 cards */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5 text-sm">
             <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
               <p className="text-[11px] text-white/60 mb-1">
@@ -432,7 +456,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Lifetime record – no win-rate block */}
+          {/* lifetime record */}
           <div className="rounded-2xl bg-slate-950/90 border border-slate-700 px-4 py-4 mb-6">
             <h2 className="text-sm font-semibold mb-1">
               Lifetime record
@@ -483,7 +507,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Streak badges */}
+          {/* badges */}
           <div>
             <h2 className="text-sm font-semibold mb-1">
               Streak badges
@@ -535,7 +559,9 @@ export default function ProfilePage() {
           </h2>
           <p className="text-xs text-white/60 mb-4">
             Update your details so we can personalise your STREAKr
-            experience.
+            experience. Some fields (like username and date of birth)
+            can&apos;t be changed here – contact support if you need
+            help.
           </p>
 
           <form
@@ -547,7 +573,7 @@ export default function ProfilePage() {
               name="username"
               value={formValues.username ?? ""}
               onChange={handleFieldChange}
-              disabled={!isEditing}
+              disabled
             />
             <Field
               label="First name"
@@ -569,7 +595,7 @@ export default function ProfilePage() {
               type="date"
               value={formValues.dateOfBirth ?? ""}
               onChange={handleFieldChange}
-              disabled={!isEditing}
+              disabled
             />
             <Field
               label="Suburb"
@@ -603,7 +629,6 @@ export default function ProfilePage() {
               placeholder="Optional"
             />
 
-            {/* Favourite AFL team */}
             <div className="sm:col-span-2">
               <label className="block text-[11px] text-white/60 mb-1">
                 Favourite AFL team
@@ -696,7 +721,7 @@ function BadgeCard({
   subtitle,
   unlocked,
 }: BadgeProps) {
-  const imageSrc = `/badges/streakr-${level}.png`; // expects public/badges/streakr-3.png etc.
+  const imageSrc = `/badges/streak-${level}.png`;
 
   return (
     <div
@@ -707,11 +732,10 @@ function BadgeCard({
       }`}
     >
       <div className="relative mb-2 h-24 w-20">
-        <Image
+        <img
           src={imageSrc}
           alt={`Streak badge level ${level}`}
-          fill
-          className={`object-contain ${
+          className={`h-full w-full object-contain ${
             unlocked ? "" : "grayscale opacity-70"
           }`}
         />
