@@ -250,6 +250,28 @@ const normaliseOutcome = (
   return null;
 };
 
+// NEW: compute which games are "busted" for the user
+// A game is busted if there is at least one final, non-void question
+// where the user made a pick and it was wrong.
+function computeBustedGameIds(rows: QuestionRow[]): Set<string> {
+  const busted = new Set<string>();
+
+  for (const row of rows) {
+    if (!row.gameId) continue;
+    if (row.status !== "final") continue;
+    if (!row.userPick) continue;
+
+    const outcome = normaliseOutcome(row.correctOutcome);
+    if (!outcome || outcome === "void") continue;
+
+    if (row.userPick !== outcome) {
+      busted.add(row.gameId);
+    }
+  }
+
+  return busted;
+}
+
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -861,9 +883,21 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
+  // NEW: derive busted games from all rows
+  const bustedGameIds = useMemo(
+    () => computeBustedGameIds(rows),
+    [rows]
+  );
+
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
+      return;
+    }
+
+    // If this game is busted (player has already had a wrong, finalised pick),
+    // they cannot make any further picks in this game.
+    if (bustedGameIds.has(row.gameId)) {
       return;
     }
 
@@ -1289,7 +1323,8 @@ export default function PicksClient() {
             const isNoPicked = row.userPick === "no";
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isLocked = row.status !== "open";
+            const isGameBusted = bustedGameIds.has(row.gameId);
+            const isLocked = row.status !== "open" || isGameBusted;
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1487,7 +1522,9 @@ export default function PicksClient() {
                       )}
                       {isLocked && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          Locked
+                          {isGameBusted
+                            ? "Out for this game"
+                            : "Locked"}
                         </span>
                       )}
                       {isSponsor && (
