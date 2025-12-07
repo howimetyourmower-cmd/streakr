@@ -12,8 +12,8 @@ import {
   getDoc,
   limit,
   onSnapshot,
-  orderBy,
   query,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -118,14 +118,14 @@ export default function VenueLeaderboardPage() {
     loadVenue();
   }, [venueId]);
 
-  // Live members + stats
+  // Live members + stats (from users.venueLeagueIds)
   useEffect(() => {
     if (!venueId) return;
 
-    const membersRef = collection(db, "venueLeagues", venueId, "members");
+    const usersRef = collection(db, "users");
     const membersQuery = query(
-      membersRef,
-      orderBy("joinedAt", "asc"),
+      usersRef,
+      where("venueLeagueIds", "array-contains", venueId),
       limit(200)
     );
 
@@ -133,59 +133,29 @@ export default function VenueLeaderboardPage() {
 
     const unsub = onSnapshot(
       membersQuery,
-      async (snapshot) => {
+      (snapshot) => {
         try {
-          const rows: VenueMember[] = [];
+          const rows: VenueMember[] = snapshot.docs.map((docSnap) => {
+            const u = docSnap.data() as any;
+            const displayName =
+              u.displayName ||
+              u.username ||
+              u.name ||
+              u.email ||
+              "Player";
 
-          for (const docSnap of snapshot.docs) {
-            const m = docSnap.data() as any;
-            const uid = m.uid as string;
-
-            // pull stats from users collection
-            let displayName = m.displayName || "Player";
-            let username: string | undefined;
-            let avatarUrl: string | undefined;
-            let currentStreak = 0;
-            let longestStreak = 0;
-            let lifetimeWins = 0;
-            let lifetimeLosses = 0;
-            let lifetimePicks = 0;
-
-            try {
-              const userRef = doc(db, "users", uid);
-              const userSnap = await getDoc(userRef);
-              if (userSnap.exists()) {
-                const u = userSnap.data() as any;
-                displayName =
-                  u.displayName ||
-                  u.username ||
-                  u.name ||
-                  m.displayName ||
-                  "Player";
-                username = u.username ?? undefined;
-                avatarUrl = u.avatarUrl ?? undefined;
-                currentStreak = u.currentStreak ?? 0;
-                longestStreak = u.longestStreak ?? 0;
-                lifetimeWins = u.lifetimeWins ?? 0;
-                lifetimeLosses = u.lifetimeLosses ?? 0;
-                lifetimePicks = u.lifetimePicks ?? 0;
-              }
-            } catch (err) {
-              console.error("Failed to load user stats for venue member", err);
-            }
-
-            rows.push({
-              uid,
+            return {
+              uid: docSnap.id,
               displayName,
-              username,
-              avatarUrl,
-              currentStreak,
-              longestStreak,
-              lifetimeWins,
-              lifetimeLosses,
-              lifetimePicks,
-            });
-          }
+              username: u.username ?? undefined,
+              avatarUrl: u.avatarUrl ?? undefined,
+              currentStreak: u.currentStreak ?? 0,
+              longestStreak: u.longestStreak ?? 0,
+              lifetimeWins: u.lifetimeWins ?? 0,
+              lifetimeLosses: u.lifetimeLosses ?? 0,
+              lifetimePicks: u.lifetimePicks ?? 0,
+            };
+          });
 
           // sort: current streak desc, then wins desc, then total picks desc
           rows.sort((a, b) => {
@@ -275,8 +245,7 @@ export default function VenueLeaderboardPage() {
 
   const showPrizeBanner = !!venue.prizesHeadline || !!venue.prizesBody;
   const showOffers =
-    venue.voucherJoinEnabled ||
-    venue.voucherMilestoneEnabled;
+    venue.voucherJoinEnabled || venue.voucherMilestoneEnabled;
 
   return (
     <div className="min-h-[60vh] bg-[#050814] text-slate-100">
