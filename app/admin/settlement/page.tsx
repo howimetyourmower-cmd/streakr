@@ -3,6 +3,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
+import { db } from "@/lib/firebaseClient";
+import { doc, updateDoc } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -30,6 +32,9 @@ type ApiGame = {
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
+  // These may already exist in your API response:
+  sport?: string;
+  isUnlocked?: boolean;
 };
 
 type PicksApiResponse = {
@@ -46,6 +51,15 @@ type QuestionRow = {
   isSponsorQuestion?: boolean;
 };
 
+type GameRow = {
+  id: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  sport?: string;
+  isUnlocked?: boolean;
+};
+
 // Map ROUND_OPTIONS.key → numeric roundNumber used by /api/picks & /api/settlement
 function keyToRoundNumber(key: string): number {
   if (key === "OR") return 0; // Opening Round
@@ -56,6 +70,34 @@ function keyToRoundNumber(key: string): number {
   return 0;
 }
 
+function formatStart(startTime: string) {
+  if (!startTime) return { date: "", time: "" };
+  const d = new Date(startTime);
+  if (isNaN(d.getTime())) return { date: "", time: "" };
+
+  return {
+    date: d.toLocaleDateString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "Australia/Melbourne",
+    }),
+    time: d.toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Australia/Melbourne",
+    }),
+  };
+}
+
+function isGameUpcoming(startTime: string): boolean {
+  if (!startTime) return true;
+  const d = new Date(startTime);
+  if (isNaN(d.getTime())) return true;
+  return d.getTime() > Date.now();
+}
+
 export default function SettlementPage() {
   const [roundKey, setRoundKey] = useState<RoundKey>("OR");
   const [statusFilter, setStatusFilter] = useState<
@@ -63,9 +105,14 @@ export default function SettlementPage() {
   >("all");
 
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [games, setGames] = useState<GameRow[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [togglingGameId, setTogglingGameId] = useState<string | null>(null);
+  const [gameError, setGameError] = useState<string | null>(null);
 
   // Derived roundNumber from key
   const roundNumber = useMemo(() => {
@@ -77,12 +124,13 @@ export default function SettlementPage() {
     return found?.label ?? "Round";
   }, [roundKey]);
 
-  // Load questions for the selected round
+  // Load questions + games for the selected round
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
+        setGameError(null);
 
         const res = await fetch(`/api/picks?round=${roundNumber}`, {
           cache: "no-store",
@@ -93,10 +141,11 @@ export default function SettlementPage() {
 
         const json: PicksApiResponse = await res.json();
 
-        const flat: QuestionRow[] = [];
+        // Flatten questions
+        const flatQuestions: QuestionRow[] = [];
         for (const game of json.games || []) {
           for (const q of game.questions || []) {
-            flat.push({
+            flatQuestions.push({
               id: q.id,
               quarter: q.quarter,
               question: q.question,
@@ -107,13 +156,26 @@ export default function SettlementPage() {
           }
         }
 
-        setQuestions(flat);
+        setQuestions(flatQuestions);
+
+        // Extract games for this round (one row per game)
+        const gameRows: GameRow[] = (json.games || []).map((g) => ({
+          id: g.id,
+          match: g.match,
+          venue: g.venue,
+          startTime: g.startTime,
+          sport: g.sport ?? "AFL",
+          isUnlocked:
+            typeof g.isUnlocked === "boolean" ? g.isUnlocked : true,
+        }));
+        setGames(gameRows);
       } catch (err: any) {
         console.error("[Settlement] load error", err);
         setError(
           err?.message || "Failed to load questions for settlement console."
         );
         setQuestions([]);
+        setGames([]);
       } finally {
         setLoading(false);
       }
@@ -186,6 +248,7 @@ export default function SettlementPage() {
       });
       if (refresh.ok) {
         const json: PicksApiResponse = await refresh.json();
+
         const flat: QuestionRow[] = [];
         for (const game of json.games || []) {
           for (const q of game.questions || []) {
@@ -200,12 +263,56 @@ export default function SettlementPage() {
           }
         }
         setQuestions(flat);
+
+        const refreshedGames: GameRow[] = (json.games || []).map((g) => ({
+          id: g.id,
+          match: g.match,
+          venue: g.venue,
+          startTime: g.startTime,
+          sport: g.sport ?? "AFL",
+          isUnlocked:
+            typeof g.isUnlocked === "boolean" ? g.isUnlocked : true,
+        }));
+        setGames(refreshedGames);
       }
     } catch (err: any) {
       console.error("[Settlement] action error", err);
       alert(err?.message || "Failed to update settlement.");
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function handleToggleGameUnlock(
+    gameId: string,
+    currentValue: boolean | undefined
+  ) {
+    try {
+      setTogglingGameId(gameId);
+      setGameError(null);
+
+      const newValue = !currentValue;
+
+      // 🔧 If your games live somewhere else, adjust this path:
+      // e.g. doc(db, "rounds", String(roundNumber), "games", gameId)
+      const gameRef = doc(db, "games", gameId);
+      await updateDoc(gameRef, {
+        isUnlocked: newValue,
+      });
+
+      // Optimistic UI update
+      setGames((prev) =>
+        prev.map((g) =>
+          g.id === gameId ? { ...g, isUnlocked: newValue } : g
+        )
+      );
+    } catch (err: any) {
+      console.error("[Settlement] game unlock error", err);
+      setGameError(
+        err?.message || "Failed to update game unlock status."
+      );
+    } finally {
+      setTogglingGameId(null);
     }
   }
 
@@ -250,10 +357,12 @@ export default function SettlementPage() {
             </h1>
             <p className="mt-2 text-sm text-slate-200/80 max-w-xl">
               Lock questions when they&apos;re live, then settle them with the
-              correct outcome. Uses <code className="text-xs">/api/picks</code>{" "}
-              for data and <code className="text-xs">/api/settlement</code> for
-              updates. Reopen is a safety net if you lock or settle the wrong
-              question.
+              correct outcome. Uses{" "}
+              <code className="text-xs">/api/picks</code> for data and{" "}
+              <code className="text-xs">/api/settlement</code> for updates.
+              Reopen is a safety net if you lock or settle the wrong
+              question. Game unlocks below control which matches are open
+              for picks on the player side.
             </p>
           </div>
 
@@ -283,6 +392,139 @@ export default function SettlementPage() {
             </select>
           </div>
         </header>
+
+        {/* GAME UNLOCK CONTROL */}
+        <section className="rounded-2xl bg-black/70 border border-white/10 shadow-[0_0_30px_rgba(0,0,0,0.7)] p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-1">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-200">
+                Game unlocks for this round
+              </h2>
+              <p className="text-xs text-slate-400 max-w-xl mt-1">
+                Control which matches are unlocked for players to make picks.
+                Only games that are upcoming, not busted for the player,{" "}
+                and <code>isUnlocked = true</code> will allow picks on the
+                Picks page.
+              </p>
+            </div>
+          </div>
+
+          {loading && (
+            <p className="text-xs text-slate-300">Loading games…</p>
+          )}
+          {gameError && (
+            <p className="text-xs text-red-400">{gameError}</p>
+          )}
+
+          {!loading && !games.length && !error && (
+            <p className="text-xs text-slate-300">
+              No games found for this round.
+            </p>
+          )}
+
+          {!loading && games.length > 0 && (
+            <div className="space-y-2">
+              {games.map((g) => {
+                const { date, time } = formatStart(g.startTime);
+                const upcoming = isGameUpcoming(g.startTime);
+                const unlocked = g.isUnlocked ?? true;
+                const isBusy = togglingGameId === g.id;
+
+                return (
+                  <div
+                    key={g.id}
+                    className="rounded-xl border border-slate-700 bg-gradient-to-r from-slate-900 via-slate-950 to-black px-3 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold">
+                          {g.match || "Untitled match"}
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-black/40 border border-slate-600 uppercase tracking-wide text-gray-200">
+                          {g.sport || "AFL"}
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800/80 text-gray-100">
+                          {g.venue || "Venue TBC"}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[11px] text-gray-300">
+                        {date && time ? (
+                          <>
+                            <span className="font-mono">{date}</span>
+                            <span className="mx-1">•</span>
+                            <span className="font-mono">
+                              {time} AEDT
+                            </span>
+                          </>
+                        ) : (
+                          <span className="italic text-gray-500">
+                            No start time set
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold ${
+                            upcoming
+                              ? "bg-emerald-500/10 text-emerald-300 border border-emerald-400/40"
+                              : "bg-red-500/10 text-red-300 border border-red-400/40"
+                          }`}
+                        >
+                          {upcoming ? "Upcoming game" : "Started / finished"}
+                        </span>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold border ${
+                            unlocked
+                              ? "bg-orange-500/15 text-orange-300 border-orange-400/50"
+                              : "bg-slate-800 text-slate-100 border-slate-500"
+                          }`}
+                        >
+                          {unlocked
+                            ? "Unlocked for picks"
+                            : "Locked for picks"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 justify-end">
+                      <div className="text-right text-[11px] text-gray-300">
+                        <p className="font-semibold">
+                          {unlocked
+                            ? "Players can pick"
+                            : "Players can’t pick"}
+                        </p>
+                        <p className="text-gray-400">
+                          {upcoming
+                            ? "Toggle this to open or close picks for this match."
+                            : "Game has started – unlocking won’t reopen old picks."}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() =>
+                          handleToggleGameUnlock(g.id, unlocked)
+                        }
+                        className={`relative inline-flex h-7 w-12 items-center rounded-full border transition ${
+                          unlocked
+                            ? "bg-emerald-500 border-emerald-300"
+                            : "bg-slate-700 border-slate-500"
+                        } ${isBusy ? "opacity-60" : ""}`}
+                      >
+                        <span
+                          className={`inline-block h-5 w-5 transform rounded-full bg-black shadow transition ${
+                            unlocked ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         {/* FILTER ROW */}
         <div className="flex flex-wrap items-center gap-3 text-xs">
@@ -424,7 +666,9 @@ export default function SettlementPage() {
         <p className="text-xs text-slate-400">
           Changes here update the live picks feed and player streaks. If a
           question is settled incorrectly, hit <strong>REOPEN</strong> and then
-          settle it again with the correct outcome.
+          settle it again with the correct outcome. Use the game unlock
+          toggles above to control which matches are available for players
+          to make picks in this round.
         </p>
       </section>
     </main>
