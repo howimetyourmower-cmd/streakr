@@ -51,6 +51,8 @@ type ApiGame = {
   startTime: string;
   sport?: string;
   questions: ApiQuestion[];
+  // NEW: admin unlock control (from API)
+  isUnlocked?: boolean;
 };
 
 type QuestionRow = {
@@ -70,6 +72,8 @@ type QuestionRow = {
   isSponsorQuestion?: boolean;
   correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
+  // NEW: per-row copy of game unlock status
+  gameIsUnlocked?: boolean;
 };
 
 type PicksApiResponse = {
@@ -272,6 +276,14 @@ function computeBustedGameIds(rows: QuestionRow[]): Set<string> {
   return busted;
 }
 
+// NEW: helper – is this game still upcoming (based on startTime)?
+function isGameUpcoming(startTime: string): boolean {
+  if (!startTime) return true; // if no time, don't hard-lock
+  const d = new Date(startTime);
+  if (isNaN(d.getTime())) return true; // invalid date => treat as upcoming
+  return d.getTime() > Date.now();
+}
+
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -437,6 +449,7 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
+          gameIsUnlocked: g.isUnlocked ?? true, // default to unlocked if not provided
         };
       })
     );
@@ -585,8 +598,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // 🔁 NEW: whenever the logged-in user changes, clear local pick state
-  // so each player sees *their* picks, not the previous user’s.
+  // 🔁 whenever the logged-in user changes, clear local pick state
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(PICK_HISTORY_KEY);
@@ -883,7 +895,7 @@ export default function PicksClient() {
       : { yes: 0, no: 100 };
   };
 
-  // NEW: derive busted games from all rows
+  // derive busted games from all rows
   const bustedGameIds = useMemo(
     () => computeBustedGameIds(rows),
     [rows]
@@ -895,9 +907,11 @@ export default function PicksClient() {
       return;
     }
 
-    // If this game is busted (player has already had a wrong, finalised pick),
-    // they cannot make any further picks in this game.
-    if (bustedGameIds.has(row.gameId)) {
+    const gameUnlocked = row.gameIsUnlocked ?? true;
+    const upcoming = isGameUpcoming(row.startTime);
+
+    // Enforce: upcoming only, must be unlocked by admin, and not busted
+    if (!gameUnlocked || !upcoming || bustedGameIds.has(row.gameId)) {
       return;
     }
 
@@ -1324,7 +1338,14 @@ export default function PicksClient() {
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
             const isGameBusted = bustedGameIds.has(row.gameId);
-            const isLocked = row.status !== "open" || isGameBusted;
+            const gameUnlocked = row.gameIsUnlocked ?? true;
+            const upcoming = isGameUpcoming(row.startTime);
+            const isLocked =
+              row.status !== "open" ||
+              isGameBusted ||
+              !gameUnlocked ||
+              !upcoming;
+
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1410,6 +1431,18 @@ export default function PicksClient() {
                 ? "opacity-40 cursor-not-allowed hover:bg-red-600"
                 : "",
             ].join(" ");
+
+            // Decide what lock label to show
+            let lockLabel: string | null = null;
+            if (isGameBusted) {
+              lockLabel = "Out for this game";
+            } else if (!upcoming) {
+              lockLabel = "Game locked";
+            } else if (!gameUnlocked) {
+              lockLabel = "Locked by admin";
+            } else if (row.status !== "open") {
+              lockLabel = "Locked";
+            }
 
             return (
               <div
@@ -1520,11 +1553,9 @@ export default function PicksClient() {
                           Streak Pick
                         </span>
                       )}
-                      {isLocked && (
+                      {lockLabel && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          {isGameBusted
-                            ? "Out for this game"
-                            : "Locked"}
+                          {lockLabel}
                         </span>
                       )}
                       {isSponsor && (
