@@ -375,6 +375,16 @@ export default function VenueLeaderboardPage() {
           </div>
         )}
 
+        {/* CTA: Make a Pick - Beat your mates! */}
+        <div className="mt-4 flex justify-center">
+          <Link
+            href="/picks"
+            className="inline-flex items-center justify-center bg-orange-500 hover:bg-orange-400 text-black font-semibold px-5 py-3 rounded-full text-sm shadow-[0_0_25px_rgba(248,144,35,0.6)] transition-colors"
+          >
+            Make a Pick - Beat your mates!
+          </Link>
+        </div>
+
         {/* Sorting note */}
         <p className="mt-4 text-[11px] text-slate-400">
           Sorted by current streak, then wins, then total picks.
