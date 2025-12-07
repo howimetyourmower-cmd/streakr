@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
 import { db } from "@/lib/firebaseClient";
-import { doc, updateDoc } from "firebase/firestore";
+import { doc, setDoc } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -32,7 +32,6 @@ type ApiGame = {
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
-  // These may already exist in your API response:
   sport?: string;
   isUnlocked?: boolean;
 };
@@ -200,7 +199,7 @@ export default function SettlementPage() {
         body: JSON.stringify({
           roundNumber,
           questionId,
-          action, // 👈 always send an action
+          action,
         }),
       });
 
@@ -293,12 +292,18 @@ export default function SettlementPage() {
 
       const newValue = !currentValue;
 
-      // 🔧 If your games live somewhere else, adjust this path:
+      // If your games live somewhere else, adjust this path:
       // e.g. doc(db, "rounds", String(roundNumber), "games", gameId)
       const gameRef = doc(db, "games", gameId);
-      await updateDoc(gameRef, {
-        isUnlocked: newValue,
-      });
+
+      // ✅ Use setDoc with merge so it creates the doc if it doesn't exist
+      await setDoc(
+        gameRef,
+        {
+          isUnlocked: newValue,
+        },
+        { merge: true }
+      );
 
       // Optimistic UI update
       setGames((prev) =>
