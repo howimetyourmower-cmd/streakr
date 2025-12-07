@@ -41,10 +41,8 @@ type ApiGame = {
   sport: string;
   venue: string;
   startTime: string;
+  isUnlockedForPicks?: boolean; // 👈 NEW: match-level lock flag
   questions: ApiQuestion[];
-
-  // 🔓 new: players can only pick if this is true
-  isUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
@@ -67,7 +65,7 @@ type QuestionStatusDoc = {
 };
 
 type GameLockDoc = {
-  roundNumber: number;
+  roundNumber?: number;
   gameId: string;
   isUnlockedForPicks?: boolean;
   updatedAt?: FirebaseFirestore.Timestamp;
@@ -128,8 +126,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
 
     const data = snap.data() || {};
     const sponsorQuestion =
-      (data.sponsorQuestion as SponsorQuestionConfig | undefined) ||
-      undefined;
+      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
@@ -153,8 +150,10 @@ async function getPickStatsForRound(
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
 }> {
-  const pickStats: Record<string, { yes: number; no: number; total: number }> =
-    {};
+  const pickStats: Record<
+    string,
+    { yes: number; no: number; total: number }
+  > = {};
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
@@ -224,7 +223,9 @@ async function getCommentCountsForRound(
  */
 async function getQuestionStatusForRound(
   roundNumber: number
-): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
+): Promise<
+  Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
+> {
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -283,26 +284,41 @@ async function getQuestionStatusForRound(
 }
 
 /**
- * Read gameLocks → which matches are open/closed for picks.
- * Keyed by gameId (e.g. "OR-G1", "R1-G3").
+ * Game lock lookup.
+ * We look up by gameId (e.g. "OR-G1", "R1-G3") so the lock works
+ * even if roundNumber on the doc is off.
  */
 async function getGameLocksForRound(
-  roundNumber: number
+  roundCode: string,
+  roundRows: JsonRow[]
 ): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
 
-  try {
-    const snap = await db
-      .collection("gameLocks")
-      .where("roundNumber", "==", roundNumber)
-      .get();
+  // All gameIds that exist in this round (e.g. ["OR-G1", "OR-G2", ...])
+  const gameIds = Array.from(
+    new Set(roundRows.map((row) => `${roundCode}-G${row.Game}`))
+  );
+  if (!gameIds.length) return map;
 
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as GameLockDoc;
-      if (!data.gameId) return;
-      // default false → locked until explicitly opened
-      map[data.gameId] = !!data.isUnlockedForPicks;
-    });
+  // Firestore "in" query max 10 values → chunk gameIds
+  const chunks: string[][] = [];
+  for (let i = 0; i < gameIds.length; i += 10) {
+    chunks.push(gameIds.slice(i, i + 10));
+  }
+
+  try {
+    for (const chunk of chunks) {
+      const snap = await db
+        .collection("gameLocks")
+        .where("gameId", "in", chunk)
+        .get();
+
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as GameLockDoc;
+        if (!data.gameId) return;
+        map[data.gameId] = !!data.isUnlockedForPicks;
+      });
+    }
   } catch (error) {
     console.error("[/api/picks] Error fetching gameLocks", error);
   }
@@ -360,7 +376,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
     // 7) Game locks for this round (which matches are open for picks)
-    const gameLocks = await getGameLocksForRound(roundNumber);
+    const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
     // 8) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
@@ -370,16 +386,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const gameKey = `${roundCode}-G${row.Game}`;
 
       if (!gamesByKey[gameKey]) {
-        const isUnlockedForPicks = gameLocks[gameKey] ?? false; // default locked
-
         gamesByKey[gameKey] = {
           id: gameKey,
           match: row.Match,
           sport: "AFL",
           venue: row.Venue,
           startTime: row.StartTime,
+          isUnlockedForPicks: !!gameLocks[gameKey], // 👈 set from gameLocks
           questions: [],
-          isUnlockedForPicks,
         };
         questionIndexByGame[gameKey] = 0;
       }
