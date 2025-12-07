@@ -1,3 +1,4 @@
+// /app/picks/page.tsx
 "use client";
 
 import {
@@ -38,7 +39,7 @@ type ApiQuestion = {
   sport?: string;
   venue?: string;
   startTime?: string;
-  correctPick?: boolean; // true = you were right, false = you were wrong
+  correctPick?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
   outcome?: "yes" | "no" | "void" | "lock" | null;
 };
@@ -229,7 +230,7 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
-// localStorage keys
+// localStorage keys (global; we clear them whenever the user changes)
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
@@ -562,12 +563,24 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // Load picks from backend and merge into history so pills work on every device
+  // 🔁 NEW: whenever the logged-in user changes, clear local pick state
+  // so each player sees *their* picks, not the previous user’s.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(PICK_HISTORY_KEY);
+      window.localStorage.removeItem(ACTIVE_PICK_KEY);
+    }
+
+    setPickHistory({});
+    setActiveQuestionId(null);
+    setActiveOutcome(null);
+  }, [user]);
+
+  // Load picks from backend and merge into history (per user)
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
-        setActiveQuestionId(null);
-        setActiveOutcome(null);
+        // no user => nothing to load
         return;
       }
 
@@ -624,9 +637,8 @@ export default function PicksClient() {
         }
 
         if (Object.keys(historyFromApi).length) {
-          setPickHistory((prev) => {
+          setPickHistory(() => {
             const merged: PickHistory = {
-              ...prev,
               ...historyFromApi,
             };
             try {
@@ -765,13 +777,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Reset celebration guard when the ROUND changes
-  useEffect(() => {
-    if (roundNumber === null) return;
-    setLastCelebratedStreak(0);
-  }, [roundNumber]);
-
-  // Streak celebration (confetti once per round, badges lifetime)
+  // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -1131,9 +1137,6 @@ export default function PicksClient() {
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
                 Track your current run, your best ever streak, and how far you
                 are behind the round leader.
-              </p>
-              <p className="mt-1 text-[10px] text-white/50">
-                Confetti milestones reset each round. Badges are yours for life.
               </p>
             </div>
 
