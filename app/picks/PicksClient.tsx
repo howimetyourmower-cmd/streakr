@@ -51,6 +51,8 @@ type ApiGame = {
   startTime: string;
   sport?: string;
   questions: ApiQuestion[];
+  // NEW: whether this match is unlocked for picks (controlled in admin / settlement)
+  isUnlockedForPicks?: boolean;
 };
 
 type QuestionRow = {
@@ -68,8 +70,9 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-  correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
+  // NEW: game-level unlock flag
+  isGameUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
@@ -415,6 +418,9 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
+          // default to true so we don't accidentally lock everything
+          isGameUnlockedForPicks:
+            g.isUnlockedForPicks ?? true,
         };
       })
     );
@@ -563,7 +569,7 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // 🔁 Whenever the logged-in user changes, clear local pick state
+  // Clear local picks when user changes (so each player sees their own)
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(PICK_HISTORY_KEY);
@@ -579,6 +585,7 @@ export default function PicksClient() {
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
+        // no user => nothing to load
         return;
       }
 
@@ -600,6 +607,7 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
+        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -617,6 +625,7 @@ export default function PicksClient() {
           }
         }
 
+        // Legacy shape: { questionId, outcome }
         if (
           json?.questionId &&
           json?.outcome &&
@@ -651,9 +660,11 @@ export default function PicksClient() {
           });
         }
 
+        // Determine active pick (for streak highlighting)
         let activeFromApi =
           json?.currentPick || json?.activePick || null;
         if (!activeFromApi && !Array.isArray(json?.picks)) {
+          // legacy: the whole object is the active pick
           activeFromApi = json;
         }
 
@@ -673,6 +684,7 @@ export default function PicksClient() {
           setActiveOutcome(activeOutcomeFromApi);
         }
 
+        // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -685,7 +697,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Streak leader listener – based on CURRENT streak now
+  // Streak leader listener – now based on CURRENT streak only
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -774,7 +786,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Streak celebration (confetti + badge modal once per level, based on current streak)
+  // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -864,7 +876,12 @@ export default function PicksClient() {
       return;
     }
 
-    if (row.status !== "open") return;
+    // Question must be OPEN and its game must be unlocked
+    const isGameUnlocked =
+      row.isGameUnlockedForPicks === undefined
+        ? true
+        : row.isGameUnlockedForPicks;
+    if (row.status !== "open" || !isGameUnlocked) return;
 
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
@@ -1099,30 +1116,9 @@ export default function PicksClient() {
 
   const streakModalContent = getStreakModalContent();
 
-  const renderStreakPill = (streak: number | null | undefined) => {
-    const s = streak ?? 0;
-    const isHot = s >= 5;
-    const isOnFire = s >= 10;
-
-    return (
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs sm:text-sm font-semibold ${
-          isOnFire
-            ? "bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-black shadow-[0_0_22px_rgba(248,113,22,0.9)]"
-            : isHot
-            ? "bg-orange-500/20 text-orange-300 border border-orange-500/70"
-            : "bg-slate-900 text-slate-100 border border-slate-600"
-        }`}
-      >
-        {isOnFire ? "🔥🔥" : isHot ? "🔥" : "●"}
-        <span>Streak {s}</span>
-      </span>
-    );
-  };
-
-  const leaderDiff =
+  const streakGap =
     leaderCurrentStreak != null && userCurrentStreak != null
-      ? leaderCurrentStreak - userCurrentStreak
+      ? Math.max(0, leaderCurrentStreak - userCurrentStreak)
       : null;
 
   return (
@@ -1149,128 +1145,106 @@ export default function PicksClient() {
           )}
         </div>
 
-        {/* STREAK PROGRESS TRACKER – CURRENT STREAK VS LEADER */}
-        <div className="mb-6 rounded-2xl bg-[#020617] border border-orange-500/40 p-4 sm:p-5 shadow-[0_18px_45px_rgba(0,0,0,0.9)] relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_top,_rgba(248,113,22,0.35),_transparent_55%)]" />
-          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 lg:gap-6">
-            {/* Left – Your streak */}
-            <div className="flex-1">
-              <p className="text-[11px] uppercase tracking-wide text-white/60 mb-1">
-                Your live streak
+        {/* STREAK PROGRESS TRACKER – CURRENT STREAK ONLY */}
+        <div className="mb-6 rounded-2xl bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border border-orange-500/40 px-4 sm:px-6 py-4 sm:py-5 shadow-[0_18px_60px_rgba(0,0,0,0.9)]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-black/40 px-3 py-1 border border-orange-500/40">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-orange-200">
+                  Live streak
+                </span>
+              </div>
+              <p className="mt-2 text-xs sm:text-sm text-white/75 max-w-md">
+                Every correct pick this round stacks onto your streak. One miss
+                and it resets to zero for the next game.
               </p>
-              <div className="flex items-center gap-4">
-                <div>
-                  <p className="text-xs text-white/70 mb-0.5">
-                    Right now you&apos;re on
-                  </p>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-4xl sm:text-5xl font-extrabold text-orange-300 drop-shadow-[0_0_20px_rgba(248,113,22,0.75)]">
-                      {user ? userCurrentStreak ?? 0 : "-"}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[11px] text-white/60 max-w-xs">
-                    One wrong pick and you&apos;re back to 0 until the next
-                    game. Every click matters.
-                  </p>
-                </div>
-                <div className="hidden sm:block">
-                  {renderStreakPill(user ? userCurrentStreak ?? 0 : 0)}
-                </div>
-              </div>
             </div>
 
-            {/* Middle – Bars */}
-            <div className="flex-1 space-y-3">
-              <div>
-                <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                  <span>Your streak</span>
-                  <span className="font-semibold text-orange-300">
-                    {user ? userCurrentStreak ?? 0 : 0}
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
-                    style={{ width: barWidth(userCurrentStreak) }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                  <span>Leaderboard top streak</span>
-                  <span className="font-semibold text-sky-300">
-                    {leaderCurrentStreak ?? 0}
-                  </span>
-                </div>
-                <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
-                    style={{ width: barWidth(leaderCurrentStreak) }}
-                  />
-                </div>
-              </div>
-
-              {leaderDiff != null && leaderCurrentStreak != null && (
-                <p className="text-[11px] text-slate-200 mt-1">
-                  {leaderDiff > 0 ? (
-                    <>
-                      You need{" "}
-                      <span className="font-semibold text-orange-300">
-                        {leaderDiff}
-                      </span>{" "}
-                      more correct pick
-                      {leaderDiff === 1 ? "" : "s"} to catch the leader.
-                    </>
-                  ) : leaderDiff === 0 ? (
-                    <span className="text-emerald-300">
-                      You&apos;re tied with the leaders – every next pick could
-                      win it.
-                    </span>
-                  ) : (
-                    <>
-                      You&apos;re ahead of the published leader data – nice
-                      problem to have.
-                    </>
-                  )}
+            <div className="flex flex-row sm:flex-col items-end sm:items-end gap-4">
+              <div className="text-right">
+                <p className="text-[11px] text-white/60">Your streak</p>
+                <p className="text-3xl sm:text-4xl font-extrabold text-orange-400 leading-none drop-shadow-[0_0_25px_rgba(248,113,22,0.8)]">
+                  {user ? userCurrentStreak ?? 0 : "-"}
                 </p>
-              )}
-            </div>
+                <p className="mt-1 text-[11px] text-white/55">
+                  {user
+                    ? userCurrentStreak && userCurrentStreak > 0
+                      ? "Keep it alive this game."
+                      : "Lock in your first pick to start."
+                    : "Log in to build a streak."}
+                </p>
+              </div>
 
-            {/* Right – share + badge info */}
-            <div className="flex flex-col items-end gap-2 w-full lg:w-auto">
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1.5 text-[11px] sm:text-xs font-semibold text-sky-200 bg-black/40 hover:bg-sky-500/10 transition"
+                className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1.5 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
               >
                 Share my streak
               </button>
-              {shareStatus && (
-                <p className="text-[10px] text-sky-300">{shareStatus}</p>
-              )}
-              {userLongestStreak != null && (
-                <p className="text-[10px] text-white/55 mt-1 text-right max-w-[180px]">
-                  Lifetime best:{" "}
-                  <span className="font-semibold text-emerald-300">
-                    {userLongestStreak}
-                  </span>{" "}
-                  – badges unlock at{" "}
-                  <span className="font-semibold">3, 5, 10, 15, 20</span>.
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <div className="flex justify-between text-[11px] text-white/70 mb-1">
+                <span>Your streak this round</span>
+                <span className="font-semibold text-orange-300">
+                  {user ? userCurrentStreak ?? 0 : 0}
+                </span>
+              </div>
+              <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
+                  style={{ width: barWidth(userCurrentStreak) }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-[11px] sm:text-xs mt-2">
+              <div className="rounded-xl bg-slate-950/70 border border-slate-700/80 px-3 py-2 flex items-center justify-between">
+                <div>
+                  <p className="text-white/60">Round leader</p>
+                  <p className="mt-0.5 text-base font-semibold text-sky-300">
+                    {leaderCurrentStreak ?? 0}
+                  </p>
+                </div>
+                {streakGap != null && leaderCurrentStreak != null && (
+                  <p className="text-[11px] text-right text-white/70">
+                    {streakGap === 0
+                      ? "You’re tied for the lead."
+                      : `You’re ${streakGap} pick${
+                          streakGap === 1 ? "" : "s"
+                        } off top spot.`}
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-xl bg-slate-950/70 border border-slate-700/80 px-3 py-2 flex items-center justify-between">
+                <div>
+                  <p className="text-white/60">Lifetime best</p>
+                  <p className="mt-0.5 text-base font-semibold text-emerald-300">
+                    {user ? userLongestStreak ?? 0 : 0}
+                  </p>
+                </div>
+                <p className="text-[11px] text-right text-white/70">
+                  Beat this to set a new personal record.
                 </p>
-              )}
+              </div>
             </div>
           </div>
 
           {streakLoading && (
-            <p className="relative mt-2 text-[10px] text-white/50">
+            <p className="mt-2 text-[10px] text-white/50">
               Loading streak data…
             </p>
           )}
           {streakError && (
-            <p className="relative mt-2 text-[10px] text-red-400">
-              {streakError}
-            </p>
+            <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
+          )}
+          {shareStatus && (
+            <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
           )}
         </div>
 
@@ -1322,6 +1296,14 @@ export default function PicksClient() {
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
 
+            const isGameUnlocked =
+              row.isGameUnlockedForPicks === undefined
+                ? true
+                : row.isGameUnlockedForPicks;
+
+            const baseLocked = row.status !== "open";
+            const isLocked = baseLocked || !isGameUnlocked;
+
             const isActive = row.id === activeQuestionId;
             const isYesActive = isActive && activeOutcome === "yes";
             const isNoActive = isActive && activeOutcome === "no";
@@ -1329,7 +1311,6 @@ export default function PicksClient() {
             const isNoPicked = row.userPick === "no";
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isLocked = row.status !== "open";
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1435,7 +1416,7 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  <div className="col-span-6 md:col-span-1">
+                  <div className="col-span-6 md:col-span-1 flex flex-col items-start md:items-start gap-1">
                     <span
                       className={`${statusClasses(
                         row.status
@@ -1443,6 +1424,11 @@ export default function PicksClient() {
                     >
                       {row.status.toUpperCase()}
                     </span>
+                    {!isGameUnlocked && (
+                      <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                        Match locked for picks
+                      </span>
+                    )}
                   </div>
 
                   <div className="col-span-12 md:col-span-3">
@@ -1527,7 +1513,9 @@ export default function PicksClient() {
                       )}
                       {isLocked && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          Locked
+                          {baseLocked
+                            ? "Locked – live or settled"
+                            : "Locked – match closed for picks"}
                         </span>
                       )}
                       {isSponsor && (
