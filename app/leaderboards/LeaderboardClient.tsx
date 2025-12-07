@@ -1,14 +1,10 @@
+// /app/leaderboards/page.tsx
 "use client";
 
-import {
-  useEffect,
-  useState,
-  useCallback,
-  useRef,
-  ChangeEvent,
-} from "react";
+import { useEffect, useState, useCallback, useRef, ChangeEvent } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
+// Leaderboard scope – unchanged, still allows round views if API supports
 type Scope =
   | "overall"
   | "opening-round"
@@ -37,6 +33,7 @@ type Scope =
   | "round-23"
   | "finals";
 
+// Updated — LONGEST removed
 type LeaderboardEntry = {
   uid: string;
   displayName: string;
@@ -44,15 +41,13 @@ type LeaderboardEntry = {
   avatarUrl?: string;
   rank: number;
   currentStreak: number;
-  longestStreak: number;
   totalWins: number;
   totalLosses: number;
-  winPct: number; // 0–1
+  winPct: number;
 };
 
+// Updated — no more longestStreak here
 type UserLifetimeStats = {
-  currentStreak: number;
-  longestStreak: number;
   totalWins: number;
   totalLosses: number;
   winPct: number;
@@ -64,8 +59,9 @@ type LeaderboardApiResponse = {
   userLifetime: UserLifetimeStats | null;
 };
 
+// NEW label text for leaderboard scopes
 const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
-  { value: "overall", label: "Overall (longest streak)" },
+  { value: "overall", label: "Overall Live Leaderboard" },
   { value: "opening-round", label: "Opening Round" },
   { value: "round-1", label: "Round 1" },
   { value: "round-2", label: "Round 2" },
@@ -95,233 +91,121 @@ const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
 
 function formatPct(p: number): string {
   if (p <= 0) return ".000";
-  const fixed = p.toFixed(3);
-  // turn "0.683" into ".683"
-  return fixed.replace(/^0/, "");
+  return p.toFixed(3).replace(/^0/, "");
 }
 
 export default function LeaderboardsPage() {
   const { user } = useAuth();
-
-  const [scope, setScope] = useState<Scope>("opening-round");
+  const [scope, setScope] = useState<Scope>("overall");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null);
-  const [userLifetime, setUserLifetime] = useState<UserLifetimeStats | null>(
-    null
-  );
+  const [userLifetime, setUserLifetime] = useState<UserLifetimeStats | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState("");
 
   const hasLoadedRef = useRef(false);
 
-  const isOverall = scope === "overall";
-
   const loadLeaderboard = useCallback(
-    async (selectedScope: Scope, options?: { silent?: boolean }) => {
-      const silent = options?.silent ?? false;
+    async (selectedScope: Scope, opts?: { silent?: boolean }) => {
+      const silent = opts?.silent ?? false;
 
       try {
-        if (!silent) {
-          setLoading(true);
-          setError("");
-        }
+        if (!silent) { setLoading(true); setError(""); }
 
         let authHeader: Record<string, string> = {};
         if (user) {
           try {
             const token = await user.getIdToken();
             authHeader = { Authorization: `Bearer ${token}` };
-          } catch (err) {
-            console.error("Failed to get ID token for leaderboard", err);
-          }
+          } catch {}
         }
 
-        const res = await fetch(`/api/leaderboard?scope=${selectedScope}`, {
-          headers: {
-            ...authHeader,
-          },
-        });
-
-        if (!res.ok) {
-          console.error("Leaderboard API error:", await res.text());
-          throw new Error("Failed to load leaderboard");
-        }
+        const res = await fetch(`/api/leaderboard?scope=${selectedScope}`, { headers: { ...authHeader }});
+        if (!res.ok) throw new Error("Leaderboard API error");
 
         const data: LeaderboardApiResponse = await res.json();
-        setEntries(data.entries || []);
-        setUserEntry(data.userEntry || null);
-        setUserLifetime(data.userLifetime || null);
+        setEntries(data.entries ?? []);
+        setUserEntry(data.userEntry ?? null);
+        setUserLifetime(data.userLifetime ?? null);
 
         hasLoadedRef.current = true;
       } catch (err) {
         console.error(err);
-        if (!silent) {
-          setError("Could not load leaderboard right now.");
-        }
+        if (!silent) setError("Could not load leaderboard.");
       } finally {
-        if (!silent) {
-          setLoading(false);
-        }
+        if (!silent) setLoading(false);
       }
     },
     [user]
   );
 
-  // initial + scope-change load
-  useEffect(() => {
-    loadLeaderboard(scope);
-  }, [scope, loadLeaderboard]);
+  useEffect(() => { loadLeaderboard(scope); }, [scope, loadLeaderboard]);
 
-  // silent refresh every 15s (no flicker)
   useEffect(() => {
     if (!hasLoadedRef.current) return;
-
-    const id = setInterval(() => {
-      loadLeaderboard(scope, { silent: true });
-    }, 15000);
-
+    const id = setInterval(() => loadLeaderboard(scope, { silent:true }), 15000);
     return () => clearInterval(id);
   }, [scope, loadLeaderboard]);
 
-  const handleScopeChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setScope(event.target.value as Scope);
-  };
-
   const top10 = entries.slice(0, 10);
-  const userOutsideTop10 =
-    userEntry && top10.every((e) => e.uid !== userEntry.uid);
+  const userOutsideTop10 = userEntry && top10.every(e => e.uid !== userEntry.uid);
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
+
+      {/* HEADER */}
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-6">
         <div>
           <h1 className="text-3xl sm:text-4xl font-bold">Leaderboards</h1>
-          <p className="mt-1 text-sm text-white/70 max-w-md">
-            {isOverall
-              ? "See who holds the longest STREAKr run."
-              : "See how players stack up for this round’s streak."}
+          <p className="text-sm text-white/70">
+            Live ranking — players with the **highest current streak**.
+          </p>
+          <p className="text-xs text-orange-300 mt-1">
+            If multiple players tie for #1 — **prizes split equally**.
           </p>
         </div>
 
-        <div className="flex flex-col items-start md:items-end gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-white/60">
-            Showing
-          </span>
+        <div className="flex flex-col items-start md:items-end">
+          <span className="text-[11px] uppercase tracking-wide text-white/60 mb-1">Scope</span>
           <select
             value={scope}
-            onChange={handleScopeChange}
-            className="mt-0.5 rounded-full bg-[#020617] border border-orange-400/80 px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(248,144,35,0.3)] focus:outline-none focus:ring-2 focus:ring-orange-400"
+            onChange={(e)=>setScope(e.target.value as Scope)}
+            className="rounded-full bg-[#020617] border border-orange-400 px-4 py-1.5 text-sm font-semibold shadow-[0_0_20px_rgba(248,144,35,0.3)]"
           >
-            {SCOPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
+            {SCOPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl bg-[#020617] border border-slate-700/80 px-4 py-3 text-xs sm:text-sm text-white/75">
-        Top 10 players shown. If you&apos;re outside the top 10, we&apos;ll
-        still show your position below.
-      </div>
-
-      {error && (
-        <p className="mb-3 text-sm text-red-400">
-          {error} Try refreshing the page.
-        </p>
-      )}
-
-      {loading && (
-        <p className="mb-3 text-sm text-white/70">Loading leaderboard…</p>
-      )}
-
-      {/* Top 10 table */}
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-[#020617] to-[#020617] border border-slate-800 shadow-[0_24px_60px_rgba(0,0,0,0.8)] mb-6">
-        <div className="grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-white/60 border-b border-slate-800">
+      {/* TOP 10 TABLE */}
+      <div className="rounded-2xl overflow-hidden border border-slate-800 shadow-[0_20px_60px_rgba(0,0,0,0.7)]">
+        <div className="grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-white/60 border-b border-slate-700">
           <div className="col-span-3 sm:col-span-2">Rank</div>
-          <div className="col-span-5 sm:col-span-4">Player</div>
-          <div className="col-span-2 text-right sm:text-center">Curr</div>
-          <div className="col-span-2 text-right sm:text-center">Long</div>
-          <div className="col-span-2 text-right">Pct</div>
+          <div className="col-span-5 sm:col-span-6">Player</div>
+          <div className="col-span-2 text-right sm:text-center">Streak</div>
+          <div className="col-span-2 text-right">Win %</div>
         </div>
 
-        {top10.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-white/70">
-            No players on the board yet. Make a streak to claim top spot.
-          </div>
-        ) : (
+        {loading && <div className="px-4 py-6 text-sm">Loading…</div>}
+        {error && <p className="text-red-400 p-4">{error}</p>}
+
+        {!loading && !error && top10.length>0 && (
           <ul className="divide-y divide-slate-800">
-            {top10.map((entry) => {
-              const isYou = user && entry.uid === user.uid;
-              const hasAvatar =
-                typeof entry.avatarUrl === "string" &&
-                entry.avatarUrl.trim().length > 0;
-
+            {top10.map(entry => {
+              const isYou = user && entry.uid===user.uid;
               return (
-                <li
-                  key={entry.uid}
-                  className={`grid grid-cols-12 px-4 py-3 items-center text-sm transform transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-slate-800/40 ${
-                    isYou
-                      ? "bg-gradient-to-r from-orange-500/10 via-sky-500/5 to-transparent"
-                      : "bg-transparent"
-                  }`}
-                >
-                  {/* Rank + crown for #1 */}
-                  <div className="col-span-3 sm:col-span-2 font-semibold text-white/80 flex items-center gap-1">
-                    <span>#{entry.rank}</span>
-                    {entry.rank === 1 && (
-                      <span className="text-yellow-300 text-lg" aria-label="Leader">
-                        👑
-                      </span>
-                    )}
-                  </div>
+                <li key={entry.uid}
+                    className={`grid grid-cols-12 px-4 py-3 items-center text-sm ${isYou?'bg-orange-500/10':''}`}>
+                  
+                  <div className="col-span-3 sm:col-span-2 font-bold">#{entry.rank}</div>
 
-                  {/* Player */}
-                  <div className="col-span-5 sm:col-span-4 flex items-center gap-2">
-                    {hasAvatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={entry.avatarUrl as string}
-                        alt={entry.displayName}
-                        className="h-7 w-7 rounded-full border border-white/20 object-cover"
-                      />
-                    ) : (
-                      <div className="h-7 w-7 rounded-full bg-slate-700 flex items-center justify-center text-[11px] font-bold">
-                        {entry.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <div className="flex flex-col">
-                      <span className="font-medium">
-                        {entry.displayName}
-                        {isYou && (
-                          <span className="ml-1 text-[11px] text-orange-300 font-semibold">
-                            (You)
-                          </span>
-                        )}
-                      </span>
-                      {entry.username && (
-                        <span className="text-[11px] text-white/60">
-                          @{entry.username}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  <div className="col-span-5 sm:col-span-6 font-medium">{entry.displayName}{isYou&&" (You)"}</div>
 
-                  {/* Curr */}
-                  <div className="col-span-2 text-right sm:text-center font-semibold text-sky-300">
+                  <div className="col-span-2 text-right sm:text-center text-sky-300 font-bold">
                     {entry.currentStreak}
                   </div>
 
-                  {/* Long */}
-                  <div className="col-span-2 text-right sm:text-center font-semibold text-emerald-300">
-                    {entry.longestStreak}
-                  </div>
-
-                  {/* Pct */}
-                  <div className="col-span-2 text-right font-mono text-sm text-white/85">
-                    {formatPct(entry.winPct)}
-                  </div>
+                  <div className="col-span-2 text-right font-mono">{formatPct(entry.winPct)}</div>
                 </li>
               );
             })}
@@ -329,90 +213,27 @@ export default function LeaderboardsPage() {
         )}
       </div>
 
-      {/* Your position if outside top 10 */}
-      {user ? (
-        userOutsideTop10 && userEntry ? (
-          <div className="mb-4 rounded-2xl bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent border border-orange-500/60 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)] transform transition-all duration-300 ease-out">
-            <p className="text-xs uppercase tracking-wide text-orange-300 mb-1">
-              Your position
-            </p>
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold flex items-center gap-1">
-                  #{userEntry.rank}
-                  {userEntry.rank === 1 && (
-                    <span
-                      className="text-yellow-300 text-lg"
-                      aria-label="Leader"
-                    >
-                      👑
-                    </span>
-                  )}
-                  <span>– {userEntry.displayName}</span>
-                </p>
-                <p className="text-xs text-white/75">
-                  Keep building your streak to climb the ladder.
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Current streak</p>
-                <p className="text-xl font-bold text-sky-300">
-                  {userEntry.currentStreak}
-                </p>
-                <p className="text-[11px] text-white/60 mt-1">Best</p>
-                <p className="text-lg font-semibold text-emerald-300">
-                  {userEntry.longestStreak}
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p className="mb-4 text-xs text-white/60">
-            {userEntry
-              ? "You’re in the top 10 – nice work!"
-              : "Make some picks to appear on the leaderboard."}
-          </p>
-        )
-      ) : (
-        <p className="mb-4 text-xs text-white/60">
-          Log in to see where you sit on the leaderboard.
-        </p>
-      )}
+      {/* USER IF OUTSIDE TOP 10 */}
+      {userOutsideTop10 && userEntry && (
+        <div className="mt-4 rounded-xl bg-orange-500/10 border border-orange-500 p-4 text-sm">
+          <p>Your rank: <b>#{userEntry.rank}</b></p>
+          <p className="text-sky-300 font-bold text-xl">{userEntry.currentStreak}</p>
+          <p className="text-xs text-white/60">Keep pushing — every pick counts.</p>
+        </div>)
+      }
 
-      {/* Lifetime box – BEST / WINS / LOSSES */}
+      {/* LIFETIME STATS - no best streak anymore */}
       {user && userLifetime && (
-        <div className="rounded-2xl bg-[#020617] border border-slate-700/80 px-4 py-4 shadow-[0_16px_40px_rgba(0,0,0,0.8)]">
-          <p className="text-xs uppercase tracking-wide text-white/60 mb-2">
-            Lifetime record
-          </p>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-white/60 mb-1">Best streak</p>
-              <p className="text-2xl font-bold text-emerald-300">
-                {userLifetime.longestStreak}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-white/60 mb-1">Wins</p>
-              <p className="text-2xl font-bold text-sky-300">
-                {userLifetime.totalWins}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-white/60 mb-1">Losses</p>
-              <p className="text-2xl font-bold text-rose-300">
-                {userLifetime.totalLosses}
-              </p>
-            </div>
+        <div className="mt-6 rounded-xl bg-[#020617] border border-slate-700 p-4 text-center">
+          <p className="text-xs uppercase tracking-wide text-white/60 mb-2">Lifetime Record</p>
+          <div className="flex justify-center gap-6">
+            <div><p className="text-xs">Wins</p><p className="text-2xl text-sky-300 font-bold">{userLifetime.totalWins}</p></div>
+            <div><p className="text-xs">Losses</p><p className="text-2xl text-rose-300 font-bold">{userLifetime.totalLosses}</p></div>
           </div>
-          <p className="mt-3 text-xs text-white/70 text-center">
-            Win rate:{" "}
-            <span className="font-mono">
-              {formatPct(userLifetime.winPct)}
-            </span>
-          </p>
+          <p className="mt-3 text-xs text-white/70">Win % <span className="font-mono">{formatPct(userLifetime.winPct)}</span></p>
         </div>
       )}
+
     </div>
   );
 }
