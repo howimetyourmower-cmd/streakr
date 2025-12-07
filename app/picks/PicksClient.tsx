@@ -419,8 +419,9 @@ export default function PicksClient() {
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
           // 🔓 copy game-level unlock flag (default true if undefined)
-          isUnlockedForPicks:
-            g.isUnlockedForPicks === false ? false : true,
+         // AFTER – default locked unless explicitly true
+isUnlockedForPicks: g.isUnlockedForPicks ?? false,
+
         };
       })
     );
