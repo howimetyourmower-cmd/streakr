@@ -47,7 +47,9 @@ type LeaderboardEntry = {
   currentStreak: number;
   totalWins: number;
   totalLosses: number;
-  winPct: number; // still in payload, just not shown in table
+  winPct: number; // kept for lifetime; not shown in table
+  // client-side only – movement vs previous load
+  rankDelta?: number;
 };
 
 type UserLifetimeStats = {
@@ -96,6 +98,42 @@ function formatPct(p: number): string {
   return p.toFixed(3).replace(/^0/, "");
 }
 
+// Small helper to describe “most common streak band”
+function describeStreakBand(entries: LeaderboardEntry[]): string | null {
+  if (!entries.length) return null;
+
+  const bands: { label: string; min: number; max: number | null }[] = [
+    { label: "0", min: 0, max: 0 },
+    { label: "1–2", min: 1, max: 2 },
+    { label: "3–4", min: 3, max: 4 },
+    { label: "5–7", min: 5, max: 7 },
+    { label: "8+", min: 8, max: null },
+  ];
+
+  const counts = new Map<string, number>();
+  for (const e of entries) {
+    const s = e.currentStreak ?? 0;
+    const band = bands.find(
+      (b) => s >= b.min && (b.max === null || s <= b.max)
+    );
+    const label = band?.label ?? "0";
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+
+  let topLabel: string | null = null;
+  let topCount = 0;
+  for (const [label, count] of counts.entries()) {
+    if (count > topCount) {
+      topCount = count;
+      topLabel = label;
+    }
+  }
+
+  if (!topLabel) return null;
+  if (topLabel === "0") return "Most players have already busted back to 0.";
+  return `Most players are sitting on a ${topLabel} streak.`;
+}
+
 export default function LeaderboardsPage() {
   const { user } = useAuth();
 
@@ -107,7 +145,10 @@ export default function LeaderboardsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
+  const [showLeadersOnly, setShowLeadersOnly] = useState(false);
+
   const hasLoadedRef = useRef(false);
+  const previousEntriesRef = useRef<LeaderboardEntry[]>([]);
 
   const loadLeaderboard = useCallback(
     async (selectedScope: Scope, options?: { silent?: boolean }) => {
@@ -141,7 +182,23 @@ export default function LeaderboardsPage() {
         }
 
         const data: LeaderboardApiResponse = await res.json();
-        setEntries(data.entries || []);
+        const incoming = data.entries || [];
+
+        // Compute rankDelta vs previous snapshot
+        const prevByUid = new Map<string, LeaderboardEntry>();
+        previousEntriesRef.current.forEach((e) =>
+          prevByUid.set(e.uid, e)
+        );
+
+        const withDelta: LeaderboardEntry[] = incoming.map((e) => {
+          const prev = prevByUid.get(e.uid);
+          if (!prev) return { ...e };
+          const delta = prev.rank - e.rank; // positive = moved up
+          return { ...e, rankDelta: delta };
+        });
+
+        previousEntriesRef.current = withDelta;
+        setEntries(withDelta);
         setUserEntry(data.userEntry || null);
         setUserLifetime(data.userLifetime || null);
 
@@ -180,9 +237,92 @@ export default function LeaderboardsPage() {
     setScope(event.target.value as Scope);
   };
 
-  const top10 = entries.slice(0, 10);
+  // Base top 10 list
+  const top10Base = entries.slice(0, 10);
+
+  // Apply "leaders only" (3+) toggle for table rows
+  const LEADER_MIN_STREAK = 3;
+  const tableRows = showLeadersOnly
+    ? top10Base.filter((e) => (e.currentStreak ?? 0) >= LEADER_MIN_STREAK)
+    : top10Base;
+
   const userOutsideTop10 =
-    userEntry && top10.every((e) => e.uid !== userEntry.uid);
+    userEntry && top10Base.every((e) => e.uid !== userEntry.uid);
+
+  const totalPlayers = entries.length;
+  const streakBandDescription = describeStreakBand(entries);
+
+  const leaderStreak = top10Base[0]?.currentStreak ?? null;
+
+  const top3 = top10Base.slice(0, 3);
+
+  const renderRankDelta = (delta?: number) => {
+    if (!delta || delta === 0) {
+      return (
+        <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
+          •
+        </span>
+      );
+    }
+    if (delta > 0) {
+      return (
+        <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">
+          ▲ {delta}
+        </span>
+      );
+    }
+    return (
+      <span className="text-[10px] text-rose-400 flex items-center gap-0.5">
+        ▼ {Math.abs(delta)}
+      </span>
+    );
+  };
+
+  const renderStreakPill = (streak: number) => {
+    const s = streak ?? 0;
+    const isHot = s >= 5;
+    const isOnFire = s >= 10;
+
+    return (
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
+          isOnFire
+            ? "bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-black shadow-[0_0_18px_rgba(248,113,22,0.9)]"
+            : isHot
+            ? "bg-orange-500/20 text-orange-300 border border-orange-500/70"
+            : "bg-slate-800 text-slate-100 border border-slate-600"
+        }`}
+      >
+        {isOnFire ? "🔥🔥" : isHot ? "🔥" : "●"}
+        <span>Streak {s}</span>
+      </span>
+    );
+  };
+
+  const renderSkeletonRows = () => (
+    <ul className="divide-y divide-slate-800 animate-pulse">
+      {Array.from({ length: 6 }).map((_, idx) => (
+        <li
+          key={idx}
+          className="grid grid-cols-12 px-4 py-3 items-center text-sm"
+        >
+          <div className="col-span-3 sm:col-span-2">
+            <div className="h-3 w-10 bg-slate-700 rounded" />
+          </div>
+          <div className="col-span-7 sm:col-span-8 flex items-center gap-2">
+            <div className="h-8 w-8 rounded-full bg-slate-700" />
+            <div className="flex-1">
+              <div className="h-3 w-24 bg-slate-700 rounded mb-1" />
+              <div className="h-2 w-16 bg-slate-800 rounded" />
+            </div>
+          </div>
+          <div className="col-span-2 flex justify-end sm:justify-center">
+            <div className="h-5 w-16 bg-slate-700 rounded-full" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen">
@@ -198,43 +338,159 @@ export default function LeaderboardsPage() {
             .
           </p>
           <p className="mt-1 text-xs text-orange-300">
-            Ties at the top? <span className="font-semibold">
+            Ties at the top?{" "}
+            <span className="font-semibold">
               Prizes are split between all leaders.
             </span>
           </p>
         </div>
 
-        <div className="flex flex-col items-start md:items-end gap-1">
-          <span className="text-[11px] uppercase tracking-wide text-white/60">
-            Scope
-          </span>
-          <select
-            value={scope}
-            onChange={handleScopeChange}
-            className="mt-0.5 rounded-full bg-[#020617] border border-orange-400/80 px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(248,144,35,0.3)] focus:outline-none focus:ring-2 focus:ring-orange-400"
+        <div className="flex flex-col items-start md:items-end gap-2">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] uppercase tracking-wide text-white/60">
+              Scope
+            </span>
+            <select
+              value={scope}
+              onChange={handleScopeChange}
+              className="rounded-full bg-[#020617] border border-orange-400/80 px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(248,144,35,0.3)] focus:outline-none focus:ring-2 focus:ring-orange-400"
+            >
+              {SCOPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowLeadersOnly((prev) => !prev)}
+            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold border transition ${
+              showLeadersOnly
+                ? "bg-orange-500/15 border-orange-400 text-orange-200"
+                : "bg-slate-900/80 border-slate-600 text-slate-200"
+            }`}
           >
-            {SCOPE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            <span
+              className={`inline-flex h-3 w-6 items-center rounded-full p-0.5 transition bg-slate-700`}
+            >
+              <span
+                className={`h-2.5 w-2.5 rounded-full bg-white transform transition ${
+                  showLeadersOnly ? "translate-x-3" : "translate-x-0"
+                }`}
+              />
+            </span>
+            Leaders only (3+)
+          </button>
         </div>
       </div>
 
-      <div className="mb-4 rounded-xl bg-[#020617] border border-slate-700/80 px-4 py-3 text-xs sm:text-sm text-white/75">
-        Top 10 players shown. If you&apos;re outside the top 10, we&apos;ll
-        still show your position below.
+      {/* TOP 3 HERO STRIP */}
+      {top3.length > 0 && (
+        <div className="mb-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-700/80 px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.8)]">
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                Live leaders
+              </p>
+              <p className="text-xs text-slate-200">
+                Top 3 based on current streak right now.
+              </p>
+            </div>
+            {leaderStreak !== null && (
+              <div className="text-right text-xs text-slate-300">
+                <p>Current top streak</p>
+                <p className="text-xl font-bold text-orange-300">
+                  {leaderStreak}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {top3.map((entry, index) => {
+              const isYou = user && entry.uid === user.uid;
+              const hasAvatar =
+                typeof entry.avatarUrl === "string" &&
+                entry.avatarUrl.trim().length > 0;
+
+              const baseCard =
+                index === 0
+                  ? "border-yellow-400/60 shadow-[0_0_26px_rgba(250,204,21,0.5)]"
+                  : index === 1
+                  ? "border-slate-300/60 shadow-[0_0_20px_rgba(148,163,184,0.45)]"
+                  : "border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.45)]";
+
+              return (
+                <div
+                  key={entry.uid}
+                  className={`rounded-2xl border bg-[#020617]/90 px-3 py-3 flex items-center gap-3 ${baseCard}`}
+                >
+                  <div className="flex-shrink-0">
+                    {hasAvatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={entry.avatarUrl as string}
+                        alt={entry.displayName}
+                        className="h-10 w-10 rounded-full border border-white/30 object-cover"
+                      />
+                    ) : (
+                      <div className="h-10 w-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold">
+                        {entry.displayName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold truncate">
+                          #{entry.rank} {entry.displayName}
+                          {isYou && (
+                            <span className="ml-1 text-[10px] text-orange-300">
+                              (You)
+                            </span>
+                          )}
+                        </p>
+                        {entry.username && (
+                          <p className="text-[10px] text-slate-400 truncate">
+                            @{entry.username}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-end">
+                        {renderStreakPill(entry.currentStreak)}
+                        {renderRankDelta(entry.rankDelta)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SOCIAL PROOF / CONTEXT LINE */}
+      <div className="mb-4 rounded-xl bg-[#020617] border border-slate-700/80 px-4 py-3 text-xs sm:text-sm text-white/75 flex flex-col gap-1">
+        <span>
+          {totalPlayers > 0
+            ? `${totalPlayers} player${
+                totalPlayers === 1 ? "" : "s"
+              } currently have a streak in this leaderboard.`
+            : "No players on the board yet – first streak takes top spot."}
+        </span>
+        {streakBandDescription && (
+          <span className="text-[11px] text-slate-300">
+            {streakBandDescription}
+          </span>
+        )}
       </div>
 
       {error && (
         <p className="mb-3 text-sm text-red-400">
           {error} Try refreshing the page.
         </p>
-      )}
-
-      {loading && (
-        <p className="mb-3 text-sm text-white/70">Loading leaderboard…</p>
       )}
 
       {/* Top 10 table */}
@@ -245,38 +501,54 @@ export default function LeaderboardsPage() {
           <div className="col-span-2 text-right sm:text-center">Streak</div>
         </div>
 
-        {top10.length === 0 ? (
+        {loading && !hasLoadedRef.current && renderSkeletonRows()}
+
+        {!loading && tableRows.length === 0 && (
           <div className="px-4 py-6 text-sm text-white/70">
             No players on the board yet. Make a streak to claim top spot.
           </div>
-        ) : (
+        )}
+
+        {!loading && tableRows.length > 0 && (
           <ul className="divide-y divide-slate-800">
-            {top10.map((entry) => {
+            {tableRows.map((entry) => {
               const isYou = user && entry.uid === user.uid;
               const hasAvatar =
                 typeof entry.avatarUrl === "string" &&
                 entry.avatarUrl.trim().length > 0;
+
+              const rankClass =
+                entry.rank === 1
+                  ? "bg-gradient-to-r from-yellow-500/15 via-yellow-400/10 to-transparent"
+                  : entry.rank === 2
+                  ? "bg-gradient-to-r from-slate-300/10 via-slate-400/5 to-transparent"
+                  : entry.rank === 3
+                  ? "bg-gradient-to-r from-amber-500/10 via-amber-400/5 to-transparent"
+                  : "bg-transparent";
 
               return (
                 <li
                   key={entry.uid}
                   className={`grid grid-cols-12 px-4 py-3 items-center text-sm transform transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-slate-800/40 ${
                     isYou
-                      ? "bg-gradient-to-r from-orange-500/10 via-sky-500/5 to-transparent"
-                      : "bg-transparent"
-                  }`}
+                      ? "ring-1 ring-orange-400/60"
+                      : ""
+                  } ${rankClass}`}
                 >
-                  {/* Rank */}
-                  <div className="col-span-3 sm:col-span-2 font-semibold text-white/80 flex items-center gap-1">
-                    <span>#{entry.rank}</span>
-                    {entry.rank === 1 && (
-                      <span
-                        className="text-yellow-300 text-lg"
-                        aria-label="Leader"
-                      >
-                        👑
-                      </span>
-                    )}
+                  {/* Rank + movement */}
+                  <div className="col-span-3 sm:col-span-2 font-semibold text-white/80 flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1">
+                      <span>#{entry.rank}</span>
+                      {entry.rank === 1 && (
+                        <span
+                          className="text-yellow-300 text-lg"
+                          aria-label="Leader"
+                        >
+                          👑
+                        </span>
+                      )}
+                    </div>
+                    {renderRankDelta(entry.rankDelta)}
                   </div>
 
                   {/* Player + avatar */}
@@ -293,8 +565,8 @@ export default function LeaderboardsPage() {
                         {entry.displayName.charAt(0).toUpperCase()}
                       </div>
                     )}
-                    <div className="flex flex-col">
-                      <span className="font-medium">
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-medium truncate">
                         {entry.displayName}
                         {isYou && (
                           <span className="ml-1 text-[11px] text-orange-300 font-semibold">
@@ -303,16 +575,16 @@ export default function LeaderboardsPage() {
                         )}
                       </span>
                       {entry.username && (
-                        <span className="text-[11px] text-white/60">
+                        <span className="text-[11px] text-white/60 truncate">
                           @{entry.username}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Current streak */}
-                  <div className="col-span-2 text-right sm:text-center font-semibold text-sky-300">
-                    {entry.currentStreak}
+                  {/* Current streak pill */}
+                  <div className="col-span-2 text-right sm:text-center">
+                    {renderStreakPill(entry.currentStreak)}
                   </div>
                 </li>
               );
@@ -365,6 +637,21 @@ export default function LeaderboardsPage() {
                 <p className="text-xl font-bold text-sky-300">
                   {userEntry.currentStreak}
                 </p>
+                {leaderStreak !== null && leaderStreak > userEntry.currentStreak && (
+                  <p className="mt-1 text-[11px] text-slate-300">
+                    Need{" "}
+                    <span className="font-semibold text-orange-300">
+                      {leaderStreak - userEntry.currentStreak}
+                    </span>{" "}
+                    more to catch the leaders.
+                  </p>
+                )}
+                {leaderStreak !== null &&
+                  leaderStreak === userEntry.currentStreak && (
+                    <p className="mt-1 text-[11px] text-emerald-300">
+                      You’re tied with the leaders.
+                    </p>
+                  )}
               </div>
             </div>
           </div>
