@@ -31,8 +31,8 @@ type ApiQuestion = {
   noPercent?: number;
   commentCount?: number;
   correctOutcome?: QuestionOutcome; // settlement result
-  outcome?: QuestionOutcome;        // duplicate for safety
-  correctPick?: boolean | null;     // did current user get it right?
+  outcome?: QuestionOutcome; // duplicate for safety
+  correctPick?: boolean | null; // did current user get it right?
 };
 
 type ApiGame = {
@@ -41,8 +41,10 @@ type ApiGame = {
   sport: string;
   venue: string;
   startTime: string;
-  isUnlockedForPicks?: boolean;     // 👈 NEW: game-level lock state
   questions: ApiQuestion[];
+
+  // 🔓 new: players can only pick if this is true
+  isUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
@@ -60,7 +62,14 @@ type QuestionStatusDoc = {
   questionId: string;
   status: QuestionStatus;
   outcome?: QuestionOutcome | "lock" | string; // we’ll normalise
-  result?: QuestionOutcome | "lock" | string;  // legacy support
+  result?: QuestionOutcome | "lock" | string; // legacy support
+  updatedAt?: FirebaseFirestore.Timestamp;
+};
+
+type GameLockDoc = {
+  roundNumber: number;
+  gameId: string;
+  isUnlockedForPicks?: boolean;
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
@@ -75,9 +84,7 @@ function getRoundCode(roundNumber: number): string {
 }
 
 // Normalise any outcome-ish value to "yes" | "no" | "void" | undefined
-function normaliseOutcomeValue(
-  val: unknown
-): QuestionOutcome | undefined {
+function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   if (typeof val !== "string") return undefined;
   const s = val.trim().toLowerCase();
 
@@ -121,7 +128,8 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
 
     const data = snap.data() || {};
     const sponsorQuestion =
-      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
+      (data.sponsorQuestion as SponsorQuestionConfig | undefined) ||
+      undefined;
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
 
     return sponsorQuestion;
@@ -216,9 +224,7 @@ async function getCommentCountsForRound(
  */
 async function getQuestionStatusForRound(
   roundNumber: number
-): Promise<
-  Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
-> {
+): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -277,29 +283,28 @@ async function getQuestionStatusForRound(
 }
 
 /**
- * 🔒 Game lock map for this round.
- * Reads the docs that /api/admin/game-lock writes:
- *   collection("games2026").doc(gameId)
+ * Read gameLocks → which matches are open/closed for picks.
+ * Keyed by gameId (e.g. "OR-G1", "R1-G3").
  */
-async function getGameLockMapForRound(
+async function getGameLocksForRound(
   roundNumber: number
 ): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
 
   try {
     const snap = await db
-      .collection("games2026")
+      .collection("gameLocks")
       .where("roundNumber", "==", roundNumber)
       .get();
 
     snap.forEach((docSnap) => {
-      const data = docSnap.data() as { isUnlockedForPicks?: boolean | null };
-      if (typeof data.isUnlockedForPicks === "boolean") {
-        map[docSnap.id] = data.isUnlockedForPicks;
-      }
+      const data = docSnap.data() as GameLockDoc;
+      if (!data.gameId) return;
+      // default false → locked until explicitly opened
+      map[data.gameId] = !!data.isUnlockedForPicks;
     });
   } catch (error) {
-    console.error("[/api/picks] Error fetching game locks", error);
+    console.error("[/api/picks] Error fetching gameLocks", error);
   }
 
   return map;
@@ -354,8 +359,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
-    // 7) Game locks for this round
-    const gameLockMap = await getGameLockMapForRound(roundNumber);
+    // 7) Game locks for this round (which matches are open for picks)
+    const gameLocks = await getGameLocksForRound(roundNumber);
 
     // 8) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
@@ -365,14 +370,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const gameKey = `${roundCode}-G${row.Game}`;
 
       if (!gamesByKey[gameKey]) {
+        const isUnlockedForPicks = gameLocks[gameKey] ?? false; // default locked
+
         gamesByKey[gameKey] = {
           id: gameKey,
           match: row.Match,
           sport: "AFL",
           venue: row.Venue,
           startTime: row.StartTime,
-          isUnlockedForPicks: gameLockMap[gameKey] ?? false, // 👈 default locked
           questions: [],
+          isUnlockedForPicks,
         };
         questionIndexByGame[gameKey] = 0;
       }
