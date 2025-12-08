@@ -51,6 +51,8 @@ type ApiGame = {
   startTime: string;
   sport?: string;
   questions: ApiQuestion[];
+  // set by /api/picks based on admin game-lock:
+  isUnlockedForPicks?: boolean;
 };
 
 type QuestionRow = {
@@ -69,13 +71,12 @@ type QuestionRow = {
   commentCount: number;
   isSponsorQuestion?: boolean;
   correctOutcome?: "yes" | "no" | "void" | null;
-  isMatchUnlockedForPicks?: boolean;
+  isUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  gameLocks?: Record<string, boolean>;
 };
 
 type Comment = {
@@ -85,7 +86,7 @@ type Comment = {
   createdAt?: string;
 };
 
-type ActiveOutcome = "yes" | "no" | null;
+type PickHistory = Record<string, "yes" | "no">;
 
 // ---------- AFL team logo helpers ----------
 
@@ -229,16 +230,12 @@ function parseAflMatchTeams(match: string): {
   };
 }
 
-// localStorage keys
-const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
-const PICK_HISTORY_KEY = "streakr_pick_history_v1";
+// --------------------------------------------------
 
-type PickHistory = Record<string, "yes" | "no">;
+// localStorage key for per-device pick history
+const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 
-const STREAK_MILESTONES: Array<3 | 5 | 10 | 15 | 20> = [
-  3, 5, 10, 15, 20,
-];
-
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
 ): "yes" | "no" | "void" | null => {
@@ -264,12 +261,6 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
-    null
-  );
-  const [activeOutcome, setActiveOutcome] =
-    useState<ActiveOutcome>(null);
-
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
   const pickHistoryRef = useRef<PickHistory>({});
   useEffect(() => {
@@ -292,7 +283,7 @@ export default function PicksClient() {
   const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
     null
   );
-  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<
+  const [leaderLongestStreak, setLeaderLongestStreak] = useState<
     number | null
   >(null);
   const [streakLoading, setStreakLoading] = useState(false);
@@ -323,6 +314,7 @@ export default function PicksClient() {
     rowsRef.current = rows;
   }, [rows]);
 
+  // window size for confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
@@ -357,15 +349,12 @@ export default function PicksClient() {
     };
   };
 
-  // *** IMPORTANT FIX IS HERE ***
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
     history: PickHistory
-  ): QuestionRow[] => {
-    const gameLocks = data.gameLocks ?? null; // null => no locking info, treat as all open
-
-    return data.games.flatMap((g: ApiGame) =>
+  ): QuestionRow[] =>
+    data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
@@ -398,21 +387,6 @@ export default function PicksClient() {
 
         const remembered = lastPercentsRef.current[q.id] || {};
 
-        // Default behaviour:
-        // - If we have NO gameLocks map at all => all matches open.
-        // - If we DO have a map:
-        //     * if key exists and is false => locked
-        //     * if key exists and is true  => open
-        //     * if key missing             => treat as open
-        let isMatchUnlockedForPicks = true;
-        if (gameLocks) {
-          if (Object.prototype.hasOwnProperty.call(gameLocks, g.id)) {
-            isMatchUnlockedForPicks = !!gameLocks[g.id];
-          } else {
-            isMatchUnlockedForPicks = true;
-          }
-        }
-
         return {
           id: q.id,
           gameId: g.id,
@@ -435,11 +409,10 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          isMatchUnlockedForPicks,
+          isUnlockedForPicks: g.isUnlockedForPicks ?? prev?.isUnlockedForPicks,
         };
       })
     );
-  };
 
   const fetchPicks = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -477,7 +450,7 @@ export default function PicksClient() {
     }
   };
 
-  // Load pick history from localStorage
+  // Load pick history from localStorage (per device)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -509,7 +482,7 @@ export default function PicksClient() {
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
-  // Comment count live updates
+  // Comment-count live updates
   useEffect(() => {
     if (!questionIds.length) return;
 
@@ -559,45 +532,15 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // Restore active pick from localStorage
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!rows.length) return;
-
-    try {
-      const raw = window.localStorage.getItem(ACTIVE_PICK_KEY);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw);
-      const questionId: string | undefined = parsed?.questionId;
-      const outcome: "yes" | "no" | undefined = parsed?.outcome;
-
-      if (
-        questionId &&
-        (outcome === "yes" || outcome === "no") &&
-        rows.some((r) => r.id === questionId)
-      ) {
-        setActiveQuestionId(questionId);
-        setActiveOutcome(outcome);
-      }
-    } catch (err) {
-      console.error("Failed to restore pick from localStorage", err);
-    }
-  }, [rows.length]);
-
-  // Clear local pick state when user changes
+  // When the logged-in user changes, clear local pick history
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(PICK_HISTORY_KEY);
-      window.localStorage.removeItem(ACTIVE_PICK_KEY);
     }
-
     setPickHistory({});
-    setActiveQuestionId(null);
-    setActiveOutcome(null);
   }, [user]);
 
-  // Load picks from backend and merge into history
+  // Load picks from backend and merge into history (per user)
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
@@ -622,6 +565,7 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
+        // Preferred shape: { picks: [{ questionId, outcome }, ...] }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -636,21 +580,6 @@ export default function PicksClient() {
                 : null;
             if (!outcome) continue;
             historyFromApi[qid] = outcome;
-          }
-        }
-
-        if (
-          json?.questionId &&
-          json?.outcome &&
-          !Array.isArray(json?.picks)
-        ) {
-          const raw = String(json.outcome).toLowerCase();
-          const outcome =
-            raw === "yes" || raw === "no"
-              ? (raw as "yes" | "no")
-              : null;
-          if (outcome) {
-            historyFromApi[json.questionId] = outcome;
           }
         }
 
@@ -673,28 +602,7 @@ export default function PicksClient() {
           });
         }
 
-        let activeFromApi =
-          json?.currentPick || json?.activePick || null;
-        if (!activeFromApi && !Array.isArray(json?.picks)) {
-          activeFromApi = json;
-        }
-
-        const activeQid = activeFromApi?.questionId;
-        let activeOutcomeFromApi: "yes" | "no" | null = null;
-        if (typeof activeFromApi?.outcome === "string") {
-          const raw = activeFromApi.outcome.toLowerCase();
-          if (raw === "yes" || raw === "no") {
-            activeOutcomeFromApi = raw as "yes" | "no";
-          }
-        }
-
-        if (activeQid) {
-          setActiveQuestionId(activeQid);
-        }
-        if (activeOutcomeFromApi) {
-          setActiveOutcome(activeOutcomeFromApi);
-        }
-
+        // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -713,11 +621,7 @@ export default function PicksClient() {
     setStreakError("");
 
     const usersRef = collection(db, "users");
-    const topQ = query(
-      usersRef,
-      orderBy("currentStreak", "desc"),
-      limit(1)
-    );
+    const topQ = query(usersRef, orderBy("longestStreak", "desc"), limit(1));
 
     const unsub = onSnapshot(
       topQ,
@@ -726,12 +630,12 @@ export default function PicksClient() {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
-            typeof data.currentStreak === "number"
-              ? data.currentStreak
+            typeof data.longestStreak === "number"
+              ? data.longestStreak
               : 0;
           leaderVal = val;
         });
-        setLeaderCurrentStreak(leaderVal);
+        setLeaderLongestStreak(leaderVal);
         setStreakLoading(false);
       },
       (err) => {
@@ -796,7 +700,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Streak celebration
+  // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -872,12 +776,7 @@ export default function PicksClient() {
       return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
     }
 
-    if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
-      return { yes: 0, no: 0 };
-    }
-    return activeOutcome === "yes"
-      ? { yes: 100, no: 0 }
-      : { yes: 0, no: 100 };
+    return { yes: 0, no: 0 };
   };
 
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
@@ -886,13 +785,11 @@ export default function PicksClient() {
       return;
     }
 
-    if (row.status !== "open" || !row.isMatchUnlockedForPicks) {
-      return;
-    }
+    // Only allow picks on open questions AND unlocked matches
+    const isMatchLocked = row.isUnlockedForPicks === false;
+    if (row.status !== "open" || isMatchLocked) return;
 
-    setActiveQuestionId(row.id);
-    setActiveOutcome(pick);
-
+    // Update local row
     setRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
@@ -900,6 +797,7 @@ export default function PicksClient() {
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
 
+    // Track pick history (per-device)
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev, [row.id]: pick };
       try {
@@ -915,17 +813,7 @@ export default function PicksClient() {
       return next;
     });
 
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(
-          ACTIVE_PICK_KEY,
-          JSON.stringify({ questionId: row.id, outcome: pick })
-        );
-      }
-    } catch (err) {
-      console.error("Failed to save pick to localStorage", err);
-    }
-
+    // Persist to backend
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
@@ -945,7 +833,7 @@ export default function PicksClient() {
         console.error("user-picks error:", await res.text());
       }
     } catch (e) {
-      console.error("Pick save error", e);
+      console.error("Pick save error:", e);
     }
   };
 
@@ -1039,7 +927,8 @@ export default function PicksClient() {
 
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
-    leaderCurrentStreak ?? 0,
+    userLongestStreak ?? 0,
+    leaderLongestStreak ?? 0,
     1
   );
   const barWidth = (val: number | null) =>
@@ -1147,74 +1036,68 @@ export default function PicksClient() {
           )}
         </div>
 
-        {/* STREAK TRACKER */}
-        <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/40 p-4 sm:p-5 shadow-[0_20px_60px_rgba(0,0,0,0.9)] relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_transparent_55%)] opacity-70" />
-          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
+        {/* STREAK PROGRESS TRACKER + SHARE */}
+        <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-sky-300/80">
-                Live streak race
+              <p className="text-[11px] uppercase tracking-wide text-white/60">
+                Streak progress
               </p>
-              <p className="mt-1 text-xs sm:text-sm text-white/80 max-w-md">
-                Your current run vs the top streak on STREAKr right now. Every
-                correct pick pushes you closer to the crown.
+              <p className="text-xs sm:text-sm text-white/80 max-w-md">
+                Make as many picks as you like on any{" "}
+                <span className="font-semibold text-emerald-300">
+                  open match
+                </span>
+                . Every correct pick this game stacks your streak – one wrong
+                and you reset for the next game.
               </p>
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-wide text-white/60">
-                    Your streak
-                  </p>
-                  <p className="text-3xl sm:text-4xl font-extrabold text-orange-400 drop-shadow-[0_0_24px_rgba(248,140,32,0.9)]">
+                  <p className="text-[11px] text-white/60">Current</p>
+                  <p className="text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_16px_rgba(248,113,22,0.8)]">
                     {user ? userCurrentStreak ?? 0 : "-"}
                   </p>
                 </div>
                 <div className="h-10 w-px bg-white/10" />
                 <div className="text-right">
-                  <p className="text-[11px] uppercase tracking-wide text-white/60">
-                    Leader streak
+                  <p className="text-[11px] text-white/60">Best</p>
+                  <p className="text-lg sm:text-xl font-bold text-emerald-300">
+                    {user ? userLongestStreak ?? 0 : "-"}
                   </p>
-                  <p className="text-2xl sm:text-3xl font-extrabold text-sky-300 drop-shadow-[0_0_18px_rgba(56,189,248,0.8)]">
-                    {leaderCurrentStreak ?? 0}
+                </div>
+                <div className="h-10 w-px bg-white/10" />
+                <div className="text-right">
+                  <p className="text-[11px] text-white/60">Leader</p>
+                  <p className="text-lg sm:text-xl font-bold text-sky-300">
+                    {leaderLongestStreak ?? "-"}
                   </p>
                 </div>
               </div>
 
-              {user && leaderCurrentStreak != null && (
-                <p className="text-[11px] text-white/70">
-                  {userCurrentStreak != null &&
-                  userCurrentStreak >= leaderCurrentStreak
-                    ? "You’re tied or out in front – keep it rolling."
-                    : `You’re ${
-                        (leaderCurrentStreak ?? 0) -
-                          (userCurrentStreak ?? 0) || 0
-                      } pick(s) off the lead.`}
-                </p>
-              )}
-
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex items-center rounded-full border border-sky-400/80 px-3.5 py-1.5 text-[11px] sm:text-xs font-semibold text-sky-100 hover:bg-sky-500/15 transition"
+                className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
               >
                 Share my streak
               </button>
             </div>
           </div>
 
-          <div className="relative space-y-3">
+          <div className="space-y-3">
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                <span>Your streak</span>
+                <span>Current streak</span>
                 <span className="font-semibold text-orange-300">
                   {user ? userCurrentStreak ?? 0 : 0}
                 </span>
               </div>
               <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600 shadow-[0_0_18px_rgba(248,140,32,0.8)]"
+                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
                   style={{ width: barWidth(userCurrentStreak) }}
                 />
               </div>
@@ -1222,56 +1105,46 @@ export default function PicksClient() {
 
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                <span>Leader streak</span>
-                <span className="font-semibold text-sky-300">
-                  {leaderCurrentStreak ?? 0}
+                <span>Longest streak</span>
+                <span className="font-semibold text-emerald-300">
+                  {user ? userLongestStreak ?? 0 : 0}
                 </span>
               </div>
-              <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600 shadow-[0_0_18px_rgba(56,189,248,0.8)]"
-                  style={{ width: barWidth(leaderCurrentStreak) }}
+                  className="h-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600"
+                  style={{ width: barWidth(userLongestStreak) }}
                 />
               </div>
             </div>
 
-            <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px]">
-              <span className="text-white/60 uppercase tracking-wide">
-                Badges:
-              </span>
-              {STREAK_MILESTONES.map((m) => {
-                const hit = (userCurrentStreak ?? 0) >= m;
-                return (
-                  <span
-                    key={m}
-                    className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${
-                      hit
-                        ? "border-orange-400 bg-orange-500/20 text-orange-200 shadow-[0_0_12px_rgba(248,140,32,0.7)]"
-                        : "border-slate-600 bg-slate-950 text-slate-200"
-                    }`}
-                  >
-                    {m}+
-                  </span>
-                );
-              })}
+            <div>
+              <div className="flex justify-between text-[11px] text-white/70 mb-1">
+                <span>Leader</span>
+                <span className="font-semibold text-sky-300">
+                  {leaderLongestStreak ?? 0}
+                </span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
+                  style={{ width: barWidth(leaderLongestStreak) }}
+                />
+              </div>
             </div>
-
-            {streakLoading && (
-              <p className="mt-1 text-[10px] text-white/50">
-                Loading streak data…
-              </p>
-            )}
-            {streakError && (
-              <p className="mt-1 text-[10px] text-red-400">
-                {streakError}
-              </p>
-            )}
-            {shareStatus && (
-              <p className="mt-1 text-[10px] text-sky-300">
-                {shareStatus}
-              </p>
-            )}
           </div>
+
+          {streakLoading && (
+            <p className="mt-2 text-[10px] text-white/50">
+              Loading streak data…
+            </p>
+          )}
+          {streakError && (
+            <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
+          )}
+          {shareStatus && (
+            <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
+          )}
         </div>
 
         {hasSponsorQuestion && (
@@ -1322,15 +1195,10 @@ export default function PicksClient() {
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
 
-            const isActive = row.id === activeQuestionId;
-            const isYesActive = isActive && activeOutcome === "yes";
-            const isNoActive = isActive && activeOutcome === "no";
-            const isYesPicked = row.userPick === "yes";
-            const isNoPicked = row.userPick === "no";
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isQuestionLocked = row.status !== "open";
-            const isMatchLocked = !row.isMatchUnlockedForPicks;
+            const isMatchLocked = row.isUnlockedForPicks === false;
+            const isLocked = row.status !== "open" || isMatchLocked;
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1393,29 +1261,26 @@ export default function PicksClient() {
                 ? "bg-red-500/15 border-red-400/60 text-red-300"
                 : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
-            const anyLock = isQuestionLocked || isMatchLocked;
+            const isYesPicked = row.userPick === "yes";
+            const isNoPicked = row.userPick === "no";
 
             const yesButtonClasses = [
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              isYesActive
-                ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-green-600 hover:bg-green-700 ${
-                    isYesPicked ? "border-white" : "border-transparent"
-                  }`,
-              anyLock
-                ? "opacity-40 cursor-not-allowed hover:bg-green-600"
+              `bg-green-600 hover:bg-green-700 ${
+                isYesPicked ? "border-white shadow-[0_0_12px_rgba(34,197,94,0.7)]" : "border-transparent"
+              }`,
+              isLocked
+                ? "opacity-40 cursor-not-allowed hover:bg-green-600 shadow-none"
                 : "",
             ].join(" ");
 
             const noButtonClasses = [
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              isNoActive
-                ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-red-600 hover:bg-red-700 ${
-                    isNoPicked ? "border-white" : "border-transparent"
-                  }`,
-              anyLock
-                ? "opacity-40 cursor-not-allowed hover:bg-red-600"
+              `bg-red-600 hover:bg-red-700 ${
+                isNoPicked ? "border-white shadow-[0_0_12px_rgba(248,113,113,0.7)]" : "border-transparent"
+              }`,
+              isLocked
+                ? "opacity-40 cursor-not-allowed hover:bg-red-600 shadow-none"
                 : "",
             ].join(" ");
 
@@ -1438,24 +1303,14 @@ export default function PicksClient() {
                     </span>
                   </div>
 
-                  <div className="col-span-6 md:col-span-1 flex flex-col gap-1">
+                  <div className="col-span-6 md:col-span-1">
                     <span
                       className={`${statusClasses(
                         row.status
-                      )} text-[10px] px-2 py-0.5 rounded-full font-bold inline-block`}
+                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
                     >
                       {row.status.toUpperCase()}
                     </span>
-                    {isMatchLocked && (
-                      <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] font-semibold text-slate-100 border border-slate-500/70">
-                        Match locked for picks
-                      </span>
-                    )}
-                    {!isMatchLocked && row.status === "open" && (
-                      <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200 border border-emerald-400/70">
-                        Match open for picks
-                      </span>
-                    )}
                   </div>
 
                   <div className="col-span-12 md:col-span-3">
@@ -1510,6 +1365,12 @@ export default function PicksClient() {
                         </div>
                       </>
                     )}
+
+                    {isMatchLocked && (
+                      <div className="mt-1 inline-flex items-center rounded-full bg-slate-900/80 border border-slate-500/70 px-2.5 py-0.5 text-[10px] font-semibold text-white/80">
+                        Match locked for picks
+                      </div>
+                    )}
                   </div>
 
                   <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
@@ -1533,14 +1394,9 @@ export default function PicksClient() {
                       >
                         Comments ({row.commentCount ?? 0})
                       </button>
-                      {isActive && (
-                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
-                          Streak Pick
-                        </span>
-                      )}
-                      {isQuestionLocked && (
+                      {isLocked && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          Question closed
+                          Locked
                         </span>
                       )}
                       {isSponsor && (
@@ -1556,7 +1412,7 @@ export default function PicksClient() {
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
-                        disabled={anyLock}
+                        disabled={isLocked}
                         className={yesButtonClasses}
                       >
                         Yes
@@ -1565,7 +1421,7 @@ export default function PicksClient() {
                       <button
                         type="button"
                         onClick={() => handlePick(row, "no")}
-                        disabled={anyLock}
+                        disabled={isLocked}
                         className={noButtonClasses}
                       >
                         No
