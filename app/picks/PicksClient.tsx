@@ -240,6 +240,11 @@ const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
+// milestones for visual badges
+const STREAK_MILESTONES: Array<3 | 5 | 10 | 15 | 20> = [
+  3, 5, 10, 15, 20,
+];
+
 // Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
@@ -1139,62 +1144,63 @@ export default function PicksClient() {
         </div>
 
         {/* STREAK PROGRESS TRACKER + SHARE */}
-        <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/40 p-4 sm:p-5 shadow-[0_20px_60px_rgba(0,0,0,0.9)] relative overflow-hidden">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_transparent_55%)] opacity-70" />
+          <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-white/60">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-sky-300/80">
                 Live streak race
               </p>
-              <p className="text-xs sm:text-sm text-white/80 max-w-md">
-                Your current run vs the top streak on the site right now.
-                Every correct pick pushes you closer to the lead.
+              <p className="mt-1 text-xs sm:text-sm text-white/80 max-w-md">
+                Your current run vs the top streak on STREAKr right now. Every
+                correct pick pushes you closer to the crown.
               </p>
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <p className="text-[11px] text-white/60">
+                  <p className="text-[11px] uppercase tracking-wide text-white/60">
                     Your streak
                   </p>
-                  <p className="text-lg sm:text-2xl font-bold text-orange-400">
+                  <p className="text-3xl sm:text-4xl font-extrabold text-orange-400 drop-shadow-[0_0_24px_rgba(248,140,32,0.9)]">
                     {user ? userCurrentStreak ?? 0 : "-"}
                   </p>
                 </div>
-                <div className="h-8 w-px bg-white/10" />
+                <div className="h-10 w-px bg-white/10" />
                 <div className="text-right">
-                  <p className="text-[11px] text-white/60">
+                  <p className="text-[11px] uppercase tracking-wide text-white/60">
                     Leader streak
                   </p>
-                  <p className="text-lg sm:text-2xl font-bold text-sky-300">
+                  <p className="text-2xl sm:text-3xl font-extrabold text-sky-300 drop-shadow-[0_0_18px_rgba(56,189,248,0.8)]">
                     {leaderCurrentStreak ?? 0}
                   </p>
                 </div>
               </div>
 
               {user && leaderCurrentStreak != null && (
-                <p className="text-[11px] text-white/65">
+                <p className="text-[11px] text-white/70">
                   {userCurrentStreak != null &&
                   userCurrentStreak >= leaderCurrentStreak
-                    ? "You’re tied or out in front."
+                    ? "You’re tied or out in front – keep it rolling."
                     : `You’re ${
                         (leaderCurrentStreak ?? 0) -
                           (userCurrentStreak ?? 0) || 0
-                      } pick(s) behind the leader.`}
+                      } pick(s) off the lead.`}
                 </p>
               )}
 
               <button
                 type="button"
                 onClick={handleShare}
-                className="inline-flex items-center rounded-full border border-sky-400/60 px-3 py-1 text-[11px] sm:text-xs font-semibold text-sky-200 hover:bg-sky-500/10 transition"
+                className="inline-flex items-center rounded-full border border-sky-400/80 px-3.5 py-1.5 text-[11px] sm:text-xs font-semibold text-sky-100 hover:bg-sky-500/15 transition"
               >
                 Share my streak
               </button>
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="relative space-y-3">
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Your streak</span>
@@ -1202,9 +1208,9 @@ export default function PicksClient() {
                   {user ? userCurrentStreak ?? 0 : 0}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+              <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
+                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600 shadow-[0_0_18px_rgba(248,140,32,0.8)]"
                   style={{ width: barWidth(userCurrentStreak) }}
                 />
               </div>
@@ -1217,26 +1223,52 @@ export default function PicksClient() {
                   {leaderCurrentStreak ?? 0}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
+              <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
+                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600 shadow-[0_0_18px_rgba(56,189,248,0.8)]"
                   style={{ width: barWidth(leaderCurrentStreak) }}
                 />
               </div>
             </div>
-          </div>
 
-          {streakLoading && (
-            <p className="mt-2 text-[10px] text-white/50">
-              Loading streak data…
-            </p>
-          )}
-          {streakError && (
-            <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
-          )}
-          {shareStatus && (
-            <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>
-          )}
+            {/* milestone badges row */}
+            <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="text-white/60 uppercase tracking-wide">
+                Badges:
+              </span>
+              {STREAK_MILESTONES.map((m) => {
+                const hit = (userCurrentStreak ?? 0) >= m;
+                return (
+                  <span
+                    key={m}
+                    className={`px-2 py-0.5 rounded-full border text-[11px] font-semibold ${
+                      hit
+                        ? "border-orange-400 bg-orange-500/20 text-orange-200 shadow-[0_0_12px_rgba(248,140,32,0.7)]"
+                        : "border-slate-600 bg-slate-950 text-slate-200"
+                    }`}
+                  >
+                    {m}+
+                  </span>
+                );
+              })}
+            </div>
+
+            {streakLoading && (
+              <p className="mt-1 text-[10px] text-white/50">
+                Loading streak data…
+              </p>
+            )}
+            {streakError && (
+              <p className="mt-1 text-[10px] text-red-400">
+                {streakError}
+              </p>
+            )}
+            {shareStatus && (
+              <p className="mt-1 text-[10px] text-sky-300">
+                {shareStatus}
+              </p>
+            )}
+          </div>
         </div>
 
         {hasSponsorQuestion && (
