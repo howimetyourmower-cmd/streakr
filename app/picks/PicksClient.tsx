@@ -68,16 +68,13 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-  correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
-  // added when flattening so we know if the whole match is locked
   isMatchUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  // When we call /api/picks we also get back which games are unlocked
   gameLocks?: Record<string, boolean>;
 };
 
@@ -232,20 +229,16 @@ function parseAflMatchTeams(match: string): {
   };
 }
 
-// --------------------------------------------------
-
-// localStorage keys (global; we clear them whenever the user changes)
+// localStorage keys
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
 type PickHistory = Record<string, "yes" | "no">;
 
-// milestones for visual badges
 const STREAK_MILESTONES: Array<3 | 5 | 10 | 15 | 20> = [
   3, 5, 10, 15, 20,
 ];
 
-// Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
 ): "yes" | "no" | "void" | null => {
@@ -364,14 +357,16 @@ export default function PicksClient() {
     };
   };
 
+  // *** IMPORTANT FIX IS HERE ***
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
     history: PickHistory
   ): QuestionRow[] => {
-    const gameLocks = data.gameLocks || {};
+    const gameLocks = data.gameLocks ?? null; // null => no locking info, treat as all open
+
     return data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion, index: number) => {
+      g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
@@ -402,7 +397,21 @@ export default function PicksClient() {
         }
 
         const remembered = lastPercentsRef.current[q.id] || {};
-        const isMatchUnlockedForPicks = !!gameLocks[g.id];
+
+        // Default behaviour:
+        // - If we have NO gameLocks map at all => all matches open.
+        // - If we DO have a map:
+        //     * if key exists and is false => locked
+        //     * if key exists and is true  => open
+        //     * if key missing             => treat as open
+        let isMatchUnlockedForPicks = true;
+        if (gameLocks) {
+          if (Object.prototype.hasOwnProperty.call(gameLocks, g.id)) {
+            isMatchUnlockedForPicks = !!gameLocks[g.id];
+          } else {
+            isMatchUnlockedForPicks = true;
+          }
+        }
 
         return {
           id: q.id,
@@ -468,7 +477,7 @@ export default function PicksClient() {
     }
   };
 
-  // Load pick history from localStorage (per device)
+  // Load pick history from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -500,7 +509,7 @@ export default function PicksClient() {
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
-  // Comment-count live updates
+  // Comment count live updates
   useEffect(() => {
     if (!questionIds.length) return;
 
@@ -550,7 +559,7 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // Restore active pick (local)
+  // Restore active pick from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!rows.length) return;
@@ -588,7 +597,7 @@ export default function PicksClient() {
     setActiveOutcome(null);
   }, [user]);
 
-  // Load picks from backend and merge into history (per user)
+  // Load picks from backend and merge into history
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) {
@@ -698,7 +707,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Streak leader listener – based on CURRENT streak
+  // Streak leader listener
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -787,7 +796,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Streak celebration (confetti + badge modal once per level)
+  // Streak celebration
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -877,11 +886,7 @@ export default function PicksClient() {
       return;
     }
 
-    // Game must be unlocked AND question must be open
-    if (
-      row.status !== "open" ||
-      !row.isMatchUnlockedForPicks
-    ) {
+    if (row.status !== "open" || !row.isMatchUnlockedForPicks) {
       return;
     }
 
@@ -940,7 +945,7 @@ export default function PicksClient() {
         console.error("user-picks error:", await res.text());
       }
     } catch (e) {
-      console.error("Pick save error:", e);
+      console.error("Pick save error", e);
     }
   };
 
@@ -1032,7 +1037,6 @@ export default function PicksClient() {
     }
   };
 
-  // For the progress bars, only compare YOUR streak vs LEADER streak
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
     leaderCurrentStreak ?? 0,
@@ -1143,7 +1147,7 @@ export default function PicksClient() {
           )}
         </div>
 
-        {/* STREAK PROGRESS TRACKER + SHARE */}
+        {/* STREAK TRACKER */}
         <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/40 p-4 sm:p-5 shadow-[0_20px_60px_rgba(0,0,0,0.9)] relative overflow-hidden">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.25),_transparent_55%)] opacity-70" />
           <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-4">
@@ -1231,7 +1235,6 @@ export default function PicksClient() {
               </div>
             </div>
 
-            {/* milestone badges row */}
             <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px]">
               <span className="text-white/60 uppercase tracking-wide">
                 Badges:
