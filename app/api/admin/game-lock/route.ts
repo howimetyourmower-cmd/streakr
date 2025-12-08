@@ -1,89 +1,45 @@
-// app/api/admin/game-lock/route.ts
-
+// /app/api/admin/game-lock/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
-import { FieldValue } from "firebase-admin/firestore";
 
-type Body = {
-  roundNumber: number;
-  gameId: string;
-  isUnlockedForPicks: boolean;
-};
-
-/**
- * POST /api/admin/game-lock
- *
- * Body:
- * {
- *   roundNumber: number;        // e.g. 0 for OR, 1 for R1
- *   gameId: string;             // e.g. "OR-G1"
- *   isUnlockedForPicks: boolean // true = players can pick
- * }
- *
- * Persists a simple config document in the "gameUnlocks" collection:
- *   roundNumber, gameId, isUnlockedForPicks, updatedAt
- *
- * /api/picks reads these docs (by roundNumber) and attaches
- *   game.isUnlockedForPicks for each game.
- */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const body = (await req.json()) as Partial<Body>;
+    const body = await req.json();
+    const { roundNumber, gameId, isUnlockedForPicks } = body ?? {};
 
-    const roundNumber = body.roundNumber;
-    const gameId = body.gameId;
-    const isUnlockedForPicks = body.isUnlockedForPicks;
-
-    if (
-      typeof roundNumber !== "number" ||
-      roundNumber < 0 ||
-      !Number.isFinite(roundNumber)
-    ) {
+    if (typeof gameId !== "string" || !gameId.trim()) {
       return NextResponse.json(
-        { error: "roundNumber must be a non-negative number" },
+        { error: "Missing or invalid gameId" },
         { status: 400 }
       );
     }
 
-    if (!gameId || typeof gameId !== "string") {
-      return NextResponse.json(
-        { error: "gameId must be a non-empty string" },
-        { status: 400 }
-      );
-    }
+    const round =
+      typeof roundNumber === "number" && roundNumber >= 0 ? roundNumber : null;
 
-    if (typeof isUnlockedForPicks !== "boolean") {
-      return NextResponse.json(
-        { error: "isUnlockedForPicks must be a boolean" },
-        { status: 400 }
-      );
-    }
-
-    // Deterministic doc id so updates overwrite the same record
-    const docId = `${roundNumber}-${gameId}`;
-
-    const docRef = db.collection("gameUnlocks").doc(docId);
+    // Use gameId as the document id for convenience
+    const docRef = db.collection("gameLocks").doc(gameId);
 
     await docRef.set(
       {
-        roundNumber,
-        gameId,
-        isUnlockedForPicks,
-        updatedAt: FieldValue.serverTimestamp(),
+        gameId, // 👈 CRUCIAL: /api/picks queries on this field
+        roundNumber: round,
+        isUnlockedForPicks: !!isUnlockedForPicks,
+        updatedAt: new Date(), // Date is fine; Firestore stores as Timestamp
       },
       { merge: true }
     );
 
     return NextResponse.json({
       ok: true,
-      roundNumber,
       gameId,
-      isUnlockedForPicks,
+      roundNumber: round,
+      isUnlockedForPicks: !!isUnlockedForPicks,
     });
   } catch (error) {
-    console.error("[/api/admin/game-lock] Unexpected error", error);
+    console.error("[/api/admin/game-lock] error", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Failed to update game lock" },
       { status: 500 }
     );
   }
