@@ -71,13 +71,13 @@ export default function Navbar() {
   return (
     <header className="w-full border-b border-white/10 bg-black">
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        {/* LOGO */}
+        {/* LOGO / WORDMARK */}
         <Link href="/" className="flex items-center gap-3">
-          logo alt="STREAKr" className="h-14 w-auto" />
           <span className="font-bold text-3xl tracking-tight">
             STREAK<span className="text-orange-400">r</span>
           </span>
         </Link>
+
         {/* DESKTOP NAV */}
         <div className="hidden md:flex items-center gap-8 text-sm">
           <Link href="/picks" className="hover:text-orange-400">
@@ -107,7 +107,7 @@ export default function Navbar() {
             <div className="h-8 w-8 rounded-full overflow-hidden border border-slate-700 bg-slate-800 flex items-center justify-center">
               <img
                 src={currentAvatarSrc}
-                alt="Avatar"
+                alt={label}
                 className="h-full w-full object-cover"
               />
             </div>
@@ -160,7 +160,7 @@ export default function Navbar() {
                 <div className="h-8 w-8 rounded-full overflow-hidden border border-white/20 bg-slate-800 flex items-center justify-center">
                   <img
                     src={currentAvatarSrc}
-                    alt="Avatar"
+                    alt={label}
                     className="h-full w-full object-cover"
                   />
                 </div>
