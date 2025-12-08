@@ -73,7 +73,7 @@ export default function Navbar() {
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
         {/* LOGO */}
         <Link href="/" className="flex items-center gap-3">
-          alt="STREAKr" className="h-14 w-auto" />
+          logo alt="STREAKr" className="h-14 w-auto" />
           <span className="font-bold text-3xl tracking-tight">
             STREAK<span className="text-orange-400">r</span>
           </span>
