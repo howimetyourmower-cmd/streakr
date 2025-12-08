@@ -226,9 +226,8 @@ export default function HomePage() {
 
             {/* Main heading */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
-              How {" "}
-              <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
-                Long Can You Last?
+               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
+                How Long Can You Last?
               </span>
               
             </h1>
