@@ -226,11 +226,11 @@ export default function HomePage() {
 
             {/* Main heading */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
-              Real{" "}
+              How {" "}
               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
-                STREAKr
+                Long Can 
               </span>
-              s don&apos;t get caught.
+              You&apos;Last?
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
