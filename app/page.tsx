@@ -228,9 +228,9 @@ export default function HomePage() {
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
               How {" "}
               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
-                Long Can  
+                Long Can You Last?
               </span>
-               You Last?
+              
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
