@@ -68,7 +68,16 @@ export default function Navbar() {
   const label =
     profileDoc?.username || user?.displayName || (user?.email ?? "Player");
 
-
+  return (
+    <header className="w-full border-b border-white/10 bg-black">
+      <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+        {/* LOGO */}
+        <Link href="/" className="flex items-center gap-3">
+          alt="STREAKr" className="h-14 w-auto" />
+          <span className="font-bold text-3xl tracking-tight">
+            STREAK<span className="text-orange-400">r</span>
+          </span>
+        </Link>
         {/* DESKTOP NAV */}
         <div className="hidden md:flex items-center gap-8 text-sm">
           <Link href="/picks" className="hover:text-orange-400">
