@@ -233,7 +233,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Make your Pick, build your longest streak, and climb the ladder.
+              Make your Picks for the game, build your longest streak, and climb the ladder.
               One wrong call and it&apos;s back to zero.
             </p>
 
