@@ -51,8 +51,6 @@ type ApiGame = {
   startTime: string;
   sport?: string;
   questions: ApiQuestion[];
-  // 🔓 new: game-level unlock flag from /api/picks
-  isUnlockedForPicks?: boolean;
 };
 
 type QuestionRow = {
@@ -72,13 +70,15 @@ type QuestionRow = {
   isSponsorQuestion?: boolean;
   correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
-  // 🔓 new: carried down to each question
-  isUnlockedForPicks?: boolean;
+  // added when flattening so we know if the whole match is locked
+  isMatchUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  // When we call /api/picks we also get back which games are unlocked
+  gameLocks?: Record<string, boolean>;
 };
 
 type Comment = {
@@ -292,8 +292,9 @@ export default function PicksClient() {
     null
   );
   const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
-    null);
-  const [leaderLongestStreak, setLeaderLongestStreak] = useState<
+    null
+  );
+  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<
     number | null
   >(null);
   const [streakLoading, setStreakLoading] = useState(false);
@@ -362,9 +363,10 @@ export default function PicksClient() {
     data: PicksApiResponse,
     prevRows: QuestionRow[],
     history: PickHistory
-  ): QuestionRow[] =>
-    data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion) => {
+  ): QuestionRow[] => {
+    const gameLocks = data.gameLocks || {};
+    return data.games.flatMap((g: ApiGame) =>
+      g.questions.map((q: ApiQuestion, index: number) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
@@ -395,6 +397,7 @@ export default function PicksClient() {
         }
 
         const remembered = lastPercentsRef.current[q.id] || {};
+        const isMatchUnlockedForPicks = !!gameLocks[g.id];
 
         return {
           id: q.id,
@@ -418,13 +421,11 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          // 🔓 copy game-level unlock flag (default true if undefined)
-         // AFTER – default locked unless explicitly true
-isUnlockedForPicks: g.isUnlockedForPicks ?? false,
-
+          isMatchUnlockedForPicks,
         };
       })
     );
+  };
 
   const fetchPicks = async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
@@ -570,7 +571,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
     }
   }, [rows.length]);
 
-  // 🔁 When the logged-in user changes, clear local pick state
+  // Clear local pick state when user changes
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(PICK_HISTORY_KEY);
@@ -692,13 +693,17 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Streak leader listener
+  // Streak leader listener – based on CURRENT streak
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
 
     const usersRef = collection(db, "users");
-    const topQ = query(usersRef, orderBy("longestStreak", "desc"), limit(1));
+    const topQ = query(
+      usersRef,
+      orderBy("currentStreak", "desc"),
+      limit(1)
+    );
 
     const unsub = onSnapshot(
       topQ,
@@ -707,12 +712,12 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
-            typeof data.longestStreak === "number"
-              ? data.longestStreak
+            typeof data.currentStreak === "number"
+              ? data.currentStreak
               : 0;
           leaderVal = val;
         });
-        setLeaderLongestStreak(leaderVal);
+        setLeaderCurrentStreak(leaderVal);
         setStreakLoading(false);
       },
       (err) => {
@@ -867,9 +872,13 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
       return;
     }
 
-    // 🔓 if match is locked OR question not open → bail
-    const isMatchUnlocked = row.isUnlockedForPicks !== false;
-    if (row.status !== "open" || !isMatchUnlocked) return;
+    // Game must be unlocked AND question must be open
+    if (
+      row.status !== "open" ||
+      !row.isMatchUnlockedForPicks
+    ) {
+      return;
+    }
 
     setActiveQuestionId(row.id);
     setActiveOutcome(pick);
@@ -1018,10 +1027,10 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
     }
   };
 
+  // For the progress bars, only compare YOUR streak vs LEADER streak
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
-    userLongestStreak ?? 0,
-    leaderLongestStreak ?? 0,
+    leaderCurrentStreak ?? 0,
     1
   );
   const barWidth = (val: number | null) =>
@@ -1134,37 +1143,46 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
               <p className="text-[11px] uppercase tracking-wide text-white/60">
-                Streak progress
+                Live streak race
               </p>
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
-                Track your current run, your best ever streak, and how far you
-                are behind the round leader.
+                Your current run vs the top streak on the site right now.
+                Every correct pick pushes you closer to the lead.
               </p>
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
               <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <p className="text-[11px] text-white/60">Current</p>
-                  <p className="text-lg sm:text-xl font-bold text-orange-400">
+                  <p className="text-[11px] text-white/60">
+                    Your streak
+                  </p>
+                  <p className="text-lg sm:text-2xl font-bold text-orange-400">
                     {user ? userCurrentStreak ?? 0 : "-"}
                   </p>
                 </div>
                 <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
-                  <p className="text-[11px] text-white/60">Best</p>
-                  <p className="text-lg sm:text-xl font-bold text-emerald-300">
-                    {user ? userLongestStreak ?? 0 : "-"}
+                  <p className="text-[11px] text-white/60">
+                    Leader streak
                   </p>
-                </div>
-                <div className="h-8 w-px bg-white/10" />
-                <div className="text-right">
-                  <p className="text-[11px] text-white/60">Leader</p>
-                  <p className="text-lg sm:text-xl font-bold text-sky-300">
-                    {leaderLongestStreak ?? "-"}
+                  <p className="text-lg sm:text-2xl font-bold text-sky-300">
+                    {leaderCurrentStreak ?? 0}
                   </p>
                 </div>
               </div>
+
+              {user && leaderCurrentStreak != null && (
+                <p className="text-[11px] text-white/65">
+                  {userCurrentStreak != null &&
+                  userCurrentStreak >= leaderCurrentStreak
+                    ? "You’re tied or out in front."
+                    : `You’re ${
+                        (leaderCurrentStreak ?? 0) -
+                          (userCurrentStreak ?? 0) || 0
+                      } pick(s) behind the leader.`}
+                </p>
+              )}
 
               <button
                 type="button"
@@ -1179,7 +1197,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
           <div className="space-y-3">
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                <span>Current streak</span>
+                <span>Your streak</span>
                 <span className="font-semibold text-orange-300">
                   {user ? userCurrentStreak ?? 0 : 0}
                 </span>
@@ -1194,30 +1212,15 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
 
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                <span>Longest streak</span>
-                <span className="font-semibold text-emerald-300">
-                  {user ? userLongestStreak ?? 0 : 0}
-                </span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-400 via-emerald-500 to-emerald-600"
-                  style={{ width: barWidth(userLongestStreak) }}
-                />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-[11px] text-white/70 mb-1">
-                <span>Leader</span>
+                <span>Leader streak</span>
                 <span className="font-semibold text-sky-300">
-                  {leaderLongestStreak ?? 0}
+                  {leaderCurrentStreak ?? 0}
                 </span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
-                  style={{ width: barWidth(leaderLongestStreak) }}
+                  style={{ width: barWidth(leaderCurrentStreak) }}
                 />
               </div>
             </div>
@@ -1284,9 +1287,6 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
 
-            const isMatchUnlocked = row.isUnlockedForPicks !== false; // default: true
-            const isLocked = row.status !== "open" || !isMatchUnlocked;
-
             const isActive = row.id === activeQuestionId;
             const isYesActive = isActive && activeOutcome === "yes";
             const isNoActive = isActive && activeOutcome === "no";
@@ -1294,6 +1294,8 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
             const isNoPicked = row.userPick === "no";
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
+            const isQuestionLocked = row.status !== "open";
+            const isMatchLocked = !row.isMatchUnlockedForPicks;
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1356,6 +1358,8 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                 ? "bg-red-500/15 border-red-400/60 text-red-300"
                 : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
+            const anyLock = isQuestionLocked || isMatchLocked;
+
             const yesButtonClasses = [
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
               isYesActive
@@ -1363,7 +1367,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                 : `bg-green-600 hover:bg-green-700 ${
                     isYesPicked ? "border-white" : "border-transparent"
                   }`,
-              isLocked
+              anyLock
                 ? "opacity-40 cursor-not-allowed hover:bg-green-600"
                 : "",
             ].join(" ");
@@ -1375,7 +1379,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                 : `bg-red-600 hover:bg-red-700 ${
                     isNoPicked ? "border-white" : "border-transparent"
                   }`,
-              isLocked
+              anyLock
                 ? "opacity-40 cursor-not-allowed hover:bg-red-600"
                 : "",
             ].join(" ");
@@ -1383,9 +1387,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
             return (
               <div
                 key={row.id}
-                className={`rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] ${
-                  !isMatchUnlocked ? "opacity-70" : ""
-                }`}
+                className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
               >
                 <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
                   <div className="col-span-12 md:col-span-2">
@@ -1395,10 +1397,13 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                     </div>
                   </div>
 
-                  <div className="col-span-6 md:col-span-1 flex flex-col gap-1">
+                  <div className="col-span-6 md:col-span-1 flex items-center">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
                       {row.sport}
                     </span>
+                  </div>
+
+                  <div className="col-span-6 md:col-span-1 flex flex-col gap-1">
                     <span
                       className={`${statusClasses(
                         row.status
@@ -1406,19 +1411,14 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                     >
                       {row.status.toUpperCase()}
                     </span>
-
-                    {/* 🔓 match lock status */}
-                    {row.status === "open" && (
-                      <span
-                        className={`mt-0.5 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          isMatchUnlocked
-                            ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/40"
-                            : "bg-slate-800 text-slate-200 border border-slate-500"
-                        }`}
-                      >
-                        {isMatchUnlocked
-                          ? "Match open for picks"
-                          : "Match locked for picks"}
+                    {isMatchLocked && (
+                      <span className="inline-flex items-center rounded-full bg-slate-800/90 px-2 py-0.5 text-[10px] font-semibold text-slate-100 border border-slate-500/70">
+                        Match locked for picks
+                      </span>
+                    )}
+                    {!isMatchLocked && row.status === "open" && (
+                      <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-200 border border-emerald-400/70">
+                        Match open for picks
                       </span>
                     )}
                   </div>
@@ -1503,9 +1503,9 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                           Streak Pick
                         </span>
                       )}
-                      {isLocked && (
+                      {isQuestionLocked && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-                          Locked
+                          Question closed
                         </span>
                       )}
                       {isSponsor && (
@@ -1521,7 +1521,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
-                        disabled={isLocked}
+                        disabled={anyLock}
                         className={yesButtonClasses}
                       >
                         Yes
@@ -1530,7 +1530,7 @@ isUnlockedForPicks: g.isUnlockedForPicks ?? false,
                       <button
                         type="button"
                         onClick={() => handlePick(row, "no")}
-                        disabled={isLocked}
+                        disabled={anyLock}
                         className={noButtonClasses}
                       >
                         No
