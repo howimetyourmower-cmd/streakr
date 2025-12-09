@@ -9,7 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-  // eslint-disable-next-line @next/next/no-img-element
+// eslint-disable-next-line @next/next/no-img-element
 import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
@@ -1017,7 +1017,7 @@ export default function PicksClient() {
         />
       )}
 
-      <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
+      <div className="w-full max-w-7xl mx_auto p-4 sm:p-6 min-h-screen bg-black text-white">
         <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
           <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
           {roundNumber !== null && (
@@ -1153,7 +1153,7 @@ export default function PicksClient() {
 
         {error && <p className="text-red-500 mb-2">{error}</p>}
 
-        <div className="flex flex-wrap gap-2 mb-6">
+        <div className="flex flex_wrap gap-2 mb-6">
           {(["all", "open", "final", "pending", "void"] as const).map((f) => (
             <button
               key={f}
@@ -1283,7 +1283,7 @@ export default function PicksClient() {
                 key={row.id}
                 className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
               >
-                <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
+                <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text_white">
                   <div className="col-span-12 md:col-span-2">
                     <div className="text-sm font-semibold">{date}</div>
                     <div className="text-[11px] text-white/80">
@@ -1301,7 +1301,7 @@ export default function PicksClient() {
                     <span
                       className={`${statusClasses(
                         row.status
-                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
+                      )} text-[10px] px-2 py-0.5 rounded_full font-bold`}
                     >
                       {row.status.toUpperCase()}
                     </span>
@@ -1383,8 +1383,8 @@ export default function PicksClient() {
                         Comments ({row.commentCount ?? 0})
                       </button>
                       {showMatchLockedLabel && (
-                        <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80">
-                          Match locked for picks
+                        <span className="inline-flex items-center rounded-full bg-red-600/80 px-2 py-0.5 text-[10px] font-semibold text-white shadow-[0_0_8px_rgba(248,113,113,0.8)]">
+                          Match closed for picks
                         </span>
                       )}
                       {showStatusLockedLabel && (
