@@ -51,7 +51,6 @@ type ApiGame = {
   startTime: string;
   sport?: string;
   questions: ApiQuestion[];
-  isUnlockedForPicks?: boolean; // 👈 set from /api/picks using game-lock
 };
 
 type QuestionRow = {
@@ -69,8 +68,8 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
+  correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
-  isUnlockedForPicks?: boolean;
 };
 
 type PicksApiResponse = {
@@ -85,7 +84,7 @@ type Comment = {
   createdAt?: string;
 };
 
-type PickHistory = Record<string, "yes" | "no">;
+type ActiveOutcome = "yes" | "no" | null;
 
 // ---------- AFL team logo helpers ----------
 
@@ -130,7 +129,10 @@ const AFL_TEAM_LOGOS: Record<
     name: "Gold Coast Suns",
     logo: "/afl-logos/gold-coast.jpeg",
   },
-  gws: { name: "GWS Giants", logo: "/afl-logos/gws.jpeg" },
+  gws: {
+    name: "GWS Giants",
+    logo: "/afl-logos/gws.jpeg",
+  },
   hawthorn: { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
   melbourne: {
     name: "Melbourne Demons",
@@ -228,17 +230,23 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
-// per-device history key
-const PICK_HISTORY_KEY = "streakr_pick_history_v2";
+// localStorage keys (global; we clear them whenever the user changes)
+const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
+const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
+type PickHistory = Record<string, "yes" | "no">;
+
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (
   val: any
 ): "yes" | "no" | "void" | null => {
   if (val == null) return null;
   const s = String(val).toLowerCase();
-  if (["yes", "y", "correct", "win"].includes(s)) return "yes";
-  if (["no", "n", "wrong", "loss"].includes(s)) return "no";
+
+  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
+  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
   if (["void", "cancelled", "canceled"].includes(s)) return "void";
+
   return null;
 };
 
@@ -253,6 +261,12 @@ export default function PicksClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
+
+  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
+    null
+  );
+  const [activeOutcome, setActiveOutcome] =
+    useState<ActiveOutcome>(null);
 
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
   const pickHistoryRef = useRef<PickHistory>({});
@@ -274,8 +288,7 @@ export default function PicksClient() {
     null
   );
   const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
-    null
-  );
+    null);
   const [leaderLongestStreak, setLeaderLongestStreak] = useState<
     number | null
   >(null);
@@ -307,7 +320,6 @@ export default function PicksClient() {
     rowsRef.current = rows;
   }, [rows]);
 
-  // window size for confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
@@ -342,14 +354,13 @@ export default function PicksClient() {
     };
   };
 
-  // ---------- FLATTEN + PERSIST MERGE ----------
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
     history: PickHistory
   ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion, index: number) => {
+      g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
@@ -390,7 +401,6 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          // 👇 this is the important merge for persistence
           userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
             typeof q.yesPercent === "number"
@@ -404,7 +414,6 @@ export default function PicksClient() {
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
-          isUnlockedForPicks: g.isUnlockedForPicks ?? prev?.isUnlockedForPicks,
         };
       })
     );
@@ -445,7 +454,7 @@ export default function PicksClient() {
     }
   };
 
-  // ---------- LOAD LOCAL PICK HISTORY ----------
+  // Load pick history from localStorage (per device)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -460,13 +469,13 @@ export default function PicksClient() {
     }
   }, []);
 
-  // ---------- INITIAL PICKS ----------
+  // Initial picks
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- AUTO REFRESH ----------
+  // Auto-refresh
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
@@ -477,7 +486,7 @@ export default function PicksClient() {
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
-  // ---------- LIVE COMMENT COUNTS ----------
+  // Comment-count live updates
   useEffect(() => {
     if (!questionIds.length) return;
 
@@ -527,18 +536,50 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // ---------- SWITCHING USER: CLEAR LOCAL DEVICE HISTORY ----------
+  // Restore active pick (local)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!rows.length) return;
+
+    try {
+      const raw = window.localStorage.getItem(ACTIVE_PICK_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      const questionId: string | undefined = parsed?.questionId;
+      const outcome: "yes" | "no" | undefined = parsed?.outcome;
+
+      if (
+        questionId &&
+        (outcome === "yes" || outcome === "no") &&
+        rows.some((r) => r.id === questionId)
+      ) {
+        setActiveQuestionId(questionId);
+        setActiveOutcome(outcome);
+      }
+    } catch (err) {
+      console.error("Failed to restore pick from localStorage", err);
+    }
+  }, [rows.length]);
+
+  // 🔁 NEW: whenever the logged-in user changes, clear local pick state
   useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.removeItem(PICK_HISTORY_KEY);
+      window.localStorage.removeItem(ACTIVE_PICK_KEY);
     }
+
     setPickHistory({});
+    setActiveQuestionId(null);
+    setActiveOutcome(null);
   }, [user]);
 
-  // ---------- LOAD SERVER-SIDE HISTORY (CROSS DEVICE) ----------
+  // Load picks from backend and merge into history (per user)
   useEffect(() => {
     const loadServerPicks = async () => {
-      if (!user) return;
+      if (!user) {
+        return;
+      }
 
       try {
         const idToken = await user.getIdToken();
@@ -555,7 +596,8 @@ export default function PicksClient() {
         }
 
         const json = await res.json();
-        const historyFromApi: PickHistory = {};
+
+        let historyFromApi: PickHistory = {};
 
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
@@ -574,9 +616,26 @@ export default function PicksClient() {
           }
         }
 
+        if (
+          json?.questionId &&
+          json?.outcome &&
+          !Array.isArray(json?.picks)
+        ) {
+          const raw = String(json.outcome).toLowerCase();
+          const outcome =
+            raw === "yes" || raw === "no"
+              ? (raw as "yes" | "no")
+              : null;
+          if (outcome) {
+            historyFromApi[json.questionId] = outcome;
+          }
+        }
+
         if (Object.keys(historyFromApi).length) {
           setPickHistory(() => {
-            const merged: PickHistory = { ...historyFromApi };
+            const merged: PickHistory = {
+              ...historyFromApi,
+            };
             try {
               if (typeof window !== "undefined") {
                 window.localStorage.setItem(
@@ -591,6 +650,28 @@ export default function PicksClient() {
           });
         }
 
+        let activeFromApi =
+          json?.currentPick || json?.activePick || null;
+        if (!activeFromApi && !Array.isArray(json?.picks)) {
+          activeFromApi = json;
+        }
+
+        const activeQid = activeFromApi?.questionId;
+        let activeOutcomeFromApi: "yes" | "no" | null = null;
+        if (typeof activeFromApi?.outcome === "string") {
+          const raw = activeFromApi.outcome.toLowerCase();
+          if (raw === "yes" || raw === "no") {
+            activeOutcomeFromApi = raw as "yes" | "no";
+          }
+        }
+
+        if (activeQid) {
+          setActiveQuestionId(activeQid);
+        }
+        if (activeOutcomeFromApi) {
+          setActiveOutcome(activeOutcomeFromApi);
+        }
+
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -603,7 +684,7 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // ---------- STREAK LISTENERS (leader + user) ----------
+  // Streak leader listener
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -636,6 +717,7 @@ export default function PicksClient() {
     return () => unsub();
   }, []);
 
+  // User streak listener
   useEffect(() => {
     if (!user) {
       setUserCurrentStreak(null);
@@ -687,7 +769,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // ---------- STREAK CELEBRATIONS ----------
+  // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
     if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
       return;
@@ -707,22 +789,25 @@ export default function PicksClient() {
       setLastCelebratedStreak(userCurrentStreak);
       setShowConfetti(true);
 
-      if (!alreadyUnlocked && user) {
+      if (!alreadyUnlocked) {
         setStreakLevelModal(hit);
-        try {
-          const userRef = doc(db, "users", user.uid);
-          await setDoc(
-            userRef,
-            {
-              streakBadges: {
-                ...(unlockedBadges || {}),
-                [key]: true,
+
+        if (user) {
+          try {
+            const userRef = doc(db, "users", user.uid);
+            await setDoc(
+              userRef,
+              {
+                streakBadges: {
+                  ...(unlockedBadges || {}),
+                  [key]: true,
+                },
               },
-            },
-            { merge: true }
-          );
-        } catch (err) {
-          console.error("Failed to persist streak badge", err);
+              { merge: true }
+            );
+          } catch (err) {
+            console.error("Failed to persist streak badge", err);
+          }
         }
       }
 
@@ -736,7 +821,6 @@ export default function PicksClient() {
     };
   }, [userCurrentStreak, lastCelebratedStreak, unlockedBadges, user]);
 
-  // ---------- FILTER ----------
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
     if (f === "all") setFilteredRows(rows);
@@ -761,30 +845,49 @@ export default function PicksClient() {
       return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
     }
 
-    return { yes: 0, no: 0 };
+    if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
+      return { yes: 0, no: 0 };
+    }
+    return activeOutcome === "yes"
+      ? { yes: 100, no: 0 }
+      : { yes: 0, no: 100 };
   };
 
-  // ---------- HANDLE PICK (PERSIST!) ----------
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
 
-    const isMatchLocked = row.isUnlockedForPicks === false;
-    if (row.status !== "open" || isMatchLocked) return;
+    if (row.status !== "open") return;
 
-    // update local rows
+    // 🔁 toggle logic: clicking the same pick clears it
+    const isSame = row.userPick === pick;
+    const nextPick: "yes" | "no" | undefined = isSame ? undefined : pick;
+
+    setActiveQuestionId(nextPick ? row.id : null);
+    setActiveOutcome(nextPick ?? null);
+
+    // Update local rows
     setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: nextPick } : r
+      )
     );
     setFilteredRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: nextPick } : r
+      )
     );
 
-    // persist in device history
+    // Update local history / localStorage
     setPickHistory((prev) => {
-      const next: PickHistory = { ...prev, [row.id]: pick };
+      const next: PickHistory = { ...prev };
+      if (nextPick) {
+        next[row.id] = nextPick;
+      } else {
+        delete next[row.id];
+      }
       try {
         if (typeof window !== "undefined") {
           window.localStorage.setItem(
@@ -798,7 +901,23 @@ export default function PicksClient() {
       return next;
     });
 
-    // persist in backend (for cross-device + streak calc)
+    // ACTIVE_PICK: only store if we have a current pick
+    try {
+      if (typeof window !== "undefined") {
+        if (nextPick) {
+          window.localStorage.setItem(
+            ACTIVE_PICK_KEY,
+            JSON.stringify({ questionId: row.id, outcome: nextPick })
+          );
+        } else {
+          window.localStorage.removeItem(ACTIVE_PICK_KEY);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to save active pick to localStorage", err);
+    }
+
+    // Persist to backend – send clear flag when unselecting
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
@@ -809,8 +928,9 @@ export default function PicksClient() {
         },
         body: JSON.stringify({
           questionId: row.id,
-          outcome: pick,
+          outcome: nextPick ?? null,
           roundNumber,
+          clear: !nextPick, // backend can treat this as "delete pick"
         }),
       });
 
@@ -822,7 +942,6 @@ export default function PicksClient() {
     }
   };
 
-  // ---------- COMMENTS ----------
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
@@ -911,7 +1030,6 @@ export default function PicksClient() {
     }
   };
 
-  // ---------- STREAK PROGRESS UI ----------
   const maxBarValue = Math.max(
     userCurrentStreak ?? 0,
     userLongestStreak ?? 0,
@@ -999,7 +1117,6 @@ export default function PicksClient() {
 
   const streakModalContent = getStreakModalContent();
 
-  // ---------- RENDER ----------
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
@@ -1024,7 +1141,7 @@ export default function PicksClient() {
           )}
         </div>
 
-        {/* STREAK PROGRESS TRACKER */}
+        {/* STREAK PROGRESS TRACKER + SHARE */}
         <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
@@ -1032,12 +1149,8 @@ export default function PicksClient() {
                 Streak progress
               </p>
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
-                Make as many picks as you like on any{" "}
-                <span className="font-semibold text-emerald-300">
-                  open match
-                </span>
-                . Every correct pick this game stacks your streak – one wrong
-                and you reset for the next game.
+                Track your current run, your best ever streak, and how far you
+                are behind the round leader.
               </p>
             </div>
 
@@ -1045,18 +1158,18 @@ export default function PicksClient() {
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Current</p>
-                  <p className="text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_16px_rgba(248,113,22,0.8)]">
+                  <p className="text-2xl sm:text-3xl font-extrabold text-orange-400">
                     {user ? userCurrentStreak ?? 0 : "-"}
                   </p>
                 </div>
-                <div className="h-10 w-px bg-white/10" />
+                <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Best</p>
                   <p className="text-lg sm:text-xl font-bold text-emerald-300">
                     {user ? userLongestStreak ?? 0 : "-"}
                   </p>
                 </div>
-                <div className="h-10 w-px bg-white/10" />
+                <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Leader</p>
                   <p className="text-lg sm:text-xl font-bold text-sky-300">
@@ -1083,7 +1196,7 @@ export default function PicksClient() {
                   {user ? userCurrentStreak ?? 0 : 0}
                 </span>
               </div>
-              <div className="h-2.5 rounded-full bg-slate-900 overflow-hidden">
+              <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
                   style={{ width: barWidth(userCurrentStreak) }}
@@ -1182,10 +1295,16 @@ export default function PicksClient() {
         <div className="space-y-2">
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
+
+            const isActive = row.id === activeQuestionId;
+            const isYesActive = isActive && activeOutcome === "yes";
+            const isNoActive = isActive && activeOutcome === "no";
+            const isYesPicked = row.userPick === "yes";
+            const isNoPicked = row.userPick === "no";
+            const hasPick = isYesPicked || isNoPicked;
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isMatchLocked = row.isUnlockedForPicks === false;
-            const isLocked = row.status !== "open" || isMatchLocked;
+            const isLocked = row.status !== "open";
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1248,26 +1367,27 @@ export default function PicksClient() {
                 ? "bg-red-500/15 border-red-400/60 text-red-300"
                 : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
-            const isYesPicked = row.userPick === "yes";
-            const isNoPicked = row.userPick === "no";
-
             const yesButtonClasses = [
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              `bg-green-600 hover:bg-green-700 ${
-                isYesPicked ? "border-white shadow-[0_0_12px_rgba(34,197,94,0.7)]" : "border-transparent"
-              }`,
+              isYesActive
+                ? "bg-sky-500 text-black border-white ring-2 ring-white"
+                : `bg-green-700/40 hover:bg-green-600 ${
+                    isYesPicked ? "border-white shadow-[0_0_12px_rgba(34,197,94,0.7)]" : "border-transparent"
+                  }`,
               isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-green-600 shadow-none"
+                ? "opacity-40 cursor-not-allowed hover:bg-green-700/40 shadow-none"
                 : "",
             ].join(" ");
 
             const noButtonClasses = [
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              `bg-red-600 hover:bg-red-700 ${
-                isNoPicked ? "border-white shadow-[0_0_12px_rgba(248,113,113,0.7)]" : "border-transparent"
-              }`,
+              isNoActive
+                ? "bg-sky-500 text-black border-white ring-2 ring-white"
+                : `bg-red-700/40 hover:bg-red-600 ${
+                    isNoPicked ? "border-white shadow-[0_0_12px_rgba(248,113,113,0.7)]" : "border-transparent"
+                  }`,
               isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-red-600 shadow-none"
+                ? "opacity-40 cursor-not-allowed hover:bg-red-700/40 shadow-none"
                 : "",
             ].join(" ");
 
@@ -1352,12 +1472,6 @@ export default function PicksClient() {
                         </div>
                       </>
                     )}
-
-                    {isMatchLocked && (
-                      <div className="mt-1 inline-flex items-center rounded-full bg-slate-900/80 border border-slate-500/70 px-2.5 py-0.5 text-[10px] font-semibold text-white/80">
-                        Match locked for picks
-                      </div>
-                    )}
                   </div>
 
                   <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
@@ -1381,6 +1495,11 @@ export default function PicksClient() {
                       >
                         Comments ({row.commentCount ?? 0})
                       </button>
+                      {isActive && (
+                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
+                          Streak Pick
+                        </span>
+                      )}
                       {isLocked && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                           Locked
@@ -1395,7 +1514,7 @@ export default function PicksClient() {
                   </div>
 
                   <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                    <div className="flex gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 mb-0.5">
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
@@ -1413,6 +1532,21 @@ export default function PicksClient() {
                       >
                         No
                       </button>
+
+                      {/* ❌ Clear selection button */}
+                      {hasPick && !isLocked && (
+                        <button
+                          type="button"
+                          title="Clear selection"
+                          onClick={() => {
+                            if (!row.userPick) return;
+                            handlePick(row, row.userPick);
+                          }}
+                          className="inline-flex items-center justify-center h-6 w-6 rounded-full border border-white/30 text-[11px] text-white/80 hover:bg-white hover:text-black transition"
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
 
                     {outcomeLabel && (
