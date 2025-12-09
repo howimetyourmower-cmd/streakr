@@ -230,7 +230,7 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
-// localStorage keys (global; we clear them whenever the user changes)
+// localStorage keys
 const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
 const PICK_HISTORY_KEY = "streakr_pick_history_v1";
 
@@ -288,7 +288,8 @@ export default function PicksClient() {
     null
   );
   const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
-    null);
+    null
+  );
   const [leaderLongestStreak, setLeaderLongestStreak] = useState<
     number | null
   >(null);
@@ -310,6 +311,9 @@ export default function PicksClient() {
   const [unlockedBadges, setUnlockedBadges] = useState<
     Record<string, boolean>
   >({});
+
+  // NEW: game-lock map: gameId -> isOpenForPicks
+  const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
   const lastPercentsRef = useRef<
     Record<string, { yes?: number; no?: number }>
@@ -562,16 +566,29 @@ export default function PicksClient() {
     }
   }, [rows.length]);
 
-  // 🔁 NEW: whenever the logged-in user changes, clear local pick state
+  // Track previous user ID so we don't wipe localStorage every refresh
+  const prevUserIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(PICK_HISTORY_KEY);
-      window.localStorage.removeItem(ACTIVE_PICK_KEY);
+    const newId = user?.uid ?? null;
+    const prevId = prevUserIdRef.current;
+
+    // If nothing actually changed, do nothing
+    if (prevId === newId) {
+      return;
     }
 
-    setPickHistory({});
-    setActiveQuestionId(null);
-    setActiveOutcome(null);
+    // Only clear local state when user truly switches (eg, log out -> another user)
+    if (prevId !== null && newId !== null && prevId !== newId) {
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(PICK_HISTORY_KEY);
+        window.localStorage.removeItem(ACTIVE_PICK_KEY);
+      }
+      setPickHistory({});
+      setActiveQuestionId(null);
+      setActiveOutcome(null);
+    }
+
+    prevUserIdRef.current = newId;
   }, [user]);
 
   // Load picks from backend and merge into history (per user)
@@ -599,6 +616,7 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
+        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -616,6 +634,7 @@ export default function PicksClient() {
           }
         }
 
+        // Legacy shape: { questionId, outcome }
         if (
           json?.questionId &&
           json?.outcome &&
@@ -650,6 +669,7 @@ export default function PicksClient() {
           });
         }
 
+        // Determine active pick (for streak highlighting) – best-effort
         let activeFromApi =
           json?.currentPick || json?.activePick || null;
         if (!activeFromApi && !Array.isArray(json?.picks)) {
@@ -672,6 +692,7 @@ export default function PicksClient() {
           setActiveOutcome(activeOutcomeFromApi);
         }
 
+        // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -683,6 +704,74 @@ export default function PicksClient() {
     loadServerPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  // 🔒 Load match open/locked state from admin game-lock API
+  useEffect(() => {
+    if (roundNumber === null || roundNumber === undefined) return;
+
+    const loadLocks = async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/game-lock?round=${roundNumber}`
+        );
+        if (!res.ok) {
+          console.warn(
+            "game-lock GET not ok",
+            res.status,
+            await res.text()
+          );
+          return;
+        }
+
+        const data = await res.json();
+        // Support multiple shapes:
+        // { locks: { gameId: { isOpen: true } } }
+        // { gameLocks: { gameId: true } }
+        // or plain { gameId: true }
+        const rawLocks =
+          (data &&
+            ((data.locks as Record<string, any>) ||
+              (data.gameLocks as Record<string, any>) ||
+              (data as Record<string, any>))) ||
+          {};
+
+        if (!rawLocks || typeof rawLocks !== "object") return;
+
+        const parsed: Record<string, boolean> = {};
+
+        Object.entries(rawLocks).forEach(([gameId, value]) => {
+          if (value == null) {
+            parsed[gameId] = false;
+            return;
+          }
+          if (typeof value === "boolean") {
+            parsed[gameId] = value;
+            return;
+          }
+          if (typeof value === "object") {
+            const v: any = value;
+            const flag =
+              typeof v.isOpen === "boolean"
+                ? v.isOpen
+                : typeof v.openForPicks === "boolean"
+                ? v.openForPicks
+                : typeof v.isOpenForPicks === "boolean"
+                ? v.isOpenForPicks
+                : undefined;
+            parsed[gameId] = flag !== undefined ? flag : !!v;
+            return;
+          }
+          parsed[gameId] = !!value;
+        });
+
+        setGameLocks(parsed);
+      } catch (err) {
+        console.error("Failed to load game locks", err);
+      }
+    };
+
+    loadLocks();
+  }, [roundNumber]);
 
   // Streak leader listener
   useEffect(() => {
@@ -861,33 +950,28 @@ export default function PicksClient() {
 
     if (row.status !== "open") return;
 
-    // 🔁 toggle logic: clicking the same pick clears it
-    const isSame = row.userPick === pick;
-    const nextPick: "yes" | "no" | undefined = isSame ? undefined : pick;
+    const isGameOpen =
+      gameLocks[row.gameId] !== undefined
+        ? gameLocks[row.gameId]
+        : false;
 
-    setActiveQuestionId(nextPick ? row.id : null);
-    setActiveOutcome(nextPick ?? null);
+    if (!isGameOpen) {
+      // Match locked - ignore
+      return;
+    }
 
-    // Update local rows
+    setActiveQuestionId(row.id);
+    setActiveOutcome(pick);
+
     setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: nextPick } : r
-      )
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
     setFilteredRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: nextPick } : r
-      )
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
 
-    // Update local history / localStorage
     setPickHistory((prev) => {
-      const next: PickHistory = { ...prev };
-      if (nextPick) {
-        next[row.id] = nextPick;
-      } else {
-        delete next[row.id];
-      }
+      const next: PickHistory = { ...prev, [row.id]: pick };
       try {
         if (typeof window !== "undefined") {
           window.localStorage.setItem(
@@ -901,23 +985,17 @@ export default function PicksClient() {
       return next;
     });
 
-    // ACTIVE_PICK: only store if we have a current pick
     try {
       if (typeof window !== "undefined") {
-        if (nextPick) {
-          window.localStorage.setItem(
-            ACTIVE_PICK_KEY,
-            JSON.stringify({ questionId: row.id, outcome: nextPick })
-          );
-        } else {
-          window.localStorage.removeItem(ACTIVE_PICK_KEY);
-        }
+        window.localStorage.setItem(
+          ACTIVE_PICK_KEY,
+          JSON.stringify({ questionId: row.id, outcome: pick })
+        );
       }
     } catch (err) {
-      console.error("Failed to save active pick to localStorage", err);
+      console.error("Failed to save pick to localStorage", err);
     }
 
-    // Persist to backend – send clear flag when unselecting
     try {
       const idToken = await user.getIdToken();
       const res = await fetch("/api/user-picks", {
@@ -928,9 +1006,8 @@ export default function PicksClient() {
         },
         body: JSON.stringify({
           questionId: row.id,
-          outcome: nextPick ?? null,
+          outcome: pick,
           roundNumber,
-          clear: !nextPick, // backend can treat this as "delete pick"
         }),
       });
 
@@ -939,6 +1016,79 @@ export default function PicksClient() {
       }
     } catch (e) {
       console.error("Pick save error:", e);
+    }
+  };
+
+  // Clear a pick (frontend + best-effort backend)
+  const handleClearPick = (row: QuestionRow) => {
+    // Update local state
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: undefined } : r
+      )
+    );
+    setFilteredRows((prev) =>
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: undefined } : r
+      )
+    );
+
+    setPickHistory((prev) => {
+      const next: PickHistory = { ...prev };
+      delete next[row.id];
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(
+            PICK_HISTORY_KEY,
+            JSON.stringify(next)
+          );
+        }
+      } catch (err) {
+        console.error(
+          "Failed to persist pick history after clear",
+          err
+        );
+      }
+      return next;
+    });
+
+    if (activeQuestionId === row.id) {
+      setActiveQuestionId(null);
+      setActiveOutcome(null);
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(ACTIVE_PICK_KEY);
+        }
+      } catch (err) {
+        console.error(
+          "Failed to clear active pick from localStorage",
+          err
+        );
+      }
+    }
+
+    // Best-effort notify backend – safe even if API doesn't support it
+    if (user) {
+      (async () => {
+        try {
+          const idToken = await user.getIdToken();
+          await fetch("/api/user-picks", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+            },
+            body: JSON.stringify({
+              questionId: row.id,
+              outcome: null,
+              clear: true,
+              roundNumber,
+            }),
+          });
+        } catch (err) {
+          console.error("Clear pick error:", err);
+        }
+      })();
     }
   };
 
@@ -1296,15 +1446,19 @@ export default function PicksClient() {
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
 
+            const isGameOpen =
+              gameLocks[row.gameId] !== undefined
+                ? gameLocks[row.gameId]
+                : false;
+
             const isActive = row.id === activeQuestionId;
             const isYesActive = isActive && activeOutcome === "yes";
             const isNoActive = isActive && activeOutcome === "no";
             const isYesPicked = row.userPick === "yes";
             const isNoPicked = row.userPick === "no";
-            const hasPick = isYesPicked || isNoPicked;
             const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isLocked = row.status !== "open";
+            const isLocked = row.status !== "open" || !isGameOpen;
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1371,11 +1525,11 @@ export default function PicksClient() {
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
               isYesActive
                 ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-green-700/40 hover:bg-green-600 ${
-                    isYesPicked ? "border-white shadow-[0_0_12px_rgba(34,197,94,0.7)]" : "border-transparent"
+                : `bg-green-600 hover:bg-green-700 ${
+                    isYesPicked ? "border-white" : "border-transparent"
                   }`,
               isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-green-700/40 shadow-none"
+                ? "opacity-40 cursor-not-allowed hover:bg-green-600"
                 : "",
             ].join(" ");
 
@@ -1383,11 +1537,11 @@ export default function PicksClient() {
               "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
               isNoActive
                 ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-red-700/40 hover:bg-red-600 ${
-                    isNoPicked ? "border-white shadow-[0_0_12px_rgba(248,113,113,0.7)]" : "border-transparent"
+                : `bg-red-600 hover:bg-red-700 ${
+                    isNoPicked ? "border-white" : "border-transparent"
                   }`,
               isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-red-700/40 shadow-none"
+                ? "opacity-40 cursor-not-allowed hover:bg-red-600"
                 : "",
             ].join(" ");
 
@@ -1505,6 +1659,11 @@ export default function PicksClient() {
                           Locked
                         </span>
                       )}
+                      {!isGameOpen && (
+                        <span className="inline-flex items-center rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-300 border border-red-400/60">
+                          Match locked for picks
+                        </span>
+                      )}
                       {isSponsor && (
                         <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                           Sponsor Question
@@ -1514,7 +1673,7 @@ export default function PicksClient() {
                   </div>
 
                   <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                    <div className="flex items-center gap-2 mb-0.5">
+                    <div className="flex gap-2 mb-0.5">
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
@@ -1532,22 +1691,25 @@ export default function PicksClient() {
                       >
                         No
                       </button>
-
-                      {/* ❌ Clear selection button */}
-                      {hasPick && !isLocked && (
-                        <button
-                          type="button"
-                          title="Clear selection"
-                          onClick={() => {
-                            if (!row.userPick) return;
-                            handlePick(row, row.userPick);
-                          }}
-                          className="inline-flex items-center justify-center h-6 w-6 rounded-full border border-white/30 text-[11px] text-white/80 hover:bg-white hover:text-black transition"
-                        >
-                          ✕
-                        </button>
-                      )}
                     </div>
+
+                    {/* Clear selection */}
+                    {(isYesPicked || isNoPicked) && (
+                      <button
+                        type="button"
+                        onClick={() => handleClearPick(row)}
+                        className="mt-1 inline-flex items-center text-[11px] text-white/60 hover:text-red-300"
+                        title="Clear selection"
+                      >
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/40 mr-1">
+                          ×
+                        </span>
+                        <span className="hidden sm:inline">
+                          Clear selection
+                        </span>
+                        <span className="sm:hidden">Clear</span>
+                      </button>
+                    )}
 
                     {outcomeLabel && (
                       <div className="mt-2">
@@ -1559,7 +1721,7 @@ export default function PicksClient() {
                       </div>
                     )}
 
-                    <div className="text-[11px] text-white/85">
+                    <div className="mt-1 text-[11px] text-white/85">
                       Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
                       {Math.round(noPct ?? 0)}%
                     </div>
