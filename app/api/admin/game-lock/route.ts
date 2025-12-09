@@ -1,21 +1,37 @@
+
 // /app/api/admin/game-lock/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { auth, db } from "@/lib/admin";
 
-type GameLockConfig = {
-  isOpenForPicks: boolean;
-  updatedAt: FirebaseFirestore.Timestamp;
+type GameLockDoc = {
+  gameId: string;
+  roundNumber: number;
+  isUnlockedForPicks: boolean;
+  updatedAt?: FirebaseFirestore.Timestamp;
   updatedBy?: string;
 };
 
-type GameLocksDoc = {
+type ApiLocksPayload = {
   roundNumber: number;
-  locks: Record<string, GameLockConfig>;
+  locks: Record<string, { isOpenForPicks: boolean }>;
 };
 
 const COLLECTION_NAME = "gameLocks";
 
-// Helper: require an authenticated user for POST
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
+function parseRoundNumber(value: unknown): number {
+  if (typeof value === "number" && value >= 0) return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (!Number.isNaN(n) && n >= 0) return n;
+  }
+  // default to Opening Round
+  return 0;
+}
+
 async function requireUserUid(req: NextRequest): Promise<string> {
   const authHeader = req.headers.get("authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -23,15 +39,11 @@ async function requireUserUid(req: NextRequest): Promise<string> {
   }
 
   const idToken = authHeader.substring("Bearer ".length).trim();
-  if (!idToken) {
-    throw new Error("Missing ID token");
-  }
+  if (!idToken) throw new Error("Missing ID token");
 
   try {
     const decoded = await auth.verifyIdToken(idToken);
-    if (!decoded.uid) {
-      throw new Error("Invalid token payload – no uid");
-    }
+    if (!decoded.uid) throw new Error("Invalid token payload – no uid");
     return decoded.uid;
   } catch (err) {
     console.error("[game-lock] Failed to verify ID token", err);
@@ -39,36 +51,10 @@ async function requireUserUid(req: NextRequest): Promise<string> {
   }
 }
 
-// Helper: parse roundNumber from query/body, default to 0 (Opening Round)
-function parseRoundNumber(value: unknown): number {
-  if (typeof value === "string") {
-    const n = Number(value);
-    if (!Number.isNaN(n) && n >= 0) return n;
-  }
-  if (typeof value === "number" && value >= 0) {
-    return value;
-  }
-  return 0;
-}
-
-// Helper: doc id for a round
-function getDocId(roundNumber: number): string {
-  // You can change this if you want, just be consistent everywhere
-  return `season-2026-round-${roundNumber}`;
-}
-
 // ─────────────────────────────────────────────
-// GET  /api/admin/game-lock?round=0
-// Returns lock state for the given round
-// Shape:
-//
-// {
-//   roundNumber: 0,
-//   locks: {
-//     "OR-G1": { isOpenForPicks: true },
-//     "OR-G2": { isOpenForPicks: false }
-//   }
-// }
+// GET /api/admin/game-lock?round=0
+// Reads all gameLocks docs for that roundNumber and
+// returns them in the shape the Picks page expects.
 // ─────────────────────────────────────────────
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
@@ -76,40 +62,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const roundParam = url.searchParams.get("round");
     const roundNumber = parseRoundNumber(roundParam ?? undefined);
 
-    const docId = getDocId(roundNumber);
-    const docRef = db.collection(COLLECTION_NAME).doc(docId);
-    const snap = await docRef.get();
+    const snap = await db
+      .collection(COLLECTION_NAME)
+      .where("roundNumber", "==", roundNumber)
+      .get();
 
-    if (!snap.exists) {
-      const empty: GameLocksDoc = {
-        roundNumber,
-        locks: {},
-      };
-      return NextResponse.json(empty);
-    }
-
-    const data = snap.data() || {};
-    const locksRaw = (data.locks || {}) as Record<string, any>;
-
-    // Normalise to { gameId: { isOpenForPicks: boolean } }
     const locks: Record<string, { isOpenForPicks: boolean }> = {};
-    for (const [gameId, value] of Object.entries(locksRaw)) {
-      if (!value || typeof value !== "object") continue;
-      const v: any = value;
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as GameLockDoc;
+      const gameId = data.gameId || docSnap.id;
+      if (!gameId) return;
+
+      // your Firestore field is isUnlockedForPicks
       const isOpen =
-        typeof v.isOpenForPicks === "boolean"
-          ? v.isOpenForPicks
-          : typeof v.openForPicks === "boolean"
-          ? v.openForPicks
-          : typeof v.isOpen === "boolean"
-          ? v.isOpen
+        typeof data.isUnlockedForPicks === "boolean"
+          ? data.isUnlockedForPicks
           : false;
 
       locks[gameId] = { isOpenForPicks: isOpen };
-    }
+    });
 
-    const payload: GameLocksDoc = {
-      roundNumber: data.roundNumber ?? roundNumber,
+    const payload: ApiLocksPayload = {
+      roundNumber,
       locks,
     };
 
@@ -117,7 +92,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch (error) {
     console.error("[game-lock][GET] Unexpected error", error);
     return NextResponse.json(
-      { error: "Failed to load game lock config", locks: {}, roundNumber: 0 },
+      { error: "Failed to load game lock config", roundNumber: 0, locks: {} },
       { status: 500 }
     );
   }
@@ -133,8 +108,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 //   "isOpenForPicks": true
 // }
 //
-// This is what the Settlement/Admin console should call when
-// you toggle "Open for picks" for a game.
+// This creates/updates: gameLocks/OR-G1
+//  - roundNumber: 0
+//  - gameId: "OR-G1"
+//  - isUnlockedForPicks: true
 // ─────────────────────────────────────────────
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -149,11 +126,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const roundNumber = parseRoundNumber(body.roundNumber);
-    const gameId = String(body.gameId || "").trim();
-    const isOpenForPicks =
-      typeof body.isOpenForPicks === "boolean"
-        ? body.isOpenForPicks
-        : false;
+    const rawGameId = body.gameId;
+    const gameId = typeof rawGameId === "string" ? rawGameId.trim() : "";
 
     if (!gameId) {
       return NextResponse.json(
@@ -162,44 +136,45 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const docId = getDocId(roundNumber);
-    const docRef = db.collection(COLLECTION_NAME).doc(docId);
+    const isOpenForPicks =
+      typeof body.isOpenForPicks === "boolean"
+        ? body.isOpenForPicks
+        : false;
 
-    const updatePath = `locks.${gameId}`;
-    const updateValue: GameLockConfig = {
-      isOpenForPicks,
+    const docRef = db.collection(COLLECTION_NAME).doc(gameId);
+
+    const update: GameLockDoc = {
+      gameId,
+      roundNumber,
+      isUnlockedForPicks: isOpenForPicks,
       updatedAt: db.firestore.Timestamp.now(),
       updatedBy: uid,
     };
 
-    await docRef.set(
-      {
-        roundNumber,
-        [updatePath]: updateValue,
-      },
-      { merge: true }
-    );
+    await docRef.set(update, { merge: true });
 
-    const snap = await docRef.get();
-    const data = snap.data() || {};
-    const locksRaw = (data.locks || {}) as Record<string, any>;
+    // Re-read all locks for this round so the admin UI can refresh cleanly
+    const snap = await db
+      .collection(COLLECTION_NAME)
+      .where("roundNumber", "==", roundNumber)
+      .get();
 
     const locks: Record<string, { isOpenForPicks: boolean }> = {};
-    for (const [gid, value] of Object.entries(locksRaw)) {
-      if (!value || typeof value !== "object") continue;
-      const v: any = value;
-      const open =
-        typeof v.isOpenForPicks === "boolean"
-          ? v.isOpenForPicks
-          : typeof v.openForPicks === "boolean"
-          ? v.openForPicks
-          : typeof v.isOpen === "boolean"
-          ? v.isOpen
-          : false;
-      locks[gid] = { isOpenForPicks: open };
-    }
 
-    const payload: GameLocksDoc = {
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as GameLockDoc;
+      const gid = data.gameId || docSnap.id;
+      if (!gid) return;
+
+      const open =
+        typeof data.isUnlockedForPicks === "boolean"
+          ? data.isUnlockedForPicks
+          : false;
+
+      locks[gid] = { isOpenForPicks: open };
+    });
+
+    const payload: ApiLocksPayload = {
       roundNumber,
       locks,
     };
