@@ -9,6 +9,7 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
+  // eslint-disable-next-line @next/next/no-img-element
 import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
@@ -68,7 +69,6 @@ type QuestionRow = {
   sport: string;
   commentCount: number;
   isSponsorQuestion?: boolean;
-  correctPick?: boolean | null;
   correctOutcome?: "yes" | "no" | "void" | null;
 };
 
@@ -84,7 +84,29 @@ type Comment = {
   createdAt?: string;
 };
 
-type ActiveOutcome = "yes" | "no" | null;
+type PickHistory = Record<string, "yes" | "no">;
+
+type GameLocksResponse = {
+  roundNumber: number;
+  locks: Record<string, boolean>; // gameId -> isUnlockedForPicks
+};
+
+// localStorage key for per-device pick history
+const PICK_HISTORY_KEY = "streakr_pick_history_v2";
+
+// Normalise any backend outcome value into "yes" | "no" | "void" | null
+const normaliseOutcome = (
+  val: any
+): "yes" | "no" | "void" | null => {
+  if (val == null) return null;
+  const s = String(val).toLowerCase();
+
+  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
+  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
+  if (["void", "cancelled", "canceled"].includes(s)) return "void";
+
+  return null;
+};
 
 // ---------- AFL team logo helpers ----------
 
@@ -230,26 +252,6 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
-// localStorage keys
-const ACTIVE_PICK_KEY = "streakr_active_pick_v1";
-const PICK_HISTORY_KEY = "streakr_pick_history_v1";
-
-type PickHistory = Record<string, "yes" | "no">;
-
-// Normalise any backend outcome value into "yes" | "no" | "void" | null
-const normaliseOutcome = (
-  val: any
-): "yes" | "no" | "void" | null => {
-  if (val == null) return null;
-  const s = String(val).toLowerCase();
-
-  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
-  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
-  if (["void", "cancelled", "canceled"].includes(s)) return "void";
-
-  return null;
-};
-
 export default function PicksClient() {
   const { user } = useAuth();
 
@@ -262,17 +264,14 @@ export default function PicksClient() {
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  const [activeQuestionId, setActiveQuestionId] = useState<string | null>(
-    null
-  );
-  const [activeOutcome, setActiveOutcome] =
-    useState<ActiveOutcome>(null);
-
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
   const pickHistoryRef = useRef<PickHistory>({});
   useEffect(() => {
     pickHistoryRef.current = pickHistory;
   }, [pickHistory]);
+
+  // game locks: which matches are open for picks
+  const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
   const [commentsOpenFor, setCommentsOpenFor] =
     useState<QuestionRow | null>(null);
@@ -312,18 +311,12 @@ export default function PicksClient() {
     Record<string, boolean>
   >({});
 
-  // NEW: game-lock map: gameId -> isOpenForPicks
-  const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
-
-  const lastPercentsRef = useRef<
-    Record<string, { yes?: number; no?: number }>
-  >({});
-
   const rowsRef = useRef<QuestionRow[]>([]);
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
 
+  // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
@@ -364,7 +357,7 @@ export default function PicksClient() {
     history: PickHistory
   ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion) => {
+      g.questions.map((q: ApiQuestion, index: number) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
@@ -376,25 +369,6 @@ export default function PicksClient() {
           q.status === "final" || q.status === "void"
             ? rawOutcome
             : null;
-
-        if (
-          typeof q.yesPercent === "number" ||
-          typeof q.noPercent === "number"
-        ) {
-          const prevPerc = lastPercentsRef.current[q.id] || {};
-          lastPercentsRef.current[q.id] = {
-            yes:
-              typeof q.yesPercent === "number"
-                ? q.yesPercent
-                : prevPerc.yes,
-            no:
-              typeof q.noPercent === "number"
-                ? q.noPercent
-                : prevPerc.no,
-          };
-        }
-
-        const remembered = lastPercentsRef.current[q.id] || {};
 
         return {
           id: q.id,
@@ -409,11 +383,9 @@ export default function PicksClient() {
           yesPercent:
             typeof q.yesPercent === "number"
               ? q.yesPercent
-              : remembered.yes,
+              : prev?.yesPercent,
           noPercent:
-            typeof q.noPercent === "number"
-              ? q.noPercent
-              : remembered.no,
+            typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
@@ -458,7 +430,7 @@ export default function PicksClient() {
     }
   };
 
-  // Load pick history from localStorage (per device)
+  // Load pick history from localStorage (per device) FIRST
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -540,63 +512,18 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // Restore active pick (local)
+  // When user changes, reset local picks so they don't inherit someone else's device history
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (!rows.length) return;
-
-    try {
-      const raw = window.localStorage.getItem(ACTIVE_PICK_KEY);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw);
-      const questionId: string | undefined = parsed?.questionId;
-      const outcome: "yes" | "no" | undefined = parsed?.outcome;
-
-      if (
-        questionId &&
-        (outcome === "yes" || outcome === "no") &&
-        rows.some((r) => r.id === questionId)
-      ) {
-        setActiveQuestionId(questionId);
-        setActiveOutcome(outcome);
-      }
-    } catch (err) {
-      console.error("Failed to restore pick from localStorage", err);
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem(PICK_HISTORY_KEY);
     }
-  }, [rows.length]);
-
-  // Track previous user ID so we don't wipe localStorage every refresh
-  const prevUserIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    const newId = user?.uid ?? null;
-    const prevId = prevUserIdRef.current;
-
-    // If nothing actually changed, do nothing
-    if (prevId === newId) {
-      return;
-    }
-
-    // Only clear local state when user truly switches (eg, log out -> another user)
-    if (prevId !== null && newId !== null && prevId !== newId) {
-      if (typeof window !== "undefined") {
-        window.localStorage.removeItem(PICK_HISTORY_KEY);
-        window.localStorage.removeItem(ACTIVE_PICK_KEY);
-      }
-      setPickHistory({});
-      setActiveQuestionId(null);
-      setActiveOutcome(null);
-    }
-
-    prevUserIdRef.current = newId;
+    setPickHistory({});
   }, [user]);
 
   // Load picks from backend and merge into history (per user)
   useEffect(() => {
     const loadServerPicks = async () => {
-      if (!user) {
-        return;
-      }
+      if (!user) return;
 
       try {
         const idToken = await user.getIdToken();
@@ -616,7 +543,6 @@ export default function PicksClient() {
 
         let historyFromApi: PickHistory = {};
 
-        // Preferred shape: { picks: [{ questionId, outcome }, ...], currentPick? }
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -634,7 +560,6 @@ export default function PicksClient() {
           }
         }
 
-        // Legacy shape: { questionId, outcome }
         if (
           json?.questionId &&
           json?.outcome &&
@@ -669,29 +594,6 @@ export default function PicksClient() {
           });
         }
 
-        // Determine active pick (for streak highlighting) – best-effort
-        let activeFromApi =
-          json?.currentPick || json?.activePick || null;
-        if (!activeFromApi && !Array.isArray(json?.picks)) {
-          activeFromApi = json;
-        }
-
-        const activeQid = activeFromApi?.questionId;
-        let activeOutcomeFromApi: "yes" | "no" | null = null;
-        if (typeof activeFromApi?.outcome === "string") {
-          const raw = activeFromApi.outcome.toLowerCase();
-          if (raw === "yes" || raw === "no") {
-            activeOutcomeFromApi = raw as "yes" | "no";
-          }
-        }
-
-        if (activeQid) {
-          setActiveQuestionId(activeQid);
-        }
-        if (activeOutcomeFromApi) {
-          setActiveOutcome(activeOutcomeFromApi);
-        }
-
         // Re-flatten rows once so row.userPick is populated from merged history
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
@@ -705,9 +607,9 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // 🔒 Load match open/locked state from admin game-lock API
+  // Load game lock state for this round
   useEffect(() => {
-    if (roundNumber === null || roundNumber === undefined) return;
+    if (roundNumber === null) return;
 
     const loadLocks = async () => {
       try {
@@ -715,56 +617,11 @@ export default function PicksClient() {
           `/api/admin/game-lock?round=${roundNumber}`
         );
         if (!res.ok) {
-          console.warn(
-            "game-lock GET not ok",
-            res.status,
-            await res.text()
-          );
+          console.warn("game-lock GET not ok", await res.text());
           return;
         }
-
-        const data = await res.json();
-        // Support multiple shapes:
-        // { locks: { gameId: { isOpen: true } } }
-        // { gameLocks: { gameId: true } }
-        // or plain { gameId: true }
-        const rawLocks =
-          (data &&
-            ((data.locks as Record<string, any>) ||
-              (data.gameLocks as Record<string, any>) ||
-              (data as Record<string, any>))) ||
-          {};
-
-        if (!rawLocks || typeof rawLocks !== "object") return;
-
-        const parsed: Record<string, boolean> = {};
-
-        Object.entries(rawLocks).forEach(([gameId, value]) => {
-          if (value == null) {
-            parsed[gameId] = false;
-            return;
-          }
-          if (typeof value === "boolean") {
-            parsed[gameId] = value;
-            return;
-          }
-          if (typeof value === "object") {
-            const v: any = value;
-            const flag =
-              typeof v.isOpen === "boolean"
-                ? v.isOpen
-                : typeof v.openForPicks === "boolean"
-                ? v.openForPicks
-                : typeof v.isOpenForPicks === "boolean"
-                ? v.isOpenForPicks
-                : undefined;
-            parsed[gameId] = flag !== undefined ? flag : !!v;
-            return;
-          }
-          parsed[gameId] = !!value;
-        });
-
-        setGameLocks(parsed);
+        const json: GameLocksResponse = await res.json();
+        setGameLocks(json.locks || {});
       } catch (err) {
         console.error("Failed to load game locks", err);
       }
@@ -916,58 +773,24 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
-  const getDisplayPercents = (row: QuestionRow) => {
-    const serverYes =
-      typeof row.yesPercent === "number" ? row.yesPercent : undefined;
-    const serverNo =
-      typeof row.noPercent === "number" ? row.noPercent : undefined;
-
-    if (serverYes !== undefined || serverNo !== undefined) {
-      return { yes: serverYes ?? 0, no: serverNo ?? 0 };
-    }
-
-    const remembered = lastPercentsRef.current[row.id];
-    if (
-      remembered &&
-      (remembered.yes !== undefined || remembered.no !== undefined)
-    ) {
-      return { yes: remembered.yes ?? 0, no: remembered.no ?? 0 };
-    }
-
-    if (!activeQuestionId || !activeOutcome || row.id !== activeQuestionId) {
-      return { yes: 0, no: 0 };
-    }
-    return activeOutcome === "yes"
-      ? { yes: 100, no: 0 }
-      : { yes: 0, no: 100 };
-  };
-
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
 
-    if (row.status !== "open") return;
-
-    const isGameOpen =
-      gameLocks[row.gameId] !== undefined
-        ? gameLocks[row.gameId]
-        : false;
-
-    if (!isGameOpen) {
-      // Match locked - ignore
-      return;
-    }
-
-    setActiveQuestionId(row.id);
-    setActiveOutcome(pick);
+    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+    if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: pick } : r
+      )
     );
     setFilteredRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+      prev.map((r) =>
+        r.id === row.id ? { ...r, userPick: pick } : r
+      )
     );
 
     setPickHistory((prev) => {
@@ -984,17 +807,6 @@ export default function PicksClient() {
       }
       return next;
     });
-
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(
-          ACTIVE_PICK_KEY,
-          JSON.stringify({ questionId: row.id, outcome: pick })
-        );
-      }
-    } catch (err) {
-      console.error("Failed to save pick to localStorage", err);
-    }
 
     try {
       const idToken = await user.getIdToken();
@@ -1016,79 +828,6 @@ export default function PicksClient() {
       }
     } catch (e) {
       console.error("Pick save error:", e);
-    }
-  };
-
-  // Clear a pick (frontend + best-effort backend)
-  const handleClearPick = (row: QuestionRow) => {
-    // Update local state
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: undefined } : r
-      )
-    );
-    setFilteredRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: undefined } : r
-      )
-    );
-
-    setPickHistory((prev) => {
-      const next: PickHistory = { ...prev };
-      delete next[row.id];
-      try {
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(
-            PICK_HISTORY_KEY,
-            JSON.stringify(next)
-          );
-        }
-      } catch (err) {
-        console.error(
-          "Failed to persist pick history after clear",
-          err
-        );
-      }
-      return next;
-    });
-
-    if (activeQuestionId === row.id) {
-      setActiveQuestionId(null);
-      setActiveOutcome(null);
-      try {
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(ACTIVE_PICK_KEY);
-        }
-      } catch (err) {
-        console.error(
-          "Failed to clear active pick from localStorage",
-          err
-        );
-      }
-    }
-
-    // Best-effort notify backend – safe even if API doesn't support it
-    if (user) {
-      (async () => {
-        try {
-          const idToken = await user.getIdToken();
-          await fetch("/api/user-picks", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              questionId: row.id,
-              outcome: null,
-              clear: true,
-              roundNumber,
-            }),
-          });
-        } catch (err) {
-          console.error("Clear pick error:", err);
-        }
-      })();
     }
   };
 
@@ -1300,7 +1039,7 @@ export default function PicksClient() {
               </p>
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
                 Track your current run, your best ever streak, and how far you
-                are behind the round leader.
+                are behind the leader.
               </p>
             </div>
 
@@ -1308,7 +1047,7 @@ export default function PicksClient() {
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Current</p>
-                  <p className="text-2xl sm:text-3xl font-extrabold text-orange-400">
+                  <p className="text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.85)]">
                     {user ? userCurrentStreak ?? 0 : "-"}
                   </p>
                 </div>
@@ -1446,19 +1185,16 @@ export default function PicksClient() {
           {filteredRows.map((row) => {
             const { date, time } = formatStartDate(row.startTime);
 
-            const isGameOpen =
-              gameLocks[row.gameId] !== undefined
-                ? gameLocks[row.gameId]
-                : false;
+            const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+            const isQuestionOpen = row.status === "open";
+            const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-            const isActive = row.id === activeQuestionId;
-            const isYesActive = isActive && activeOutcome === "yes";
-            const isNoActive = isActive && activeOutcome === "no";
             const isYesPicked = row.userPick === "yes";
             const isNoPicked = row.userPick === "no";
-            const { yes: yesPct, no: noPct } = getDisplayPercents(row);
 
-            const isLocked = row.status !== "open" || !isGameOpen;
+            const yesPct = row.yesPercent ?? 0;
+            const noPct = row.noPercent ?? 0;
+
             const isSponsor = !!row.isSponsorQuestion;
 
             const parsed =
@@ -1522,28 +1258,25 @@ export default function PicksClient() {
                 : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
             const yesButtonClasses = [
-              "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              isYesActive
-                ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-green-600 hover:bg-green-700 ${
-                    isYesPicked ? "border-white" : "border-transparent"
-                  }`,
-              isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-green-600"
-                : "",
+              "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+              !isSelectable
+                ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
+                : isYesPicked
+                ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                : "bg-green-600 hover:bg-green-700 text-white border-transparent",
             ].join(" ");
 
             const noButtonClasses = [
-              "px-4 py-1.5 rounded-full text-xs font-bold w-16 text-white transition border",
-              isNoActive
-                ? "bg-sky-500 text-black border-white ring-2 ring-white"
-                : `bg-red-600 hover:bg-red-700 ${
-                    isNoPicked ? "border-white" : "border-transparent"
-                  }`,
-              isLocked
-                ? "opacity-40 cursor-not-allowed hover:bg-red-600"
-                : "",
+              "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+              !isSelectable
+                ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
+                : isNoPicked
+                ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                : "bg-red-600 hover:bg-red-700 text-white border-transparent",
             ].join(" ");
+
+            const showMatchLockedLabel = !isMatchUnlocked;
+            const showStatusLockedLabel = !isQuestionOpen && isMatchUnlocked;
 
             return (
               <div
@@ -1649,19 +1382,14 @@ export default function PicksClient() {
                       >
                         Comments ({row.commentCount ?? 0})
                       </button>
-                      {isActive && (
-                        <span className="inline-flex items-center rounded-full bg-sky-500/90 text-black px-2 py-0.5 text-[10px] font-semibold">
-                          Streak Pick
+                      {showMatchLockedLabel && (
+                        <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white/80">
+                          Match locked for picks
                         </span>
                       )}
-                      {isLocked && (
+                      {showStatusLockedLabel && (
                         <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                           Locked
-                        </span>
-                      )}
-                      {!isGameOpen && (
-                        <span className="inline-flex items-center rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-300 border border-red-400/60">
-                          Match locked for picks
                         </span>
                       )}
                       {isSponsor && (
@@ -1677,7 +1405,7 @@ export default function PicksClient() {
                       <button
                         type="button"
                         onClick={() => handlePick(row, "yes")}
-                        disabled={isLocked}
+                        disabled={!isSelectable}
                         className={yesButtonClasses}
                       >
                         Yes
@@ -1686,30 +1414,12 @@ export default function PicksClient() {
                       <button
                         type="button"
                         onClick={() => handlePick(row, "no")}
-                        disabled={isLocked}
+                        disabled={!isSelectable}
                         className={noButtonClasses}
                       >
                         No
                       </button>
                     </div>
-
-                    {/* Clear selection */}
-                    {(isYesPicked || isNoPicked) && (
-                      <button
-                        type="button"
-                        onClick={() => handleClearPick(row)}
-                        className="mt-1 inline-flex items-center text-[11px] text-white/60 hover:text-red-300"
-                        title="Clear selection"
-                      >
-                        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-white/40 mr-1">
-                          ×
-                        </span>
-                        <span className="hidden sm:inline">
-                          Clear selection
-                        </span>
-                        <span className="sm:hidden">Clear</span>
-                      </button>
-                    )}
 
                     {outcomeLabel && (
                       <div className="mt-2">
@@ -1721,9 +1431,9 @@ export default function PicksClient() {
                       </div>
                     )}
 
-                    <div className="mt-1 text-[11px] text-white/85">
-                      Yes: {Math.round(yesPct ?? 0)}% • No:{" "}
-                      {Math.round(noPct ?? 0)}%
+                    <div className="text-[11px] text-white/85">
+                      Yes: {Math.round(yesPct)}% • No:{" "}
+                      {Math.round(noPct)}%
                     </div>
                   </div>
                 </div>
