@@ -92,11 +92,10 @@ type GameLocksResponse = {
 };
 
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
+const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
 
 // Normalise any backend outcome value into "yes" | "no" | "void" | null
-const normaliseOutcome = (
-  val: any
-): "yes" | "no" | "void" | null => {
+const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   if (val == null) return null;
   const s = String(val).toLowerCase();
 
@@ -129,36 +128,18 @@ type AflTeamKey =
   | "west-coast"
   | "western-bulldogs";
 
-const AFL_TEAM_LOGOS: Record<
-  AflTeamKey,
-  { name: string; logo: string }
-> = {
+const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
   adelaide: { name: "Adelaide Crows", logo: "/afl-logos/adelaide.jpeg" },
   brisbane: { name: "Brisbane Lions", logo: "/afl-logos/brisbane.jpeg" },
   carlton: { name: "Carlton", logo: "/afl-logos/carlton.jpeg" },
-  collingwood: {
-    name: "Collingwood",
-    logo: "/afl-logos/collingwood.jpeg",
-  },
+  collingwood: { name: "Collingwood", logo: "/afl-logos/collingwood.jpeg" },
   essendon: { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
-  fremantle: {
-    name: "Fremantle Dockers",
-    logo: "/afl-logos/fremantle.jpeg",
-  },
+  fremantle: { name: "Fremantle Dockers", logo: "/afl-logos/fremantle.jpeg" },
   geelong: { name: "Geelong Cats", logo: "/afl-logos/geelong.jpeg" },
-  "gold-coast": {
-    name: "Gold Coast Suns",
-    logo: "/afl-logos/gold-coast.jpeg",
-  },
-  gws: {
-    name: "GWS Giants",
-    logo: "/afl-logos/gws.jpeg",
-  },
+  "gold-coast": { name: "Gold Coast Suns", logo: "/afl-logos/gold-coast.jpeg" },
+  gws: { name: "GWS Giants", logo: "/afl-logos/gws.jpeg" },
   hawthorn: { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
-  melbourne: {
-    name: "Melbourne Demons",
-    logo: "/afl-logos/melbourne.jpeg",
-  },
+  melbourne: { name: "Melbourne Demons", logo: "/afl-logos/melbourne.jpeg" },
   "north-melbourne": {
     name: "North Melbourne Kangaroos",
     logo: "/afl-logos/north-melbourne.jpeg",
@@ -167,19 +148,10 @@ const AFL_TEAM_LOGOS: Record<
     name: "Port Adelaide Power",
     logo: "/afl-logos/port-adelaide.jpeg",
   },
-  richmond: {
-    name: "Richmond Tigers",
-    logo: "/afl-logos/richmond.jpeg",
-  },
-  "st-kilda": {
-    name: "St Kilda Saints",
-    logo: "/afl-logos/st-kilda.jpeg",
-  },
+  richmond: { name: "Richmond Tigers", logo: "/afl-logos/richmond.jpeg" },
+  "st-kilda": { name: "St Kilda Saints", logo: "/afl-logos/st-kilda.jpeg" },
   sydney: { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
-  "west-coast": {
-    name: "West Coast Eagles",
-    logo: "/afl-logos/west-coast.jpeg",
-  },
+  "west-coast": { name: "West Coast Eagles", logo: "/afl-logos/west-coast.jpeg" },
   "western-bulldogs": {
     name: "Western Bulldogs",
     logo: "/afl-logos/western-bulldogs.jpeg",
@@ -206,8 +178,7 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
   if (s.includes("north melbourne") || s.includes("kangaroos"))
     return "north-melbourne";
-  if (s.includes("port adelaide") || s.includes("power"))
-    return "port-adelaide";
+  if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
@@ -256,9 +227,7 @@ export default function PicksClient() {
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
-  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
-    "all"
-  );
+  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
@@ -272,8 +241,9 @@ export default function PicksClient() {
   // game locks: which matches are open for picks
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
-  const [commentsOpenFor, setCommentsOpenFor] =
-    useState<QuestionRow | null>(null);
+  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(
+    null
+  );
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState("");
@@ -282,15 +252,14 @@ export default function PicksClient() {
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
+  // 🆕 How to Play modal
+  const [showHowToModal, setShowHowToModal] = useState(false);
+
+  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
+  const [userLongestStreak, setUserLongestStreak] = useState<number | null>(null);
+  const [leaderLongestStreak, setLeaderLongestStreak] = useState<number | null>(
     null
   );
-  const [userLongestStreak, setUserLongestStreak] = useState<number | null>(
-    null
-  );
-  const [leaderLongestStreak, setLeaderLongestStreak] = useState<
-    number | null
-  >(null);
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
@@ -306,9 +275,9 @@ export default function PicksClient() {
     height: 0,
   });
 
-  const [unlockedBadges, setUnlockedBadges] = useState<
-    Record<string, boolean>
-  >({});
+  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>(
+    {}
+  );
 
   const rowsRef = useRef<QuestionRow[]>([]);
   useEffect(() => {
@@ -356,18 +325,15 @@ export default function PicksClient() {
     history: PickHistory
   ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion, index: number) => {
+      g.questions.map((q: ApiQuestion) => {
         const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
         const rawOutcome =
-          normaliseOutcome(q.correctOutcome) ??
-          normaliseOutcome(q.outcome);
+          normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
 
         const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void"
-            ? rawOutcome
-            : null;
+          q.status === "final" || q.status === "void" ? rawOutcome : null;
 
         return {
           id: q.id,
@@ -380,9 +346,7 @@ export default function PicksClient() {
           status: q.status,
           userPick: q.userPick ?? historyPick ?? prev?.userPick,
           yesPercent:
-            typeof q.yesPercent === "number"
-              ? q.yesPercent
-              : prev?.yesPercent,
+            typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
           noPercent:
             typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
           sport: q.sport ?? g.sport ?? "AFL",
@@ -409,11 +373,7 @@ export default function PicksClient() {
         setRoundNumber(data.roundNumber);
       }
 
-      const flat = flattenApi(
-        data,
-        rowsRef.current,
-        pickHistoryRef.current
-      );
+      const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current);
 
       setRows(flat);
       setFilteredRows(
@@ -443,6 +403,30 @@ export default function PicksClient() {
       console.error("Failed to load pick history", err);
     }
   }, []);
+
+  // 🆕 First-time "How to Play" modal (per device)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const seen = window.localStorage.getItem(HOW_TO_PLAY_KEY);
+      if (!seen) {
+        setShowHowToModal(true);
+      }
+    } catch (err) {
+      console.error("Failed to read how-to-play flag", err);
+    }
+  }, []);
+
+  const handleCloseHowToModal = () => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(HOW_TO_PLAY_KEY, "true");
+      } catch (err) {
+        console.error("Failed to persist how-to-play flag", err);
+      }
+    }
+    setShowHowToModal(false);
+  };
 
   // Initial picks
   useEffect(() => {
@@ -490,17 +474,13 @@ export default function PicksClient() {
 
         setRows((prev) =>
           prev.map((r) =>
-            counts[r.id] !== undefined
-              ? { ...r, commentCount: counts[r.id] }
-              : r
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
           )
         );
 
         setFilteredRows((prev) =>
           prev.map((r) =>
-            counts[r.id] !== undefined
-              ? { ...r, commentCount: counts[r.id] }
-              : r
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
           )
         );
       });
@@ -511,25 +491,15 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // 🔒 STRONGER PERSIST:
-  // Whenever pickHistory changes (from localStorage or API),
-  // force it back into rows + filteredRows so picks reappear immediately.
+  // Stronger persist: re-apply local pickHistory into rows whenever it changes
   useEffect(() => {
     if (!rowsRef.current.length) return;
 
     setRows((prev) =>
-      prev.map((r) =>
-        pickHistory[r.id]
-          ? { ...r, userPick: pickHistory[r.id] }
-          : r
-      )
+      prev.map((r) => (pickHistory[r.id] ? { ...r, userPick: pickHistory[r.id] } : r))
     );
     setFilteredRows((prev) =>
-      prev.map((r) =>
-        pickHistory[r.id]
-          ? { ...r, userPick: pickHistory[r.id] }
-          : r
-      )
+      prev.map((r) => (pickHistory[r.id] ? { ...r, userPick: pickHistory[r.id] } : r))
     );
   }, [pickHistory]);
 
@@ -560,29 +530,18 @@ export default function PicksClient() {
           for (const p of json.picks) {
             const qid = p?.questionId;
             if (!qid) continue;
-            const raw =
-              typeof p.outcome === "string"
-                ? p.outcome.toLowerCase()
-                : "";
+            const raw = typeof p.outcome === "string" ? p.outcome.toLowerCase() : "";
             const outcome =
-              raw === "yes" || raw === "no"
-                ? (raw as "yes" | "no")
-                : null;
+              raw === "yes" || raw === "no" ? (raw as "yes" | "no") : null;
             if (!outcome) continue;
             historyFromApi[qid] = outcome;
           }
         }
 
-        if (
-          json?.questionId &&
-          json?.outcome &&
-          !Array.isArray(json?.picks)
-        ) {
+        if (json?.questionId && json?.outcome && !Array.isArray(json?.picks)) {
           const raw = String(json.outcome).toLowerCase();
           const outcome =
-            raw === "yes" || raw === "no"
-              ? (raw as "yes" | "no")
-              : null;
+            raw === "yes" || raw === "no" ? (raw as "yes" | "no") : null;
           if (outcome) {
             historyFromApi[json.questionId] = outcome;
           }
@@ -590,7 +549,6 @@ export default function PicksClient() {
 
         if (Object.keys(historyFromApi).length) {
           setPickHistory((prev) => {
-            // merge server over local
             const merged: PickHistory = {
               ...prev,
               ...historyFromApi,
@@ -609,7 +567,6 @@ export default function PicksClient() {
           });
         }
 
-        // Re-fetch picks silently so /api/picks userPick aligns too
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
@@ -628,9 +585,7 @@ export default function PicksClient() {
 
     const loadLocks = async () => {
       try {
-        const res = await fetch(
-          `/api/admin/game-lock?round=${roundNumber}`
-        );
+        const res = await fetch(`/api/admin/game-lock?round=${roundNumber}`);
         if (!res.ok) {
           console.warn("game-lock GET not ok", await res.text());
           return;
@@ -660,9 +615,7 @@ export default function PicksClient() {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const val =
-            typeof data.longestStreak === "number"
-              ? data.longestStreak
-              : 0;
+            typeof data.longestStreak === "number" ? data.longestStreak : 0;
           leaderVal = val;
         });
         setLeaderLongestStreak(leaderVal);
@@ -698,13 +651,9 @@ export default function PicksClient() {
         if (userSnap.exists()) {
           const data = userSnap.data() as any;
           const current =
-            typeof data.currentStreak === "number"
-              ? data.currentStreak
-              : 0;
+            typeof data.currentStreak === "number" ? data.currentStreak : 0;
           const longest =
-            typeof data.longestStreak === "number"
-              ? data.longestStreak
-              : 0;
+            typeof data.longestStreak === "number" ? data.longestStreak : 0;
           const badges =
             data.streakBadges && typeof data.streakBadges === "object"
               ? (data.streakBadges as Record<string, boolean>)
@@ -732,12 +681,9 @@ export default function PicksClient() {
 
   // Streak celebration (confetti + badge modal once per level)
   useEffect(() => {
-    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak)
-      return;
+    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak) return;
 
-    const milestones: Array<3 | 5 | 10 | 15 | 20> = [
-      3, 5, 10, 15, 20,
-    ];
+    const milestones: Array<3 | 5 | 10 | 15 | 20> = [3, 5, 10, 15, 20];
     const hit = milestones.find((m) => userCurrentStreak === m);
     if (!hit) return;
 
@@ -798,24 +744,17 @@ export default function PicksClient() {
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: pick } : r
-      )
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
     setFilteredRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id ? { ...r, userPick: pick } : r
-      )
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
 
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev, [row.id]: pick };
       try {
         if (typeof window !== "undefined") {
-          window.localStorage.setItem(
-            PICK_HISTORY_KEY,
-            JSON.stringify(next)
-          );
+          window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
         }
       } catch (err) {
         console.error("Failed to persist pick history", err);
@@ -1032,17 +971,26 @@ export default function PicksClient() {
         />
       )}
 
-      <div className="w-full max-w-7xl mx_auto p-4 sm:p-6 min-h-screen bg-black text-white">
-        <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-2 mb-4">
-          <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-          {roundNumber !== null && (
-            <p className="text-sm text-white/70">
-              Current Round:{" "}
-              <span className="font-semibold text-orange-400">
-                {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
-              </span>
-            </p>
-          )}
+      <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
+            {roundNumber !== null && (
+              <p className="text-sm text-white/70">
+                Current Round:{" "}
+                <span className="font-semibold text-orange-400">
+                  {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
+                </span>
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowHowToModal(true)}
+            className="inline-flex items-center justify-center self-start sm:self-auto rounded-full border border-orange-400/70 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/10 transition"
+          >
+            How to play STREAKr
+          </button>
         </div>
 
         {/* STREAK PROGRESS TRACKER + SHARE */}
@@ -1140,9 +1088,7 @@ export default function PicksClient() {
           </div>
 
           {streakLoading && (
-            <p className="mt-2 text-[10px] text-white/50">
-              Loading streak data…
-            </p>
+            <p className="mt-2 text-[10px] text-white/50">Loading streak data…</p>
           )}
           {streakError && (
             <p className="mt-2 text-[10px] text-red-400">{streakError}</p>
@@ -1158,17 +1104,16 @@ export default function PicksClient() {
               Sponsor Question
             </span>
             <span className="text-[12px] sm:text-[13px]">
-              Look for the{" "}
-              <span className="font-semibold">Sponsor Question</span> tag. Get
-              it right to go into the draw for this round&apos;s $100 sponsor
-              gift card.*
+              Look for the <span className="font-semibold">Sponsor Question</span>{" "}
+              tag. Get it right to go into the draw for this round&apos;s $100
+              sponsor gift card.*
             </span>
           </div>
         )}
 
         {error && <p className="text-red-500 mb-2">{error}</p>}
 
-        <div className="flex flex_wrap gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {(["all", "open", "final", "pending", "void"] as const).map((f) => (
             <button
               key={f}
@@ -1228,12 +1173,7 @@ export default function PicksClient() {
 
             const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-            type OutcomeKind =
-              | "win"
-              | "loss"
-              | "void"
-              | "settled-no-result"
-              | null;
+            type OutcomeKind = "win" | "loss" | "void" | "settled-no-result" | null;
 
             const outcome = normaliseOutcome(
               (row.correctOutcome as any) ?? (row as any).outcome
@@ -1245,8 +1185,7 @@ export default function PicksClient() {
               outcomeKind = "void";
             } else if (row.status === "final") {
               if (outcome && row.userPick) {
-                outcomeKind =
-                  row.userPick === outcome ? "win" : "loss";
+                outcomeKind = row.userPick === outcome ? "win" : "loss";
               } else {
                 outcomeKind = "settled-no-result";
               }
@@ -1298,7 +1237,7 @@ export default function PicksClient() {
                 key={row.id}
                 className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]"
               >
-                <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text_white">
+                <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
                   <div className="col-span-12 md:col-span-2">
                     <div className="text-sm font-semibold">{date}</div>
                     <div className="text-[11px] text-white/80">
@@ -1316,7 +1255,7 @@ export default function PicksClient() {
                     <span
                       className={`${statusClasses(
                         row.status
-                      )} text-[10px] px-2 py-0.5 rounded_full font-bold`}
+                      )} text-[10px] px-2 py-0.5 rounded-full font-bold`}
                     >
                       {row.status.toUpperCase()}
                     </span>
@@ -1377,12 +1316,7 @@ export default function PicksClient() {
                   </div>
 
                   <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                    <span className="block md:hidden">
-                      Quarter {row.quarter}
-                    </span>
-                    <span className="hidden md:inline">
-                      Quarter {row.quarter}
-                    </span>
+                    <span className="block">Quarter {row.quarter}</span>
                   </div>
 
                   <div className="col-span-9 md:col-span-2">
@@ -1447,8 +1381,7 @@ export default function PicksClient() {
                     )}
 
                     <div className="text-[11px] text-white/85">
-                      Yes: {Math.round(yesPct)}% • No:{" "}
-                      {Math.round(noPct)}%
+                      Yes: {Math.round(yesPct)}% • No: {Math.round(noPct)}%
                     </div>
                   </div>
                 </div>
@@ -1529,9 +1462,7 @@ export default function PicksClient() {
                   placeholder="Add your comment…"
                 />
                 {commentsError && (
-                  <p className="text-xs text-red-500 mt-1">
-                    {commentsError}
-                  </p>
+                  <p className="text-xs text-red-500 mt-1">{commentsError}</p>
                 )}
                 <div className="flex justify-end mt-2">
                   <button
@@ -1547,9 +1478,7 @@ export default function PicksClient() {
 
               <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
                 {commentsLoading ? (
-                  <p className="text-sm text-gray-400">
-                    Loading comments…
-                  </p>
+                  <p className="text-sm text-gray-400">Loading comments…</p>
                 ) : comments.length === 0 ? (
                   <p className="text-sm text-gray-400">
                     No comments yet. Be the first!
@@ -1626,6 +1555,106 @@ export default function PicksClient() {
                   className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-2 text-sm font-semibold text-white hover:border-orange-400 hover:text-orange-300"
                 >
                   Share this streak
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🆕 HOW TO PLAY MODAL */}
+        {showHowToModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
+            <div className="w-full max-w-lg rounded-2xl bg-[#050816] border border-white/15 shadow-[0_20px_70px_rgba(0,0,0,0.9)] p-6 sm:p-7">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">
+                    New to STREAKr?
+                  </p>
+                  <h2 className="text-xl sm:text-2xl font-bold">
+                    How to play Picks
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloseHowToModal}
+                  className="ml-3 text-sm text-white/50 hover:text-white"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-sm text-white/75 mb-4">
+                Quick rundown so you don&apos;t stitch yourself up in the first
+                quarter:
+              </p>
+
+              <ul className="space-y-2.5 text-sm text-white/80 mb-5">
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">One game at a time:</span>{" "}
+                    the next game only opens once the previous game locks.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">
+                      Pick as many questions as you like
+                    </span>{" "}
+                    in any open game. Every question is another chance to build
+                    your streak.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">Change your mind?</span>{" "}
+                    You can tweak your selections right up until that game
+                    starts.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    If{" "}
+                    <span className="font-semibold">
+                      all your picks in a game are correct
+                    </span>
+                    , your streak carries straight into the next game.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">One loss = streak dead.</span>{" "}
+                    You drop back to <span className="font-semibold">0</span>{" "}
+                    but you&apos;re still in – jump into the next game and start
+                    building again.
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    The player with the{" "}
+                    <span className="font-semibold">longest current streak</span>{" "}
+                    for the round takes the glory (and the prizes).
+                  </span>
+                </li>
+              </ul>
+
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                <p className="text-xs text-white/60">
+                  Tip: don&apos;t chase everything. Back the picks you&apos;d
+                  argue about at the pub.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCloseHowToModal}
+                  className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold text-sm px-5 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.8)]"
+                >
+                  Got it – let me pick
                 </button>
               </div>
             </div>
