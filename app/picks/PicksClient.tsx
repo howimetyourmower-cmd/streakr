@@ -1604,7 +1604,7 @@ export default function PicksClient() {
                       Pick as many questions as you like
                     </span>{" "}
                     in any open game. Every question is another chance to build
-                    your streak.
+                    your streak. Do you have the balls to pick all questions?
                   </span>
                 </li>
                 <li className="flex gap-2">
@@ -1612,7 +1612,7 @@ export default function PicksClient() {
                   <span>
                     <span className="font-semibold">Change your mind?</span>{" "}
                     You can tweak your selections right up until that game
-                    starts.
+                    starts. 
                   </span>
                 </li>
                 <li className="flex gap-2">
@@ -1622,13 +1622,13 @@ export default function PicksClient() {
                     <span className="font-semibold">
                       all your picks in a game are correct
                     </span>
-                    , your streak carries straight into the next game.
+                    , your streak carries straight into the next game. Bang!
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">One loss = streak dead.</span>{" "}
+                    <span className="font-semibold">One loss = streak dead, loser </span>{" "}
                     You drop back to <span className="font-semibold">0</span>{" "}
                     but you&apos;re still in – jump into the next game and start
                     building again.
@@ -1639,7 +1639,7 @@ export default function PicksClient() {
                   <span>
                     The player with the{" "}
                     <span className="font-semibold">longest current streak</span>{" "}
-                    for the round takes the glory (and the prizes).
+                    for the round takes the glory (and the prizes). How many picks will you make in the final game?
                   </span>
                 </li>
               </ul>
