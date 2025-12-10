@@ -341,7 +341,7 @@ export default function HomePage() {
                 <span className="font-semibold">+1</span> to your streak. One
                 wrong pick and you&apos;re{" "}
                 <span className="font-semibold">back to zero</span>. No safety
-                nets. No cash outs. Just nerve.
+                nets. No cash outs. Just nerve. Put your Balls on the line.
               </p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
