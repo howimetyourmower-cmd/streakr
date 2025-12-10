@@ -237,7 +237,7 @@ export default function HomePage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your AFL?. Back your gut, ride the hot
+              Think you know your AFL?. Prove it or Pipe down. Back your gut, ride the hot
               hand, and roast your mates when you&apos;re on a heater. One
               wrong call and your streak is cooked — back to zip.
             </p>
@@ -297,14 +297,14 @@ export default function HomePage() {
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
                   <p className="text-[11px] text-white/60 mb-1">
-                    Group chats. Pub TVs. Office comps.
+                    Group chats. Pub Banter. Office comps.
                   </p>
                   <p className="text-sm font-semibold text-white">
-                    One streak. Endless sledging.
+                    One streak. Battle your mates. Endless sledging.
                   </p>
                 </div>
                 <div className="rounded-full bg-[#FF7A00] text-black text-xs font-bold px-3 py-1 shadow-[0_0_24px_rgba(255,122,0,0.9)]">
-                  Make your next pick
+                  Make your next pick. 
                 </div>
               </div>
             </div>
@@ -363,7 +363,7 @@ export default function HomePage() {
               <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
                 Built for
               </p>
-              <p>Group chats, office comps, pub TVs and venue leagues.</p>
+              <p>Group chats, office comps, pub and venue leagues.</p>
             </div>
             <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
               <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
