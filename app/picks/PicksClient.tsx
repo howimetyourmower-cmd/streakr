@@ -91,7 +91,6 @@ type GameLocksResponse = {
   locks: Record<string, boolean>; // gameId -> isUnlockedForPicks
 };
 
-// localStorage key for per-device pick history
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 
 // Normalise any backend outcome value into "yes" | "no" | "void" | null
@@ -512,13 +511,27 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // When user changes, reset local picks so they don't inherit someone else's device history
+  // 🔒 STRONGER PERSIST:
+  // Whenever pickHistory changes (from localStorage or API),
+  // force it back into rows + filteredRows so picks reappear immediately.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.removeItem(PICK_HISTORY_KEY);
-    }
-    setPickHistory({});
-  }, [user]);
+    if (!rowsRef.current.length) return;
+
+    setRows((prev) =>
+      prev.map((r) =>
+        pickHistory[r.id]
+          ? { ...r, userPick: pickHistory[r.id] }
+          : r
+      )
+    );
+    setFilteredRows((prev) =>
+      prev.map((r) =>
+        pickHistory[r.id]
+          ? { ...r, userPick: pickHistory[r.id] }
+          : r
+      )
+    );
+  }, [pickHistory]);
 
   // Load picks from backend and merge into history (per user)
   useEffect(() => {
@@ -576,8 +589,10 @@ export default function PicksClient() {
         }
 
         if (Object.keys(historyFromApi).length) {
-          setPickHistory(() => {
+          setPickHistory((prev) => {
+            // merge server over local
             const merged: PickHistory = {
+              ...prev,
               ...historyFromApi,
             };
             try {
@@ -594,7 +609,7 @@ export default function PicksClient() {
           });
         }
 
-        // Re-flatten rows once so row.userPick is populated from merged history
+        // Re-fetch picks silently so /api/picks userPick aligns too
         if (rowsRef.current.length) {
           fetchPicks({ silent: true });
         }
