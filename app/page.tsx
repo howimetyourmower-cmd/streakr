@@ -231,13 +231,13 @@ export default function HomePage() {
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Footy. Banter. Bragging rights.
               </span>
-              <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
+              <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">
                 How Long Can You Last?
               </span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Quarter-by-quarter AFL stat picks. Back your gut, ride the hot
+              Think you know your AFL?. Back your gut, ride the hot
               hand, and roast your mates when you&apos;re on a heater. One
               wrong call and your streak is cooked — back to zip.
             </p>
