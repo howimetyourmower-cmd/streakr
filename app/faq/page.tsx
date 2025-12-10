@@ -1,3 +1,4 @@
+// /app/faq/page.tsx
 "use client";
 
 import { FormEvent, useState } from "react";
@@ -137,7 +138,7 @@ export default function FAQPage() {
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
                     Is there an age restriction?
                   </h3>
-                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]}>
                     STREAKr is for{" "}
                     <span className="font-semibold">18+ only</span>. By creating
                     an account you confirm you are at least 18 years old.
@@ -156,7 +157,7 @@ export default function FAQPage() {
                   Picks &amp; streak rules
                 </h2>
                 <p className="mt-1 text-xs text-zinc-400 md:text-sm">
-                  How questions work, what a streak pick is and when things
+                  How questions work, how your streak moves, and when things
                   lock.
                 </p>
               </div>
@@ -168,47 +169,87 @@ export default function FAQPage() {
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
                     Each question is a{" "}
                     <span className="font-semibold">Yes / No prediction</span>{" "}
-                    about a real AFL event – for example a player stat or a
-                    match outcome in a specific quarter.
+                    about a real AFL event – usually a player stat or game
+                    moment in a specific quarter (for example, a player to have
+                    7+ disposals in Q1, or to kick a goal in Q3).
                   </p>
                 </div>
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    What is a &quot;streak pick&quot;?
+                    How many picks can I make?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    At any time you can have{" "}
+                    On the Picks page you&apos;ll see multiple questions for
+                    each match and quarter. You can{" "}
                     <span className="font-semibold">
-                      exactly one active question
+                      make as many picks as you like
                     </span>{" "}
-                    as your streak pick. On the Picks page you&apos;ll see a
-                    highlight showing &quot;Your streak pick&quot; on the
-                    question currently counting towards your streak.
+                    on any match that is{" "}
+                    <span className="font-semibold">open for picks</span> and
+                    where the question status is{" "}
+                    <span className="font-semibold">OPEN</span>. Every
+                    &quot;Yes&quot; or &quot;No&quot; you lock in on an open
+                    question becomes one of your picks for that round.
                   </p>
                 </div>
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    Can I change my pick?
+                    Can I change or clear a pick?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    Yes – you can change your streak pick as many times as you
-                    like <span className="font-semibold">until that question
-                    locks</span>. When you switch to another question in the
-                    same game, your previous one is no longer active and goes
-                    back to 0% / 0% for your personal pick stats.
+                    Yes. As long as the{" "}
+                    <span className="font-semibold">match is open</span> for
+                    picks and the question status is{" "}
+                    <span className="font-semibold">OPEN</span>, you can:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-400 md:text-[15px]">
+                    <li>switch from YES to NO (or vice versa), and</li>
+                    <li>
+                      completely <span className="font-semibold">
+                        clear your selection
+                      </span>{" "}
+                      on that question.
+                    </li>
+                  </ul>
+                  <p className="mt-2 text-sm text-zinc-400 md:text-[15px]">
+                    Once a match is marked as{" "}
+                    <span className="font-semibold">closed for picks</span> or a
+                    question is locked, you can&apos;t edit or remove that pick
+                    any more – it will simply settle as correct / incorrect /
+                    void when the stats come in.
                   </p>
                 </div>
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    When do questions lock?
+                    Why does it say &quot;Match closed for picks&quot;?
+                  </h3>
+                  <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
+                    STREAKr admins control when each{" "}
+                    <span className="font-semibold">match is open</span> or{" "}
+                    <span className="font-semibold">
+                      closed for new picks
+                    </span>
+                    . When you see the red pill saying{" "}
+                    <span className="font-semibold">
+                      &quot;Match closed for picks&quot;
+                    </span>
+                    , you can no longer add, change or clear picks on any of the
+                    questions in that game. You may still see the questions and
+                    final outcomes for info.
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800/80 pt-4">
+                  <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
+                    When do questions lock and get settled?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
                     Questions lock shortly before the relevant bounce / quarter
                     starts. Once locked, you can&apos;t change that pick. When
-                    the outcome is known, the admin team (or automated stats
+                    the outcome is known, the STREAKr team (or automated stats
                     feed) settles the question as{" "}
                     <span className="font-semibold">YES</span>,{" "}
                     <span className="font-semibold">NO</span> or{" "}
@@ -218,13 +259,25 @@ export default function FAQPage() {
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    How is my streak calculated?
+                    How is my streak calculated now?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    Every time your active streak pick settles as{" "}
-                    <span className="font-semibold">correct</span>, your streak
-                    increases by 1. A single incorrect streak pick resets your
-                    streak back to 0. Void questions do not affect your streak.
+                    Every time a question you&apos;ve picked on settles as{" "}
+                    <span className="font-semibold">correct</span>, your{" "}
+                    <span className="font-semibold">current streak</span>{" "}
+                    increases by 1. Every time a question settles and your pick
+                    is <span className="font-semibold">wrong</span>, your
+                    current streak resets back to 0.
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-400 md:text-[15px]">
+                    It doesn&apos;t matter how many open picks you have at once
+                    – your streak is simply the count of{" "}
+                    <span className="font-semibold">
+                      consecutive correct results
+                    </span>{" "}
+                    across the questions you&apos;ve answered. If a question is
+                    settled as <span className="font-semibold">VOID</span>, it
+                    does not increase or decrease your streak.
                   </p>
                 </div>
               </div>
@@ -251,8 +304,10 @@ export default function FAQPage() {
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
                     Prize details are listed on the{" "}
                     <span className="font-semibold">Rewards</span> page. For
-                    example, we may advertise a cash or voucher prize pool for
-                    the best streaks in a given round.
+                    example, we may advertise a cash or voucher{" "}
+                    <span className="font-semibold">prize pool per round</span>{" "}
+                    for the best streaks, plus extra sponsor giveaways on
+                    selected questions.
                   </p>
                 </div>
 
@@ -261,12 +316,21 @@ export default function FAQPage() {
                     How are winners decided?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    At the end of a round, we look at the{" "}
+                    For rounds that have prizes, we look at the{" "}
                     <span className="font-semibold">
-                      longest active streaks
-                    </span>
-                    . Ties and any special sponsor promotions will be handled as
-                    described on the Rewards page and in the game rules.
+                      highest streak achieved during that prize period
+                    </span>{" "}
+                    (e.g. Opening Round, Round 1, etc).
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-400 md:text-[15px]">
+                    At the end of the round,{" "}
+                    <span className="font-semibold">
+                      every player who finishes with the top streak
+                    </span>{" "}
+                    for that round shares the advertised prize pool. If three
+                    players tie for the best streak, the pool is split three
+                    ways. Any special conditions or minimum streaks will always
+                    be spelled out on the Rewards page and in the game rules.
                   </p>
                 </div>
 
@@ -275,11 +339,24 @@ export default function FAQPage() {
                     What is a sponsored question?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    From time to time you may see a question marked as a{" "}
-                    <span className="font-semibold">sponsor question</span>. If
-                    you select that as your streak pick and it lands correct,
-                    you may go into a separate draw (e.g. a gift card or promo
-                    prize) as advertised on the question and Rewards page.
+                    From time to time you may see a question marked with a{" "}
+                    <span className="font-semibold">Sponsor Question</span> tag
+                    on the Picks page. These are special questions linked to a
+                    partner.
+                  </p>
+                  <p className="mt-2 text-sm text-zinc-400 md:text-[15px]">
+                    If you make a pick on the sponsor question and it lands
+                    correct, you may go into a{" "}
+                    <span className="font-semibold">
+                      separate sponsor prize draw
+                    </span>{" "}
+                    (for example a gift card or promo prize) as advertised on
+                    the Rewards page and in the question description. Sponsor
+                    prizes are usually{" "}
+                    <span className="font-semibold">
+                      separate to the main round streak prizes
+                    </span>
+                    .
                   </p>
                 </div>
               </div>
@@ -477,7 +554,7 @@ export default function FAQPage() {
                   </p>
                 )}
 
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify_between gap-3">
                   <button
                     type="submit"
                     disabled={submitting}
@@ -492,7 +569,7 @@ export default function FAQPage() {
               </form>
             </div>
 
-            {/* BLUE SPONSOR BANNER – similar vibe to Sportsbet */}
+            {/* BLUE SPONSOR BANNER */}
             <div className="rounded-2xl bg-gradient-to-r from-sky-700 via-sky-500 to-sky-600 p-[1px] shadow-[0_0_40px_rgba(56,189,248,0.35)]">
               <div className="flex flex-col gap-4 rounded-2xl bg-sky-600/90 px-4 py-4 md:flex-row md:items-center md:px-6 md:py-5">
                 {/* Text side */}
@@ -522,7 +599,7 @@ export default function FAQPage() {
                 <div className="flex items-center justify-center md:w-40">
                   <div className="relative h-28 w-20 rotate-2 rounded-2xl bg-white/95 shadow-[0_10px_25px_rgba(15,23,42,0.5)]">
                     <div className="absolute inset-1 rounded-xl bg-sky-50/90 p-1 text-[8px] text-sky-900">
-                      <div className="mb-1 flex items-center justify-between text-[7px] font-semibold">
+                      <div className="mb-1 flex items-center justify_between text-[7px] font-semibold">
                         <span>Tonight</span>
                         <span className="rounded-full bg-sky-600 px-1 py-[1px] text-[7px] text-white">
                           LIVE
@@ -530,7 +607,7 @@ export default function FAQPage() {
                       </div>
                       <div className="h-[52px] rounded-md bg-gradient-to-br from-sky-200 to-sky-50" />
                       <div className="mt-1 space-y-[2px]">
-                        <div className="flex items-center justify-between text-[7px]">
+                        <div className="flex items-center justify_between text-[7px]">
                           <span className="font-semibold">Streak pick</span>
                           <span className="text-green-600 font-bold">✔</span>
                         </div>
