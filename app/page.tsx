@@ -181,7 +181,7 @@ export default function HomePage() {
               playsInline
               className="
                 absolute inset-0 w-full h-full
-                object-contain   /* show entire video on all devices */
+                object-contain
                 bg-black
               "
             />
@@ -198,7 +198,7 @@ export default function HomePage() {
                 STREAKr
               </p>
               <p className="mt-1 text-[11px] sm:text-xs text-white/60">
-                How long can you last?
+                How Long Can You Last?
               </p>
             </div>
           </div>
@@ -218,34 +218,39 @@ export default function HomePage() {
                 {roundNumber !== null && (
                   <>
                     <span className="mx-1">•</span>
-                    <span>Current Round: {roundNumber}</span>
+                    <span>Round {roundNumber}</span>
                   </>
                 )}
+                <span className="mx-1">•</span>
+                <span>Free to play. Aussie as.</span>
               </span>
             </div>
 
             {/* Main heading */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
-               <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
+              <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
+                Footy. Banter. Bragging rights.
+              </span>
+              <span className="text-[#FF7A00] drop-shadow-[0_0_18px_rgba(255,122,0,0.8)]">
                 How Long Can You Last?
               </span>
-              
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Make your Picks for the game, build your longest streak, and climb the ladder.
-              One wrong call and it&apos;s back to zero.
+              Quarter-by-quarter AFL stat picks. Back your gut, ride the hot
+              hand, and roast your mates when you&apos;re on a heater. One
+              wrong call and your streak is cooked — back to zip.
             </p>
 
             {/* Prize pill */}
-            <div className="inline-flex items-center gap-3 mb-6">
+            <div className="inline-flex flex-wrap items-center gap-3 mb-6">
               <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
                 <span className="text-sm font-semibold text-orange-200">
-                  $1,000 in prizes every round*
+                  Up to $1,000 in prizes every round*
                 </span>
               </div>
               <span className="hidden sm:inline text-[11px] text-white/60">
-                Free to play • 18+ • No gambling
+                Free to play • 18+ • No gambling • Just bragging rights
               </span>
             </div>
 
@@ -255,64 +260,146 @@ export default function HomePage() {
                 href="/picks"
                 className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
               >
-                Play now – make your streak pick
+                Play now – make your next pick
               </Link>
               <Link
                 href="/leaderboards"
                 className="inline-flex items-center justify-center rounded-full border border-white/25 hover:border-sky-400/80 hover:text-sky-300 px-6 py-3 text-sm sm:text-base text-white/85"
               >
-                View leaderboards
+                Check who&apos;s talking big
               </Link>
             </div>
 
             <p className="text-[11px] text-white/50">
               *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
-              gambling. 18+ only.
+              gambling. 18+ only. Don&apos;t be a mug — play for fun.
             </p>
           </div>
 
           {/* Right hero image card */}
           <div className="relative">
-            <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-sky-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
+            <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
+              {/* You can swap this out for a more cinematic Aussie hero image, e.g.
+                  /images/streakr-hero-night-footy.png */}
               <Image
                 src="/mcg-hero.jpg"
-                alt="MCG at night"
+                alt="Night footy at the G"
                 fill
-                className="object-cover opacity-80"
+                className="object-cover opacity-85"
                 priority
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+              <div className="absolute top-4 left-4 flex items-center gap-2">
+                <span className="rounded-full bg-black/70 border border-white/20 px-3 py-1 text-[11px] font-semibold">
+                  Live AFL player-stat picks
+                </span>
+              </div>
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
-                  <p className="text-[11px] text-white/60">
-                    Live streaks in every game.
+                  <p className="text-[11px] text-white/60 mb-1">
+                    Group chats. Pub TVs. Office comps.
+                  </p>
+                  <p className="text-sm font-semibold text-white">
+                    One streak. Endless sledging.
                   </p>
                 </div>
-                <div className="rounded-full bg-sky-500/90 text-black text-xs font-semibold px-3 py-1 shadow-[0_0_24px_rgba(56,189,248,0.9)]">
-                  Make your Picks
+                <div className="rounded-full bg-[#FF7A00] text-black text-xs font-bold px-3 py-1 shadow-[0_0_24px_rgba(255,122,0,0.9)]">
+                  Make your next pick
                 </div>
               </div>
             </div>
           </div>
         </section>
 
-        {/* NEXT QUESTIONS PREVIEW */}
+        {/* HOW IT WORKS */}
+        <section className="mb-10">
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">
+            How STREAKr works
+          </h2>
+          <p className="text-sm text-white/70 mb-4 max-w-2xl">
+            It&apos;s like tipping&apos;s louder cousin. Quick picks, live
+            sweat, and bragging rights that last all week.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-4">
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                1 · Pick a player question
+              </p>
+              <p className="text-sm text-white/80">
+                Every quarter has hand-picked AFL player-stat questions.{" "}
+                <span className="font-semibold">Yes</span> or{" "}
+                <span className="font-semibold">No</span> — back your gut and
+                lock in your pick.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                2 · Build a filthy streak
+              </p>
+              <p className="text-sm text-white/80">
+                Every correct answer adds{" "}
+                <span className="font-semibold">+1</span> to your streak. One
+                wrong pick and you&apos;re{" "}
+                <span className="font-semibold">back to zero</span>. No safety
+                nets. No cash outs. Just nerve.
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                3 · Flex on your mates
+              </p>
+              <p className="text-sm text-white/80">
+                Climb the round ladder, earn{" "}
+                <span className="font-semibold">badges</span>, win{" "}
+                <span className="font-semibold">prizes</span>, and send those
+                screenshots straight into the group chat. Long streak = loudest
+                voice.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid sm:grid-cols-3 gap-4 text-sm text-white/75">
+            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                Built for
+              </p>
+              <p>Group chats, office comps, pub TVs and venue leagues.</p>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                No deposit, no drama
+              </p>
+              <p>Free to play. No odds, no multis, no gambling nonsense.</p>
+            </div>
+            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                Just the footy chat
+              </p>
+              <p>
+                Back your eye for the game, not your bank account. Be the one
+                everyone hates losing to.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* NEXT QUESTIONS PREVIEW – KEEPING PICKS DOWN THE BOTTOM */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold">
-                Next Available Picks
+                Tonight&apos;s live picks preview
               </h2>
               <p className="text-sm text-white/70">
-                A preview of some open questions. Jump into Picks to lock in
-                your streak.
+                A taste of the open questions right now. Jump into Picks to
+                actually lock yours in.
               </p>
             </div>
             <Link
               href="/picks"
-              className="text-sm text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+              className="text-sm text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
             >
-              View all picks →
+              Make your next pick →
             </Link>
           </div>
 
@@ -323,7 +410,8 @@ export default function HomePage() {
 
           {!loading && previewQuestions.length === 0 && !error && (
             <p className="text-sm text-white/60">
-              No open questions right now. Check back closer to game time.
+              No open questions right now. Schedule&apos;s probably between
+              games — check back closer to bounce.
             </p>
           )}
 
@@ -333,13 +421,13 @@ export default function HomePage() {
               return (
                 <div
                   key={q.id}
-                  className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-sky-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
+                  className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-orange-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
                 >
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                     {/* Left: meta + question */}
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
-                        <span className="font-semibold text-white/80">
+                        <span className="font-semibold text-orange-200">
                           Q{q.quarter}
                         </span>
                         <span>•</span>
@@ -380,53 +468,12 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* HOW IT WORKS */}
-        <section className="mb-10">
-          <h2 className="text-xl sm:text-2xl font-bold mb-4">
-            How STREAKr works
-          </h2>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-sky-300 mb-1">
-                1 · Make your pick
-              </p>
-              <p className="text-sm text-white/80">
-                Each quarter has hand-picked AFL questions. Choose{" "}
-                <span className="font-semibold">Yes</span> or{" "}
-                <span className="font-semibold">No</span> on one question as
-                your active streak pick.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-sky-300 mb-1">
-                2 · Build the streak
-              </p>
-              <p className="text-sm text-white/80">
-                Every correct answer adds{" "}
-                <span className="font-semibold">+1</span> to your streak. One
-                wrong pick and your streak resets to{" "}
-                <span className="font-semibold">0</span>.
-              </p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-sky-300 mb-1">
-                3 · Climb the ladder
-              </p>
-              <p className="text-sm text-white/80">
-                Chase the top 10 each round, compare streaks with your mates in
-                private leagues, and compete for a share of{" "}
-                <span className="font-semibold">$1,000 in prizes</span>.
-              </p>
-            </div>
-          </div>
-        </section>
-
         {/* SOCIAL + FOOTER */}
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
           {/* Social bar */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <p className="text-xs sm:text-sm text-white/60 uppercase tracking-wide">
-              Follow STREAKr
+              Follow STREAKr – clips, challenges &amp; bad beats
             </p>
             <div className="flex flex-wrap gap-3">
               {/* Instagram */}
@@ -475,11 +522,13 @@ export default function HomePage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
               STREAKr is a free game of skill. No gambling. 18+ only. Prizes
-              subject to terms and conditions.
+              subject to terms and conditions. Play responsibly and don&apos;t
+              be a hero chasing losses — it&apos;s just for fun and bragging
+              rights.
             </p>
             <Link
               href="/faq"
-              className="text-sky-300 hover:text-sky-200 underline-offset-2 hover:underline"
+              className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
             >
               FAQ
             </Link>
