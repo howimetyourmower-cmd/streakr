@@ -21,7 +21,7 @@ type JsonRow = {
 
 type ApiQuestion = {
   id: string;
-  gameId: string; // ✅ NEW: explicit gameId (e.g. "OR-G1")
+  gameId: string; // explicit gameId (e.g. "OR-G1")
   quarter: number;
   question: string;
   status: QuestionStatus;
@@ -92,7 +92,7 @@ function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   return undefined;
 }
 
-// ✅ Safer status normalisation (instead of `as QuestionStatus`)
+// Safer status normalisation
 function normaliseStatusValue(val: unknown): QuestionStatus {
   const s = String(val ?? "open").trim().toLowerCase();
   if (s === "open") return "open";
@@ -174,7 +174,9 @@ async function getPickStatsForRound(
       const pick = data.pick;
       if (!questionId || (pick !== "yes" && pick !== "no")) return;
 
-      if (!pickStats[questionId]) pickStats[questionId] = { yes: 0, no: 0, total: 0 };
+      if (!pickStats[questionId]) {
+        pickStats[questionId] = { yes: 0, no: 0, total: 0 };
+      }
 
       pickStats[questionId][pick] += 1;
       pickStats[questionId].total += 1;
@@ -331,6 +333,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(empty);
     }
 
+    // ✅ THIS IS WHAT MAKES "BLUE PICKS" WORK:
+    // if the client sends Authorization: Bearer <idToken>,
+    // we can identify the user and include q.userPick.
     const currentUserId = await getUserIdFromRequest(req);
 
     const sponsorConfig = await getSponsorQuestionConfig();
@@ -397,7 +402,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
-        gameId: gameKey, // ✅ NEW
+        gameId: gameKey,
         quarter: row.Quarter,
         question: row.Question,
         status: effectiveStatus,
