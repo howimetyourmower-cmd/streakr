@@ -1,5 +1,4 @@
 // /app/api/settlement/route.ts
-// GAME-LEVEL SCORING (AUTHORITATIVE)
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
@@ -13,8 +12,6 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
-  status?: QuestionStatus;
-  outcome?: QuestionOutcome | "lock";
   action?:
     | "lock"
     | "reopen"
@@ -24,196 +21,56 @@ type RequestBody = {
     | "void";
 };
 
-type ResultState = "correct" | "wrong";
-
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
 }
 
-type PickRow = {
-  userId: string;
-  outcome: "yes" | "no";
-  gameId: string;
-};
-
-async function getPicksForQuestion(questionId: string): Promise<PickRow[]> {
-  const results: PickRow[] = [];
+async function getPicksForQuestion(questionId: string): Promise<
+  { userId: string; pick: "yes" | "no" }[]
+> {
+  const results: { userId: string; pick: "yes" | "no" }[] = [];
 
   const snap = await db
     .collection("picks")
     .where("questionId", "==", questionId)
     .get();
 
-  snap.forEach((docSnap) => {
-    const d = docSnap.data() as any;
-    if (
-      typeof d.userId === "string" &&
-      (d.pick === "yes" || d.pick === "no") &&
-      typeof d.gameId === "string"
-    ) {
-      results.push({
-        userId: d.userId,
-        outcome: d.pick,
-        gameId: d.gameId,
-      });
+  snap.forEach((doc) => {
+    const d = doc.data() as any;
+    if (d.userId && (d.pick === "yes" || d.pick === "no")) {
+      results.push({ userId: d.userId, pick: d.pick });
     }
   });
 
   return results;
 }
 
-function userGameStateDocId(
-  roundNumber: number,
-  gameId: string,
-  userId: string
-) {
-  return `${roundNumber}__${gameId}__${userId}`;
-}
-
-function computeGameScore(results: Record<string, ResultState>): number {
-  const vals = Object.values(results);
-  if (vals.some((v) => v === "wrong")) return 0;
-  return vals.length;
-}
-
-async function applyGameScoring(
-  roundNumber: number,
-  questionId: string,
-  outcome: QuestionOutcome
-) {
-  if (outcome === "void") return;
-
-  const picks = await getPicksForQuestion(questionId);
-  if (!picks.length) return;
-
-  const updates: Promise<any>[] = [];
-
-  for (const { userId, outcome: pick, gameId } of picks) {
-    const userRef = db.collection("users").doc(userId);
-    const gsRef = db
-      .collection("userGameState")
-      .doc(userGameStateDocId(roundNumber, gameId, userId));
-
-    const p = db.runTransaction(async (tx) => {
-      const userSnap = await tx.get(userRef);
-      const gsSnap = await tx.get(gsRef);
-
-      const wasCorrect = pick === outcome;
-
-      const prevResults: Record<string, ResultState> =
-        gsSnap.exists && typeof gsSnap.data()?.results === "object"
-          ? (gsSnap.data()!.results as Record<string, ResultState>)
-          : {};
-
-      const nextResults: Record<string, ResultState> = {
-        ...prevResults,
-        [questionId]: wasCorrect ? "correct" : "wrong",
-      };
-
-      const gameScore = computeGameScore(nextResults);
-
-      let longestStreak =
-        userSnap.exists && typeof userSnap.data()?.longestStreak === "number"
-          ? userSnap.data()!.longestStreak
-          : 0;
-
-      if (gameScore > longestStreak) {
-        longestStreak = gameScore;
-      }
-
-      tx.set(
-        gsRef,
-        {
-          roundNumber,
-          gameId,
-          userId,
-          results: nextResults,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      tx.set(
-        userRef,
-        {
-          currentStreak: gameScore,
-          longestStreak,
-          lastUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-
-    updates.push(p);
-  }
-
-  await Promise.all(updates);
-}
-
-async function revertGameScoring(
-  roundNumber: number,
-  questionId: string,
-  previousOutcome: QuestionOutcome
-) {
-  if (previousOutcome === "void") return;
-
-  const picks = await getPicksForQuestion(questionId);
-  if (!picks.length) return;
-
-  const updates: Promise<any>[] = [];
-
-  for (const { userId, gameId } of picks) {
-    const userRef = db.collection("users").doc(userId);
-    const gsRef = db
-      .collection("userGameState")
-      .doc(userGameStateDocId(roundNumber, gameId, userId));
-
-    const p = db.runTransaction(async (tx) => {
-      const gsSnap = await tx.get(gsRef);
-
-      const prevResults: Record<string, ResultState> =
-        gsSnap.exists && typeof gsSnap.data()?.results === "object"
-          ? (gsSnap.data()!.results as Record<string, ResultState>)
-          : {};
-
-      const nextResults: Record<string, ResultState> = { ...prevResults };
-      delete nextResults[questionId];
-
-      const gameScore = computeGameScore(nextResults);
-
-      tx.set(
-        gsRef,
-        {
-          results: nextResults,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      tx.set(
-        userRef,
-        {
-          currentStreak: gameScore,
-          lastUpdatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-    });
-
-    updates.push(p);
-  }
-
-  await Promise.all(updates);
+/**
+ * Compute per-game score:
+ * - Any wrong pick → 0
+ * - Otherwise → number of picks made
+ */
+function computeGameScore(
+  results: Record<string, "correct" | "wrong">
+): number {
+  const values = Object.values(results);
+  if (!values.length) return 0;
+  if (values.some((v) => v === "wrong")) return 0;
+  return values.length;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
-    const { roundNumber, questionId } = body;
+    const { roundNumber, questionId, action } = body;
 
-    if (typeof roundNumber !== "number" || !questionId) {
+    if (
+      typeof roundNumber !== "number" ||
+      !questionId ||
+      !action
+    ) {
       return NextResponse.json(
-        { error: "roundNumber and questionId required" },
+        { error: "Invalid request" },
         { status: 400 }
       );
     }
@@ -223,88 +80,112 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .doc(questionStatusDocId(roundNumber, questionId));
 
     const prevSnap = await qsRef.get();
-    const prev = prevSnap.exists ? (prevSnap.data() as any) : {};
-    const prevStatus = prev.status as QuestionStatus | undefined;
-    const prevOutcome = prev.outcome as QuestionOutcome | undefined;
+    const prevData = prevSnap.exists ? (prevSnap.data() as any) : null;
 
-    let status = body.status;
-    let outcome = body.outcome;
+    let status: QuestionStatus;
+    let outcome: QuestionOutcome | undefined;
 
-    if (body.action) {
-      switch (body.action) {
-        case "lock":
-          status = "pending";
-          outcome = "lock";
-          break;
-        case "reopen":
-          status = "open";
-          outcome = undefined;
-          break;
-        case "final_yes":
-          status = "final";
-          outcome = "yes";
-          break;
-        case "final_no":
-          status = "final";
-          outcome = "no";
-          break;
-        case "final_void":
-        case "void":
-          status = "void";
-          outcome = "void";
-          break;
-      }
+    switch (action) {
+      case "lock":
+        status = "pending";
+        break;
+      case "reopen":
+        status = "open";
+        break;
+      case "final_yes":
+        status = "final";
+        outcome = "yes";
+        break;
+      case "final_no":
+        status = "final";
+        outcome = "no";
+        break;
+      case "final_void":
+      case "void":
+        status = "void";
+        outcome = "void";
+        break;
+      default:
+        return NextResponse.json(
+          { error: "Invalid action" },
+          { status: 400 }
+        );
     }
 
-    if (!status) {
-      return NextResponse.json(
-        { error: "status or action required" },
-        { status: 400 }
-      );
+    await qsRef.set(
+      {
+        roundNumber,
+        questionId,
+        status,
+        outcome,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    // Only apply scoring on FINAL yes/no
+    if (status !== "final" || !outcome || outcome === "void") {
+      return NextResponse.json({ ok: true });
     }
 
-    const payload: any = {
-      roundNumber,
-      questionId,
-      status,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-
-    if (outcome) payload.outcome = outcome;
-    else payload.outcome = FieldValue.delete();
-
-    await qsRef.set(payload, { merge: true });
-
-    if (
-      status === "final" &&
-      (outcome === "yes" || outcome === "no" || outcome === "void")
-    ) {
-      if (
-        prevStatus === "final" &&
-        prevOutcome &&
-        prevOutcome !== outcome
-      ) {
-        await revertGameScoring(roundNumber, questionId, prevOutcome);
-      }
-
-      await applyGameScoring(roundNumber, questionId, outcome);
+    const picks = await getPicksForQuestion(questionId);
+    if (!picks.length) {
+      return NextResponse.json({ ok: true });
     }
 
-    if (status === "open" && prevStatus === "final" && prevOutcome) {
-      await revertGameScoring(roundNumber, questionId, prevOutcome);
+    const byUser: Record<
+      string,
+      Record<string, "correct" | "wrong">
+    > = {};
+
+    for (const { userId, pick } of picks) {
+      if (!byUser[userId]) byUser[userId] = {};
+      byUser[userId][questionId] =
+        pick === outcome ? "correct" : "wrong";
     }
 
-    if (
-      status === "void" &&
-      prevStatus === "final" &&
-      (prevOutcome === "yes" || prevOutcome === "no")
-    ) {
-      await revertGameScoring(roundNumber, questionId, prevOutcome);
+    const updates: Promise<unknown>[] = [];
+
+    for (const userId of Object.keys(byUser)) {
+      const userRef = db.collection("users").doc(userId);
+
+      const p = db.runTransaction(async (tx) => {
+        const snap = await tx.get(userRef);
+        const u = snap.exists ? (snap.data() as any) : {};
+
+        const prevCurrent =
+          typeof u.currentStreak === "number" ? u.currentStreak : 0;
+        const prevLongest =
+          typeof u.longestStreak === "number" ? u.longestStreak : 0;
+
+        const gameScore = computeGameScore(byUser[userId]);
+
+        let newCurrent = 0;
+        if (gameScore > 0) {
+          newCurrent = prevCurrent + gameScore;
+        }
+
+        const newLongest = Math.max(prevLongest, newCurrent);
+
+        tx.set(
+          userRef,
+          {
+            currentStreak: newCurrent,
+            longestStreak: newLongest,
+            lastUpdatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      });
+
+      updates.push(p);
     }
+
+    await Promise.all(updates);
 
     return NextResponse.json({ ok: true });
-  } catch (error) {
-    console.error("[/api/settlement] error", error);
+  } catch (err) {
+    console.error("[/api/settlement] Error", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
