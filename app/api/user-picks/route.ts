@@ -41,6 +41,7 @@ async function getLatestPickForUser(uid: string): Promise<{
 
     const docSnap = snap.docs[0];
     const data = docSnap.data() as any;
+
     const questionId =
       typeof data.questionId === "string" ? data.questionId : null;
     const outcome =
@@ -110,10 +111,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({
-      questionId,
-      outcome,
-    });
+    return NextResponse.json({ questionId, outcome });
   } catch (error) {
     console.error("[/api/user-picks] GET error", error);
     return NextResponse.json(
@@ -125,7 +123,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 /**
  * POST – set/update the user's active streak pick
- * Body: { questionId: string, outcome: "yes" | "no", roundNumber?: number | null }
+ * Body:
+ * {
+ *   questionId: string,
+ *   outcome: "yes" | "no",
+ *   roundNumber?: number | null,
+ *   gameId?: string | null   ✅ IMPORTANT for game scoring mechanics
+ * }
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
@@ -135,10 +139,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const body = await req.json();
+
     const questionId: string | undefined = body?.questionId;
     const outcome: "yes" | "no" | undefined = body?.outcome;
+
     const roundNumber: number | null =
       typeof body?.roundNumber === "number" ? body.roundNumber : null;
+
+    const gameId: string | null =
+      typeof body?.gameId === "string" && body.gameId.trim()
+        ? body.gameId.trim()
+        : null;
 
     if (!questionId || (outcome !== "yes" && outcome !== "no")) {
       return NextResponse.json(
@@ -149,7 +160,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const now = Timestamp.now();
 
-    // 1) Update the user's active pick fields
+    // 1) Update the user's active pick fields (keep your existing behaviour)
     const userRef = db.collection("users").doc(uid);
     await userRef.set(
       {
@@ -161,20 +172,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
 
     // 2) Upsert a pick document for this user & question
+    // IMPORTANT: include gameId so settlement can compute gameScore correctly.
     const pickId = `${uid}_${questionId}`;
     const pickRef = db.collection("picks").doc(pickId);
 
-    await pickRef.set(
-      {
-        userId: uid,
-        questionId,
-        roundNumber,
-        pick: outcome,
-        createdAt: now,
-        updatedAt: now,
-      },
-      { merge: true }
-    );
+    const payload: any = {
+      userId: uid,
+      questionId,
+      roundNumber,
+      pick: outcome,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    if (gameId) payload.gameId = gameId;
+
+    await pickRef.set(payload, { merge: true });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
