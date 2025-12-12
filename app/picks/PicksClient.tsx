@@ -986,8 +986,7 @@ try {
 const shareUrl =
 typeof window !== "undefined"
 ? window.location.href
-: "https://streakr.com.au
-";
+: "https://streakr.com.au";
 
   if (typeof navigator !== "undefined" && (navigator as any).share) {
     await (navigator as any).share({
