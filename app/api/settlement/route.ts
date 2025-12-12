@@ -1,4 +1,17 @@
 // /app/api/settlement/route.ts
+// GAME-LEVEL SCORING (AUTHORITATIVE)
+//
+// Rules implemented:
+// - Scoring is PER GAME, not per question
+// - User can pick N questions in a game
+// - If ANY picked question is wrong → gameScore = 0
+// - If ALL picked questions are correct → gameScore = N
+// - currentStreak reflects the CURRENT GAME SCORE ONLY
+// - Streak can NEVER rebound within the same game
+// - Settlement order does NOT matter
+// - Reopen cleanly removes the game result and recomputes
+//
+// Leaderboard reads users.currentStreak (now correct)
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
@@ -12,10 +25,8 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
-  // old style
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock";
-  // new style
   action?:
     | "lock"
     | "reopen"
@@ -25,66 +36,36 @@ type RequestBody = {
     | "void";
 };
 
-/** Deterministic doc id for questionStatus */
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
 }
 
-/**
- * We keep a per-user per-round per-game doc that stores correctness per question.
- * This makes streak/game-score order independent (settle YES then NO or vice versa).
- *
- * Doc id: `${round}__${gameId}__${userId}`
- *
- * Shape:
- * {
- *   roundNumber,
- *   gameId,
- *   userId,
- *   results: { [questionId]: "correct" | "wrong" }  // only for picks they made
- *   updatedAt
- * }
- */
-function userGameStateDocId(roundNumber: number, gameId: string, userId: string) {
-  return `${roundNumber}__${gameId}__${userId}`;
-}
+type PickRow = {
+  userId: string;
+  outcome: "yes" | "no";
+  gameId: string;
+};
 
-type PickRow = { userId: string; outcome: "yes" | "no"; gameId?: string | null };
-
-/**
- * Fetch all picks for a given question from both:
- *  - `picks`      (current collection written by /api/user-picks, field `pick`)
- *  - `userPicks`  (legacy collection, field `outcome`)
- *
- * We ALSO try to read `gameId` off the pick docs if it exists.
- */
 async function getPicksForQuestion(questionId: string): Promise<PickRow[]> {
   const results: PickRow[] = [];
 
-  const [picksSnap, userPicksSnap] = await Promise.all([
-    db.collection("picks").where("questionId", "==", questionId).get(),
-    db.collection("userPicks").where("questionId", "==", questionId).get(),
-  ]);
+  const snap = await db
+    .collection("picks")
+    .where("questionId", "==", questionId)
+    .get();
 
-  picksSnap.forEach((docSnap) => {
-    const data = docSnap.data() as any;
-    const userId = data.userId;
-    const pick = data.pick;
-    const gameId = typeof data.gameId === "string" ? data.gameId : null;
-
-    if (typeof userId === "string" && (pick === "yes" || pick === "no")) {
-      results.push({ userId, outcome: pick, gameId });
-    }
-  });
-
-  userPicksSnap.forEach((docSnap) => {
-    const data = docSnap.data() as any;
-    const userId = data.userId;
-    const out = data.outcome;
-    const gameId = typeof data.gameId === "string" ? data.gameId : null;
-
-    if (typeof userId === "string" && (out === "yes" || out === "no")) {
-      results.push({ userId, outcome: out, gameId });
+  snap.forEach((docSnap) => {
+    const d = docSnap.data() as any;
+    if (
+      typeof d.userId === "string" &&
+      (d.pick === "yes" || d.pick === "no") &&
+      typeof d.gameId === "string"
+    ) {
+      results.push({
+        userId: d.userId,
+        outcome: d.pick,
+        gameId: d.gameId,
+      });
     }
   });
 
@@ -92,24 +73,33 @@ async function getPicksForQuestion(questionId: string): Promise<PickRow[]> {
 }
 
 /**
- * Recompute gameScore from a results map.
- * - if any "wrong" => 0
- * - else => count("correct")
+ * Per-user per-game state
+ *
+ * userGameState/{round}__{gameId}__{userId}
+ * {
+ *   roundNumber,
+ *   gameId,
+ *   userId,
+ *   results: { [questionId]: "correct" | "wrong" }
+ * }
  */
-function computeGameScore(results: Record<string, "correct" | "wrong">) {
-  const vals = Object.values(results || {});
-  if (vals.some((v) => v === "wrong")) return 0;
-  return vals.filter((v) => v === "correct").length;
+function userGameStateDocId(
+  roundNumber: number,
+  gameId: string,
+  userId: string
+) {
+  return `${roundNumber}__${gameId}__${userId}`;
 }
 
-/**
- * Apply game-score mechanics for a settled question (final yes/no).
- * Also updates lifetime wins/losses like before.
- *
- * IMPORTANT:
- * - currentStreak now becomes GAME SCORE for that game (order independent).
- */
-async function applyGameScoringForQuestion(
+function computeGameScore(
+  results: Record<string, "correct" | "wrong">
+) {
+  const vals = Object.values(results);
+  if (vals.some((v) => v === "wrong")) return 0;
+  return vals.length;
+}
+
+async function applyGameScoring(
   roundNumber: number,
   questionId: string,
   outcome: QuestionOutcome
@@ -119,106 +109,62 @@ async function applyGameScoringForQuestion(
   const picks = await getPicksForQuestion(questionId);
   if (!picks.length) return;
 
-  const updates: Promise<unknown>[] = [];
+  const updates: Promise<any>[] = [];
 
   for (const { userId, outcome: pick, gameId } of picks) {
-    // If we don't know the gameId, we can’t do per-game scoring safely.
-    // We’ll still do the old per-question lifetime wins/losses update,
-    // but we won’t touch currentStreak (to avoid wrong state).
-    const canDoGame = typeof gameId === "string" && gameId.length > 0;
-
     const userRef = db.collection("users").doc(userId);
+    const gsRef = db
+      .collection("userGameState")
+      .doc(userGameStateDocId(roundNumber, gameId, userId));
 
     const p = db.runTransaction(async (tx) => {
       const userSnap = await tx.get(userRef);
-
-      let currentStreak = 0;
-      let longestStreak = 0;
-      let lifetimeWins = 0;
-      let lifetimeLosses = 0;
-      let roundsPlayed = 0;
-      let roundsPlayedRounds: number[] = [];
-
-      if (userSnap.exists) {
-        const u = userSnap.data() as any;
-        currentStreak = typeof u.currentStreak === "number" ? u.currentStreak : 0;
-        longestStreak = typeof u.longestStreak === "number" ? u.longestStreak : 0;
-        lifetimeWins = typeof u.lifetimeWins === "number" ? u.lifetimeWins : 0;
-        lifetimeLosses = typeof u.lifetimeLosses === "number" ? u.lifetimeLosses : 0;
-        roundsPlayed = typeof u.roundsPlayed === "number" ? u.roundsPlayed : 0;
-        roundsPlayedRounds = Array.isArray(u.roundsPlayedRounds) ? u.roundsPlayedRounds : [];
-      }
+      const gsSnap = await tx.get(gsRef);
 
       const wasCorrect = pick === outcome;
 
-      // Lifetime stats remain per-question (as you had)
-      if (wasCorrect) lifetimeWins += 1;
-      else lifetimeLosses += 1;
+      const prevResults: Record<string, "correct" | "wrong"> =
+        gsSnap.exists && typeof gsSnap.data()?.results === "object"
+          ? gsSnap.data()!.results
+          : {};
 
-      // Rounds played – once per round per user (same as before)
-      let shouldUpdateRounds = false;
-      let newRoundsPlayed = roundsPlayed;
-
-      if (!roundsPlayedRounds.includes(roundNumber)) {
-        shouldUpdateRounds = true;
-        newRoundsPlayed = roundsPlayed + 1;
-      }
-
-      let nextCurrentStreak = currentStreak;
-
-      if (canDoGame) {
-        const gsRef = db
-          .collection("userGameState")
-          .doc(userGameStateDocId(roundNumber, gameId!, userId));
-
-        const gsSnap = await tx.get(gsRef);
-        const prev = gsSnap.exists ? (gsSnap.data() as any) : {};
-        const prevResults: Record<string, "correct" | "wrong"> =
-          prev?.results && typeof prev.results === "object" ? prev.results : {};
-
-        const nextResults: Record<string, "correct" | "wrong"> = {
-          ...prevResults,
-          [questionId]: wasCorrect ? "correct" : "wrong",
-        };
-
-        const gameScore = computeGameScore(nextResults);
-
-        // ✅ currentStreak now mirrors GAME SCORE (all-or-nothing)
-        nextCurrentStreak = gameScore;
-
-        // Longest streak is now "best game score achieved" (if you want it that way)
-        // If you want longestStreak to stay lifetime best *gameScore*, this is correct:
-        if (typeof gameScore === "number" && gameScore > longestStreak) {
-          longestStreak = gameScore;
-        }
-
-        tx.set(
-          gsRef,
-          {
-            roundNumber,
-            gameId,
-            userId,
-            results: nextResults,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-
-      const payload: any = {
-        currentStreak: nextCurrentStreak,
-        longestStreak,
-        lifetimeWins,
-        lifetimeLosses,
-        lastUpdatedAt: FieldValue.serverTimestamp(),
+      const nextResults = {
+        ...prevResults,
+        [questionId]: wasCorrect ? "correct" : "wrong",
       };
 
-      if (shouldUpdateRounds) {
-        payload.roundsPlayed = newRoundsPlayed;
-        payload.roundsPlayedRounds = FieldValue.arrayUnion(roundNumber);
+      const gameScore = computeGameScore(nextResults);
+
+      let longestStreak =
+        userSnap.exists && typeof userSnap.data()?.longestStreak === "number"
+          ? userSnap.data()!.longestStreak
+          : 0;
+
+      if (gameScore > longestStreak) {
+        longestStreak = gameScore;
       }
 
-      tx.set(userRef, payload, { merge: true });
+      tx.set(
+        gsRef,
+        {
+          roundNumber,
+          gameId,
+          userId,
+          results: nextResults,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      tx.set(
+        userRef,
+        {
+          currentStreak: gameScore,
+          longestStreak,
+          lastUpdatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
     });
 
     updates.push(p);
@@ -227,14 +173,7 @@ async function applyGameScoringForQuestion(
   await Promise.all(updates);
 }
 
-/**
- * Revert effects of a previously-final yes/no when reopened or changed.
- * We must:
- * - revert lifetime wins/losses
- * - remove the stored correctness for that question from userGameState and recompute gameScore
- * - set users.currentStreak to recomputed gameScore (so it doesn’t bounce wrong)
- */
-async function revertGameScoringForQuestion(
+async function revertGameScoring(
   roundNumber: number,
   questionId: string,
   previousOutcome: QuestionOutcome
@@ -244,73 +183,40 @@ async function revertGameScoringForQuestion(
   const picks = await getPicksForQuestion(questionId);
   if (!picks.length) return;
 
-  const updates: Promise<unknown>[] = [];
+  const updates: Promise<any>[] = [];
 
-  for (const { userId, outcome: pick, gameId } of picks) {
-    const canDoGame = typeof gameId === "string" && gameId.length > 0;
-
+  for (const { userId, gameId } of picks) {
     const userRef = db.collection("users").doc(userId);
+    const gsRef = db
+      .collection("userGameState")
+      .doc(userGameStateDocId(roundNumber, gameId, userId));
 
     const p = db.runTransaction(async (tx) => {
-      const userSnap = await tx.get(userRef);
+      const gsSnap = await tx.get(gsRef);
 
-      let currentStreak = 0;
-      let longestStreak = 0;
-      let lifetimeWins = 0;
-      let lifetimeLosses = 0;
+      const prevResults: Record<string, "correct" | "wrong"> =
+        gsSnap.exists && typeof gsSnap.data()?.results === "object"
+          ? gsSnap.data()!.results
+          : {};
 
-      if (userSnap.exists) {
-        const u = userSnap.data() as any;
-        currentStreak = typeof u.currentStreak === "number" ? u.currentStreak : 0;
-        longestStreak = typeof u.longestStreak === "number" ? u.longestStreak : 0;
-        lifetimeWins = typeof u.lifetimeWins === "number" ? u.lifetimeWins : 0;
-        lifetimeLosses = typeof u.lifetimeLosses === "number" ? u.lifetimeLosses : 0;
-      }
+      const nextResults = { ...prevResults };
+      delete nextResults[questionId];
 
-      const wasCorrect = pick === previousOutcome;
+      const gameScore = computeGameScore(nextResults);
 
-      // Revert lifetime stats per-question
-      if (wasCorrect) lifetimeWins = Math.max(0, lifetimeWins - 1);
-      else lifetimeLosses = Math.max(0, lifetimeLosses - 1);
-
-      let nextCurrentStreak = currentStreak;
-
-      if (canDoGame) {
-        const gsRef = db
-          .collection("userGameState")
-          .doc(userGameStateDocId(roundNumber, gameId!, userId));
-
-        const gsSnap = await tx.get(gsRef);
-        const prev = gsSnap.exists ? (gsSnap.data() as any) : {};
-        const prevResults: Record<string, "correct" | "wrong"> =
-          prev?.results && typeof prev.results === "object" ? prev.results : {};
-
-        const nextResults = { ...prevResults };
-        delete nextResults[questionId];
-
-        const gameScore = computeGameScore(nextResults);
-        nextCurrentStreak = gameScore;
-
-        tx.set(
-          gsRef,
-          {
-            roundNumber,
-            gameId,
-            userId,
-            results: nextResults,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
+      tx.set(
+        gsRef,
+        {
+          results: nextResults,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
 
       tx.set(
         userRef,
         {
-          currentStreak: nextCurrentStreak,
-          longestStreak, // we do not reduce longest
-          lifetimeWins,
-          lifetimeLosses,
+          currentStreak: gameScore,
           lastUpdatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -328,9 +234,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const body = (await req.json()) as RequestBody;
     const { roundNumber, questionId } = body;
 
-    if (typeof roundNumber !== "number" || Number.isNaN(roundNumber) || !questionId) {
+    if (
+      typeof roundNumber !== "number" ||
+      !questionId
+    ) {
       return NextResponse.json(
-        { error: "roundNumber and questionId are required" },
+        { error: "roundNumber and questionId required" },
         { status: 400 }
       );
     }
@@ -340,18 +249,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .doc(questionStatusDocId(roundNumber, questionId));
 
     const prevSnap = await qsRef.get();
-    const prevData = prevSnap.exists
-      ? (prevSnap.data() as { status?: QuestionStatus; outcome?: QuestionOutcome | "lock" })
-      : null;
+    const prev = prevSnap.exists ? prevSnap.data() as any : {};
+    const prevStatus = prev.status as QuestionStatus | undefined;
+    const prevOutcome = prev.outcome as QuestionOutcome | undefined;
 
-    const prevStatus = prevData?.status;
-    const prevOutcome =
-      prevData?.outcome === "yes" || prevData?.outcome === "no" || prevData?.outcome === "void"
-        ? (prevData.outcome as QuestionOutcome)
-        : undefined;
-
-    let status: QuestionStatus | undefined = body.status;
-    let outcome: QuestionOutcome | "lock" | undefined = body.outcome;
+    let status = body.status;
+    let outcome = body.outcome;
 
     if (body.action) {
       switch (body.action) {
@@ -379,12 +282,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    if (!status && outcome && (outcome === "yes" || outcome === "no" || outcome === "void")) {
-      status = outcome === "void" ? "void" : "final";
-    }
-
     if (!status) {
-      return NextResponse.json({ error: "status or action is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "status or action required" },
+        { status: 400 }
+      );
     }
 
     const payload: any = {
@@ -399,30 +301,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
-    // ── Revert/Apply ─────────────────────────────────────────────
-
-    // If changing from one final outcome to another, revert old first
-    if (status === "final" && (outcome === "yes" || outcome === "no" || outcome === "void")) {
-      if (prevStatus === "final" && prevOutcome && prevOutcome !== outcome) {
-        await revertGameScoringForQuestion(roundNumber, questionId, prevOutcome);
+    if (
+      status === "final" &&
+      (outcome === "yes" || outcome === "no" || outcome === "void")
+    ) {
+      if (
+        prevStatus === "final" &&
+        prevOutcome &&
+        prevOutcome !== outcome
+      ) {
+        await revertGameScoring(roundNumber, questionId, prevOutcome);
       }
 
-      await applyGameScoringForQuestion(roundNumber, questionId, outcome as QuestionOutcome);
+      await applyGameScoring(
+        roundNumber,
+        questionId,
+        outcome as QuestionOutcome
+      );
     }
 
-    // Reopen previously-final => revert
-    if (status === "open" && prevStatus === "final" && prevOutcome) {
-      await revertGameScoringForQuestion(roundNumber, questionId, prevOutcome);
+    if (
+      status === "open" &&
+      prevStatus === "final" &&
+      prevOutcome
+    ) {
+      await revertGameScoring(roundNumber, questionId, prevOutcome);
     }
 
-    // Mark previously-final as void => revert
-    if (status === "void" && prevStatus === "final" && (prevOutcome === "yes" || prevOutcome === "no")) {
-      await revertGameScoringForQuestion(roundNumber, questionId, prevOutcome as QuestionOutcome);
+    if (
+      status === "void" &&
+      prevStatus === "final" &&
+      (prevOutcome === "yes" || prevOutcome === "no")
+    ) {
+      await revertGameScoring(roundNumber, questionId, prevOutcome);
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error("[/api/settlement] Unexpected error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    console.error("[/api/settlement] error", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
