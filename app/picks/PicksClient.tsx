@@ -963,7 +963,7 @@ try {
 
 const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderLongestStreak ?? 0, 1);
 const barWidth = (val: number | null) =>
-${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%;
+'${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%';
 
 const hasSponsorQuestion = useMemo(
 () => rows.some((r) => r.isSponsorQuestion),
