@@ -13,7 +13,7 @@ type QuestionOutcome = "yes" | "no" | "void";
 type RequestBody = {
   roundNumber: number;
   questionId: string;
-  action?:
+  action:
     | "lock"
     | "reopen"
     | "final_yes"
@@ -46,6 +46,7 @@ type PickDoc = {
   userId?: string;
   questionId?: string;
   pick?: "yes" | "no";
+  outcome?: "yes" | "no"; // legacy (userPicks)
 };
 
 function questionStatusDocId(roundNumber: number, questionId: string) {
@@ -67,19 +68,17 @@ function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   return undefined;
 }
 
-function getGameIdFromQuestionId(questionId: string): string {
-  // questionId looks like: OR-G1-Q1  / R1-G3-Q4
-  // so gameId is everything before "-Q"
-  const idx = questionId.lastIndexOf("-Q");
-  if (idx > 0) return questionId.slice(0, idx);
-  // fallback: still try first 2 segments
-  const parts = questionId.split("-Q");
-  return parts[0] || questionId;
-}
-
 /**
- * Build ordered gameIds + questionIds for this round from rounds2026.json
- * so we can deterministically recompute streaks.
+ * 🚨 IMPORTANT:
+ * This MUST match /app/api/picks/route.ts questionId generation exactly.
+ *
+ * In /api/picks you do:
+ *   - roundRows = rows.filter(row.Round === roundCode)
+ *   - iterate roundRows IN THEIR EXISTING ORDER
+ *   - gameKey = `${roundCode}-G${row.Game}`
+ *   - questionId = `${gameKey}-Q${qIndex+1}` (qIndex increments per game in encounter order)
+ *
+ * So we do the SAME here: no sorting.
  */
 function buildRoundStructure(roundNumber: number): {
   roundCode: string;
@@ -88,43 +87,24 @@ function buildRoundStructure(roundNumber: number): {
 } {
   const roundCode = getRoundCode(roundNumber);
   const rows = rounds2026 as JsonRow[];
-
   const roundRows = rows.filter((r) => r.Round === roundCode);
 
-  // Keep game order by StartTime then Game number (stable)
-  const uniqueGames = new Map<number, { startTime: string }>();
-  for (const r of roundRows) {
-    if (!uniqueGames.has(r.Game)) {
-      uniqueGames.set(r.Game, { startTime: r.StartTime });
-    }
-  }
-
-  const gameNums = Array.from(uniqueGames.keys()).sort((a, b) => {
-    const aT = uniqueGames.get(a)?.startTime || "";
-    const bT = uniqueGames.get(b)?.startTime || "";
-    const aMs = new Date(aT).getTime();
-    const bMs = new Date(bT).getTime();
-    if (!Number.isNaN(aMs) && !Number.isNaN(bMs) && aMs !== bMs) return aMs - bMs;
-    return a - b;
-  });
-
-  const gameIdsInOrder = gameNums.map((g) => `${roundCode}-G${g}`);
+  const gameIdsInOrder: string[] = [];
   const questionIdsByGame: Record<string, string[]> = {};
+  const questionIndexByGame: Record<string, number> = {};
 
-  for (const gameNum of gameNums) {
-    const gameId = `${roundCode}-G${gameNum}`;
-    const gameRows = roundRows.filter((r) => r.Game === gameNum);
+  for (const row of roundRows) {
+    const gameId = `${roundCode}-G${row.Game}`;
 
-    // Deterministic question order: Quarter asc, then original order
-    // We must match your /api/picks questionId generation: Q1..Qn in the same order used there.
-    // /api/picks increments by iteration order of roundRows loop; to match reliably we sort:
-    const ordered = [...gameRows].sort((a, b) => {
-      if (a.Quarter !== b.Quarter) return a.Quarter - b.Quarter;
-      // tie-breaker: question text
-      return String(a.Question || "").localeCompare(String(b.Question || ""));
-    });
+    if (!questionIdsByGame[gameId]) {
+      questionIdsByGame[gameId] = [];
+      questionIndexByGame[gameId] = 0;
+      gameIdsInOrder.push(gameId); // insertion order = picks API order
+    }
 
-    questionIdsByGame[gameId] = ordered.map((_, idx) => `${gameId}-Q${idx + 1}`);
+    const idx = questionIndexByGame[gameId]++;
+    const questionId = `${gameId}-Q${idx + 1}`;
+    questionIdsByGame[gameId].push(questionId);
   }
 
   return { roundCode, gameIdsInOrder, questionIdsByGame };
@@ -132,6 +112,7 @@ function buildRoundStructure(roundNumber: number): {
 
 /**
  * Read all questionStatus docs for this round and keep the latest per questionId.
+ * Accepts both outcome and legacy result; normalises casing.
  */
 async function getLatestQuestionStatusMap(
   roundNumber: number
@@ -164,7 +145,8 @@ async function getLatestQuestionStatusMap(
     }
   });
 
-  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> = {};
+  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> =
+    {};
   for (const [qid, v] of Object.entries(temp)) {
     finalMap[qid] = { status: v.status, outcome: v.outcome };
   }
@@ -172,21 +154,37 @@ async function getLatestQuestionStatusMap(
 }
 
 /**
- * Get all picks for affected users on a specific question (used to find which users to recompute).
+ * ✅ Affected users MUST include:
+ *  - picks collection
+ *  - legacy userPicks collection
  */
-async function getUserIdsForQuestion(questionId: string): Promise<string[]> {
-  const snap = await db.collection("picks").where("questionId", "==", questionId).get();
+async function getAffectedUserIdsForQuestion(questionId: string): Promise<string[]> {
   const set = new Set<string>();
-  snap.forEach((docSnap) => {
+
+  const [picksSnap, legacySnap] = await Promise.all([
+    db.collection("picks").where("questionId", "==", questionId).get(),
+    db.collection("userPicks").where("questionId", "==", questionId).get(),
+  ]);
+
+  picksSnap.forEach((docSnap) => {
     const d = docSnap.data() as PickDoc;
     if (typeof d.userId === "string") set.add(d.userId);
   });
+
+  legacySnap.forEach((docSnap) => {
+    const d = docSnap.data() as PickDoc;
+    if (typeof d.userId === "string") set.add(d.userId);
+  });
+
   return Array.from(set);
 }
 
 /**
- * Get all picks for user in this round (filter by questionId prefix = roundCode-G)
- * (We avoid relying on pick.roundNumber because it can be null/mismatched.)
+ * Get all picks for user in this round (combine picks + legacy userPicks).
+ * We filter by questionId prefix = `${roundCode}-G`
+ * (Avoid relying on pick.roundNumber because it can be null/mismatched.)
+ *
+ * If both exist, `picks` wins.
  */
 async function getUserPicksForRound(
   uid: string,
@@ -194,11 +192,13 @@ async function getUserPicksForRound(
 ): Promise<Record<string, "yes" | "no">> {
   const map: Record<string, "yes" | "no"> = {};
 
-  // NOTE: This fetches all picks for the user. OK for now.
-  // If later needed, add an indexed query on roundNumber and fall back to prefix.
-  const snap = await db.collection("picks").where("userId", "==", uid).get();
+  const [picksSnap, legacySnap] = await Promise.all([
+    db.collection("picks").where("userId", "==", uid).get(),
+    db.collection("userPicks").where("userId", "==", uid).get(),
+  ]);
 
-  snap.forEach((docSnap) => {
+  // primary: picks (field: pick)
+  picksSnap.forEach((docSnap) => {
     const d = docSnap.data() as PickDoc;
     const qid = d.questionId;
     const pick = d.pick;
@@ -207,99 +207,110 @@ async function getUserPicksForRound(
     map[qid] = pick;
   });
 
+  // legacy: userPicks (field: outcome) ONLY if not already present
+  legacySnap.forEach((docSnap) => {
+    const d = docSnap.data() as PickDoc;
+    const qid = d.questionId;
+    const out = d.outcome;
+    if (!qid || (out !== "yes" && out !== "no")) return;
+    if (!qid.startsWith(`${roundCode}-G`)) return;
+    if (!map[qid]) map[qid] = out;
+  });
+
   return map;
 }
 
 /**
- * ✅ NEW STREAK RULES (game score + rollover):
- * - In a game: if you picked N questions...
- *    - if ANY picked question is wrong (based on settled outcome) => game score = 0
- *    - else game score = number of picked questions that are currently correct+settled
- *      (void doesn't count)
- * - Your STREAK is the rolling total across games since the last busted game.
- * - If a game is busted (any wrong), your streak becomes 0 and stays 0 for the rest of that game.
- * - Next game: you can start building again from 0.
+ * ✅ NEW ROLLING SCORING RULES (your “Rolling Baby!” rules)
  *
- * We recompute deterministically from scratch for the round whenever settlement changes.
+ * - In a game:
+ *    - If you picked N questions and ANY settled yes/no is wrong => busted => game contributes 0 and streak resets to 0
+ *    - Otherwise game contributes the count of correct settled yes/no picks (void + unsettled don't count)
+ * - Rolling streak continues across games until busted.
+ *
+ * We recompute deterministically from scratch for the round.
  */
 async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
-  const { roundCode, gameIdsInOrder, questionIdsByGame } = buildRoundStructure(roundNumber);
+  const { roundCode, gameIdsInOrder, questionIdsByGame } =
+    buildRoundStructure(roundNumber);
 
   const [statusMap, userPicks] = await Promise.all([
     getLatestQuestionStatusMap(roundNumber),
     getUserPicksForRound(uid, roundCode),
   ]);
 
-  let currentStreak = 0;
-  let longestStreak = 0;
+  let rollingStreak = 0;
 
   for (const gameId of gameIdsInOrder) {
     const qids = questionIdsByGame[gameId] || [];
-
-    // Gather picked questions in this game
     const pickedQids = qids.filter((qid) => userPicks[qid] === "yes" || userPicks[qid] === "no");
-    if (!pickedQids.length) {
-      // No picks in this game → streak unchanged
-      longestStreak = Math.max(longestStreak, currentStreak);
-      continue;
-    }
 
-    // Evaluate game
+    if (!pickedQids.length) continue;
+
     let gameBusted = false;
-    let gameCorrectSettledCount = 0;
+    let gameAdd = 0;
 
     for (const qid of pickedQids) {
       const pick = userPicks[qid];
       const st = statusMap[qid];
 
       // only settled outcomes affect score
-      const outcome =
+      const settledOutcome =
         st?.status === "final" || st?.status === "void" ? st?.outcome : undefined;
 
-      if (!outcome) {
-        // not settled yet → ignore for now (doesn't add, doesn't bust)
+      if (!settledOutcome) {
+        // not settled yet → ignore (no add, no bust)
         continue;
       }
 
-      if (outcome === "void") {
-        // void doesn't add and doesn't bust
+      if (settledOutcome === "void") {
+        // void → ignore (no add, no bust)
         continue;
       }
 
-      if (pick !== outcome) {
+      // settled yes/no:
+      if (pick !== settledOutcome) {
         gameBusted = true;
         break;
       }
 
       // correct settled
-      gameCorrectSettledCount += 1;
+      gameAdd += 1;
     }
 
     if (gameBusted) {
-      // busted game resets entire run
-      currentStreak = 0;
-      longestStreak = Math.max(longestStreak, currentStreak);
-      // IMPORTANT: once busted, we do NOT add anything else from this game
+      rollingStreak = 0;
+      // once busted, the roll is reset; next games can build again
       continue;
     }
 
-    // not busted: add the correct settled picks so far in this game
-    currentStreak += gameCorrectSettledCount;
-    longestStreak = Math.max(longestStreak, currentStreak);
+    rollingStreak += gameAdd;
   }
 
-  // Persist
-  await db
-    .collection("users")
-    .doc(uid)
-    .set(
+  // Persist:
+  // - Update currentStreak to match the rolling score.
+  // - Only ever increase longestStreak (we don't decrease lifetime records here).
+  const userRef = db.collection("users").doc(uid);
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const existingLongest =
+      snap.exists && typeof (snap.data() as any).longestStreak === "number"
+        ? (snap.data() as any).longestStreak
+        : 0;
+
+    const newLongest = Math.max(existingLongest, rollingStreak);
+
+    tx.set(
+      userRef,
       {
-        currentStreak,
-        longestStreak,
+        currentStreak: rollingStreak,
+        longestStreak: newLongest,
         lastUpdatedAt: FieldValue.serverTimestamp(),
       },
       { merge: true }
     );
+  });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -322,11 +333,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const qsRef = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
-
-    // For reference/debug (not strictly required)
-    const prevSnap = await qsRef.get();
-    const prev = prevSnap.exists ? (prevSnap.data() as any) : null;
-    void prev;
 
     // Resolve status/outcome from action
     let status: QuestionStatus;
@@ -358,7 +364,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
 
-    // Write questionStatus
+    // Write questionStatus doc
     const payload: any = {
       roundNumber,
       questionId,
@@ -371,22 +377,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
-    // ✅ Recompute streaks for ONLY users who picked this question
-    const affectedUserIds = await getUserIdsForQuestion(questionId);
+    // ✅ Recompute streaks for users who picked this question (picks + legacy)
+    const affectedUserIds = await getAffectedUserIdsForQuestion(questionId);
 
-    // If nobody picked it, we're done
-    if (!affectedUserIds.length) {
-      return NextResponse.json({ ok: true });
+    if (affectedUserIds.length) {
+      await Promise.all(
+        affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber))
+      );
     }
-
-    // Recompute in parallel (safe; each user doc is independent)
-    await Promise.all(
-      affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber))
-    );
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[/api/settlement] Unexpected error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
