@@ -21,6 +21,7 @@ type JsonRow = {
 
 type ApiQuestion = {
   id: string;
+  gameId: string; // ✅ NEW: explicit gameId (e.g. "OR-G1")
   quarter: number;
   question: string;
   status: QuestionStatus;
@@ -41,7 +42,7 @@ type ApiGame = {
   sport: string;
   venue: string;
   startTime: string;
-  isUnlockedForPicks?: boolean; // 👈 NEW: match-level lock flag
+  isUnlockedForPicks?: boolean; // match-level lock flag
   questions: ApiQuestion[];
 };
 
@@ -75,7 +76,6 @@ type GameLockDoc = {
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
 // Map numeric roundNumber (used in Firestore & URL) → code used in JSON
-// 0 -> "OR" (Opening Round), 1 -> "R1", 2 -> "R2", etc.
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
@@ -86,16 +86,25 @@ function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   if (typeof val !== "string") return undefined;
   const s = val.trim().toLowerCase();
 
-  if (s === "yes" || s === "y" || s === "correct" || s === "win") {
-    return "yes";
-  }
-  if (s === "no" || s === "n" || s === "wrong" || s === "loss") {
-    return "no";
-  }
-  if (s === "void" || s === "cancelled" || s === "canceled") {
-    return "void";
-  }
+  if (s === "yes" || s === "y" || s === "correct" || s === "win") return "yes";
+  if (s === "no" || s === "n" || s === "wrong" || s === "loss") return "no";
+  if (s === "void" || s === "cancelled" || s === "canceled") return "void";
   return undefined;
+}
+
+// ✅ Safer status normalisation (instead of `as QuestionStatus`)
+function normaliseStatusValue(val: unknown): QuestionStatus {
+  const s = String(val ?? "open").trim().toLowerCase();
+  if (s === "open") return "open";
+  if (s === "final") return "final";
+  if (s === "pending") return "pending";
+  if (s === "void") return "void";
+  // handle common JSON cases like "Open"/"Final"
+  if (s.includes("open")) return "open";
+  if (s.includes("final")) return "final";
+  if (s.includes("pend")) return "pending";
+  if (s.includes("void")) return "void";
+  return "open";
 }
 
 // ─────────────────────────────────────────────
@@ -138,10 +147,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
 
 /**
  * Get pick stats for all questions.
- *
- * We deliberately do NOT filter by roundNumber here, because questionId
- * is globally unique (e.g. "OR-G1-Q1") and some picks may be missing
- * or have mismatched roundNumber. Using questionId only is safest.
+ * We deliberately do NOT filter by roundNumber here, because questionId is unique.
  */
 async function getPickStatsForRound(
   _roundNumber: number,
@@ -150,10 +156,8 @@ async function getPickStatsForRound(
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
 }> {
-  const pickStats: Record<
-    string,
-    { yes: number; no: number; total: number }
-  > = {};
+  const pickStats: Record<string, { yes: number; no: number; total: number }> =
+    {};
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
@@ -162,7 +166,6 @@ async function getPickStatsForRound(
     snap.forEach((docSnap) => {
       const data = docSnap.data() as {
         userId?: string;
-        roundNumber?: number;
         questionId?: string;
         pick?: "yes" | "no";
       };
@@ -171,9 +174,7 @@ async function getPickStatsForRound(
       const pick = data.pick;
       if (!questionId || (pick !== "yes" && pick !== "no")) return;
 
-      if (!pickStats[questionId]) {
-        pickStats[questionId] = { yes: 0, no: 0, total: 0 };
-      }
+      if (!pickStats[questionId]) pickStats[questionId] = { yes: 0, no: 0, total: 0 };
 
       pickStats[questionId][pick] += 1;
       pickStats[questionId].total += 1;
@@ -213,19 +214,9 @@ async function getCommentCountsForRound(
   return commentCounts;
 }
 
-/**
- * Read questionStatus, but if multiple docs exist for the same questionId,
- * we ALWAYS use the one with the latest updatedAt.
- *
- * We now:
- *  - accept both `outcome` and `result` fields
- *  - normalise case (e.g. "YES", "Yes" → "yes")
- */
 async function getQuestionStatusForRound(
   roundNumber: number
-): Promise<
-  Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>
-> {
+): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
   const temp: Record<
     string,
     { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
@@ -239,18 +230,15 @@ async function getQuestionStatusForRound(
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as QuestionStatusDoc;
-
       if (!data.questionId || !data.status) return;
 
-      // grab either outcome or result, then normalise
       const rawOutcome =
         (data.outcome as string | undefined) ??
         (data.result as string | undefined);
       const outcome = normaliseOutcomeValue(rawOutcome);
 
       const updatedAtMs =
-        data.updatedAt &&
-        typeof (data.updatedAt as any).toMillis === "function"
+        data.updatedAt && typeof (data.updatedAt as any).toMillis === "function"
           ? (data.updatedAt as any).toMillis()
           : 0;
 
@@ -268,10 +256,8 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  const finalMap: Record<
-    string,
-    { status: QuestionStatus; outcome?: QuestionOutcome }
-  > = {};
+  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> =
+    {};
 
   Object.entries(temp).forEach(([qid, value]) => {
     finalMap[qid] = {
@@ -283,24 +269,17 @@ async function getQuestionStatusForRound(
   return finalMap;
 }
 
-/**
- * Game lock lookup.
- * We look up by gameId (e.g. "OR-G1", "R1-G3") so the lock works
- * even if roundNumber on the doc is off.
- */
 async function getGameLocksForRound(
   roundCode: string,
   roundRows: JsonRow[]
 ): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
 
-  // All gameIds that exist in this round (e.g. ["OR-G1", "OR-G2", ...])
   const gameIds = Array.from(
     new Set(roundRows.map((row) => `${roundCode}-G${row.Game}`))
   );
   if (!gameIds.length) return map;
 
-  // Firestore "in" query max 10 values → chunk gameIds
   const chunks: string[][] = [];
   for (let i = 0; i < gameIds.length; i += 10) {
     chunks.push(gameIds.slice(i, i + 10));
@@ -332,26 +311,19 @@ async function getGameLocksForRound(
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1) Determine round number (?round=0, ?round=1, ...)
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
     let roundNumber: number | null = null;
     if (roundParam !== null) {
       const parsed = Number(roundParam);
-      if (!Number.isNaN(parsed) && parsed >= 0) {
-        roundNumber = parsed;
-      }
+      if (!Number.isNaN(parsed) && parsed >= 0) roundNumber = parsed;
     }
 
-    // Default: Opening Round (0)
-    if (roundNumber === null) {
-      roundNumber = 0;
-    }
+    if (roundNumber === null) roundNumber = 0;
 
     const roundCode = getRoundCode(roundNumber);
 
-    // 2) Filter JSON rows for this round
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
@@ -359,26 +331,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(empty);
     }
 
-    // 3) Identify user (for userPick)
     const currentUserId = await getUserIdFromRequest(req);
 
-    // 4) Sponsor config
     const sponsorConfig = await getSponsorQuestionConfig();
 
-    // 5) Stats & comments
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // 6) Status overrides + outcomes from questionStatus
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
 
-    // 7) Game locks for this round (which matches are open for picks)
     const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
-    // 8) Group rows into games and build final API shape
     const gamesByKey: Record<string, ApiGame> = {};
     const questionIndexByGame: Record<string, number> = {};
 
@@ -392,7 +358,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           sport: "AFL",
           venue: row.Venue,
           startTime: row.StartTime,
-          isUnlockedForPicks: !!gameLocks[gameKey], // 👈 set from gameLocks
+          isUnlockedForPicks: !!gameLocks[gameKey],
           questions: [],
         };
         questionIndexByGame[gameKey] = 0;
@@ -404,10 +370,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
 
-      const yesPercent =
-        total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-      const noPercent =
-        total > 0 ? Math.round((stats.no / total) * 100) : 0;
+      const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+      const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const isSponsorQuestion =
         sponsorConfig &&
@@ -416,12 +380,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const statusInfo = statusOverrides[questionId];
 
-      const jsonStatusRaw = row.Status || "Open";
-      const jsonStatus = jsonStatusRaw.toLowerCase() as QuestionStatus;
+      const effectiveStatus =
+        statusInfo?.status ?? normaliseStatusValue(row.Status || "Open");
 
-      const effectiveStatus = statusInfo?.status ?? jsonStatus;
-
-      // final outcome (yes/no/void) for this question, if known
       const correctOutcome =
         effectiveStatus === "final" || effectiveStatus === "void"
           ? statusInfo?.outcome
@@ -436,6 +397,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
+        gameId: gameKey, // ✅ NEW
         quarter: row.Quarter,
         question: row.Question,
         status: effectiveStatus,
@@ -446,7 +408,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         noPercent,
         commentCount: commentCounts[questionId] ?? 0,
         correctOutcome,
-        outcome: correctOutcome, // duplicate to be extra safe
+        outcome: correctOutcome,
         correctPick,
       };
 
@@ -455,11 +417,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const games = Object.values(gamesByKey);
 
-    const response: PicksApiResponse = {
-      games,
-      roundNumber,
-    };
-
+    const response: PicksApiResponse = { games, roundNumber };
     return NextResponse.json(response);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
