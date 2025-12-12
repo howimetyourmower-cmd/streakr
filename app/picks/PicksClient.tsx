@@ -266,9 +266,9 @@ const [shareStatus, setShareStatus] = useState<string>("");
 
 const [showConfetti, setShowConfetti] = useState(false);
 const [streakLevelModal, setStreakLevelModal] = useState<
-3 | 5 | 10 | 15 | 20 | null
+(3 | 5 | 10 | 15 | 20) | null
 
-(null);
+>(null);
 const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
 const [windowSize, setWindowSize] = useState({
 width: 0,
