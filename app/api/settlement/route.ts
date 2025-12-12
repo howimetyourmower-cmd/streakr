@@ -1,17 +1,5 @@
 // /app/api/settlement/route.ts
 // GAME-LEVEL SCORING (AUTHORITATIVE)
-//
-// Rules implemented:
-// - Scoring is PER GAME, not per question
-// - User can pick N questions in a game
-// - If ANY picked question is wrong → gameScore = 0
-// - If ALL picked questions are correct → gameScore = N
-// - currentStreak reflects the CURRENT GAME SCORE ONLY
-// - Streak can NEVER rebound within the same game
-// - Settlement order does NOT matter
-// - Reopen cleanly removes the game result and recomputes
-//
-// Leaderboard reads users.currentStreak (now correct)
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
@@ -35,6 +23,8 @@ type RequestBody = {
     | "final_void"
     | "void";
 };
+
+type ResultState = "correct" | "wrong";
 
 function questionStatusDocId(roundNumber: number, questionId: string) {
   return `${roundNumber}__${questionId}`;
@@ -72,17 +62,6 @@ async function getPicksForQuestion(questionId: string): Promise<PickRow[]> {
   return results;
 }
 
-/**
- * Per-user per-game state
- *
- * userGameState/{round}__{gameId}__{userId}
- * {
- *   roundNumber,
- *   gameId,
- *   userId,
- *   results: { [questionId]: "correct" | "wrong" }
- * }
- */
 function userGameStateDocId(
   roundNumber: number,
   gameId: string,
@@ -91,9 +70,7 @@ function userGameStateDocId(
   return `${roundNumber}__${gameId}__${userId}`;
 }
 
-function computeGameScore(
-  results: Record<string, "correct" | "wrong">
-) {
+function computeGameScore(results: Record<string, ResultState>): number {
   const vals = Object.values(results);
   if (vals.some((v) => v === "wrong")) return 0;
   return vals.length;
@@ -123,12 +100,12 @@ async function applyGameScoring(
 
       const wasCorrect = pick === outcome;
 
-      const prevResults: Record<string, "correct" | "wrong"> =
+      const prevResults: Record<string, ResultState> =
         gsSnap.exists && typeof gsSnap.data()?.results === "object"
-          ? gsSnap.data()!.results
+          ? (gsSnap.data()!.results as Record<string, ResultState>)
           : {};
 
-      const nextResults = {
+      const nextResults: Record<string, ResultState> = {
         ...prevResults,
         [questionId]: wasCorrect ? "correct" : "wrong",
       };
@@ -194,12 +171,12 @@ async function revertGameScoring(
     const p = db.runTransaction(async (tx) => {
       const gsSnap = await tx.get(gsRef);
 
-      const prevResults: Record<string, "correct" | "wrong"> =
+      const prevResults: Record<string, ResultState> =
         gsSnap.exists && typeof gsSnap.data()?.results === "object"
-          ? gsSnap.data()!.results
+          ? (gsSnap.data()!.results as Record<string, ResultState>)
           : {};
 
-      const nextResults = { ...prevResults };
+      const nextResults: Record<string, ResultState> = { ...prevResults };
       delete nextResults[questionId];
 
       const gameScore = computeGameScore(nextResults);
@@ -234,10 +211,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const body = (await req.json()) as RequestBody;
     const { roundNumber, questionId } = body;
 
-    if (
-      typeof roundNumber !== "number" ||
-      !questionId
-    ) {
+    if (typeof roundNumber !== "number" || !questionId) {
       return NextResponse.json(
         { error: "roundNumber and questionId required" },
         { status: 400 }
@@ -249,7 +223,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .doc(questionStatusDocId(roundNumber, questionId));
 
     const prevSnap = await qsRef.get();
-    const prev = prevSnap.exists ? prevSnap.data() as any : {};
+    const prev = prevSnap.exists ? (prevSnap.data() as any) : {};
     const prevStatus = prev.status as QuestionStatus | undefined;
     const prevOutcome = prev.outcome as QuestionOutcome | undefined;
 
@@ -313,18 +287,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         await revertGameScoring(roundNumber, questionId, prevOutcome);
       }
 
-      await applyGameScoring(
-        roundNumber,
-        questionId,
-        outcome as QuestionOutcome
-      );
+      await applyGameScoring(roundNumber, questionId, outcome);
     }
 
-    if (
-      status === "open" &&
-      prevStatus === "final" &&
-      prevOutcome
-    ) {
+    if (status === "open" && prevStatus === "final" && prevOutcome) {
       await revertGameScoring(roundNumber, questionId, prevOutcome);
     }
 
