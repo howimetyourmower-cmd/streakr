@@ -130,10 +130,7 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
   essendon: { name: "Essendon", logo: "/afl-logos/essendon.jpeg" },
   fremantle: { name: "Fremantle Dockers", logo: "/afl-logos/fremantle.jpeg" },
   geelong: { name: "Geelong Cats", logo: "/afl-logos/geelong.jpeg" },
-  "gold-coast": {
-    name: "Gold Coast Suns",
-    logo: "/afl-logos/gold-coast.jpeg",
-  },
+  "gold-coast": { name: "Gold Coast Suns", logo: "/afl-logos/gold-coast.jpeg" },
   gws: { name: "GWS Giants", logo: "/afl-logos/gws.jpeg" },
   hawthorn: { name: "Hawthorn Hawks", logo: "/afl-logos/hawthorn.jpeg" },
   melbourne: { name: "Melbourne Demons", logo: "/afl-logos/melbourne.jpeg" },
@@ -148,10 +145,7 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
   richmond: { name: "Richmond Tigers", logo: "/afl-logos/richmond.jpeg" },
   "st-kilda": { name: "St Kilda Saints", logo: "/afl-logos/st-kilda.jpeg" },
   sydney: { name: "Sydney Swans", logo: "/afl-logos/sydney.jpeg" },
-  "west-coast": {
-    name: "West Coast Eagles",
-    logo: "/afl-logos/west-coast.jpeg",
-  },
+  "west-coast": { name: "West Coast Eagles", logo: "/afl-logos/west-coast.jpeg" },
   "western-bulldogs": {
     name: "Western Bulldogs",
     logo: "/afl-logos/western-bulldogs.jpeg",
@@ -250,7 +244,7 @@ export default function PicksClient() {
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // How to Play modal
+  // 🆕 How to Play modal
   const [showHowToModal, setShowHowToModal] = useState(false);
 
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
@@ -265,11 +259,13 @@ export default function PicksClient() {
     null
   );
   const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
-  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
+  const [windowSize, setWindowSize] = useState({
+    width: 0,
+    height: 0,
+  });
 
   const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>({});
 
-  // UI-only streak animation + reset fx
   const [animatedCurrentStreak, setAnimatedCurrentStreak] = useState<number>(0);
   const [streakResetFx, setStreakResetFx] = useState(false);
   const prevStreakRef = useRef<number>(0);
@@ -284,7 +280,10 @@ export default function PicksClient() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+      setWindowSize({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
     };
     handleResize();
     window.addEventListener("resize", handleResize);
@@ -338,7 +337,8 @@ export default function PicksClient() {
           question: q.question,
           status: q.status,
           userPick: q.userPick ?? historyPick ?? prev?.userPick,
-          yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
+          yesPercent:
+            typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
           noPercent: typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
           sport: q.sport ?? g.sport ?? "AFL",
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
@@ -393,12 +393,14 @@ export default function PicksClient() {
     }
   }, []);
 
-  // First-time "How to Play" modal (per device)
+  // 🆕 First-time "How to Play" modal (per device)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const seen = window.localStorage.getItem(HOW_TO_PLAY_KEY);
-      if (!seen) setShowHowToModal(true);
+      if (!seen) {
+        setShowHowToModal(true);
+      }
     } catch (err) {
       console.error("Failed to read how-to-play flag", err);
     }
@@ -438,7 +440,9 @@ export default function PicksClient() {
 
     const chunkArray = (arr: string[], size: number): string[][] => {
       const chunks: string[][] = [];
-      for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+      for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+      }
       return chunks;
     };
 
@@ -458,10 +462,15 @@ export default function PicksClient() {
         });
 
         setRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
+          prev.map((r) =>
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
+          )
         );
+
         setFilteredRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
+          prev.map((r) =>
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
+          )
         );
       });
     });
@@ -492,7 +501,9 @@ export default function PicksClient() {
         const idToken = await user.getIdToken();
         const res = await fetch("/api/user-picks", {
           method: "GET",
-          headers: { Authorization: `Bearer ${idToken}` },
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
         });
 
         if (!res.ok) {
@@ -501,6 +512,7 @@ export default function PicksClient() {
         }
 
         const json = await res.json();
+
         let historyFromApi: PickHistory = {};
 
         if (Array.isArray(json?.picks)) {
@@ -517,12 +529,17 @@ export default function PicksClient() {
         if (json?.questionId && json?.outcome && !Array.isArray(json?.picks)) {
           const raw = String(json.outcome).toLowerCase();
           const outcome = raw === "yes" || raw === "no" ? (raw as "yes" | "no") : null;
-          if (outcome) historyFromApi[json.questionId] = outcome;
+          if (outcome) {
+            historyFromApi[json.questionId] = outcome;
+          }
         }
 
         if (Object.keys(historyFromApi).length) {
           setPickHistory((prev) => {
-            const merged: PickHistory = { ...prev, ...historyFromApi };
+            const merged: PickHistory = {
+              ...prev,
+              ...historyFromApi,
+            };
             try {
               if (typeof window !== "undefined") {
                 window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(merged));
@@ -534,7 +551,9 @@ export default function PicksClient() {
           });
         }
 
-        if (rowsRef.current.length) fetchPicks({ silent: true });
+        if (rowsRef.current.length) {
+          fetchPicks({ silent: true });
+        }
       } catch (err) {
         console.error("Failed to load picks from API", err);
       }
@@ -618,6 +637,7 @@ export default function PicksClient() {
             data.streakBadges && typeof data.streakBadges === "object"
               ? (data.streakBadges as Record<string, boolean>)
               : {};
+
           setUserCurrentStreak(current);
           setUnlockedBadges(badges);
         } else {
@@ -636,7 +656,7 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Animate streak gain + shake/glow on reset (UI only)
+  // Animate streak gain + shake/glow on reset
   useEffect(() => {
     if (typeof userCurrentStreak !== "number") return;
 
@@ -655,6 +675,7 @@ export default function PicksClient() {
 
     const from = typeof animatedCurrentStreak === "number" ? animatedCurrentStreak : 0;
     const to = userCurrentStreak;
+
     if (from === to) return;
 
     const start = performance.now();
@@ -683,7 +704,6 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userCurrentStreak]);
 
-  // Ensure animation baseline is correct on login/logout
   useEffect(() => {
     if (!user) {
       setAnimatedCurrentStreak(0);
@@ -889,76 +909,93 @@ export default function PicksClient() {
     }
   };
 
-  // (Removed longest streak cleanly)
   const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderLongestStreak ?? 0, 1);
   const barWidth = (val: number | null) =>
     `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // "X picks made this game" (header, per game)
+  // ✅ Picks made per game (use ALL rows, not filtered, so headers stay true)
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const r of filteredRows) {
+    for (const r of rows) {
       const effectivePick = (pickHistory[r.id] ?? r.userPick) as any;
       const picked = effectivePick === "yes" || effectivePick === "no";
       if (!picked) continue;
       counts[r.gameId] = (counts[r.gameId] ?? 0) + 1;
     }
     return counts;
-  }, [filteredRows, pickHistory]);
+  }, [rows, pickHistory]);
 
-  // UI-only "streak impact" per game header (based on question outcomes)
-  const gameUiSummary = useMemo(() => {
-    const map: Record<
-      string,
-      {
-        allSettled: boolean;
-        hasAnyPick: boolean;
-        hasKnownWrong: boolean;
-        hasKnownCorrect: boolean;
-        hasUnknownFinalOutcome: boolean;
-        hasAnyNonVoidFinal: boolean;
-      }
-    > = {};
+  // ✅ Game score per game (your scoring mechanics)
+  const gameScoreByGame = useMemo(() => {
+    type GameScoreInfo =
+      | { kind: "no-picks" }
+      | { kind: "pending"; pickedCount: number }
+      | { kind: "scored"; score: number; pickedCount: number }
+      | { kind: "zero"; pickedCount: number };
 
+    const byGame: Record<string, GameScoreInfo> = {};
+
+    // Group rows by gameId
+    const groups: Record<string, QuestionRow[]> = {};
     for (const r of rows) {
-      if (!map[r.gameId]) {
-        map[r.gameId] = {
-          allSettled: true,
-          hasAnyPick: false,
-          hasKnownWrong: false,
-          hasKnownCorrect: false,
-          hasUnknownFinalOutcome: false,
-          hasAnyNonVoidFinal: false,
-        };
+      if (!groups[r.gameId]) groups[r.gameId] = [];
+      groups[r.gameId].push(r);
+    }
+
+    for (const gameId of Object.keys(groups)) {
+      const gameRows = groups[gameId];
+
+      let pickedCount = 0;
+      let pendingPicked = 0;
+      let losses = 0;
+      let wins = 0;
+
+      for (const r of gameRows) {
+        const effectivePick = (pickHistory[r.id] ?? r.userPick) as any;
+        const hasPicked = effectivePick === "yes" || effectivePick === "no";
+        if (!hasPicked) continue;
+
+        pickedCount++;
+
+        const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
+
+        // Void never helps or hurts
+        if (r.status === "void" || outcome === "void") {
+          continue;
+        }
+
+        // Not settled yet
+        if (r.status !== "final") {
+          pendingPicked++;
+          continue;
+        }
+
+        // Final but missing outcome: treat as pending
+        if (!outcome) {
+          pendingPicked++;
+          continue;
+        }
+
+        // Settled win/loss
+        if (effectivePick === outcome) wins++;
+        else losses++;
       }
 
-      const effectivePick = (pickHistory[r.id] ?? r.userPick) as "yes" | "no" | undefined;
-      const picked = effectivePick === "yes" || effectivePick === "no";
-      if (picked) map[r.gameId].hasAnyPick = true;
-
-      // settled?
-      const settled = r.status === "final" || r.status === "void";
-      if (!settled) map[r.gameId].allSettled = false;
-
-      // evaluate only when final
-      const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
-
-      if (r.status === "final") {
-        if (outcome === "yes" || outcome === "no") {
-          map[r.gameId].hasAnyNonVoidFinal = true;
-          if (picked) {
-            if (effectivePick === outcome) map[r.gameId].hasKnownCorrect = true;
-            else map[r.gameId].hasKnownWrong = true;
-          }
-        } else if (outcome == null) {
-          map[r.gameId].hasUnknownFinalOutcome = true;
-        }
+      if (pickedCount === 0) {
+        byGame[gameId] = { kind: "no-picks" };
+      } else if (pendingPicked > 0) {
+        byGame[gameId] = { kind: "pending", pickedCount };
+      } else if (losses > 0) {
+        byGame[gameId] = { kind: "zero", pickedCount };
+      } else {
+        // All picked questions that matter were correct (void ignored)
+        byGame[gameId] = { kind: "scored", score: wins, pickedCount };
       }
     }
 
-    return map;
+    return byGame;
   }, [rows, pickHistory]);
 
   const handleShare = async () => {
@@ -1088,25 +1125,6 @@ export default function PicksClient() {
           .streakr-reset-fx {
             animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
           }
-
-          @keyframes streakrPulseGreen {
-            0% {
-              transform: scale(1);
-              filter: drop-shadow(0 0 0 rgba(16, 185, 129, 0));
-            }
-            35% {
-              transform: scale(1.03);
-              filter: drop-shadow(0 0 14px rgba(16, 185, 129, 0.75));
-            }
-            100% {
-              transform: scale(1);
-              filter: drop-shadow(0 0 0 rgba(16, 185, 129, 0));
-            }
-          }
-
-          .streakr-win-pulse {
-            animation: streakrPulseGreen 0.65s ease-in-out;
-          }
         `}</style>
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -1213,8 +1231,8 @@ export default function PicksClient() {
               Sponsor Question
             </span>
             <span className="text-[12px] sm:text-[13px]">
-              Look for the <span className="font-semibold">Sponsor Question</span> tag. Get it
-              right to go into the draw for this round&apos;s $100 sponsor gift card.*
+              Look for the <span className="font-semibold">Sponsor Question</span> tag. Get it right
+              to go into the draw for this round&apos;s $100 sponsor gift card.*
             </span>
           </div>
         )}
@@ -1258,10 +1276,7 @@ export default function PicksClient() {
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-              const effectivePick = (pickHistory[row.id] ?? row.userPick) as
-                | "yes"
-                | "no"
-                | undefined;
+              const effectivePick = (pickHistory[row.id] ?? row.userPick) as "yes" | "no" | undefined;
 
               const hasPicked = effectivePick === "yes" || effectivePick === "no";
 
@@ -1277,14 +1292,9 @@ export default function PicksClient() {
                 row.sport.toUpperCase() === "AFL" ? parseAflMatchTeams(row.match) : null;
 
               const homeTeam =
-                parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
-                  ? AFL_TEAM_LOGOS[parsed.homeKey]
-                  : null;
-
+                parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey] ? AFL_TEAM_LOGOS[parsed.homeKey] : null;
               const awayTeam =
-                parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
-                  ? AFL_TEAM_LOGOS[parsed.awayKey]
-                  : null;
+                parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey] ? AFL_TEAM_LOGOS[parsed.awayKey] : null;
 
               const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
@@ -1312,13 +1322,18 @@ export default function PicksClient() {
                 }
               }
 
-              // ✅ Correct behaviour labels
               let outcomeLabel: string | null = null;
-              if (outcomeKind === "void") outcomeLabel = "Question voided – no streak change";
-              else if (outcomeKind === "win") outcomeLabel = "Correct pick";
-              else if (outcomeKind === "loss") outcomeLabel = "Wrong pick";
-              else if (outcomeKind === "no-pick") outcomeLabel = "No pick made";
-              else if (outcomeKind === "settled-no-result") outcomeLabel = "Finalised";
+              if (outcomeKind === "void") {
+                outcomeLabel = "Question voided – no streak change";
+              } else if (outcomeKind === "win") {
+                outcomeLabel = "Correct pick";
+              } else if (outcomeKind === "loss") {
+                outcomeLabel = "Wrong pick";
+              } else if (outcomeKind === "no-pick") {
+                outcomeLabel = "No pick made";
+              } else if (outcomeKind === "settled-no-result") {
+                outcomeLabel = "Finalised";
+              }
 
               const outcomeClasses =
                 outcomeKind === "void"
@@ -1331,22 +1346,21 @@ export default function PicksClient() {
                   ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
                   : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
-              // ✅ Restore blue picked pills even when locked/disabled:
               const yesButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                isYesPicked
-                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
-                  : !isSelectable
+                !isSelectable
                   ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
+                  : isYesPicked
+                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
                   : "bg-green-600 hover:bg-green-700 text-white border-transparent",
               ].join(" ");
 
               const noButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                isNoPicked
-                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
-                  : !isSelectable
+                !isSelectable
                   ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
+                  : isNoPicked
+                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
                   : "bg-red-600 hover:bg-red-700 text-white border-transparent",
               ].join(" ");
 
@@ -1354,20 +1368,32 @@ export default function PicksClient() {
               const showStatusLockedLabel = !isQuestionOpen && isMatchUnlocked;
 
               const shouldRenderHeader = lastGameId !== row.gameId;
-              if (shouldRenderHeader) lastGameId = row.gameId;
+              if (shouldRenderHeader) {
+                lastGameId = row.gameId;
+              }
 
               const headerPicksMade = picksMadeByGame[row.gameId] ?? 0;
+              const gameScoreInfo = gameScoreByGame[row.gameId];
 
-              const summary = gameUiSummary[row.gameId];
-              const canShowImpact =
-                !!summary &&
-                summary.allSettled &&
-                summary.hasAnyPick &&
-                !summary.hasUnknownFinalOutcome &&
-                summary.hasAnyNonVoidFinal;
-
-              const isGameWin = canShowImpact && !summary.hasKnownWrong;
-              const isGameLoss = canShowImpact && summary.hasKnownWrong;
+              // header chip styling
+              const gameScoreChip =
+                !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
+                  <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/70 border border-white/10">
+                    No picks
+                  </span>
+                ) : gameScoreInfo.kind === "pending" ? (
+                  <span className="inline-flex items-center rounded-full bg-yellow-500/15 px-3 py-1 text-[11px] font-semibold text-yellow-200 border border-yellow-400/30">
+                    Game pending
+                  </span>
+                ) : gameScoreInfo.kind === "zero" ? (
+                  <span className="inline-flex items-center rounded-full bg-red-500/15 px-3 py-1 text-[11px] font-extrabold text-red-200 border border-red-400/30">
+                    Game Score: 0
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-extrabold text-emerald-200 border border-emerald-400/30">
+                    Game Score: {gameScoreInfo.score}
+                  </span>
+                );
 
               return (
                 <div key={row.id}>
@@ -1384,22 +1410,11 @@ export default function PicksClient() {
                           </div>
                         </div>
 
-                        <div className="flex items-center flex-wrap gap-2 justify-start sm:justify-end">
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
                           <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/80 border border-white/10">
                             {headerPicksMade} picks made this game
                           </span>
-
-                          {/* UI-only streak impact */}
-                          {isGameWin && (
-                            <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold border border-emerald-400/60 bg-emerald-500/15 text-emerald-200 streakr-win-pulse">
-                              +1 streak (game)
-                            </span>
-                          )}
-                          {isGameLoss && (
-                            <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold border border-red-400/60 bg-red-500/15 text-red-200">
-                              Streak reset (game)
-                            </span>
-                          )}
+                          {gameScoreChip}
                         </div>
                       </div>
                     </div>
@@ -1445,9 +1460,7 @@ export default function PicksClient() {
                                 </span>
                               </div>
 
-                              <span className="text-xs uppercase tracking-wide text-white/70">
-                                vs
-                              </span>
+                              <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
 
                               <div className="flex items-center gap-1 min-w-0">
                                 <span className="text-sm font-semibold truncate">
@@ -1681,7 +1694,9 @@ export default function PicksClient() {
               <p className="relative mt-1 text-sm text-orange-200 text-center">
                 {streakModalContent.subtitle}
               </p>
-              <p className="relative mt-3 text-sm text-slate-100 text-center">{streakModalContent.body}</p>
+              <p className="relative mt-3 text-sm text-slate-100 text-center">
+                {streakModalContent.body}
+              </p>
 
               <div className="relative mt-5 flex flex-col sm:flex-row gap-3 justify-center">
                 <button
@@ -1703,7 +1718,7 @@ export default function PicksClient() {
           </div>
         )}
 
-        {/* HOW TO PLAY MODAL */}
+        {/* 🆕 HOW TO PLAY MODAL */}
         {showHowToModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
             <div className="w-full max-w-lg rounded-2xl bg-[#050816] border border-white/15 shadow-[0_20px_70px_rgba(0,0,0,0.9)] p-6 sm:p-7">
@@ -1732,46 +1747,51 @@ export default function PicksClient() {
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">One game at a time:</span> the next game only
-                    opens once the previous game locks.
+                    <span className="font-semibold">One game at a time:</span> the next game only opens
+                    once the previous game locks.
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">Pick as many questions as you like</span> in any
-                    open game. Every question is another chance to build your streak. Do you have
-                    the balls to pick all questions?
+                    <span className="font-semibold">Pick as many questions as you like</span> in any open
+                    game.
+                  </span>
+                </li>
+
+                {/* ✅ UPDATED SCORING MECHANIC */}
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">Game scoring:</span> if you get <span className="font-semibold">ANY</span>{" "}
+                    of your picked questions wrong, your <span className="font-semibold">Game Score is 0</span>. If you get
+                    <span className="font-semibold"> ALL</span> your picked questions right, your{" "}
+                    <span className="font-semibold">Game Score equals the number of picks you made</span>. Voided questions
+                    don&apos;t count either way.
+                  </span>
+                </li>
+
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    <span className="font-semibold">Change your mind?</span> You can tweak your selections right up until that
+                    game starts.
+                  </span>
+                </li>
+
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    If <span className="font-semibold">your Game Score is &gt; 0</span>, your streak carries straight into the next
+                    game. Bang!
                   </span>
                 </li>
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">Change your mind?</span> You can tweak your
-                    selections right up until that game starts.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    If <span className="font-semibold">all your picks in a game are correct</span>,
-                    your streak carries straight into the next game. Bang!
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">One loss = streak dead, loser </span>You drop
-                    back to <span className="font-semibold">0</span> but you&apos;re still in – jump
-                    into the next game and start building again.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    The player with the <span className="font-semibold">longest current streak</span>{" "}
-                    for the round takes the glory (and the prizes). How many picks will you make in
-                    the final game?
+                    <span className="font-semibold">One loss = streak dead</span>. You drop back to{" "}
+                    <span className="font-semibold">0</span> but you&apos;re still in – jump into the next game and start building
+                    again.
                   </span>
                 </li>
               </ul>
