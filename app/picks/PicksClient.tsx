@@ -534,6 +534,7 @@ export default function PicksClient() {
           }
         }
 
+        // Server wins where it has a pick; local fallback otherwise.
         if (Object.keys(historyFromApi).length) {
           setPickHistory((prev) => {
             const merged: PickHistory = {
@@ -772,6 +773,16 @@ export default function PicksClient() {
     else setFilteredRows(rows.filter((r) => r.status === f));
   };
 
+  const persistPickHistory = (next: PickHistory) => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
+      }
+    } catch (err) {
+      console.error("Failed to persist pick history", err);
+    }
+  };
+
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
@@ -788,13 +799,7 @@ export default function PicksClient() {
 
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev, [row.id]: pick };
-      try {
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
-        }
-      } catch (err) {
-        console.error("Failed to persist pick history", err);
-      }
+      persistPickHistory(next);
       return next;
     });
 
@@ -818,6 +823,54 @@ export default function PicksClient() {
       }
     } catch (e) {
       console.error("Pick save error:", e);
+    }
+  };
+
+  // ✅ Clear selection = NO PICK (must not affect streak/outcomes)
+  // ⚠️ To persist across refresh/device, /api/user-picks must support clearing/deleting.
+  const handleClearPick = async (row: QuestionRow) => {
+    // If not logged in, just clear local UI state (device-only) — still valid "no pick"
+    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+    if (row.status !== "open" || !isMatchUnlocked) return;
+
+    setRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
+    );
+    setFilteredRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
+    );
+
+    setPickHistory((prev) => {
+      const next: PickHistory = { ...prev };
+      delete next[row.id];
+      persistPickHistory(next);
+      return next;
+    });
+
+    if (!user) return;
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/user-picks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        // Backend should delete the pick when action:"clear"
+        body: JSON.stringify({
+          questionId: row.id,
+          action: "clear",
+          outcome: null,
+          roundNumber,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error("user-picks clear error:", await res.text());
+      }
+    } catch (e) {
+      console.error("Pick clear error:", e);
     }
   };
 
@@ -927,7 +980,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // ✅ Game score per game (your scoring mechanics)
+  // ✅ Game score per game (clean sweep logic for that match; void/no-pick ignored)
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -990,7 +1043,7 @@ export default function PicksClient() {
       } else if (losses > 0) {
         byGame[gameId] = { kind: "zero", pickedCount };
       } else {
-        // All picked questions that matter were correct (void ignored)
+        // Clean sweep in this match (void ignored)
         byGame[gameId] = { kind: "scored", score: wins, pickedCount };
       }
     }
@@ -1154,7 +1207,8 @@ export default function PicksClient() {
             <div>
               <p className="text-[11px] uppercase tracking-wide text-white/60">Streak progress</p>
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
-                Track your current run and how far you are behind the leader.
+                Your streak is calculated using the <span className="font-semibold">Clean sweep rule</span>{" "}
+                (to carry your streak forward, you need a clean sweep in that match).
               </p>
             </div>
 
@@ -1276,7 +1330,10 @@ export default function PicksClient() {
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-              const effectivePick = (pickHistory[row.id] ?? row.userPick) as "yes" | "no" | undefined;
+              const effectivePick = (pickHistory[row.id] ?? row.userPick) as
+                | "yes"
+                | "no"
+                | undefined;
 
               const hasPicked = effectivePick === "yes" || effectivePick === "no";
 
@@ -1292,19 +1349,17 @@ export default function PicksClient() {
                 row.sport.toUpperCase() === "AFL" ? parseAflMatchTeams(row.match) : null;
 
               const homeTeam =
-                parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey] ? AFL_TEAM_LOGOS[parsed.homeKey] : null;
+                parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
+                  ? AFL_TEAM_LOGOS[parsed.homeKey]
+                  : null;
               const awayTeam =
-                parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey] ? AFL_TEAM_LOGOS[parsed.awayKey] : null;
+                parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
+                  ? AFL_TEAM_LOGOS[parsed.awayKey]
+                  : null;
 
               const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
-              type OutcomeKind =
-                | "win"
-                | "loss"
-                | "no-pick"
-                | "void"
-                | "settled-no-result"
-                | null;
+              type OutcomeKind = "win" | "loss" | "void" | "settled-no-result" | null;
 
               const outcome = normaliseOutcome((row.correctOutcome as any) ?? (row as any).outcome);
 
@@ -1313,8 +1368,9 @@ export default function PicksClient() {
               if (row.status === "void" || outcome === "void") {
                 outcomeKind = "void";
               } else if (row.status === "final") {
+                // ✅ CRITICAL: NO PICK => show NOTHING (no pill, no "wrong pick", no streak impact)
                 if (!hasPicked) {
-                  outcomeKind = "no-pick";
+                  outcomeKind = null;
                 } else if (outcome) {
                   outcomeKind = effectivePick === outcome ? "win" : "loss";
                 } else {
@@ -1329,8 +1385,6 @@ export default function PicksClient() {
                 outcomeLabel = "Correct pick";
               } else if (outcomeKind === "loss") {
                 outcomeLabel = "Wrong pick";
-              } else if (outcomeKind === "no-pick") {
-                outcomeLabel = "No pick made";
               } else if (outcomeKind === "settled-no-result") {
                 outcomeLabel = "Finalised";
               }
@@ -1342,8 +1396,6 @@ export default function PicksClient() {
                   ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
                   : outcomeKind === "loss"
                   ? "bg-red-500/15 border-red-400/60 text-red-300"
-                  : outcomeKind === "no-pick"
-                  ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
                   : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
               const yesButtonClasses = [
@@ -1387,11 +1439,11 @@ export default function PicksClient() {
                   </span>
                 ) : gameScoreInfo.kind === "zero" ? (
                   <span className="inline-flex items-center rounded-full bg-red-500/15 px-3 py-1 text-[11px] font-extrabold text-red-200 border border-red-400/30">
-                    Game Score: 0
+                    Clean sweep failed (0)
                   </span>
                 ) : (
                   <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-extrabold text-emerald-200 border border-emerald-400/30">
-                    Game Score: {gameScoreInfo.score}
+                    Clean sweep! +{gameScoreInfo.score}
                   </span>
                 );
 
@@ -1520,26 +1572,44 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-12 md:col-span-2 flex flex-col items-end">
-                        <div className="flex gap-2 mb-0.5">
-                          <button
-                            type="button"
-                            onClick={() => handlePick(row, "yes")}
-                            disabled={!isSelectable}
-                            className={yesButtonClasses}
-                          >
-                            Yes
-                          </button>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handlePick(row, "yes")}
+                              disabled={!isSelectable}
+                              className={yesButtonClasses}
+                            >
+                              Yes
+                            </button>
 
-                          <button
-                            type="button"
-                            onClick={() => handlePick(row, "no")}
-                            disabled={!isSelectable}
-                            className={noButtonClasses}
-                          >
-                            No
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePick(row, "no")}
+                              disabled={!isSelectable}
+                              className={noButtonClasses}
+                            >
+                              No
+                            </button>
+                          </div>
+
+                          {/* ✅ Clear selection icon (only if picked + selectable) */}
+                          {hasPicked && isSelectable && (
+                            <button
+                              type="button"
+                              onClick={() => handleClearPick(row)}
+                              title="Clear selection"
+                              aria-label="Clear selection"
+                              className="group inline-flex items-center justify-center h-7 w-7 rounded-full border border-white/15 bg-black/40 hover:bg-white/10 transition"
+                            >
+                              <span className="text-white/70 group-hover:text-white text-sm leading-none">
+                                ✕
+                              </span>
+                            </button>
+                          )}
                         </div>
 
+                        {/* ✅ Outcome pills only when user picked (or void); NEVER show for no-pick */}
                         {outcomeLabel && (
                           <div className="mt-2">
                             <span
@@ -1655,7 +1725,9 @@ export default function PicksClient() {
                       <li key={c.id} className="bg-[#0b1220] rounded-md px-3 py-2 text-sm">
                         <div className="flex justify-between mb-1">
                           <span className="font-semibold">{c.displayName || "User"}</span>
-                          {c.createdAt && <span className="text-[11px] text-gray-400">{c.createdAt}</span>}
+                          {c.createdAt && (
+                            <span className="text-[11px] text-gray-400">{c.createdAt}</span>
+                          )}
                         </div>
                         <p className="text-sm text-gray-100">{c.body}</p>
                       </li>
@@ -1740,65 +1812,56 @@ export default function PicksClient() {
               </div>
 
               <p className="text-sm text-white/75 mb-4">
-                Quick rundown so you don&apos;t stitch yourself up in the first quarter:
+                Quick rundown so you don&apos;t stitch yourself up early:
               </p>
 
               <ul className="space-y-2.5 text-sm text-white/80 mb-5">
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">One game at a time:</span> the next game only opens
-                    once the previous game locks.
-                  </span>
-                </li>
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">Pick as many questions as you like</span> in any open
-                    game.
-                  </span>
-                </li>
-
-                {/* ✅ UPDATED SCORING MECHANIC */}
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">Game scoring:</span> if you get <span className="font-semibold">ANY</span>{" "}
-                    of your picked questions wrong, your <span className="font-semibold">Game Score is 0</span>. If you get
-                    <span className="font-semibold"> ALL</span> your picked questions right, your{" "}
-                    <span className="font-semibold">Game Score equals the number of picks you made</span>. Voided questions
-                    don&apos;t count either way.
+                    <span className="font-semibold">All matches are open</span> from the start of the round
+                    (until each match closes for picks).
                   </span>
                 </li>
 
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">Change your mind?</span> You can tweak your selections right up until that
-                    game starts.
+                    Make <span className="font-semibold">Yes / No</span> picks on live questions.
+                    Pick as many (or as few) as you want across any games.
                   </span>
                 </li>
 
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    If <span className="font-semibold">your Game Score is &gt; 0</span>, your streak carries straight into the next
-                    game. Bang!
+                    <span className="font-semibold">Clean sweep rule:</span> to carry your streak forward,
+                    you need a <span className="font-semibold">clean sweep in that match</span>.
+                    If <span className="font-semibold">any</span> pick in a match is wrong, your streak resets to{" "}
+                    <span className="font-semibold">0</span> at the end of that match.
                   </span>
                 </li>
+
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">One loss = streak dead</span>. You drop back to{" "}
-                    <span className="font-semibold">0</span> but you&apos;re still in – jump into the next game and start building
-                    again.
+                    <span className="font-semibold">Voided questions</span> don&apos;t count as right or wrong.
+                    <span className="font-semibold"> No picks</span> in a match don&apos;t affect your streak at all.
+                  </span>
+                </li>
+
+                <li className="flex gap-2">
+                  <span className="mt-1 text-orange-300">•</span>
+                  <span>
+                    Change your pick anytime before lock. To remove a pick completely, hit the{" "}
+                    <span className="font-semibold">✕</span> (clear selection).
                   </span>
                 </li>
               </ul>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
                 <p className="text-xs text-white/60">
-                  Tip: don&apos;t chase everything. Back the picks you&apos;d argue about at the pub.
+                  Tip: back your best reads. Don&apos;t spray picks like it&apos;s a multis promo.
                 </p>
                 <button
                   type="button"
