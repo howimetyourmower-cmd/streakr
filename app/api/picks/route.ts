@@ -75,10 +75,31 @@ type GameLockDoc = {
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
-// CricketRounds (BBL) shape (what you seed)
+// ─────────────────────────────────────────────
+// Cricket/BBL Firestore shapes
+// ─────────────────────────────────────────────
+
+// Shape 1: what you seeded (your screenshot shows this)
+type BblGamesDoc = {
+  league?: string; // "BBL"
+  sport?: string; // "BBL"
+  match?: string;
+  venue?: string;
+  startTime?: string;
+  matchId?: string;
+  questions?: Array<{
+    id?: string;
+    quarter?: number; // often 0 in your seeding UI
+    question?: string;
+    status?: QuestionStatus | string;
+    isSponsorQuestion?: boolean;
+  }>;
+};
+
+// Shape 2: optional (if you ever use cricketRounds docs)
 type CricketSeedQuestion = {
   id: string;
-  quarter: number; // 0 for match-level
+  quarter: number;
   question: string;
   status?: QuestionStatus;
   isSponsorQuestion?: boolean;
@@ -96,9 +117,9 @@ type CricketSeedGame = {
 type CricketRoundDoc = {
   season: number;
   roundNumber?: number;
-  round?: number; // legacy if you ever use it
+  round?: number;
   label?: string;
-  sport?: string; // "BBL"
+  sport?: string;
   games: CricketSeedGame[];
 };
 
@@ -157,7 +178,7 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 
 /**
  * Pick stats for all questions (questionId uniqueness is key).
- * Works across sports as long as questionId is unique.
+ * NOTE: Right now this reads ALL picks (not filtered by round/sport). That’s ok for MVP.
  */
 async function getPickStatsForRound(
   _roundNumber: number,
@@ -202,7 +223,7 @@ async function getPickStatsForRound(
   return { pickStats, userPicks };
 }
 
-// AFL-only helpers (kept as-is)
+// AFL-only helpers
 async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
   try {
     const docRef = db.collection("config").doc("season-2026");
@@ -341,12 +362,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
 
-    // sport param controls which data source to use
     const sportParam = String(url.searchParams.get("sport") ?? "AFL")
       .trim()
       .toUpperCase();
 
-    // round param (still used for AFL; for BBL it's optional)
     const roundParam = url.searchParams.get("round");
     let roundNumber: number | null = null;
     if (roundParam !== null) {
@@ -355,10 +374,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     if (roundNumber === null) roundNumber = 0;
 
-    // Auth user id (for blue picks)
     const currentUserId = await getUserIdFromRequest(req);
 
-    // Pick stats (works for both sports)
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
@@ -375,71 +392,135 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({
           ...empty,
           error:
-            "Missing docId. Call /api/picks?sport=BBL&docId=<your-cricketRounds-docId>",
+            "Missing docId. Call /api/picks?sport=BBL&docId=<your-doc-id>",
         });
       }
 
-      const snap = await db.collection("cricketRounds").doc(docId).get();
-      if (!snap.exists) {
-        const empty: PicksApiResponse = { games: [], roundNumber };
-        return NextResponse.json({
-          ...empty,
-          error: `BBL doc not found: cricketRounds/${docId}`,
-        });
-      }
+      // 1) Try cricketRounds first (optional legacy/alternate)
+      const cricketSnap = await db.collection("cricketRounds").doc(docId).get();
+      if (cricketSnap.exists) {
+        const data = cricketSnap.data() as CricketRoundDoc;
+        const effectiveRoundNumber =
+          Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
 
-      const data = snap.data() as CricketRoundDoc;
-      const effectiveRoundNumber =
-        Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
+        const games: ApiGame[] = (data.games || []).map((g, gi) => {
+          const gameId = g.id?.trim() || `${docId}-G${gi + 1}`;
+          const match = String(g.match || "").trim();
+          const venue = String(g.venue || "").trim();
+          const startTime = String(g.startTime || "").trim();
+          const sport = String(g.sport || data.sport || "BBL").toUpperCase();
 
-      const games: ApiGame[] = (data.games || []).map((g, gi) => {
-        const gameId = g.id?.trim() || `${docId}-G${gi + 1}`;
-        const match = String(g.match || "").trim();
-        const venue = String(g.venue || "").trim();
-        const startTime = String(g.startTime || "").trim();
-        const sport = String(g.sport || data.sport || "BBL").toUpperCase();
+          const questions: ApiQuestion[] = (g.questions || []).map((q) => {
+            const qid = String(q.id || "").trim();
+            // Make IDs stable so picks can attach
+            const questionId = qid ? `${gameId}-${qid}` : `${gameId}-QX`;
 
-        const questions: ApiQuestion[] = (g.questions || []).map((q) => {
-          const qid = String(q.id || "").trim();
-          const questionId =
-            qid || `${gameId}-Q${Math.random().toString(36).slice(2, 8)}`;
+            const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
+            const total = stats.total;
 
-          const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
-          const total = stats.total;
+            const yesPercent =
+              total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+            const noPercent =
+              total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-          const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-          const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
+            const userPick = userPicks[questionId];
 
-          const userPick = userPicks[questionId];
+            const rawQuarter = Number.isFinite(Number(q.quarter))
+              ? Number(q.quarter)
+              : 1;
+            const safeQuarter = rawQuarter <= 0 ? 1 : rawQuarter;
 
-          // For BBL MVP: no questionStatus/commentCounts yet
-          const effectiveStatus = normaliseStatusValue(q.status ?? "open");
-
-          // ✅ IMPORTANT FIX:
-          // If you seed quarter: 0 (match-level), the UI often filters it out.
-          // We normalise any 0/invalid quarter to 1 so the row renders.
-          const rawQuarter = Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 1;
-          const safeQuarter = rawQuarter <= 0 ? 1 : rawQuarter;
+            return {
+              id: questionId,
+              gameId,
+              quarter: safeQuarter,
+              question: String(q.question || "").trim(),
+              status: normaliseStatusValue(q.status ?? "open"),
+              sport,
+              isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+              userPick,
+              yesPercent,
+              noPercent,
+              commentCount: 0,
+              correctOutcome: undefined,
+              outcome: undefined,
+              correctPick: null,
+            };
+          });
 
           return {
-            id: questionId,
-            gameId,
-            quarter: safeQuarter,
-            question: String(q.question || "").trim(),
-            status: effectiveStatus,
+            id: gameId,
+            match,
             sport,
-            isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-            userPick,
-            yesPercent,
-            noPercent,
-            commentCount: 0,
-            correctOutcome: undefined,
-            outcome: undefined,
-            correctPick: null,
+            venue,
+            startTime,
+            isUnlockedForPicks: true,
+            questions,
           };
         });
 
+        return NextResponse.json({
+          games,
+          roundNumber: effectiveRoundNumber,
+        } satisfies PicksApiResponse);
+      }
+
+      // 2) ✅ Fallback to the collection you ACTUALLY seeded: games/<docId>
+      const gameSnap = await db.collection("games").doc(docId).get();
+      if (!gameSnap.exists) {
+        const empty: PicksApiResponse = { games: [], roundNumber };
+        return NextResponse.json({
+          ...empty,
+          error: `BBL doc not found in cricketRounds/${docId} or games/${docId}`,
+        });
+      }
+
+      const gameDoc = gameSnap.data() as BblGamesDoc;
+
+      const sport = String(gameDoc.sport || gameDoc.league || "BBL").toUpperCase();
+      const match = String(gameDoc.match || "").trim();
+      const venue = String(gameDoc.venue || "").trim();
+      const startTime = String(gameDoc.startTime || "").trim();
+
+      const gameId = String(gameDoc.matchId || docId).trim() || docId;
+
+      const questions: ApiQuestion[] = (gameDoc.questions || []).map((q, idx) => {
+        const rawId = String(q.id || `Q${idx + 1}`).trim();
+        // Make IDs stable and unique (THIS MATTERS)
+        const questionId = `${gameId}-${rawId}`;
+
+        const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
+        const total = stats.total;
+
+        const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+        const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
+
+        const userPick = userPicks[questionId];
+
+        // ✅ quarter 0 often causes UI filters to drop it, so force into 1..4
+        const rawQuarter = Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 1;
+        const safeQuarter = rawQuarter <= 0 ? 1 : rawQuarter;
+
         return {
+          id: questionId,
+          gameId,
+          quarter: safeQuarter,
+          question: String(q.question || "").trim(),
+          status: normaliseStatusValue(q.status ?? "open"),
+          sport,
+          isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+          userPick,
+          yesPercent,
+          noPercent,
+          commentCount: 0,
+          correctOutcome: undefined,
+          outcome: undefined,
+          correctPick: null,
+        };
+      });
+
+      const games: ApiGame[] = [
+        {
           id: gameId,
           match,
           sport,
@@ -447,15 +528,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           startTime,
           isUnlockedForPicks: true,
           questions,
-        };
-      });
+        },
+      ];
 
-      const response: PicksApiResponse = {
+      return NextResponse.json({
         games,
-        roundNumber: effectiveRoundNumber,
-      };
-
-      return NextResponse.json(response);
+        roundNumber: 0,
+      } satisfies PicksApiResponse);
     }
 
     // ─────────────────────────────
