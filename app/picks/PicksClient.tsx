@@ -88,11 +88,9 @@ type GameLocksResponse = {
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
 
-// ✅ SWITCH SPORT HERE
-const ACTIVE_SPORT: "AFL" | "BBL" = "BBL";
-
-// ✅ ONLY USED WHEN ACTIVE_SPORT === "BBL"
-const BBL_DOC_ID = "BBL-2025-12-14-SCO-VS-SIX";
+// ✅ NEW: sport + bbl doc persistence keys
+const ACTIVE_SPORT_KEY = "streakr_active_sport_v1";
+const BBL_DOC_ID_KEY = "streakr_bbl_doc_id_v1";
 
 // Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
@@ -222,8 +220,16 @@ function parseAflMatchTeams(match: string): {
 
 // --------------------------------------------------
 
+type SportKey = "AFL" | "BBL";
+
 export default function PicksClient() {
   const { user } = useAuth();
+
+  // ✅ NEW: sport toggle state (defaults safe)
+  const [activeSport, setActiveSport] = useState<SportKey>("AFL");
+
+  // ✅ NEW: BBL doc id state (editable for testing)
+  const [bblDocId, setBblDocId] = useState<string>("BBL-2025-12-14-SCO-VS-SIX");
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
@@ -282,6 +288,45 @@ export default function PicksClient() {
     rowsRef.current = rows;
   }, [rows]);
 
+  // ✅ Load active sport + bbl doc id from localStorage (per device)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const savedSport = window.localStorage.getItem(ACTIVE_SPORT_KEY);
+      if (savedSport === "AFL" || savedSport === "BBL") {
+        setActiveSport(savedSport);
+      }
+
+      const savedDoc = window.localStorage.getItem(BBL_DOC_ID_KEY);
+      if (savedDoc && typeof savedDoc === "string") {
+        setBblDocId(savedDoc);
+      }
+    } catch (err) {
+      console.error("Failed to load sport/doc from localStorage", err);
+    }
+  }, []);
+
+  // ✅ Persist active sport
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(ACTIVE_SPORT_KEY, activeSport);
+    } catch (err) {
+      console.error("Failed to persist activeSport", err);
+    }
+  }, [activeSport]);
+
+  // ✅ Persist bbl doc id
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(BBL_DOC_ID_KEY, bblDocId);
+    } catch (err) {
+      console.error("Failed to persist bblDocId", err);
+    }
+  }, [bblDocId]);
+
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -320,7 +365,8 @@ export default function PicksClient() {
   const flattenApi = (
     data: PicksApiResponse,
     prevRows: QuestionRow[],
-    history: PickHistory
+    history: PickHistory,
+    sportFallback: SportKey
   ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
@@ -346,7 +392,7 @@ export default function PicksClient() {
           yesPercent:
             typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
           noPercent: typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
-          sport: q.sport ?? g.sport ?? ACTIVE_SPORT,
+          sport: (q.sport ?? g.sport ?? sportFallback).toString(),
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
@@ -362,8 +408,8 @@ export default function PicksClient() {
 
     try {
       const url =
-        ACTIVE_SPORT === "BBL"
-          ? `/api/picks?sport=BBL&docId=${encodeURIComponent(BBL_DOC_ID)}`
+        activeSport === "BBL"
+          ? `/api/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
           : "/api/picks";
 
       const res = await fetch(url);
@@ -375,10 +421,10 @@ export default function PicksClient() {
         setRoundNumber(data.roundNumber);
       } else {
         // For BBL you may not send roundNumber; keep it null
-        if (ACTIVE_SPORT === "BBL") setRoundNumber(null);
+        if (activeSport === "BBL") setRoundNumber(null);
       }
 
-      const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current);
+      const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current, activeSport);
 
       setRows(flat);
       setFilteredRows(
@@ -431,20 +477,20 @@ export default function PicksClient() {
     setShowHowToModal(false);
   };
 
-  // Initial picks
+  // Initial picks (and refetch on sport/doc change)
   useEffect(() => {
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeSport, bblDocId]);
 
-  // Auto-refresh
+  // Auto-refresh (always uses current sport/doc)
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
     }, 15000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeSport, bblDocId]);
 
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
@@ -580,7 +626,7 @@ export default function PicksClient() {
 
   // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
-    if (ACTIVE_SPORT !== "AFL") return;
+    if (activeSport !== "AFL") return;
     if (roundNumber === null) return;
 
     const loadLocks = async () => {
@@ -598,7 +644,7 @@ export default function PicksClient() {
     };
 
     loadLocks();
-  }, [roundNumber]);
+  }, [roundNumber, activeSport]);
 
   // Streak leader listener
   useEffect(() => {
@@ -804,8 +850,7 @@ export default function PicksClient() {
       return;
     }
 
-    const isMatchUnlocked =
-      ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+    const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
 
     if (row.status !== "open" || !isMatchUnlocked) return;
 
@@ -832,8 +877,8 @@ export default function PicksClient() {
           questionId: row.id,
           outcome: pick,
           roundNumber,
-          sport: ACTIVE_SPORT,
-          docId: ACTIVE_SPORT === "BBL" ? BBL_DOC_ID : undefined,
+          sport: activeSport,
+          docId: activeSport === "BBL" ? bblDocId : undefined,
         }),
       });
 
@@ -845,17 +890,12 @@ export default function PicksClient() {
     }
   };
 
-  // ✅ Clear selection = NO PICK (must not affect streak/outcomes)
-  // ⚠️ To persist across refresh/device, /api/user-picks must support clearing/deleting.
   const handleClearPick = async (row: QuestionRow) => {
-    const isMatchUnlocked =
-      ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+    const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
 
     if (row.status !== "open" || !isMatchUnlocked) return;
 
-    setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
-    );
+    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
     setFilteredRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
     );
@@ -877,14 +917,13 @@ export default function PicksClient() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
         },
-        // Backend should delete the pick when action:"clear"
         body: JSON.stringify({
           questionId: row.id,
           action: "clear",
           outcome: null,
           roundNumber,
-          sport: ACTIVE_SPORT,
-          docId: ACTIVE_SPORT === "BBL" ? BBL_DOC_ID : undefined,
+          sport: activeSport,
+          docId: activeSport === "BBL" ? bblDocId : undefined,
         }),
       });
 
@@ -990,7 +1029,7 @@ export default function PicksClient() {
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // ✅ Picks made per game (use ALL rows, not filtered, so headers stay true)
+  // ✅ Picks made per game (use ALL rows, not filtered)
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -1002,7 +1041,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // ✅ Game score per game (clean sweep logic for that match; void/no-pick ignored)
+  // ✅ Game score per game (clean sweep logic)
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -1012,7 +1051,6 @@ export default function PicksClient() {
 
     const byGame: Record<string, GameScoreInfo> = {};
 
-    // Group rows by gameId
     const groups: Record<string, QuestionRow[]> = {};
     for (const r of rows) {
       if (!groups[r.gameId]) groups[r.gameId] = [];
@@ -1036,24 +1074,20 @@ export default function PicksClient() {
 
         const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
 
-        // Void never helps or hurts
         if (r.status === "void" || outcome === "void") {
           continue;
         }
 
-        // Not settled yet
         if (r.status !== "final") {
           pendingPicked++;
           continue;
         }
 
-        // Final but missing outcome: treat as pending
         if (!outcome) {
           pendingPicked++;
           continue;
         }
 
-        // Settled win/loss
         if (effectivePick === outcome) wins++;
         else losses++;
       }
@@ -1065,7 +1099,6 @@ export default function PicksClient() {
       } else if (losses > 0) {
         byGame[gameId] = { kind: "zero", pickedCount };
       } else {
-        // Clean sweep in this match (void ignored)
         byGame[gameId] = { kind: "scored", score: wins, pickedCount };
       }
     }
@@ -1202,31 +1235,83 @@ export default function PicksClient() {
           }
         `}</style>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-            {roundNumber !== null && ACTIVE_SPORT === "AFL" && (
-              <p className="text-sm text-white/70">
-                Current Round:{" "}
-                <span className="font-semibold text-orange-400">
-                  {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
-                </span>
-              </p>
-            )}
-            {ACTIVE_SPORT === "BBL" && (
-              <p className="text-sm text-white/70">
-                Sport: <span className="font-semibold text-orange-400">BBL</span> • Match Doc:{" "}
-                <span className="font-semibold text-sky-300">{BBL_DOC_ID}</span>
-              </p>
-            )}
+        <div className="flex flex-col gap-3 mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex flex-col gap-1">
+              <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
+
+              {roundNumber !== null && activeSport === "AFL" && (
+                <p className="text-sm text-white/70">
+                  Current Round:{" "}
+                  <span className="font-semibold text-orange-400">
+                    {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
+                  </span>
+                </p>
+              )}
+
+              {activeSport === "BBL" && (
+                <p className="text-sm text-white/70">
+                  Sport: <span className="font-semibold text-orange-400">BBL</span> • Match Doc:{" "}
+                  <span className="font-semibold text-sky-300">{bblDocId}</span>
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              {/* ✅ SPORT TOGGLE */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveSport("AFL")}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${
+                    activeSport === "AFL"
+                      ? "bg-orange-500 text-black border-orange-400"
+                      : "bg-black/40 text-white/70 border-white/15 hover:bg-white/5"
+                  }`}
+                >
+                  AFL
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveSport("BBL")}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${
+                    activeSport === "BBL"
+                      ? "bg-orange-500 text-black border-orange-400"
+                      : "bg-black/40 text-white/70 border-white/15 hover:bg-white/5"
+                  }`}
+                >
+                  BBL
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowHowToModal(true)}
+                className="inline-flex items-center justify-center rounded-full border border-orange-400/70 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/10 transition"
+              >
+                How to play STREAKr
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowHowToModal(true)}
-            className="inline-flex items-center justify-center self-start sm:self-auto rounded-full border border-orange-400/70 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/10 transition"
-          >
-            How to play STREAKr
-          </button>
+
+          {/* ✅ BBL DOC INPUT (only when BBL active) */}
+          {activeSport === "BBL" && (
+            <div className="rounded-xl bg-[#0b1220] border border-slate-700 p-3">
+              <div className="text-[11px] uppercase tracking-wide text-white/60 mb-1">
+                BBL Match Document ID (for testing)
+              </div>
+              <input
+                value={bblDocId}
+                onChange={(e) => setBblDocId(e.target.value)}
+                className="w-full rounded-lg bg-black/40 border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                placeholder="BBL-YYYY-MM-DD-XXX-VS-YYY"
+              />
+              <div className="mt-1 text-[11px] text-white/55">
+                Tip: paste the doc id from Firestore: <span className="text-white/75">cricketRounds/{`{docId}`}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* STREAK PROGRESS TRACKER + SHARE */}
@@ -1354,8 +1439,7 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked =
-                ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+              const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
 
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
@@ -1398,7 +1482,6 @@ export default function PicksClient() {
               if (row.status === "void" || outcome === "void") {
                 outcomeKind = "void";
               } else if (row.status === "final") {
-                // ✅ CRITICAL: NO PICK => show NOTHING (no pill, no "wrong pick", no streak impact)
                 if (!hasPicked) {
                   outcomeKind = null;
                 } else if (outcome) {
@@ -1428,7 +1511,6 @@ export default function PicksClient() {
                   ? "bg-red-500/15 border-red-400/60 text-red-300"
                   : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
-              // ✅ FIX: keep blue selection even when not selectable / finalised
               const yesButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
                 isYesPicked
@@ -1447,20 +1529,15 @@ export default function PicksClient() {
                   : "bg-red-600 hover:bg-red-700 text-white border-transparent",
               ].join(" ");
 
-              const showMatchLockedLabel =
-                ACTIVE_SPORT === "AFL" ? !isMatchUnlocked : false;
-
+              const showMatchLockedLabel = activeSport === "AFL" ? !isMatchUnlocked : false;
               const showStatusLockedLabel = !isQuestionOpen && isMatchUnlocked;
 
               const shouldRenderHeader = lastGameId !== row.gameId;
-              if (shouldRenderHeader) {
-                lastGameId = row.gameId;
-              }
+              if (shouldRenderHeader) lastGameId = row.gameId;
 
               const headerPicksMade = picksMadeByGame[row.gameId] ?? 0;
               const gameScoreInfo = gameScoreByGame[row.gameId];
 
-              // header chip styling (UPDATED – clearer + stronger)
               const gameScoreChip =
                 !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
                   <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
@@ -1545,9 +1622,7 @@ export default function PicksClient() {
                                 </span>
                               </div>
 
-                              <span className="text-xs uppercase tracking-wide text-white/70">
-                                vs
-                              </span>
+                              <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
 
                               <div className="flex items-center gap-1 min-w-0">
                                 <span className="text-sm font-semibold truncate">
@@ -1590,16 +1665,19 @@ export default function PicksClient() {
                           >
                             Comments ({row.commentCount ?? 0})
                           </button>
+
                           {showMatchLockedLabel && (
                             <span className="inline-flex items-center rounded-full bg-red-600/80 px-2 py-0.5 text-[10px] font-semibold text-white shadow-[0_0_8px_rgba(248,113,113,0.8)]">
                               Match closed for picks
                             </span>
                           )}
+
                           {showStatusLockedLabel && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
                           )}
+
                           {isSponsor && (
                             <span className="inline-flex items-center rounded-full bg-amber-400 text-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                               Sponsor Question
@@ -1630,7 +1708,6 @@ export default function PicksClient() {
                             </button>
                           </div>
 
-                          {/* ✅ Clear selection icon (only if picked + selectable) */}
                           {hasPicked && isSelectable && (
                             <button
                               type="button"
@@ -1646,7 +1723,6 @@ export default function PicksClient() {
                           )}
                         </div>
 
-                        {/* ✅ Outcome pills only when user picked (or void); NEVER show for no-pick */}
                         {outcomeLabel && (
                           <div className="mt-2">
                             <span
