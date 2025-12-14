@@ -33,6 +33,8 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+
+  // ✅ outcome-pill fields
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null;
@@ -86,6 +88,7 @@ type CricketMatchQuestion = {
   quarter: number; // 0 for match-level
   question: string;
   status?: QuestionStatus | string;
+  outcome?: QuestionOutcome | string; // ✅ NEW (Option B)
   isSponsorQuestion?: boolean;
 };
 
@@ -106,6 +109,7 @@ type CricketSeedQuestion = {
   quarter: number;
   question: string;
   status?: QuestionStatus | string;
+  outcome?: QuestionOutcome | string; // ✅ NEW (Option B)
   isSponsorQuestion?: boolean;
 };
 
@@ -316,65 +320,6 @@ async function getQuestionStatusForRound(
   return finalMap;
 }
 
-/**
- * ✅ NEW: For BBL we don’t have roundNumber logic.
- * We fetch the latest status/outcome by questionId (in chunks of 10).
- */
-async function getLatestQuestionStatusByQuestionIds(
-  questionIds: string[]
-): Promise<Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<
-    string,
-    { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
-  > = {};
-
-  const unique = Array.from(new Set(questionIds.filter(Boolean)));
-  if (!unique.length) return {};
-
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
-
-  try {
-    for (const chunk of chunks) {
-      const snap = await db
-        .collection("questionStatus")
-        .where("questionId", "in", chunk)
-        .get();
-
-      snap.forEach((docSnap) => {
-        const d = docSnap.data() as QuestionStatusDoc;
-        if (!d.questionId) return;
-
-        const rawOutcome = (d.outcome as any) ?? (d.result as any);
-        const outcome = normaliseOutcomeValue(rawOutcome);
-
-        const updatedAtMs =
-          d.updatedAt && typeof (d.updatedAt as any).toMillis === "function"
-            ? (d.updatedAt as any).toMillis()
-            : 0;
-
-        const existing = temp[d.questionId];
-        if (!existing || updatedAtMs >= existing.updatedAtMs) {
-          temp[d.questionId] = {
-            status: d.status ? normaliseStatusValue(d.status) : undefined,
-            outcome,
-            updatedAtMs,
-          };
-        }
-      });
-    }
-  } catch (error) {
-    console.error("[/api/picks] Error fetching questionStatus by ids", error);
-  }
-
-  const out: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> =
-    {};
-  for (const [qid, v] of Object.entries(temp)) {
-    out[qid] = { status: v.status, outcome: v.outcome };
-  }
-  return out;
-}
-
 async function getGameLocksForRound(
   roundCode: string,
   roundRows: JsonRow[]
@@ -413,36 +358,34 @@ async function getGameLocksForRound(
 
 // ─────────────────────────────────────────────
 // BBL helper: build API response from either doc shape
+// ✅ Option B: status/outcome comes from cricketRounds doc itself
 // ─────────────────────────────────────────────
 
-function enrichQuestionWithStatusAndOutcome(params: {
+function enrichQuestionForApi(params: {
   q: {
     id: string;
     gameId: string;
     quarter: number;
     question: string;
     status: QuestionStatus;
+    outcome?: QuestionOutcome;
     sport: string;
     isSponsorQuestion?: boolean;
   };
-  statusOverride?: { status?: QuestionStatus; outcome?: QuestionOutcome };
   userPick?: "yes" | "no";
   yesPercent: number;
   noPercent: number;
-}) : ApiQuestion {
-  const { q, statusOverride, userPick, yesPercent, noPercent } = params;
-
-  const effectiveStatus: QuestionStatus =
-    statusOverride?.status ?? q.status;
+}): ApiQuestion {
+  const { q, userPick, yesPercent, noPercent } = params;
 
   const correctOutcome =
-    effectiveStatus === "final" || effectiveStatus === "void"
-      ? statusOverride?.outcome
-      : undefined;
+    q.status === "final" || q.status === "void" ? q.outcome : undefined;
 
   let correctPick: boolean | null = null;
   if (correctOutcome && userPick) {
-    correctPick = userPick === correctOutcome;
+    // if void, keep null (void shouldn't mark correct/incorrect)
+    if (correctOutcome === "void") correctPick = null;
+    else correctPick = userPick === correctOutcome;
   }
 
   return {
@@ -450,7 +393,7 @@ function enrichQuestionWithStatusAndOutcome(params: {
     gameId: q.gameId,
     quarter: q.quarter,
     question: q.question,
-    status: effectiveStatus,
+    status: q.status,
     sport: q.sport,
     isSponsorQuestion: q.isSponsorQuestion,
     userPick,
@@ -467,8 +410,7 @@ function buildBblGameFromMatchDoc(
   docId: string,
   data: CricketMatchDoc,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
-  userPicks: Record<string, "yes" | "no">,
-  statusByQid: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>
+  userPicks: Record<string, "yes" | "no">
 ): ApiGame {
   const sport = String(data.sport || data.league || "BBL").trim().toUpperCase();
   const match = String(data.match || "").trim();
@@ -491,13 +433,13 @@ function buildBblGameFromMatchDoc(
       quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
       question: String(q.question || "").trim(),
       status: normaliseStatusValue(q.status ?? "open"),
+      outcome: normaliseOutcomeValue(String(q.outcome ?? "")), // ✅ from doc
       sport,
       isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
     };
 
-    return enrichQuestionWithStatusAndOutcome({
+    return enrichQuestionForApi({
       q: base,
-      statusOverride: statusByQid[qid],
       userPick: userPicks[qid],
       yesPercent,
       noPercent,
@@ -519,8 +461,7 @@ function buildBblGamesFromRoundDoc(
   docId: string,
   data: CricketRoundDoc,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
-  userPicks: Record<string, "yes" | "no">,
-  statusByQid: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>
+  userPicks: Record<string, "yes" | "no">
 ): ApiGame[] {
   const gamesArr = Array.isArray(data.games) ? data.games : [];
   const baseSport = String(data.sport || "BBL").trim().toUpperCase();
@@ -547,13 +488,13 @@ function buildBblGamesFromRoundDoc(
         quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
         question: String(q.question || "").trim(),
         status: normaliseStatusValue(q.status ?? "open"),
+        outcome: normaliseOutcomeValue(String(q.outcome ?? "")), // ✅ from doc
         sport,
         isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
       };
 
-      return enrichQuestionWithStatusAndOutcome({
+      return enrichQuestionForApi({
         q: base,
-        statusOverride: statusByQid[qid],
         userPick: userPicks[qid],
         yesPercent,
         noPercent,
@@ -599,7 +540,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
 
     // ─────────────────────────────
-    // BBL / Cricket path (Firestore)
+    // BBL / Cricket path (Firestore) — OPTION B
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
       const docId = String(url.searchParams.get("docId") ?? "").trim();
@@ -627,30 +568,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const hasGamesArray = Array.isArray((raw as any).games);
       const hasQuestionsArray = Array.isArray((raw as any).questions);
 
-      // Collect all questionIds so we can fetch their settlement outcomes
-      const qids: string[] = [];
-
-      if (hasGamesArray) {
-        const data = raw as CricketRoundDoc;
-        const gamesArr = Array.isArray(data.games) ? data.games : [];
-        for (const g of gamesArr) {
-          const qs = Array.isArray(g.questions) ? g.questions : [];
-          for (const q of qs) {
-            const qid = String(q.id || "").trim();
-            if (qid) qids.push(qid);
-          }
-        }
-      } else if (hasQuestionsArray) {
-        const data = raw as CricketMatchDoc;
-        const qs = Array.isArray(data.questions) ? data.questions : [];
-        for (const q of qs) {
-          const qid = String(q.id || "").trim();
-          if (qid) qids.push(qid);
-        }
-      }
-
-      const statusByQid = await getLatestQuestionStatusByQuestionIds(qids);
-
       let games: ApiGame[] = [];
       let effectiveRoundNumber = roundNumber;
 
@@ -659,12 +576,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         effectiveRoundNumber =
           Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
 
-        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks, statusByQid);
+        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks);
       } else if (hasQuestionsArray) {
         const data = raw as CricketMatchDoc;
         effectiveRoundNumber = roundNumber;
 
-        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks, statusByQid)];
+        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks)];
       } else {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
@@ -747,7 +664,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       let correctPick: boolean | null = null;
       if (correctOutcome && userPick) {
-        correctPick = userPick === correctOutcome;
+        if (correctOutcome === "void") correctPick = null;
+        else correctPick = userPick === correctOutcome;
       }
 
       const apiQuestion: ApiQuestion = {
