@@ -1398,21 +1398,22 @@ export default function PicksClient() {
                   ? "bg-red-500/15 border-red-400/60 text-red-300"
                   : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
+              // ✅ FIX: keep blue selection even when not selectable / finalised
               const yesButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                !isSelectable
-                  ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
-                  : isYesPicked
+                isYesPicked
                   ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                  : !isSelectable
+                  ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
                   : "bg-green-600 hover:bg-green-700 text-white border-transparent",
               ].join(" ");
 
               const noButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                !isSelectable
-                  ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
-                  : isNoPicked
+                isNoPicked
                   ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                  : !isSelectable
+                  ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
                   : "bg-red-600 hover:bg-red-700 text-white border-transparent",
               ].join(" ");
 
