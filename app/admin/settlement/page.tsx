@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ROUND_OPTIONS, CURRENT_SEASON } from "@/lib/rounds";
 
+type SportKey = "AFL" | "BBL";
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
 type SettlementAction =
@@ -34,7 +35,7 @@ type ApiGame = {
 
 type PicksApiResponse = {
   games: ApiGame[];
-  roundNumber: number;
+  roundNumber?: number; // ✅ optional so BBL doesn’t break
 };
 
 type QuestionRow = {
@@ -82,7 +83,15 @@ function formatStart(iso: string) {
 }
 
 export default function SettlementPage() {
+  // ✅ Sport switch
+  const [sport, setSport] = useState<SportKey>("AFL");
+
+  // ✅ AFL round selector (only used when sport === "AFL")
   const [roundKey, setRoundKey] = useState<RoundKey>("OR");
+
+  // ✅ BBL doc selector (only used when sport === "BBL")
+  const [bblDocId, setBblDocId] = useState<string>("BBL-2025-12-14-SCO-VS-SIX");
+
   const [statusFilter, setStatusFilter] = useState<
     "all" | "open" | "pending" | "final" | "void"
   >("all");
@@ -101,7 +110,7 @@ export default function SettlementPage() {
   } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
-  // Derived roundNumber from key
+  // Derived roundNumber from key (AFL only)
   const roundNumber = useMemo(() => keyToRoundNumber(roundKey), [roundKey]);
 
   const roundLabel = useMemo(() => {
@@ -109,10 +118,18 @@ export default function SettlementPage() {
     return found?.label ?? "Round";
   }, [roundKey]);
 
+  const seasonLabel = useMemo(() => {
+    if (sport === "BBL") return "BBL";
+    return `AFL Season ${CURRENT_SEASON}`;
+  }, [sport]);
+
   async function refreshRoundData() {
-    const res = await fetch(`/api/picks?round=${roundNumber}`, {
-      cache: "no-store",
-    });
+    const url =
+      sport === "BBL"
+        ? `/api/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
+        : `/api/picks?round=${roundNumber}`;
+
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
       throw new Error(`Failed to load picks (status ${res.status})`);
     }
@@ -139,7 +156,7 @@ export default function SettlementPage() {
     setQuestions(flatQuestions);
   }
 
-  // Load questions for selected round
+  // Load questions when round changes (AFL) OR docId changes (BBL) OR sport changes
   useEffect(() => {
     const load = async () => {
       try {
@@ -149,9 +166,7 @@ export default function SettlementPage() {
         await refreshRoundData();
       } catch (err: any) {
         console.error("[Settlement] load error", err);
-        setError(
-          err?.message || "Failed to load questions for settlement console."
-        );
+        setError(err?.message || "Failed to load questions for settlement console.");
         setQuestions([]);
       } finally {
         setLoading(false);
@@ -160,7 +175,7 @@ export default function SettlementPage() {
 
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roundNumber]);
+  }, [sport, roundNumber, bblDocId]);
 
   // ─────────────────────────────────────────────
   // Derived helpers
@@ -228,20 +243,34 @@ export default function SettlementPage() {
   // Settlement helpers
   // ─────────────────────────────────────────────
   async function postSettlement(questionId: string, action: SettlementAction) {
+    // ✅ IMPORTANT:
+    // - AFL uses roundNumber + questionId
+    // - BBL uses sport + docId + questionId
+    // Your /app/api/settlement/route.ts must support sport/docId for BBL.
+    const body =
+      sport === "BBL"
+        ? {
+            sport: "BBL",
+            docId: bblDocId,
+            roundNumber: 0, // safe placeholder (backend should ignore for BBL)
+            questionId,
+            action,
+          }
+        : {
+            roundNumber,
+            questionId,
+            action,
+          };
+
     const res = await fetch("/api/settlement", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        roundNumber,
-        questionId,
-        action,
-      }),
+      body: JSON.stringify(body),
     });
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const message =
-        data?.error || `Settlement API failed (status ${res.status})`;
+      const message = data?.error || `Settlement API failed (status ${res.status})`;
       throw new Error(message);
     }
   }
@@ -338,9 +367,9 @@ export default function SettlementPage() {
 
       if (failures.length) {
         setBulkError(
-          `Locked ${questionIds.length - failures.length}/${
-            questionIds.length
-          }. Failed: ${failures.length}. (Refresh done — you can retry.)`
+          `Locked ${questionIds.length - failures.length}/${questionIds.length}. Failed: ${
+            failures.length
+          }. (Refresh done — you can retry.)`
         );
       }
     } catch (err: any) {
@@ -358,16 +387,19 @@ export default function SettlementPage() {
   }
 
   async function lockAllOpenQuestions() {
-    const ids = questions
-      .filter((q) => q.status === "open")
-      .map((q) => q.id);
+    const ids = questions.filter((q) => q.status === "open").map((q) => q.id);
     if (!ids.length) return;
+
+    const label =
+      sport === "BBL"
+        ? `BBL (${bblDocId})`
+        : `${roundLabel}`;
 
     const ok =
       typeof window === "undefined"
         ? true
         : window.confirm(
-            `Lock ALL open questions for ${roundLabel}?\n\nThis sets them to PENDING (same as clicking LOCK). You can REOPEN any question if needed.`
+            `Lock ALL open questions for ${label}?\n\nThis sets them to PENDING (same as clicking LOCK). You can REOPEN any question if needed.`
           );
     if (!ok) return;
 
@@ -428,6 +460,11 @@ export default function SettlementPage() {
     return `Locking ${bulkProgress.done}/${bulkProgress.total} (${scope})…`;
   }, [bulkLocking, bulkProgress, bulkTarget]);
 
+  const headerRightLabel = useMemo(() => {
+    if (sport === "BBL") return `Match Doc: ${bblDocId}`;
+    return `Round: ${roundLabel}`;
+  }, [sport, bblDocId, roundLabel]);
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white">
       <section className="max-w-6xl mx-auto px-4 py-8 space-y-6">
@@ -447,25 +484,75 @@ export default function SettlementPage() {
           <div className="flex flex-col items-start md:items-end gap-3 text-sm">
             <div className="flex flex-wrap gap-2 items-center">
               <span className="inline-flex items-center rounded-full bg-white/5 border border-white/15 px-3 py-1 text-[11px] uppercase tracking-wide text-white/80">
-                AFL Season {CURRENT_SEASON}
+                {seasonLabel}
               </span>
               <span className="text-xs text-slate-300">
-                Round: <span className="font-semibold text-white">{roundLabel}</span>
+                {headerRightLabel.includes("Round:")
+                  ? (
+                    <>
+                      Round: <span className="font-semibold text-white">{roundLabel}</span>
+                    </>
+                  )
+                  : (
+                    <>
+                      Match Doc: <span className="font-semibold text-white">{bblDocId}</span>
+                    </>
+                  )
+                }
               </span>
             </div>
 
-            <div className="flex items-center gap-2">
-              <select
-                value={roundKey}
-                onChange={(e) => setRoundKey(e.target.value as RoundKey)}
-                className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
-              >
-                {ROUND_OPTIONS.map((r) => (
-                  <option key={r.key} value={r.key}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
+            {/* ✅ SPORT TOGGLE + SELECTORS */}
+            <div className="flex flex-col md:flex-row md:items-center gap-2">
+              <div className="inline-flex rounded-full bg-black border border-white/25 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSport("AFL")}
+                  disabled={loading || bulkLocking}
+                  className={`px-4 py-2 text-sm font-extrabold transition ${
+                    sport === "AFL"
+                      ? "bg-orange-500 text-black"
+                      : "bg-black text-white/80 hover:bg-white/5"
+                  }`}
+                >
+                  AFL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSport("BBL")}
+                  disabled={loading || bulkLocking}
+                  className={`px-4 py-2 text-sm font-extrabold transition ${
+                    sport === "BBL"
+                      ? "bg-orange-500 text-black"
+                      : "bg-black text-white/80 hover:bg-white/5"
+                  }`}
+                >
+                  BBL
+                </button>
+              </div>
+
+              {sport === "AFL" ? (
+                <select
+                  value={roundKey}
+                  onChange={(e) => setRoundKey(e.target.value as RoundKey)}
+                  className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+                  disabled={loading || bulkLocking}
+                >
+                  {ROUND_OPTIONS.map((r) => (
+                    <option key={r.key} value={r.key}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={bblDocId}
+                  onChange={(e) => setBblDocId(e.target.value)}
+                  placeholder="BBL docId (e.g. BBL-2025-12-14-SCO-VS-SIX)"
+                  className="w-full md:w-[360px] rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+                  disabled={loading || bulkLocking}
+                />
+              )}
 
               <button
                 type="button"
@@ -510,7 +597,7 @@ export default function SettlementPage() {
 
           <div className="px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-black/30">
             <div className="text-xs text-slate-300">
-              Open questions this round:{" "}
+              Open questions:{" "}
               <span className="font-semibold text-white">{openQuestionCount}</span>
             </div>
 
@@ -579,7 +666,7 @@ export default function SettlementPage() {
 
           {!loading && !error && gameMetaList.length === 0 && (
             <div className="rounded-2xl bg-black/40 border border-white/10 px-4 py-6 text-sm text-slate-200">
-              No games found for this round.
+              No games found.
             </div>
           )}
 
@@ -596,7 +683,7 @@ export default function SettlementPage() {
 
               return (
                 <div key={g.id} className="space-y-2">
-                  {/* GAME HEADER (PicksClient style) */}
+                  {/* GAME HEADER */}
                   <div className="rounded-xl bg-[#0b1220] border border-slate-700 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <div className="min-w-0">
