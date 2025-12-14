@@ -75,31 +75,24 @@ type GameLockDoc = {
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
-// CricketRounds (BBL) shape (what you seed)
-type CricketSeedQuestion = {
-  id: string;
-  quarter: number; // 0 for match-level
+// ✅ BBL (games collection) shape (what your screenshots show)
+type GamesDocQuestion = {
+  id: string; // "Q1"
+  quarter: number; // 0
   question: string;
-  status?: QuestionStatus;
+  status?: QuestionStatus | string;
   isSponsorQuestion?: boolean;
 };
 
-type CricketSeedGame = {
-  id?: string;
-  match: string;
+type GamesDoc = {
+  league?: string; // "BBL"
+  sport?: string; // "BBL"
+  season?: number;
+  matchId?: string;
+  match?: string; // "Perth Scorchers vs Sydney Sixers"
   venue?: string;
   startTime?: string;
-  sport?: string; // "BBL"
-  questions: CricketSeedQuestion[];
-};
-
-type CricketRoundDoc = {
-  season: number;
-  roundNumber?: number;
-  round?: number; // legacy if you ever use it
-  label?: string;
-  sport?: string; // "BBL"
-  games: CricketSeedGame[];
+  questions?: GamesDocQuestion[];
 };
 
 // ─────────────────────────────────────────────
@@ -200,6 +193,40 @@ async function getPickStatsForRound(
   }
 
   return { pickStats, userPicks };
+}
+
+// ✅ Comment counts by questionId (works for BBL + AFL if you ever use it)
+async function getCommentCountsForQuestionIds(
+  questionIds: string[]
+): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  if (!questionIds.length) return counts;
+
+  // Firestore "in" limit = 10
+  const chunks: string[][] = [];
+  for (let i = 0; i < questionIds.length; i += 10) {
+    chunks.push(questionIds.slice(i, i + 10));
+  }
+
+  try {
+    for (const chunk of chunks) {
+      const snap = await db
+        .collection("comments")
+        .where("questionId", "in", chunk)
+        .get();
+
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as { questionId?: string };
+        const qid = data.questionId;
+        if (!qid) return;
+        counts[qid] = (counts[qid] ?? 0) + 1;
+      });
+    }
+  } catch (error) {
+    console.error("[/api/picks] Error fetching comments by questionId", error);
+  }
+
+  return counts;
 }
 
 // AFL-only helpers (kept as-is)
@@ -337,6 +364,8 @@ async function getGameLocksForRound(
 // Main GET handler
 // ─────────────────────────────────────────────
 
+const DEFAULT_BBL_DOC_ID = "BBL - 2025-12-14 - SCO-VS-SIX";
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
@@ -358,95 +387,87 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // Auth user id (for blue picks)
     const currentUserId = await getUserIdFromRequest(req);
 
-    // Pick stats (works for both sports)
+    // Pick stats (works for both sports if questionId is unique)
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
 
     // ─────────────────────────────
-    // BBL / Cricket path (Firestore)
+    // ✅ BBL / Cricket path (games collection)
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
-      const docId = String(url.searchParams.get("docId") ?? "").trim();
+      const docId = String(url.searchParams.get("docId") ?? DEFAULT_BBL_DOC_ID).trim();
 
-      if (!docId) {
-        // We require docId for now to avoid collisions and guessing
-        const empty: PicksApiResponse = { games: [], roundNumber };
-        return NextResponse.json({
-          ...empty,
-          error:
-            "Missing docId. Call /api/picks?sport=BBL&docId=<your-cricketRounds-docId>",
-        });
-      }
-
-      const snap = await db.collection("cricketRounds").doc(docId).get();
+      const snap = await db.collection("games").doc(docId).get();
       if (!snap.exists) {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
-          error: `BBL doc not found: cricketRounds/${docId}`,
+          error: `BBL doc not found: games/${docId}`,
         });
       }
 
-      const data = snap.data() as CricketRoundDoc;
-      const effectiveRoundNumber =
-        Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
+      const data = (snap.data() || {}) as GamesDoc;
 
-      const games: ApiGame[] = (data.games || []).map((g, gi) => {
-        const gameId = g.id?.trim() || `${docId}-G${gi + 1}`;
-        const match = String(g.match || "").trim();
-        const venue = String(g.venue || "").trim();
-        const startTime = String(g.startTime || "").trim();
-        const sport = String(g.sport || data.sport || "BBL").toUpperCase();
+      const sport = String(data.sport || data.league || "BBL").toUpperCase();
+      const match = String(data.match || docId).trim();
+      const venue = String(data.venue || "").trim();
+      const startTime = String(data.startTime || "").trim();
 
-        const questions: ApiQuestion[] = (g.questions || []).map((q) => {
-          const qid = String(q.id || "").trim();
-          const questionId = qid || `${gameId}-Q${Math.random().toString(36).slice(2, 8)}`;
+      const seedQuestions = Array.isArray(data.questions) ? data.questions : [];
 
-          const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
-          const total = stats.total;
+      // ✅ unique question IDs so picks/comments don’t collide
+      const questionIds = seedQuestions.map((q) => `${docId}-${String(q.id).trim()}`);
+      const commentCounts = await getCommentCountsForQuestionIds(questionIds);
 
-          const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-          const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
+      const questions: ApiQuestion[] = seedQuestions.map((q) => {
+        const qShortId = String(q.id || "").trim();
+        const questionId = `${docId}-${qShortId}`;
 
-          const userPick = userPicks[questionId];
+        const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
+        const total = stats.total;
 
-          // For BBL MVP: we do not apply questionStatus/commentCounts yet (avoids roundNumber clashes)
-          const effectiveStatus = normaliseStatusValue(q.status ?? "open");
+        const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+        const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-          return {
-            id: questionId,
-            gameId,
-            quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
-            question: String(q.question || "").trim(),
-            status: effectiveStatus,
-            sport,
-            isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-            userPick,
-            yesPercent,
-            noPercent,
-            commentCount: 0,
-            correctOutcome: undefined,
-            outcome: undefined,
-            correctPick: null,
-          };
-        });
+        const userPick = userPicks[questionId];
+
+        const effectiveStatus = normaliseStatusValue(q.status ?? "open");
 
         return {
-          id: gameId,
+          id: questionId,
+          gameId: docId,
+          quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
+          question: String(q.question || "").trim(),
+          status: effectiveStatus,
+          sport,
+          isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+          userPick,
+          yesPercent,
+          noPercent,
+          commentCount: commentCounts[questionId] ?? 0,
+          correctOutcome: undefined,
+          outcome: undefined,
+          correctPick: null,
+        };
+      });
+
+      const games: ApiGame[] = [
+        {
+          id: docId,
           match,
           sport,
           venue,
           startTime,
           isUnlockedForPicks: true,
           questions,
-        };
-      });
+        },
+      ];
 
       const response: PicksApiResponse = {
         games,
-        roundNumber: effectiveRoundNumber,
+        roundNumber,
       };
 
       return NextResponse.json(response);
