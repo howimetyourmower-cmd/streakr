@@ -88,7 +88,7 @@ type GameLocksResponse = {
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
 
-// ✅ NEW: sport + bbl doc persistence keys
+// ✅ sport + bbl doc persistence keys
 const ACTIVE_SPORT_KEY = "streakr_active_sport_v1";
 const BBL_DOC_ID_KEY = "streakr_bbl_doc_id_v1";
 
@@ -225,10 +225,16 @@ type SportKey = "AFL" | "BBL";
 export default function PicksClient() {
   const { user } = useAuth();
 
-  // ✅ NEW: sport toggle state (defaults safe)
   const [activeSport, setActiveSport] = useState<SportKey>("AFL");
 
-  // ✅ NEW: BBL doc id state (editable for testing)
+  /**
+   * ✅ Still required for the BBL API call,
+   * but we REMOVE the on-page input + display (as requested).
+   *
+   * You can still override for testing via:
+   *  - localStorage key: streakr_bbl_doc_id_v1
+   *  - URL: /picks?docId=BBL-.... (added below)
+   */
   const [bblDocId, setBblDocId] = useState<string>("BBL-2025-12-14-SCO-VS-SIX");
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
@@ -260,7 +266,10 @@ export default function PicksClient() {
   const [showHowToModal, setShowHowToModal] = useState(false);
 
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
-  const [leaderLongestStreak, setLeaderLongestStreak] = useState<number | null>(null);
+
+  // ✅ CHANGE: Leader should be highest CURRENT streak (not longest ever)
+  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
+
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
@@ -289,6 +298,7 @@ export default function PicksClient() {
   }, [rows]);
 
   // ✅ Load active sport + bbl doc id from localStorage (per device)
+  // ✅ Also allow URL override: /picks?docId=BBL-....
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -298,9 +308,17 @@ export default function PicksClient() {
         setActiveSport(savedSport);
       }
 
-      const savedDoc = window.localStorage.getItem(BBL_DOC_ID_KEY);
-      if (savedDoc && typeof savedDoc === "string") {
-        setBblDocId(savedDoc);
+      const url = new URL(window.location.href);
+      const urlDocId = String(url.searchParams.get("docId") ?? "").trim();
+
+      if (urlDocId) {
+        setBblDocId(urlDocId);
+        window.localStorage.setItem(BBL_DOC_ID_KEY, urlDocId);
+      } else {
+        const savedDoc = window.localStorage.getItem(BBL_DOC_ID_KEY);
+        if (savedDoc && typeof savedDoc === "string") {
+          setBblDocId(savedDoc);
+        }
       }
     } catch (err) {
       console.error("Failed to load sport/doc from localStorage", err);
@@ -317,7 +335,7 @@ export default function PicksClient() {
     }
   }, [activeSport]);
 
-  // ✅ Persist bbl doc id
+  // ✅ Persist bbl doc id (even though UI is removed)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -420,7 +438,6 @@ export default function PicksClient() {
       if (typeof data.roundNumber === "number") {
         setRoundNumber(data.roundNumber);
       } else {
-        // For BBL you may not send roundNumber; keep it null
         if (activeSport === "BBL") setRoundNumber(null);
       }
 
@@ -646,13 +663,13 @@ export default function PicksClient() {
     loadLocks();
   }, [roundNumber, activeSport]);
 
-  // Streak leader listener
+  // ✅ Leader listener — CURRENT streak (not longest ever)
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
 
     const usersRef = collection(db, "users");
-    const topQ = query(usersRef, orderBy("longestStreak", "desc"), limit(1));
+    const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
 
     const unsub = onSnapshot(
       topQ,
@@ -660,10 +677,10 @@ export default function PicksClient() {
         let leaderVal: number | null = null;
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
-          const val = typeof data.longestStreak === "number" ? data.longestStreak : 0;
+          const val = typeof data.currentStreak === "number" ? data.currentStreak : 0;
           leaderVal = val;
         });
-        setLeaderLongestStreak(leaderVal);
+        setLeaderCurrentStreak(leaderVal);
         setStreakLoading(false);
       },
       (err) => {
@@ -1023,7 +1040,8 @@ export default function PicksClient() {
     }
   };
 
-  const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderLongestStreak ?? 0, 1);
+  // ✅ CHANGE: bars compare CURRENT vs CURRENT leader (not longest)
+  const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
   const barWidth = (val: number | null) =>
     `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
@@ -1249,12 +1267,7 @@ export default function PicksClient() {
                 </p>
               )}
 
-              {activeSport === "BBL" && (
-                <p className="text-sm text-white/70">
-                  Sport: <span className="font-semibold text-orange-400">BBL</span> • Match Doc:{" "}
-                  <span className="font-semibold text-sky-300">{bblDocId}</span>
-                </p>
-              )}
+              {/* ✅ REMOVED: BBL “Match Doc” display line */}
             </div>
 
             <div className="flex items-center gap-3">
@@ -1295,23 +1308,7 @@ export default function PicksClient() {
             </div>
           </div>
 
-          {/* ✅ BBL DOC INPUT (only when BBL active) */}
-          {activeSport === "BBL" && (
-            <div className="rounded-xl bg-[#0b1220] border border-slate-700 p-3">
-              <div className="text-[11px] uppercase tracking-wide text-white/60 mb-1">
-                BBL Match Document ID (for testing)
-              </div>
-              <input
-                value={bblDocId}
-                onChange={(e) => setBblDocId(e.target.value)}
-                className="w-full rounded-lg bg-black/40 border border-white/15 px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                placeholder="BBL-YYYY-MM-DD-XXX-VS-YYY"
-              />
-              <div className="mt-1 text-[11px] text-white/55">
-                Tip: paste the doc id from Firestore: <span className="text-white/75">cricketRounds/{`{docId}`}</span>
-              </div>
-            </div>
-          )}
+          {/* ✅ REMOVED: BBL Doc ID input box entirely */}
         </div>
 
         {/* STREAK PROGRESS TRACKER + SHARE */}
@@ -1342,7 +1339,7 @@ export default function PicksClient() {
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Leader</p>
                   <p className="text-lg sm:text-xl font-bold text-sky-300">
-                    {leaderLongestStreak ?? "-"}
+                    {leaderCurrentStreak ?? "-"}
                   </p>
                 </div>
               </div>
@@ -1376,12 +1373,12 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Leader</span>
-                <span className="font-semibold text-sky-300">{leaderLongestStreak ?? 0}</span>
+                <span className="font-semibold text-sky-300">{leaderCurrentStreak ?? 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
-                  style={{ width: barWidth(leaderLongestStreak) }}
+                  style={{ width: barWidth(leaderCurrentStreak) }}
                 />
               </div>
             </div>
@@ -1439,7 +1436,8 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+              const isMatchUnlocked =
+                activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
 
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
@@ -1793,7 +1791,8 @@ export default function PicksClient() {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold mb-1">
-                    Comments – {commentsOpenFor.quarter === 0 ? "Match" : `Q${commentsOpenFor.quarter}`}
+                    Comments –{" "}
+                    {commentsOpenFor.quarter === 0 ? "Match" : `Q${commentsOpenFor.quarter}`}
                   </h2>
                   <p className="text-sm text-gray-300">{commentsOpenFor.question}</p>
                 </div>
@@ -1932,8 +1931,8 @@ export default function PicksClient() {
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">All matches are open</span> from the start of the round
-                    (until each match closes for picks).
+                    <span className="font-semibold">All matches are open</span> from the start of the
+                    round (until each match closes for picks).
                   </span>
                 </li>
 
@@ -1948,18 +1947,19 @@ export default function PicksClient() {
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">Clean sweep rule:</span> to carry your streak forward,
-                    you need a <span className="font-semibold">clean sweep in that match</span>.
-                    If <span className="font-semibold">any</span> pick in a match is wrong, your streak resets to{" "}
-                    <span className="font-semibold">0</span> at the end of that match.
+                    <span className="font-semibold">Clean sweep rule:</span> to carry your streak
+                    forward, you need a <span className="font-semibold">clean sweep in that match</span>.
+                    If <span className="font-semibold">any</span> pick in a match is wrong, your streak
+                    resets to <span className="font-semibold">0</span> at the end of that match.
                   </span>
                 </li>
 
                 <li className="flex gap-2">
                   <span className="mt-1 text-orange-300">•</span>
                   <span>
-                    <span className="font-semibold">Voided questions</span> don&apos;t count as right or wrong.
-                    <span className="font-semibold"> No picks</span> in a match don&apos;t affect your streak at all.
+                    <span className="font-semibold">Voided questions</span> don&apos;t count as right or
+                    wrong. <span className="font-semibold">No picks</span> in a match don&apos;t affect your
+                    streak at all.
                   </span>
                 </li>
 
