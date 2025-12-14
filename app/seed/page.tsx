@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { collection, doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "@/lib/firebaseClient explains;
+import { db } from "@/lib/firebaseClient";
 
 const DEFAULT_AFL_JSON = {
   round: 1,
