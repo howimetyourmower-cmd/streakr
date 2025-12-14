@@ -170,7 +170,7 @@ export default function FAQPage() {
                     Each question is a{" "}
                     <span className="font-semibold">Yes / No prediction</span>{" "}
                     about a real AFL event – for example a player stat or a
-                    match outcome in a specific quarter.
+                    match event in a specific quarter.
                   </p>
                 </div>
 
@@ -183,12 +183,11 @@ export default function FAQPage() {
                     <span className="font-semibold">
                       as many picks as you like
                     </span>{" "}
-                    on any{" "}
-                    <span className="font-semibold">unlocked match</span>. On
-                    the Picks page you&apos;ll see which matches are open or
-                    closed for picks. If a match is marked{" "}
-                    <span className="font-semibold">Match closed for picks</span>
-                    , you can&apos;t change or add picks on those questions.
+                    across{" "}
+                    <span className="font-semibold">any games in the round</span>.
+                    All games are available to select from the start of the
+                    round, and you can pick as many (or as few) questions per
+                    game as you want.
                   </p>
                 </div>
 
@@ -197,50 +196,87 @@ export default function FAQPage() {
                     Can I change or clear a pick?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    Yes. For any question in a match that is still{" "}
-                    <span className="font-semibold">open for picks</span> you
-                    can switch from YES to NO, or clear your selection completely
-                    using the{" "}
-                    <span className="font-semibold">Clear selection</span>{" "}
-                    option (the small × icon next to your pick). Once the match
-                    is closed for picks, your choices on those questions are
-                    locked in.
+                    Yes. While a question is{" "}
+                    <span className="font-semibold">open</span>, you can switch
+                    from YES to NO, or clear your selection completely using the{" "}
+                    <span className="font-semibold">× (clear selection)</span>{" "}
+                    button. Once a question is locked, your choice is locked in
+                    for that question.
                   </p>
                 </div>
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    When do matches lock for picks?
+                    When do questions lock?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    Match locks are controlled by the STREAKr admin team. A
-                    match will show as{" "}
-                    <span className="font-semibold">Match closed for picks</span>{" "}
-                    shortly before the bounce or a key cutoff time. Once
-                    locked, you can&apos;t add, change or clear picks for any
-                    question in that match.
+                    Questions lock around their live cutoff (for example,
+                    quarter-based questions lock around that quarter starting).
+                    Locking is controlled by the STREAKr admin team to keep the
+                    game fair. Once locked, you can&apos;t add, change or clear
+                    picks on that question.
                   </p>
                 </div>
 
                 <div className="border-t border-zinc-800/80 pt-4">
                   <h3 className="text-sm font-semibold text-zinc-50 md:text-base">
-                    How is my streak calculated now?
+                    How is my streak calculated?
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
-                    Your streak is a simple run of{" "}
-                    <span className="font-semibold">consecutive correct picks</span>.
-                    Every time a question you&apos;ve answered settles as{" "}
-                    <span className="font-semibold">correct</span>, your{" "}
-                    <span className="font-semibold">current streak</span>{" "}
-                    increases by 1. A single incorrect pick{" "}
-                    <span className="font-semibold">resets your streak to 0</span>.
-                    Void questions do not affect your streak either way.
+                    STREAKr uses the{" "}
+                    <span className="font-semibold">Clean sweep rule</span>{" "}
+                    per game:
                   </p>
-                  <p className="mt-2 text-sm text-zinc-400 md:text-[15px]">
-                    On the Picks page you&apos;ll see a{" "}
-                    <span className="font-semibold">streak tracker</span> at the
-                    top, showing your current streak for the round and how close
-                    you are to streak badges and rewards.
+                  <ul className="mt-2 space-y-2 text-sm text-zinc-400 md:text-[15px]">
+                    <li className="flex gap-2">
+                      <span className="mt-1 text-orange-300">•</span>
+                      <span>
+                        You can make multiple picks within the same match.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-1 text-orange-300">•</span>
+                      <span>
+                        If <span className="font-semibold">any</span> pick you
+                        made in that match is wrong, your{" "}
+                        <span className="font-semibold">
+                          streak resets to 0
+                        </span>{" "}
+                        at the end of that match.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-1 text-orange-300">•</span>
+                      <span>
+                        If you get a{" "}
+                        <span className="font-semibold">clean sweep</span> in a
+                        match (all your picks in that match are correct), your
+                        streak increases by the number of correct picks you made
+                        in that match.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-1 text-orange-300">•</span>
+                      <span>
+                        <span className="font-semibold">No pick</span> on a
+                        question means it doesn&apos;t affect your streak at
+                        all.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-1 text-orange-300">•</span>
+                      <span>
+                        <span className="font-semibold">Void</span> questions
+                        don&apos;t count as right or wrong and don&apos;t change
+                        your streak.
+                      </span>
+                    </li>
+                  </ul>
+                  <p className="mt-3 text-sm text-zinc-400 md:text-[15px]">
+                    On the Picks page you&apos;ll see a clear{" "}
+                    <span className="font-semibold">game header</span> showing
+                    whether that match is pending, a clean sweep win, or a clean
+                    sweep fail.
                   </p>
                 </div>
               </div>
@@ -279,9 +315,9 @@ export default function FAQPage() {
                   </h3>
                   <p className="mt-1 text-sm text-zinc-400 md:text-[15px]">
                     At the end of a round we look at the{" "}
-                    <span className="font-semibold">top current streaks</span>{" "}
-                    for that round. If multiple players finish on the same top
-                    streak, the advertised prize pool for that round is{" "}
+                    <span className="font-semibold">top streaks</span> for that
+                    round. If multiple players finish on the same top streak,
+                    the advertised prize pool for that round is{" "}
                     <span className="font-semibold">
                       split between all tied players
                     </span>{" "}
