@@ -88,6 +88,12 @@ type GameLocksResponse = {
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
 
+// ✅ SWITCH SPORT HERE
+const ACTIVE_SPORT: "AFL" | "BBL" = "BBL";
+
+// ✅ ONLY USED WHEN ACTIVE_SPORT === "BBL"
+const BBL_DOC_ID = "BBL-2025-12-14-SCO-VS-SIX";
+
 // Normalise any backend outcome value into "yes" | "no" | "void" | null
 const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   if (val == null) return null;
@@ -232,7 +238,7 @@ export default function PicksClient() {
     pickHistoryRef.current = pickHistory;
   }, [pickHistory]);
 
-  // game locks: which matches are open for picks
+  // game locks: which matches are open for picks (AFL only)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
   const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
@@ -340,7 +346,7 @@ export default function PicksClient() {
           yesPercent:
             typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
           noPercent: typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
-          sport: q.sport ?? g.sport ?? "AFL",
+          sport: q.sport ?? g.sport ?? ACTIVE_SPORT,
           commentCount: q.commentCount ?? prev?.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
@@ -355,13 +361,21 @@ export default function PicksClient() {
     }
 
     try {
-      const res = await fetch("/api/picks");
+      const url =
+        ACTIVE_SPORT === "BBL"
+          ? `/api/picks?sport=BBL&docId=${encodeURIComponent(BBL_DOC_ID)}`
+          : "/api/picks";
+
+      const res = await fetch(url);
       if (!res.ok) throw new Error("API error");
 
       const data: PicksApiResponse = await res.json();
 
       if (typeof data.roundNumber === "number") {
         setRoundNumber(data.roundNumber);
+      } else {
+        // For BBL you may not send roundNumber; keep it null
+        if (ACTIVE_SPORT === "BBL") setRoundNumber(null);
       }
 
       const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current);
@@ -564,8 +578,9 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Load game lock state for this round
+  // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
+    if (ACTIVE_SPORT !== "AFL") return;
     if (roundNumber === null) return;
 
     const loadLocks = async () => {
@@ -789,7 +804,9 @@ export default function PicksClient() {
       return;
     }
 
-    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+    const isMatchUnlocked =
+      ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
@@ -815,6 +832,8 @@ export default function PicksClient() {
           questionId: row.id,
           outcome: pick,
           roundNumber,
+          sport: ACTIVE_SPORT,
+          docId: ACTIVE_SPORT === "BBL" ? BBL_DOC_ID : undefined,
         }),
       });
 
@@ -829,8 +848,9 @@ export default function PicksClient() {
   // ✅ Clear selection = NO PICK (must not affect streak/outcomes)
   // ⚠️ To persist across refresh/device, /api/user-picks must support clearing/deleting.
   const handleClearPick = async (row: QuestionRow) => {
-    // If not logged in, just clear local UI state (device-only) — still valid "no pick"
-    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+    const isMatchUnlocked =
+      ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) =>
@@ -863,6 +883,8 @@ export default function PicksClient() {
           action: "clear",
           outcome: null,
           roundNumber,
+          sport: ACTIVE_SPORT,
+          docId: ACTIVE_SPORT === "BBL" ? BBL_DOC_ID : undefined,
         }),
       });
 
@@ -1183,12 +1205,18 @@ export default function PicksClient() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
-            {roundNumber !== null && (
+            {roundNumber !== null && ACTIVE_SPORT === "AFL" && (
               <p className="text-sm text-white/70">
                 Current Round:{" "}
                 <span className="font-semibold text-orange-400">
                   {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
                 </span>
+              </p>
+            )}
+            {ACTIVE_SPORT === "BBL" && (
+              <p className="text-sm text-white/70">
+                Sport: <span className="font-semibold text-orange-400">BBL</span> • Match Doc:{" "}
+                <span className="font-semibold text-sky-300">{BBL_DOC_ID}</span>
               </p>
             )}
           </div>
@@ -1312,7 +1340,7 @@ export default function PicksClient() {
           <div className="col-span-1">SPORT</div>
           <div className="col-span-1">STATUS</div>
           <div className="col-span-3">MATCH • VENUE</div>
-          <div className="col-span-1 text-center">QUARTER</div>
+          <div className="col-span-1 text-center">PERIOD</div>
           <div className="col-span-2">QUESTION</div>
           <div className="col-span-2 text-right">PICK • YES% • NO%</div>
         </div>
@@ -1326,7 +1354,9 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+              const isMatchUnlocked =
+                ACTIVE_SPORT === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
@@ -1417,7 +1447,9 @@ export default function PicksClient() {
                   : "bg-red-600 hover:bg-red-700 text-white border-transparent",
               ].join(" ");
 
-              const showMatchLockedLabel = !isMatchUnlocked;
+              const showMatchLockedLabel =
+                ACTIVE_SPORT === "AFL" ? !isMatchUnlocked : false;
+
               const showStatusLockedLabel = !isQuestionOpen && isMatchUnlocked;
 
               const shouldRenderHeader = lastGameId !== row.gameId;
@@ -1428,25 +1460,25 @@ export default function PicksClient() {
               const headerPicksMade = picksMadeByGame[row.gameId] ?? 0;
               const gameScoreInfo = gameScoreByGame[row.gameId];
 
-            // header chip styling (UPDATED – clearer + stronger)
-const gameScoreChip =
-  !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
-    <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
-      No picks
-    </span>
-  ) : gameScoreInfo.kind === "pending" ? (
-    <span className="inline-flex items-center rounded-full bg-amber-500/20 px-4 py-1.5 text-xs font-extrabold text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]">
-      Game pending
-    </span>
-  ) : gameScoreInfo.kind === "zero" ? (
-    <span className="inline-flex items-center rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-extrabold text-red-300 border border-red-400/60 shadow-[0_0_14px_rgba(239,68,68,0.6)]">
-      Clean sweep failed (0)
-    </span>
-  ) : (
-    <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-extrabold text-emerald-300 border border-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.75)]">
-      Clean sweep! +{gameScoreInfo.score}
-    </span>
-  );
+              // header chip styling (UPDATED – clearer + stronger)
+              const gameScoreChip =
+                !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
+                  <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
+                    No picks
+                  </span>
+                ) : gameScoreInfo.kind === "pending" ? (
+                  <span className="inline-flex items-center rounded-full bg-amber-500/20 px-4 py-1.5 text-xs font-extrabold text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]">
+                    Game pending
+                  </span>
+                ) : gameScoreInfo.kind === "zero" ? (
+                  <span className="inline-flex items-center rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-extrabold text-red-300 border border-red-400/60 shadow-[0_0_14px_rgba(239,68,68,0.6)]">
+                    Clean sweep failed (0)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-extrabold text-emerald-300 border border-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.75)]">
+                    Clean sweep! +{gameScoreInfo.score}
+                  </span>
+                );
 
               return (
                 <div key={row.id}>
@@ -1513,7 +1545,9 @@ const gameScoreChip =
                                 </span>
                               </div>
 
-                              <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
+                              <span className="text-xs uppercase tracking-wide text-white/70">
+                                vs
+                              </span>
 
                               <div className="flex items-center gap-1 min-w-0">
                                 <span className="text-sm font-semibold truncate">
@@ -1541,7 +1575,9 @@ const gameScoreChip =
                       </div>
 
                       <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                        <span className="block">Quarter {row.quarter}</span>
+                        <span className="block">
+                          {row.quarter === 0 ? "Match" : `Quarter ${row.quarter}`}
+                        </span>
                       </div>
 
                       <div className="col-span-9 md:col-span-2">
@@ -1681,7 +1717,7 @@ const gameScoreChip =
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold mb-1">
-                    Comments – Q{commentsOpenFor.quarter}
+                    Comments – {commentsOpenFor.quarter === 0 ? "Match" : `Q${commentsOpenFor.quarter}`}
                   </h2>
                   <p className="text-sm text-gray-300">{commentsOpenFor.question}</p>
                 </div>
