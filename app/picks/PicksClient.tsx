@@ -1428,25 +1428,25 @@ export default function PicksClient() {
               const headerPicksMade = picksMadeByGame[row.gameId] ?? 0;
               const gameScoreInfo = gameScoreByGame[row.gameId];
 
-              // header chip styling
-              const gameScoreChip =
-                !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
-                  <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/70 border border-white/10">
-                    No picks
-                  </span>
-                ) : gameScoreInfo.kind === "pending" ? (
-                  <span className="inline-flex items-center rounded-full bg-yellow-500/15 px-3 py-1 text-[11px] font-semibold text-yellow-200 border border-yellow-400/30">
-                    Game pending
-                  </span>
-                ) : gameScoreInfo.kind === "zero" ? (
-                  <span className="inline-flex items-center rounded-full bg-red-500/15 px-3 py-1 text-[11px] font-extrabold text-red-200 border border-red-400/30">
-                    Clean sweep failed (0)
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-extrabold text-emerald-200 border border-emerald-400/30">
-                    Clean sweep! +{gameScoreInfo.score}
-                  </span>
-                );
+            // header chip styling (UPDATED – clearer + stronger)
+const gameScoreChip =
+  !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
+    <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
+      No picks
+    </span>
+  ) : gameScoreInfo.kind === "pending" ? (
+    <span className="inline-flex items-center rounded-full bg-amber-500/20 px-4 py-1.5 text-xs font-extrabold text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]">
+      Game pending
+    </span>
+  ) : gameScoreInfo.kind === "zero" ? (
+    <span className="inline-flex items-center rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-extrabold text-red-300 border border-red-400/60 shadow-[0_0_14px_rgba(239,68,68,0.6)]">
+      Clean sweep failed (0)
+    </span>
+  ) : (
+    <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-extrabold text-emerald-300 border border-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.75)]">
+      Clean sweep! +{gameScoreInfo.score}
+    </span>
+  );
 
               return (
                 <div key={row.id}>
