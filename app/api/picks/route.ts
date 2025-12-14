@@ -75,12 +75,37 @@ type GameLockDoc = {
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
-// CricketRounds (BBL) shape (what you seed into cricketRounds)
-type CricketSeedQuestion = {
+// ─────────────────────────────────────────────
+// BBL / Cricket shapes (support BOTH structures)
+// ─────────────────────────────────────────────
+
+// Structure A (your CURRENT Firestore screenshot):
+// cricketRounds/{docId} contains match/meta + questions[]
+type CricketMatchQuestion = {
   id: string;
   quarter: number; // 0 for match-level
   question: string;
-  status?: QuestionStatus;
+  status?: QuestionStatus | string;
+  isSponsorQuestion?: boolean;
+};
+
+type CricketMatchDoc = {
+  league?: string; // "BBL"
+  sport?: string; // "BBL"
+  match?: string; // "Perth Scorchers vs Sydney Sixers"
+  matchId?: string; // "BBL-2025-12-14-SCO-VS-SIX"
+  venue?: string;
+  startTime?: string;
+  questions?: CricketMatchQuestion[];
+};
+
+// Structure B (older / planned):
+// cricketRounds/{docId} contains games:[{match,venue,startTime,questions:[]}]
+type CricketSeedQuestion = {
+  id: string;
+  quarter: number;
+  question: string;
+  status?: QuestionStatus | string;
   isSponsorQuestion?: boolean;
 };
 
@@ -89,34 +114,17 @@ type CricketSeedGame = {
   match: string;
   venue?: string;
   startTime?: string;
-  sport?: string; // "BBL"
+  sport?: string;
   questions: CricketSeedQuestion[];
 };
 
 type CricketRoundDoc = {
-  season: number;
+  season?: number;
   roundNumber?: number;
-  round?: number; // legacy if you ever use it
+  round?: number;
   label?: string;
-  sport?: string; // "BBL"
-  games: CricketSeedGame[];
-};
-
-// A "games" doc shape (what your screenshot shows you actually have)
-type SingleGameDoc = {
-  league?: string; // "BBL"
-  sport?: string; // "BBL"
-  match?: string;
-  venue?: string;
-  startTime?: string;
-  matchId?: string; // often slugged "BBL-2025-12-14-SCO-VS-SIX"
-  questions?: Array<{
-    id?: string;
-    quarter?: number;
-    question?: string;
-    status?: QuestionStatus | string;
-    isSponsorQuestion?: boolean;
-  }>;
+  sport?: string;
+  games?: CricketSeedGame[];
 };
 
 // ─────────────────────────────────────────────
@@ -304,10 +312,8 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  const finalMap: Record<
-    string,
-    { status: QuestionStatus; outcome?: QuestionOutcome }
-  > = {};
+  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> =
+    {};
 
   Object.entries(temp).forEach(([qid, value]) => {
     finalMap[qid] = { status: value.status, outcome: value.outcome };
@@ -353,76 +359,40 @@ async function getGameLocksForRound(
 }
 
 // ─────────────────────────────────────────────
-// BBL helpers
+// BBL helper: build API response from either doc shape
 // ─────────────────────────────────────────────
 
-function safeDecode(s: string): string {
-  try {
-    return decodeURIComponent(s);
-  } catch {
-    return s;
-  }
-}
-
-function collapseSpaces(s: string): string {
-  return s.replace(/\s+/g, " ").trim();
-}
-
-function makeMatchIdVariants(input: string): string[] {
-  const decoded = collapseSpaces(safeDecode(input));
-
-  // "BBL - 2025-12-14 - SCO-VS-SIX"
-  const spaced = decoded;
-
-  // "BBL-2025-12-14-SCO-VS-SIX"
-  const slug = decoded.replace(/\s*-\s*/g, "-").replace(/\s+/g, "");
-
-  // also allow removing spaces but keeping hyphens
-  const noExtraSpaces = decoded.replace(/\s+/g, "");
-
-  const variants = [spaced, slug, noExtraSpaces]
-    .map((v) => v.trim())
-    .filter(Boolean);
-
-  // unique
-  return Array.from(new Set(variants));
-}
-
-function toApiGameFromSingleGameDoc(
+function buildBblGameFromMatchDoc(
   docId: string,
-  data: SingleGameDoc,
+  data: CricketMatchDoc,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
   userPicks: Record<string, "yes" | "no">
 ): ApiGame {
-  const match = String(data.match || docId).trim();
+  const sport = String(data.sport || data.league || "BBL").trim().toUpperCase();
+  const match = String(data.match || "").trim();
   const venue = String(data.venue || "").trim();
   const startTime = String(data.startTime || "").trim();
-  const sport = String(data.sport || data.league || "BBL").toUpperCase();
 
-  const gameId = docId;
+  const questionsArr = Array.isArray(data.questions) ? data.questions : [];
 
-  const questions: ApiQuestion[] = (data.questions || []).map((q, idx) => {
-    const rawId = String(q.id || "").trim();
-    const questionId = rawId || `${gameId}-Q${idx + 1}`;
-
-    const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
+  const questions: ApiQuestion[] = questionsArr.map((q, idx) => {
+    // IMPORTANT: use Firestore question id exactly, so picks save/load aligns
+    const qid = String(q.id || "").trim() || `${docId}-Q${idx + 1}`;
+    const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
     const total = stats.total;
 
     const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
     const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-    const userPick = userPicks[questionId];
-    const effectiveStatus = normaliseStatusValue(q.status ?? "open");
-
     return {
-      id: questionId,
-      gameId,
+      id: qid,
+      gameId: docId,
       quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
       question: String(q.question || "").trim(),
-      status: effectiveStatus,
+      status: normaliseStatusValue(q.status ?? "open"),
       sport,
       isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-      userPick,
+      userPick: userPicks[qid],
       yesPercent,
       noPercent,
       commentCount: 0,
@@ -433,7 +403,7 @@ function toApiGameFromSingleGameDoc(
   });
 
   return {
-    id: gameId,
+    id: docId,
     match,
     sport,
     venue,
@@ -441,6 +411,62 @@ function toApiGameFromSingleGameDoc(
     isUnlockedForPicks: true,
     questions,
   };
+}
+
+function buildBblGamesFromRoundDoc(
+  docId: string,
+  data: CricketRoundDoc,
+  pickStats: Record<string, { yes: number; no: number; total: number }>,
+  userPicks: Record<string, "yes" | "no">
+): ApiGame[] {
+  const gamesArr = Array.isArray(data.games) ? data.games : [];
+  const baseSport = String(data.sport || "BBL").trim().toUpperCase();
+
+  return gamesArr.map((g, gi) => {
+    const gameId = String(g.id || "").trim() || `${docId}-G${gi + 1}`;
+    const match = String(g.match || "").trim();
+    const venue = String(g.venue || "").trim();
+    const startTime = String(g.startTime || "").trim();
+    const sport = String(g.sport || baseSport || "BBL").trim().toUpperCase();
+
+    const qs = Array.isArray(g.questions) ? g.questions : [];
+    const questions: ApiQuestion[] = qs.map((q, qi) => {
+      const qid = String(q.id || "").trim() || `${gameId}-Q${qi + 1}`;
+
+      const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
+      const total = stats.total;
+
+      const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
+      const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
+
+      return {
+        id: qid,
+        gameId,
+        quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
+        question: String(q.question || "").trim(),
+        status: normaliseStatusValue(q.status ?? "open"),
+        sport,
+        isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+        userPick: userPicks[qid],
+        yesPercent,
+        noPercent,
+        commentCount: 0,
+        correctOutcome: undefined,
+        outcome: undefined,
+        correctPick: null,
+      };
+    });
+
+    return {
+      id: gameId,
+      match,
+      sport,
+      venue,
+      startTime,
+      isUnlockedForPicks: true,
+      questions,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -473,132 +499,66 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // BBL / Cricket path (Firestore)
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
-      const rawDocId = String(url.searchParams.get("docId") ?? "").trim();
-      const docId = collapseSpaces(safeDecode(rawDocId));
+      const docId = String(url.searchParams.get("docId") ?? "").trim();
 
       if (!docId) {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
           error:
-            "Missing docId. Call /api/picks?sport=BBL&docId=<your-doc-id-or-matchId>",
+            "Missing docId. Call /api/picks?sport=BBL&docId=<cricketRounds-docId>",
         });
       }
 
-      // 1) Try cricketRounds/<docId>
-      const cricketSnap = await db.collection("cricketRounds").doc(docId).get();
-      if (cricketSnap.exists) {
-        const data = cricketSnap.data() as CricketRoundDoc;
+      const snap = await db.collection("cricketRounds").doc(docId).get();
+      if (!snap.exists) {
+        const empty: PicksApiResponse = { games: [], roundNumber };
+        return NextResponse.json({
+          ...empty,
+          error: `BBL doc not found: cricketRounds/${docId}`,
+        });
+      }
 
-        const effectiveRoundNumber =
+      const raw = snap.data() || {};
+
+      // Detect which structure this doc is:
+      // - If it has `games` array => RoundDoc (Structure B)
+      // - Else if it has `questions` array => MatchDoc (Structure A)
+      const hasGamesArray = Array.isArray((raw as any).games);
+      const hasQuestionsArray = Array.isArray((raw as any).questions);
+
+      let games: ApiGame[] = [];
+      let effectiveRoundNumber = roundNumber;
+
+      if (hasGamesArray) {
+        const data = raw as CricketRoundDoc;
+        effectiveRoundNumber =
           Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
 
-        const games: ApiGame[] = (data.games || []).map((g, gi) => {
-          const gameId = g.id?.trim() || `${docId}-G${gi + 1}`;
-          const match = String(g.match || "").trim();
-          const venue = String(g.venue || "").trim();
-          const startTime = String(g.startTime || "").trim();
-          const sport = String(g.sport || data.sport || "BBL").toUpperCase();
+        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks);
+      } else if (hasQuestionsArray) {
+        const data = raw as CricketMatchDoc;
+        effectiveRoundNumber = roundNumber; // match-based (no round concept)
 
-          const questions: ApiQuestion[] = (g.questions || []).map((q) => {
-            const qid = String(q.id || "").trim();
-            const questionId = qid || `${gameId}-Q${Math.random().toString(36).slice(2, 8)}`;
-
-            const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
-            const total = stats.total;
-
-            const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
-            const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
-
-            const userPick = userPicks[questionId];
-            const effectiveStatus = normaliseStatusValue(q.status ?? "open");
-
-            return {
-              id: questionId,
-              gameId,
-              quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
-              question: String(q.question || "").trim(),
-              status: effectiveStatus,
-              sport,
-              isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-              userPick,
-              yesPercent,
-              noPercent,
-              commentCount: 0,
-              correctOutcome: undefined,
-              outcome: undefined,
-              correctPick: null,
-            };
-          });
-
-          return {
-            id: gameId,
-            match,
-            sport,
-            venue,
-            startTime,
-            isUnlockedForPicks: true,
-            questions,
-          };
+        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks)];
+      } else {
+        // Nothing usable in the document
+        const empty: PicksApiResponse = { games: [], roundNumber };
+        return NextResponse.json({
+          ...empty,
+          error:
+            `cricketRounds/${docId} exists but has no games[] or questions[]. ` +
+            `Expected either:\n- games: [{ match, venue, startTime, questions: [...] }]\n` +
+            `OR\n- match/venue/startTime + questions: [...]`,
         });
-
-        return NextResponse.json({
-          games,
-          roundNumber: effectiveRoundNumber,
-        } satisfies PicksApiResponse);
       }
 
-      // 2) Try games/<docId>  ✅ this matches what your seeder actually created in the screenshot
-      const gameDocSnap = await db.collection("games").doc(docId).get();
-      if (gameDocSnap.exists) {
-        const data = gameDocSnap.data() as SingleGameDoc;
-        const apiGame = toApiGameFromSingleGameDoc(docId, data, pickStats, userPicks);
-        return NextResponse.json({
-          games: [apiGame],
-          roundNumber,
-        } satisfies PicksApiResponse);
-      }
+      const response: PicksApiResponse = {
+        games,
+        roundNumber: effectiveRoundNumber,
+      };
 
-      // 3) Try games where matchId matches (using variants)
-      const variants = makeMatchIdVariants(docId);
-
-      // Firestore "in" max 10; variants list is small anyway
-      let found: { id: string; data: SingleGameDoc } | null = null;
-
-      try {
-        const snap = await db
-          .collection("games")
-          .where("matchId", "in", variants.slice(0, 10))
-          .limit(1)
-          .get();
-
-        snap.forEach((d) => {
-          if (found) return;
-          found = { id: d.id, data: d.data() as SingleGameDoc };
-        });
-      } catch (e) {
-        console.error("[/api/picks] BBL matchId lookup failed", e);
-      }
-
-      if (found) {
-        const apiGame = toApiGameFromSingleGameDoc(found.id, found.data, pickStats, userPicks);
-        return NextResponse.json({
-          games: [apiGame],
-          roundNumber,
-        } satisfies PicksApiResponse);
-      }
-
-      // Not found anywhere
-      const empty: PicksApiResponse = { games: [], roundNumber };
-      return NextResponse.json({
-        ...empty,
-        error:
-          `BBL doc not found. Tried:\n` +
-          `- cricketRounds/${docId}\n` +
-          `- games/${docId}\n` +
-          `- games where matchId IN [${variants.join(", ")}]\n` +
-          `If you can see the doc in Firestore console but this endpoint still returns not found, then your seeder is writing to a different Firebase project than this API is reading.`,
-      });
+      return NextResponse.json(response);
     }
 
     // ─────────────────────────────
@@ -638,6 +598,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
 
       const qIndex = questionIndexByGame[gameKey]++;
+
+      // AFL question IDs are generated (must match how you save picks)
       const questionId = `${gameKey}-Q${qIndex + 1}`;
 
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
