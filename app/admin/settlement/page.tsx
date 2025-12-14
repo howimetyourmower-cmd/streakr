@@ -95,7 +95,10 @@ export default function SettlementPage() {
   // Bulk lock state
   const [bulkLocking, setBulkLocking] = useState(false);
   const [bulkTarget, setBulkTarget] = useState<string | null>(null); // "ALL" | gameId
-  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
   // Derived roundNumber from key
@@ -107,14 +110,16 @@ export default function SettlementPage() {
   }, [roundKey]);
 
   async function refreshRoundData() {
-    const res = await fetch(`/api/picks?round=${roundNumber}`, { cache: "no-store" });
+    const res = await fetch(`/api/picks?round=${roundNumber}`, {
+      cache: "no-store",
+    });
     if (!res.ok) {
       throw new Error(`Failed to load picks (status ${res.status})`);
     }
+
     const json: PicksApiResponse = await res.json();
 
     const flatQuestions: QuestionRow[] = [];
-
     for (const game of json.games || []) {
       for (const q of game.questions || []) {
         flatQuestions.push({
@@ -144,7 +149,9 @@ export default function SettlementPage() {
         await refreshRoundData();
       } catch (err: any) {
         console.error("[Settlement] load error", err);
-        setError(err?.message || "Failed to load questions for settlement console.");
+        setError(
+          err?.message || "Failed to load questions for settlement console."
+        );
         setQuestions([]);
       } finally {
         setLoading(false);
@@ -155,6 +162,9 @@ export default function SettlementPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundNumber]);
 
+  // ─────────────────────────────────────────────
+  // Derived helpers
+  // ─────────────────────────────────────────────
   const filteredQuestions = useMemo(() => {
     if (statusFilter === "all") return questions;
     return questions.filter((q) => q.status === statusFilter);
@@ -174,8 +184,12 @@ export default function SettlementPage() {
     return counts;
   }, [questions]);
 
-  const gamesForRound = useMemo(() => {
-    const map = new Map<string, { id: string; match: string; venue: string; startTime: string }>();
+  const gameMetaList = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; match: string; venue: string; startTime: string }
+    >();
+
     for (const q of questions) {
       if (!map.has(q.gameId)) {
         map.set(q.gameId, {
@@ -186,12 +200,29 @@ export default function SettlementPage() {
         });
       }
     }
+
     return Array.from(map.values()).sort((a, b) => {
       const ta = new Date(a.startTime).getTime();
       const tb = new Date(b.startTime).getTime();
       return (Number.isFinite(ta) ? ta : 0) - (Number.isFinite(tb) ? tb : 0);
     });
   }, [questions]);
+
+  const filteredByGame = useMemo(() => {
+    const groups: Record<string, QuestionRow[]> = {};
+    for (const q of filteredQuestions) {
+      if (!groups[q.gameId]) groups[q.gameId] = [];
+      groups[q.gameId].push(q);
+    }
+    // Stable sort within game: quarter then question
+    for (const gid of Object.keys(groups)) {
+      groups[gid].sort((a, b) => {
+        if (a.quarter !== b.quarter) return a.quarter - b.quarter;
+        return a.question.localeCompare(b.question);
+      });
+    }
+    return groups;
+  }, [filteredQuestions]);
 
   // ─────────────────────────────────────────────
   // Settlement helpers
@@ -209,7 +240,8 @@ export default function SettlementPage() {
 
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const message = data?.error || `Settlement API failed (status ${res.status})`;
+      const message =
+        data?.error || `Settlement API failed (status ${res.status})`;
       throw new Error(message);
     }
   }
@@ -281,7 +313,9 @@ export default function SettlementPage() {
 
     // Optimistic: mark them pending instantly
     const idSet = new Set(questionIds);
-    setQuestions((prev) => prev.map((q) => (idSet.has(q.id) ? { ...q, status: "pending" } : q)));
+    setQuestions((prev) =>
+      prev.map((q) => (idSet.has(q.id) ? { ...q, status: "pending" } : q))
+    );
 
     const failures: Array<{ id: string; error: string }> = [];
 
@@ -304,7 +338,9 @@ export default function SettlementPage() {
 
       if (failures.length) {
         setBulkError(
-          `Locked ${questionIds.length - failures.length}/${questionIds.length}. Failed: ${failures.length}. (Refresh done — you can retry.)`
+          `Locked ${questionIds.length - failures.length}/${
+            questionIds.length
+          }. Failed: ${failures.length}. (Refresh done — you can retry.)`
         );
       }
     } catch (err: any) {
@@ -322,7 +358,9 @@ export default function SettlementPage() {
   }
 
   async function lockAllOpenQuestions() {
-    const ids = questions.filter((q) => q.status === "open").map((q) => q.id);
+    const ids = questions
+      .filter((q) => q.status === "open")
+      .map((q) => q.id);
     if (!ids.length) return;
 
     const ok =
@@ -336,7 +374,7 @@ export default function SettlementPage() {
     await bulkLock(ids, "ALL");
   }
 
-  async function lockAllOpenQuestionsForGame(gameId: string, matchLabel: string) {
+  async function lockEntireGame(gameId: string, matchLabel: string) {
     const ids = questions
       .filter((q) => q.gameId === gameId && q.status === "open")
       .map((q) => q.id);
@@ -347,7 +385,7 @@ export default function SettlementPage() {
       typeof window === "undefined"
         ? true
         : window.confirm(
-            `Lock ALL open questions for:\n${matchLabel}\n\nThis sets them to PENDING. You can REOPEN any question if needed.`
+            `Lock ENTIRE GAME (all OPEN questions) for:\n${matchLabel}\n\nThis sets them to PENDING. You can REOPEN any question if needed.`
           );
     if (!ok) return;
 
@@ -396,12 +434,13 @@ export default function SettlementPage() {
         {/* HEADER */}
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-extrabold tracking-tight">Settlement console</h1>
+            <h1 className="text-3xl font-extrabold tracking-tight">
+              Settlement console
+            </h1>
             <p className="mt-2 text-sm text-slate-200/80 max-w-xl">
-              Lock questions when they&apos;re live, then settle them with the correct outcome. Uses{" "}
-              <code className="text-xs">/api/picks</code> for data and{" "}
-              <code className="text-xs">/api/settlement</code> for updates. Reopen is a safety net if
-              you lock or settle the wrong question.
+              Lock questions at kickoff (sets them to <strong>PENDING</strong>),
+              then settle them with the correct outcome. Reopen is a safety net
+              if you lock or settle the wrong question.
             </p>
           </div>
 
@@ -450,20 +489,22 @@ export default function SettlementPage() {
           </div>
         </header>
 
-        {/* BULK + PER-GAME LOCK PANEL (replaces game unlocks) */}
+        {/* BULK LOCK STRIP */}
         <section className="rounded-2xl bg-slate-950/90 border border-amber-500/35 shadow-[0_0_40px_rgba(15,23,42,0.9)] overflow-hidden">
           <div className="px-4 py-3 border-b border-amber-500/25 bg-gradient-to-r from-amber-900/40 via-slate-900 to-slate-950">
             <h2 className="text-sm font-bold tracking-wide uppercase text-amber-100">
-              Quick locks (questions)
+              Bulk actions
             </h2>
             <p className="mt-1 text-xs text-slate-100/80 max-w-2xl">
-              All games are available to players now. Use this to mass-lock questions to{" "}
-              <strong>PENDING</strong> when matches go live.
+              All games are open for players now — this console only controls{" "}
+              <strong>question status</strong>.
             </p>
 
             <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div className="text-[11px] text-slate-200/80">{bulkBusyText}</div>
-              {bulkError && <p className="text-xs text-red-300 font-medium">{bulkError}</p>}
+              {bulkError && (
+                <p className="text-xs text-red-300 font-medium">{bulkError}</p>
+              )}
             </div>
           </div>
 
@@ -485,64 +526,11 @@ export default function SettlementPage() {
                   : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
               }`}
             >
-              {bulkLocking && bulkTarget === "ALL" ? "Locking…" : "Lock ALL open questions"}
+              {bulkLocking && bulkTarget === "ALL"
+                ? "Locking…"
+                : "Lock ALL open questions"}
             </button>
           </div>
-
-          {gamesForRound.length === 0 ? (
-            <div className="px-4 py-4 text-sm text-slate-200">No games found for this round.</div>
-          ) : (
-            <div className="divide-y divide-slate-800/60">
-              {gamesForRound.map((g) => {
-                const { date, time } = formatStart(g.startTime);
-                const openCount = openQuestionCountByGame[g.id] ?? 0;
-                const perGameBulkBusy = bulkLocking && bulkTarget === g.id;
-
-                return (
-                  <div
-                    key={g.id}
-                    className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-gradient-to-r from-slate-950 via-slate-950 to-slate-950"
-                  >
-                    <div className="flex flex-col gap-1">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-                        <span className="inline-flex items-center rounded-full bg-black/30 px-2 py-0.5 text-[11px] font-semibold text-white/70 border border-white/10">
-                          {openCount} open questions
-                        </span>
-                      </div>
-
-                      <div className="text-sm font-semibold text-white">{g.match}</div>
-                      <div className="text-xs text-slate-300">
-                        {date && time ? `${date} · ${time} AEDT` : ""}
-                      </div>
-                      <div className="text-xs text-slate-400">{g.venue}</div>
-                    </div>
-
-                    <div className="flex flex-col items-start md:items-end gap-2">
-                      <button
-                        type="button"
-                        disabled={bulkLocking || openCount === 0}
-                        onClick={() => lockAllOpenQuestionsForGame(g.id, g.match)}
-                        className={`rounded-full px-4 py-2 text-xs font-extrabold border transition ${
-                          openCount === 0
-                            ? "bg-slate-800/50 text-white/40 border-white/10 cursor-not-allowed"
-                            : perGameBulkBusy
-                            ? "bg-amber-400/60 text-black border-amber-300 opacity-80"
-                            : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
-                        }`}
-                      >
-                        {perGameBulkBusy ? "Locking…" : "Lock all questions"}
-                      </button>
-
-                      <p className="text-[11px] text-slate-400 max-w-xs text-right">
-                        Sets every <strong>OPEN</strong> question in this match to{" "}
-                        <strong>PENDING</strong>.
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </section>
 
         {/* FILTER ROW FOR QUESTIONS */}
@@ -550,7 +538,7 @@ export default function SettlementPage() {
           <span className="text-[11px] uppercase tracking-wide text-slate-400">
             Filter questions by status
           </span>
-          {(["open", "final", "pending", "void", "all"] as const).map((s) => (
+          {(["open", "pending", "final", "void", "all"] as const).map((s) => (
             <button
               key={s}
               type="button"
@@ -575,120 +563,174 @@ export default function SettlementPage() {
           </div>
         )}
 
-        {/* QUESTIONS TABLE */}
-        <section className="rounded-2xl bg-slate-950/90 border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.7)] overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-slate-300 bg-black/80">
-            <div className="flex items-center gap-6">
-              <span className="w-10 text-left">Qtr</span>
-              <span>Question</span>
-            </div>
-            <div className="flex items-center gap-6">
-              <span>Status</span>
-              <span>Set outcome</span>
-            </div>
-          </div>
-
-          {loading && <div className="px-4 py-6 text-sm text-slate-200">Loading questions…</div>}
-
-          {!loading && error && <div className="px-4 py-6 text-sm text-red-400">{error}</div>}
-
-          {!loading && !error && filteredQuestions.length === 0 && (
-            <div className="px-4 py-6 text-sm text-slate-200">
-              No questions found for this round / filter.
+        {/* QUESTIONS (GROUPED BY GAME like Picks page) */}
+        <section className="space-y-3">
+          {loading && (
+            <div className="rounded-2xl bg-black/40 border border-white/10 px-4 py-6 text-sm text-slate-200">
+              Loading questions…
             </div>
           )}
 
-          {!loading && !error && filteredQuestions.length > 0 && (
-            <div className="divide-y divide-white/10">
-              {filteredQuestions.map((q) => (
-                <div
-                  key={q.id}
-                  className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
-                >
-                  <div className="flex items-start gap-4 md:w-2/3">
-                    <div className="w-10 mt-1 text-sm font-semibold text-slate-200">Q{q.quarter}</div>
-                    <div>
-                      <div className="text-xs text-slate-400 mb-0.5">{q.match}</div>
-                      <div className="text-sm font-semibold text-white">{q.question}</div>
-                      {q.isSponsorQuestion && (
-                        <div className="mt-1 inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
-                          Sponsor Question
+          {!loading && error && (
+            <div className="rounded-2xl bg-black/40 border border-red-500/30 px-4 py-6 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          {!loading && !error && gameMetaList.length === 0 && (
+            <div className="rounded-2xl bg-black/40 border border-white/10 px-4 py-6 text-sm text-slate-200">
+              No games found for this round.
+            </div>
+          )}
+
+          {!loading &&
+            !error &&
+            gameMetaList.map((g) => {
+              const items = filteredByGame[g.id] || [];
+              if (!items.length) return null;
+
+              const { date, time } = formatStart(g.startTime);
+              const openCount = openQuestionCountByGame[g.id] ?? 0;
+
+              const perGameBulkBusy = bulkLocking && bulkTarget === g.id;
+
+              return (
+                <div key={g.id} className="space-y-2">
+                  {/* GAME HEADER (PicksClient style) */}
+                  <div className="rounded-xl bg-[#0b1220] border border-slate-700 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm sm:text-base font-extrabold text-white truncate">
+                          {g.match}
                         </div>
-                      )}
+                        <div className="text-[11px] sm:text-xs text-white/70">
+                          {g.venue} • {date} {time} AEDT
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/80 border border-white/10">
+                          {openCount} open questions
+                        </span>
+
+                        <button
+                          type="button"
+                          disabled={bulkLocking || loading || openCount === 0}
+                          onClick={() => lockEntireGame(g.id, g.match)}
+                          className={`inline-flex items-center rounded-full px-4 py-2 text-[11px] font-extrabold border transition ${
+                            openCount === 0
+                              ? "bg-slate-800/50 text-white/40 border-white/10 cursor-not-allowed"
+                              : perGameBulkBusy
+                              ? "bg-amber-400/60 text-black border-amber-300 opacity-80"
+                              : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
+                          }`}
+                        >
+                          {perGameBulkBusy ? "Locking…" : "Lock entire game"}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-3 md:w-1/3">
-                    <div>{statusBadge(q.status)}</div>
+                  {/* QUESTIONS UNDER GAME */}
+                  <div className="rounded-2xl bg-slate-950/90 border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.7)] overflow-hidden">
+                    <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-slate-300 bg-black/80">
+                      <div className="flex items-center gap-6">
+                        <span className="w-10 text-left">Qtr</span>
+                        <span>Question</span>
+                      </div>
+                      <div className="flex items-center gap-6">
+                        <span>Status</span>
+                        <span>Set outcome</span>
+                      </div>
+                    </div>
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* YES / NO / VOID */}
-                      <button
-                        type="button"
-                        disabled={savingId === q.id || bulkLocking}
-                        onClick={() => handleAction(q.id, "final_yes")}
-                        className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/80 text-black hover:bg-emerald-400 disabled:opacity-60"
-                      >
-                        YES
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingId === q.id || bulkLocking}
-                        onClick={() => handleAction(q.id, "final_no")}
-                        className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/80 text-black hover:bg-red-400 disabled:opacity-60"
-                      >
-                        NO
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingId === q.id || bulkLocking}
-                        onClick={() => handleAction(q.id, "final_void")}
-                        className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/80 text-black hover:bg-slate-400 disabled:opacity-60"
-                      >
-                        VOID
-                      </button>
+                    <div className="divide-y divide-white/10">
+                      {items.map((q) => (
+                        <div
+                          key={q.id}
+                          className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
+                        >
+                          <div className="flex items-start gap-4 md:w-2/3">
+                            <div className="w-10 mt-1 text-sm font-semibold text-slate-200">
+                              Q{q.quarter}
+                            </div>
+                            <div>
+                              <div className="text-sm font-semibold text-white">
+                                {q.question}
+                              </div>
+                              {q.isSponsorQuestion && (
+                                <div className="mt-1 inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
+                                  Sponsor Question
+                                </div>
+                              )}
+                            </div>
+                          </div>
 
-                      {/* LOCK / REOPEN */}
-                      <button
-                        type="button"
-                        disabled={savingId === q.id || bulkLocking}
-                        onClick={() => handleAction(q.id, "lock")}
-                        className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
-                      >
-                        LOCK
-                      </button>
-                      <button
-                        type="button"
-                        disabled={savingId === q.id || bulkLocking}
-                        onClick={() => handleAction(q.id, "reopen")}
-                        className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-100 border border-slate-500 hover:bg-slate-700 disabled:opacity-60"
-                      >
-                        REOPEN
-                      </button>
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-3 md:w-1/3">
+                            <div>{statusBadge(q.status)}</div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                              {/* YES / NO / VOID */}
+                              <button
+                                type="button"
+                                disabled={savingId === q.id || bulkLocking}
+                                onClick={() => handleAction(q.id, "final_yes")}
+                                className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/80 text-black hover:bg-emerald-400 disabled:opacity-60"
+                              >
+                                YES
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingId === q.id || bulkLocking}
+                                onClick={() => handleAction(q.id, "final_no")}
+                                className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/80 text-black hover:bg-red-400 disabled:opacity-60"
+                              >
+                                NO
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingId === q.id || bulkLocking}
+                                onClick={() => handleAction(q.id, "final_void")}
+                                className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/80 text-black hover:bg-slate-400 disabled:opacity-60"
+                              >
+                                VOID
+                              </button>
+
+                              {/* LOCK / REOPEN */}
+                              <button
+                                type="button"
+                                disabled={savingId === q.id || bulkLocking}
+                                onClick={() => handleAction(q.id, "lock")}
+                                className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
+                              >
+                                LOCK
+                              </button>
+                              <button
+                                type="button"
+                                disabled={savingId === q.id || bulkLocking}
+                                onClick={() => handleAction(q.id, "reopen")}
+                                className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-100 border border-slate-500 hover:bg-slate-700 disabled:opacity-60"
+                              >
+                                REOPEN
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            })}
         </section>
 
         <p className="text-xs text-slate-400">
-          Changes here update the live picks feed and player streaks. If a question is settled
-          incorrectly, hit <strong>REOPEN</strong> and then settle it again with the correct outcome.
+          Tip: use <strong>Lock entire game</strong> at kickoff to flip all OPEN
+          questions in that match to <strong>PENDING</strong>, then settle the
+          outcomes as they’re confirmed. If you settle incorrectly, hit{" "}
+          <strong>REOPEN</strong> and set the correct outcome.
         </p>
       </section>
     </main>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
