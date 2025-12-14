@@ -211,19 +211,26 @@ export default function HomePage() {
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
           {/* Left text block */}
           <div>
-            {/* Season / round meta */}
+            {/* ✅ Season / round meta — FIXED FOR MOBILE */}
             <div className="mb-4">
-              <span className="inline-flex items-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
-                AFL Season 2026
-                {roundNumber !== null && (
-                  <>
-                    <span className="mx-1">•</span>
-                    <span>Round {roundNumber}</span>
-                  </>
-                )}
-                <span className="mx-1">•</span>
-                <span>Free to play. Aussie as.</span>
-              </span>
+              <div className="w-full overflow-hidden">
+                <div className="flex items-center gap-2 w-full flex-nowrap">
+                  {/* Pill 1 */}
+                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    AFL SEASON 2026
+                  </span>
+
+                  {/* Pill 2 */}
+                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    ROUND {roundNumber ?? "—"}
+                  </span>
+
+                  {/* Pill 3 (expands to fill, prevents wrap) */}
+                  <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    FREE TO PLAY. AUSSIE AS.
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Main heading */}
@@ -279,8 +286,6 @@ export default function HomePage() {
           {/* Right hero image card */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
-              {/* You can swap this out for a more cinematic Aussie hero image, e.g.
-                  /images/streakr-hero-night-footy.png */}
               <Image
                 src="/mcg-hero.jpg"
                 alt="Night footy at the G"
@@ -304,7 +309,7 @@ export default function HomePage() {
                   </p>
                 </div>
                 <div className="rounded-full bg-[#FF7A00] text-black text-xs font-bold px-3 py-1 shadow-[0_0_24px_rgba(255,122,0,0.9)]">
-                  Make your next pick. 
+                  Make your next pick.
                 </div>
               </div>
             </div>
