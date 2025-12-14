@@ -75,11 +75,7 @@ type GameLockDoc = {
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
-// ─────────────────────────────────────────────
-// Cricket/BBL Firestore shapes
-// ─────────────────────────────────────────────
-
-// Shape 1: what you seeded (your screenshot shows this)
+// BBL “games/<docId>” doc shape (what your seeder creates)
 type BblGamesDoc = {
   league?: string; // "BBL"
   sport?: string; // "BBL"
@@ -89,14 +85,14 @@ type BblGamesDoc = {
   matchId?: string;
   questions?: Array<{
     id?: string;
-    quarter?: number; // often 0 in your seeding UI
+    quarter?: number; // often 0
     question?: string;
     status?: QuestionStatus | string;
     isSponsorQuestion?: boolean;
   }>;
 };
 
-// Shape 2: optional (if you ever use cricketRounds docs)
+// Optional “cricketRounds/<docId>” doc shape (if you ever use it)
 type CricketSeedQuestion = {
   id: string;
   quarter: number;
@@ -119,8 +115,9 @@ type CricketRoundDoc = {
   roundNumber?: number;
   round?: number;
   label?: string;
-  sport?: string;
-  games: CricketSeedGame[];
+  sport?: string; // "BBL"
+  matchId?: string;
+  games?: CricketSeedGame[];
 };
 
 // ─────────────────────────────────────────────
@@ -176,10 +173,6 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   }
 }
 
-/**
- * Pick stats for all questions (questionId uniqueness is key).
- * NOTE: Right now this reads ALL picks (not filtered by round/sport). That’s ok for MVP.
- */
 async function getPickStatsForRound(
   _roundNumber: number,
   currentUserId: string | null
@@ -221,6 +214,25 @@ async function getPickStatsForRound(
   }
 
   return { pickStats, userPicks };
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+function normaliseDocId(raw: string): string {
+  const decoded = safeDecode(raw).replace(/\+/g, " ");
+  // normalise weird dashes to "-"
+  const dashFixed = decoded.replace(/[–—−]/g, "-");
+  // collapse spaces around dashes and general whitespace
+  return dashFixed
+    .replace(/\s*-\s*/g, " - ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // AFL-only helpers
@@ -366,6 +378,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       .trim()
       .toUpperCase();
 
+    const debug = String(url.searchParams.get("debug") ?? "").trim() === "1";
+
     const roundParam = url.searchParams.get("round");
     let roundNumber: number | null = null;
     if (roundParam !== null) {
@@ -375,29 +389,54 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (roundNumber === null) roundNumber = 0;
 
     const currentUserId = await getUserIdFromRequest(req);
-
     const { pickStats, userPicks } = await getPickStatsForRound(
       roundNumber,
       currentUserId
     );
 
     // ─────────────────────────────
-    // BBL / Cricket path (Firestore)
+    // BBL / Cricket path
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
-      const docId = String(url.searchParams.get("docId") ?? "").trim();
+      const rawDocId = String(url.searchParams.get("docId") ?? "");
+      const docId = normaliseDocId(rawDocId);
 
       if (!docId) {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
-          error:
-            "Missing docId. Call /api/picks?sport=BBL&docId=<your-doc-id>",
+          error: "Missing docId. Call /api/picks?sport=BBL&docId=<your-doc-id>",
         });
       }
 
-      // 1) Try cricketRounds first (optional legacy/alternate)
-      const cricketSnap = await db.collection("cricketRounds").doc(docId).get();
+      // ✅ DEBUG: show what the Vercel backend can actually see
+      if (debug) {
+        const [gamesList, cricketList] = await Promise.all([
+          db.collection("games").limit(25).get(),
+          db.collection("cricketRounds").limit(25).get(),
+        ]);
+
+        return NextResponse.json({
+          requestedDocId_raw: rawDocId,
+          requestedDocId_normalised: docId,
+          visibleGamesDocIds: gamesList.docs.map((d) => d.id),
+          visibleCricketRoundsDocIds: cricketList.docs.map((d) => d.id),
+        });
+      }
+
+      // 1) Try exact docId in cricketRounds
+      let cricketSnap = await db.collection("cricketRounds").doc(docId).get();
+
+      // 2) If not found, try querying by matchId field
+      if (!cricketSnap.exists) {
+        const q = await db
+          .collection("cricketRounds")
+          .where("matchId", "==", docId)
+          .limit(1)
+          .get();
+        if (!q.empty) cricketSnap = q.docs[0];
+      }
+
       if (cricketSnap.exists) {
         const data = cricketSnap.data() as CricketRoundDoc;
         const effectiveRoundNumber =
@@ -410,10 +449,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           const startTime = String(g.startTime || "").trim();
           const sport = String(g.sport || data.sport || "BBL").toUpperCase();
 
-          const questions: ApiQuestion[] = (g.questions || []).map((q) => {
-            const qid = String(q.id || "").trim();
-            // Make IDs stable so picks can attach
-            const questionId = qid ? `${gameId}-${qid}` : `${gameId}-QX`;
+          const questions: ApiQuestion[] = (g.questions || []).map((q, idx) => {
+            const rawId = String(q.id || `Q${idx + 1}`).trim();
+            const questionId = `${gameId}-${rawId}`;
 
             const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
             const total = stats.total;
@@ -422,8 +460,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               total > 0 ? Math.round((stats.yes / total) * 100) : 0;
             const noPercent =
               total > 0 ? Math.round((stats.no / total) * 100) : 0;
-
-            const userPick = userPicks[questionId];
 
             const rawQuarter = Number.isFinite(Number(q.quarter))
               ? Number(q.quarter)
@@ -438,7 +474,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
               status: normaliseStatusValue(q.status ?? "open"),
               sport,
               isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-              userPick,
+              userPick: userPicks[questionId],
               yesPercent,
               noPercent,
               commentCount: 0,
@@ -465,13 +501,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         } satisfies PicksApiResponse);
       }
 
-      // 2) ✅ Fallback to the collection you ACTUALLY seeded: games/<docId>
-      const gameSnap = await db.collection("games").doc(docId).get();
+      // 3) Try exact docId in games
+      let gameSnap = await db.collection("games").doc(docId).get();
+
+      // 4) If not found, query by matchId field (your screenshot shows matchId exists)
+      if (!gameSnap.exists) {
+        const q = await db
+          .collection("games")
+          .where("matchId", "==", docId)
+          .limit(1)
+          .get();
+        if (!q.empty) gameSnap = q.docs[0];
+      }
+
       if (!gameSnap.exists) {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
-          error: `BBL doc not found in cricketRounds/${docId} or games/${docId}`,
+          error: `BBL doc not found. Tried:
+- cricketRounds/${docId}
+- cricketRounds where matchId == "${docId}"
+- games/${docId}
+- games where matchId == "${docId}"
+
+If this doc EXISTS in your console, your Vercel env is pointing at the wrong Firebase project.`,
         });
       }
 
@@ -482,11 +535,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const venue = String(gameDoc.venue || "").trim();
       const startTime = String(gameDoc.startTime || "").trim();
 
-      const gameId = String(gameDoc.matchId || docId).trim() || docId;
+      const gameId = String(gameDoc.matchId || gameSnap.id).trim() || gameSnap.id;
 
       const questions: ApiQuestion[] = (gameDoc.questions || []).map((q, idx) => {
         const rawId = String(q.id || `Q${idx + 1}`).trim();
-        // Make IDs stable and unique (THIS MATTERS)
         const questionId = `${gameId}-${rawId}`;
 
         const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
@@ -495,9 +547,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
         const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-        const userPick = userPicks[questionId];
-
-        // ✅ quarter 0 often causes UI filters to drop it, so force into 1..4
         const rawQuarter = Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 1;
         const safeQuarter = rawQuarter <= 0 ? 1 : rawQuarter;
 
@@ -509,7 +558,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           status: normaliseStatusValue(q.status ?? "open"),
           sport,
           isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-          userPick,
+          userPick: userPicks[questionId],
           yesPercent,
           noPercent,
           commentCount: 0,
@@ -603,7 +652,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         correctPick = userPick === correctOutcome;
       }
 
-      const apiQuestion: ApiQuestion = {
+      gamesByKey[gameKey].questions.push({
         id: questionId,
         gameId: gameKey,
         quarter: row.Quarter,
@@ -618,14 +667,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         correctOutcome,
         outcome: correctOutcome,
         correctPick,
-      };
-
-      gamesByKey[gameKey].questions.push(apiQuestion);
+      });
     }
 
-    const games = Object.values(gamesByKey);
-    const response: PicksApiResponse = { games, roundNumber };
-    return NextResponse.json(response);
+    return NextResponse.json({
+      games: Object.values(gamesByKey),
+      roundNumber,
+    } satisfies PicksApiResponse);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
