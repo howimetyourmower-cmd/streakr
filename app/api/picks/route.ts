@@ -60,9 +60,9 @@ type SponsorQuestionConfig = {
 };
 
 type QuestionStatusDoc = {
-  roundNumber: number;
+  roundNumber?: number;
   questionId: string;
-  status: QuestionStatus;
+  status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock" | string;
   result?: QuestionOutcome | "lock" | string;
   updatedAt?: FirebaseFirestore.Timestamp;
@@ -79,7 +79,7 @@ type GameLockDoc = {
 // BBL / Cricket shapes (support BOTH structures)
 // ─────────────────────────────────────────────
 
-// Structure A (your CURRENT Firestore screenshot):
+// Structure A:
 // cricketRounds/{docId} contains match/meta + questions[]
 type CricketMatchQuestion = {
   id: string;
@@ -92,14 +92,14 @@ type CricketMatchQuestion = {
 type CricketMatchDoc = {
   league?: string; // "BBL"
   sport?: string; // "BBL"
-  match?: string; // "Perth Scorchers vs Sydney Sixers"
-  matchId?: string; // "BBL-2025-12-14-SCO-VS-SIX"
+  match?: string;
+  matchId?: string;
   venue?: string;
   startTime?: string;
   questions?: CricketMatchQuestion[];
 };
 
-// Structure B (older / planned):
+// Structure B:
 // cricketRounds/{docId} contains games:[{match,venue,startTime,questions:[]}]
 type CricketSeedQuestion = {
   id: string;
@@ -141,9 +141,9 @@ function getRoundCode(roundNumber: number): string {
 function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   if (typeof val !== "string") return undefined;
   const s = val.trim().toLowerCase();
-  if (s === "yes" || s === "y" || s === "correct" || s === "win") return "yes";
-  if (s === "no" || s === "n" || s === "wrong" || s === "loss") return "no";
-  if (s === "void" || s === "cancelled" || s === "canceled") return "void";
+  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
+  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
+  if (["void", "cancelled", "canceled"].includes(s)) return "void";
   return undefined;
 }
 
@@ -299,13 +299,8 @@ async function getQuestionStatusForRound(
           : 0;
 
       const existing = temp[data.questionId];
-
       if (!existing || updatedAtMs >= existing.updatedAtMs) {
-        temp[data.questionId] = {
-          status: data.status,
-          outcome,
-          updatedAtMs,
-        };
+        temp[data.questionId] = { status: data.status, outcome, updatedAtMs };
       }
     });
   } catch (error) {
@@ -314,12 +309,70 @@ async function getQuestionStatusForRound(
 
   const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> =
     {};
-
   Object.entries(temp).forEach(([qid, value]) => {
     finalMap[qid] = { status: value.status, outcome: value.outcome };
   });
 
   return finalMap;
+}
+
+/**
+ * ✅ NEW: For BBL we don’t have roundNumber logic.
+ * We fetch the latest status/outcome by questionId (in chunks of 10).
+ */
+async function getLatestQuestionStatusByQuestionIds(
+  questionIds: string[]
+): Promise<Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>> {
+  const temp: Record<
+    string,
+    { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
+  > = {};
+
+  const unique = Array.from(new Set(questionIds.filter(Boolean)));
+  if (!unique.length) return {};
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += 10) chunks.push(unique.slice(i, i + 10));
+
+  try {
+    for (const chunk of chunks) {
+      const snap = await db
+        .collection("questionStatus")
+        .where("questionId", "in", chunk)
+        .get();
+
+      snap.forEach((docSnap) => {
+        const d = docSnap.data() as QuestionStatusDoc;
+        if (!d.questionId) return;
+
+        const rawOutcome = (d.outcome as any) ?? (d.result as any);
+        const outcome = normaliseOutcomeValue(rawOutcome);
+
+        const updatedAtMs =
+          d.updatedAt && typeof (d.updatedAt as any).toMillis === "function"
+            ? (d.updatedAt as any).toMillis()
+            : 0;
+
+        const existing = temp[d.questionId];
+        if (!existing || updatedAtMs >= existing.updatedAtMs) {
+          temp[d.questionId] = {
+            status: d.status ? normaliseStatusValue(d.status) : undefined,
+            outcome,
+            updatedAtMs,
+          };
+        }
+      });
+    }
+  } catch (error) {
+    console.error("[/api/picks] Error fetching questionStatus by ids", error);
+  }
+
+  const out: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> =
+    {};
+  for (const [qid, v] of Object.entries(temp)) {
+    out[qid] = { status: v.status, outcome: v.outcome };
+  }
+  return out;
 }
 
 async function getGameLocksForRound(
@@ -362,11 +415,60 @@ async function getGameLocksForRound(
 // BBL helper: build API response from either doc shape
 // ─────────────────────────────────────────────
 
+function enrichQuestionWithStatusAndOutcome(params: {
+  q: {
+    id: string;
+    gameId: string;
+    quarter: number;
+    question: string;
+    status: QuestionStatus;
+    sport: string;
+    isSponsorQuestion?: boolean;
+  };
+  statusOverride?: { status?: QuestionStatus; outcome?: QuestionOutcome };
+  userPick?: "yes" | "no";
+  yesPercent: number;
+  noPercent: number;
+}) : ApiQuestion {
+  const { q, statusOverride, userPick, yesPercent, noPercent } = params;
+
+  const effectiveStatus: QuestionStatus =
+    statusOverride?.status ?? q.status;
+
+  const correctOutcome =
+    effectiveStatus === "final" || effectiveStatus === "void"
+      ? statusOverride?.outcome
+      : undefined;
+
+  let correctPick: boolean | null = null;
+  if (correctOutcome && userPick) {
+    correctPick = userPick === correctOutcome;
+  }
+
+  return {
+    id: q.id,
+    gameId: q.gameId,
+    quarter: q.quarter,
+    question: q.question,
+    status: effectiveStatus,
+    sport: q.sport,
+    isSponsorQuestion: q.isSponsorQuestion,
+    userPick,
+    yesPercent,
+    noPercent,
+    commentCount: 0,
+    correctOutcome,
+    outcome: correctOutcome,
+    correctPick,
+  };
+}
+
 function buildBblGameFromMatchDoc(
   docId: string,
   data: CricketMatchDoc,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
-  userPicks: Record<string, "yes" | "no">
+  userPicks: Record<string, "yes" | "no">,
+  statusByQid: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>
 ): ApiGame {
   const sport = String(data.sport || data.league || "BBL").trim().toUpperCase();
   const match = String(data.match || "").trim();
@@ -376,15 +478,14 @@ function buildBblGameFromMatchDoc(
   const questionsArr = Array.isArray(data.questions) ? data.questions : [];
 
   const questions: ApiQuestion[] = questionsArr.map((q, idx) => {
-    // IMPORTANT: use Firestore question id exactly, so picks save/load aligns
     const qid = String(q.id || "").trim() || `${docId}-Q${idx + 1}`;
+
     const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
     const total = stats.total;
-
     const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
     const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-    return {
+    const base = {
       id: qid,
       gameId: docId,
       quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
@@ -392,14 +493,15 @@ function buildBblGameFromMatchDoc(
       status: normaliseStatusValue(q.status ?? "open"),
       sport,
       isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+    };
+
+    return enrichQuestionWithStatusAndOutcome({
+      q: base,
+      statusOverride: statusByQid[qid],
       userPick: userPicks[qid],
       yesPercent,
       noPercent,
-      commentCount: 0,
-      correctOutcome: undefined,
-      outcome: undefined,
-      correctPick: null,
-    };
+    });
   });
 
   return {
@@ -417,7 +519,8 @@ function buildBblGamesFromRoundDoc(
   docId: string,
   data: CricketRoundDoc,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
-  userPicks: Record<string, "yes" | "no">
+  userPicks: Record<string, "yes" | "no">,
+  statusByQid: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>
 ): ApiGame[] {
   const gamesArr = Array.isArray(data.games) ? data.games : [];
   const baseSport = String(data.sport || "BBL").trim().toUpperCase();
@@ -435,11 +538,10 @@ function buildBblGamesFromRoundDoc(
 
       const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
-
       const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
       const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-      return {
+      const base = {
         id: qid,
         gameId,
         quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
@@ -447,14 +549,15 @@ function buildBblGamesFromRoundDoc(
         status: normaliseStatusValue(q.status ?? "open"),
         sport,
         isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
+      };
+
+      return enrichQuestionWithStatusAndOutcome({
+        q: base,
+        statusOverride: statusByQid[qid],
         userPick: userPicks[qid],
         yesPercent,
         noPercent,
-        commentCount: 0,
-        correctOutcome: undefined,
-        outcome: undefined,
-        correctPick: null,
-      };
+      });
     });
 
     return {
@@ -521,11 +624,32 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const raw = snap.data() || {};
 
-      // Detect which structure this doc is:
-      // - If it has `games` array => RoundDoc (Structure B)
-      // - Else if it has `questions` array => MatchDoc (Structure A)
       const hasGamesArray = Array.isArray((raw as any).games);
       const hasQuestionsArray = Array.isArray((raw as any).questions);
+
+      // Collect all questionIds so we can fetch their settlement outcomes
+      const qids: string[] = [];
+
+      if (hasGamesArray) {
+        const data = raw as CricketRoundDoc;
+        const gamesArr = Array.isArray(data.games) ? data.games : [];
+        for (const g of gamesArr) {
+          const qs = Array.isArray(g.questions) ? g.questions : [];
+          for (const q of qs) {
+            const qid = String(q.id || "").trim();
+            if (qid) qids.push(qid);
+          }
+        }
+      } else if (hasQuestionsArray) {
+        const data = raw as CricketMatchDoc;
+        const qs = Array.isArray(data.questions) ? data.questions : [];
+        for (const q of qs) {
+          const qid = String(q.id || "").trim();
+          if (qid) qids.push(qid);
+        }
+      }
+
+      const statusByQid = await getLatestQuestionStatusByQuestionIds(qids);
 
       let games: ApiGame[] = [];
       let effectiveRoundNumber = roundNumber;
@@ -535,14 +659,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         effectiveRoundNumber =
           Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
 
-        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks);
+        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks, statusByQid);
       } else if (hasQuestionsArray) {
         const data = raw as CricketMatchDoc;
-        effectiveRoundNumber = roundNumber; // match-based (no round concept)
+        effectiveRoundNumber = roundNumber;
 
-        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks)];
+        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks, statusByQid)];
       } else {
-        // Nothing usable in the document
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
@@ -598,8 +721,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
 
       const qIndex = questionIndexByGame[gameKey]++;
-
-      // AFL question IDs are generated (must match how you save picks)
       const questionId = `${gameKey}-Q${qIndex + 1}`;
 
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
