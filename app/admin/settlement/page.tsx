@@ -29,7 +29,6 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
-  isUnlockedForPicks?: boolean;
   questions: ApiQuestion[];
 };
 
@@ -40,19 +39,14 @@ type PicksApiResponse = {
 
 type QuestionRow = {
   id: string;
+  gameId: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
   match: string;
-  isSponsorQuestion?: boolean;
-};
-
-type GameUnlock = {
-  id: string;
-  match: string;
   venue: string;
   startTime: string;
-  isUnlockedForPicks: boolean;
+  isSponsorQuestion?: boolean;
 };
 
 // Map ROUND_OPTIONS.key → numeric roundNumber used by /api/picks & /api/settlement
@@ -94,83 +88,71 @@ export default function SettlementPage() {
   >("all");
 
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
-  const [gameUnlocks, setGameUnlocks] = useState<GameUnlock[]>([]);
-
   const [loading, setLoading] = useState(false);
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [lockSavingId, setLockSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lockError, setLockError] = useState<string | null>(null);
+
+  // Bulk lock state
+  const [bulkLocking, setBulkLocking] = useState(false);
+  const [bulkTarget, setBulkTarget] = useState<string | null>(null); // "ALL" | gameId
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   // Derived roundNumber from key
-  const roundNumber = useMemo(() => {
-    return keyToRoundNumber(roundKey);
-  }, [roundKey]);
+  const roundNumber = useMemo(() => keyToRoundNumber(roundKey), [roundKey]);
 
   const roundLabel = useMemo(() => {
     const found = ROUND_OPTIONS.find((r) => r.key === roundKey);
     return found?.label ?? "Round";
   }, [roundKey]);
 
-  // Load questions + game unlocks for the selected round
+  async function refreshRoundData() {
+    const res = await fetch(`/api/picks?round=${roundNumber}`, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`Failed to load picks (status ${res.status})`);
+    }
+    const json: PicksApiResponse = await res.json();
+
+    const flatQuestions: QuestionRow[] = [];
+
+    for (const game of json.games || []) {
+      for (const q of game.questions || []) {
+        flatQuestions.push({
+          id: q.id,
+          gameId: game.id,
+          quarter: q.quarter,
+          question: q.question,
+          status: q.status,
+          match: game.match,
+          venue: game.venue,
+          startTime: game.startTime,
+          isSponsorQuestion: q.isSponsorQuestion,
+        });
+      }
+    }
+
+    setQuestions(flatQuestions);
+  }
+
+  // Load questions for selected round
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-        setLockError(null);
-
-        const res = await fetch(`/api/picks?round=${roundNumber}`, {
-          cache: "no-store",
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to load picks (status ${res.status})`);
-        }
-
-        const json: PicksApiResponse = await res.json();
-
-        // Flatten questions
-        const flatQuestions: QuestionRow[] = [];
-        const gameUnlockList: GameUnlock[] = [];
-
-        for (const game of json.games || []) {
-          // game unlock row
-          gameUnlockList.push({
-            id: game.id,
-            match: game.match,
-            venue: game.venue,
-            startTime: game.startTime,
-            isUnlockedForPicks: !!game.isUnlockedForPicks,
-          });
-
-          // settlement rows
-          for (const q of game.questions || []) {
-            flatQuestions.push({
-              id: q.id,
-              quarter: q.quarter,
-              question: q.question,
-              status: q.status,
-              match: game.match,
-              isSponsorQuestion: q.isSponsorQuestion,
-            });
-          }
-        }
-
-        setQuestions(flatQuestions);
-        setGameUnlocks(gameUnlockList);
+        setBulkError(null);
+        await refreshRoundData();
       } catch (err: any) {
         console.error("[Settlement] load error", err);
-        setError(
-          err?.message || "Failed to load questions for settlement console."
-        );
+        setError(err?.message || "Failed to load questions for settlement console.");
         setQuestions([]);
-        setGameUnlocks([]);
       } finally {
         setLoading(false);
       }
     };
 
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roundNumber]);
 
   const filteredQuestions = useMemo(() => {
@@ -178,81 +160,69 @@ export default function SettlementPage() {
     return questions.filter((q) => q.status === statusFilter);
   }, [questions, statusFilter]);
 
-  // ─────────────────────────────────────────────
-  // Game unlock / lock for picks
-  // ─────────────────────────────────────────────
-  async function handleToggleGameLock(gameId: string, nextUnlocked: boolean) {
-    setLockError(null);
-    setLockSavingId(gameId);
+  const openQuestionCount = useMemo(
+    () => questions.filter((q) => q.status === "open").length,
+    [questions]
+  );
 
-    // Optimistic update
-    setGameUnlocks((prev) =>
-      prev.map((g) =>
-        g.id === gameId ? { ...g, isUnlockedForPicks: nextUnlocked } : g
-      )
-    );
+  const openQuestionCountByGame = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const q of questions) {
+      if (q.status !== "open") continue;
+      counts[q.gameId] = (counts[q.gameId] ?? 0) + 1;
+    }
+    return counts;
+  }, [questions]);
 
-    try {
-      const res = await fetch("/api/admin/game-lock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roundNumber,
-          gameId,
-          isUnlockedForPicks: nextUnlocked,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg =
-          data?.error ||
-          `Failed to update game lock (status ${res.status})`;
-        throw new Error(msg);
+  const gamesForRound = useMemo(() => {
+    const map = new Map<string, { id: string; match: string; venue: string; startTime: string }>();
+    for (const q of questions) {
+      if (!map.has(q.gameId)) {
+        map.set(q.gameId, {
+          id: q.gameId,
+          match: q.match,
+          venue: q.venue,
+          startTime: q.startTime,
+        });
       }
-    } catch (err: any) {
-      console.error("[Settlement] game lock error", err);
-      setLockError(
-        err?.message || "Failed to update game lock. Please try again."
-      );
-      // revert optimistic update
-      setGameUnlocks((prev) =>
-        prev.map((g) =>
-          g.id === gameId ? { ...g, isUnlockedForPicks: !nextUnlocked } : g
-        )
-      );
-    } finally {
-      setLockSavingId(null);
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const ta = new Date(a.startTime).getTime();
+      const tb = new Date(b.startTime).getTime();
+      return (Number.isFinite(ta) ? ta : 0) - (Number.isFinite(tb) ? tb : 0);
+    });
+  }, [questions]);
+
+  // ─────────────────────────────────────────────
+  // Settlement helpers
+  // ─────────────────────────────────────────────
+  async function postSettlement(questionId: string, action: SettlementAction) {
+    const res = await fetch("/api/settlement", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roundNumber,
+        questionId,
+        action,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = data?.error || `Settlement API failed (status ${res.status})`;
+      throw new Error(message);
     }
   }
 
   // ─────────────────────────────────────────────
-  // Question settlement
+  // Single question action
   // ─────────────────────────────────────────────
   async function handleAction(questionId: string, action: SettlementAction) {
     try {
       setSavingId(questionId);
       setError(null);
 
-      const res = await fetch("/api/settlement", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roundNumber,
-          questionId,
-          action,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        const message =
-          data?.error || `Settlement API failed (status ${res.status})`;
-        throw new Error(message);
-      }
-
-      // Optimistic local status update so you see it instantly
+      // Optimistic local status update
       setQuestions((prev) =>
         prev.map((q) => {
           if (q.id !== questionId) return q;
@@ -282,45 +252,106 @@ export default function SettlementPage() {
         })
       );
 
-      // Hard refresh from /api/picks so everything is in sync
-      const refresh = await fetch(`/api/picks?round=${roundNumber}`, {
-        cache: "no-store",
-      });
-      if (refresh.ok) {
-        const json: PicksApiResponse = await refresh.json();
-        const flatQuestions: QuestionRow[] = [];
-        const gameUnlockList: GameUnlock[] = [];
+      await postSettlement(questionId, action);
 
-        for (const game of json.games || []) {
-          gameUnlockList.push({
-            id: game.id,
-            match: game.match,
-            venue: game.venue,
-            startTime: game.startTime,
-            isUnlockedForPicks: !!game.isUnlockedForPicks,
-          });
-
-          for (const q of game.questions || []) {
-            flatQuestions.push({
-              id: q.id,
-              quarter: q.quarter,
-              question: q.question,
-              status: q.status,
-              match: game.match,
-              isSponsorQuestion: q.isSponsorQuestion,
-            });
-          }
-        }
-
-        setQuestions(flatQuestions);
-        setGameUnlocks(gameUnlockList);
-      }
+      // Hard refresh so everything is in sync
+      await refreshRoundData();
     } catch (err: any) {
       console.error("[Settlement] action error", err);
       alert(err?.message || "Failed to update settlement.");
+      // best-effort refresh to recover UI state
+      try {
+        await refreshRoundData();
+      } catch {}
     } finally {
       setSavingId(null);
     }
+  }
+
+  // ─────────────────────────────────────────────
+  // BULK: Lock all open questions (round or per-game)
+  // ─────────────────────────────────────────────
+  async function bulkLock(questionIds: string[], targetLabel: string) {
+    if (!questionIds.length) return;
+
+    setBulkError(null);
+    setBulkLocking(true);
+    setBulkTarget(targetLabel);
+    setBulkProgress({ done: 0, total: questionIds.length });
+
+    // Optimistic: mark them pending instantly
+    const idSet = new Set(questionIds);
+    setQuestions((prev) => prev.map((q) => (idSet.has(q.id) ? { ...q, status: "pending" } : q)));
+
+    const failures: Array<{ id: string; error: string }> = [];
+
+    try {
+      let done = 0;
+
+      // Sequential = safer (avoids rate limits / write contention)
+      for (const id of questionIds) {
+        try {
+          await postSettlement(id, "lock");
+        } catch (e: any) {
+          failures.push({ id, error: e?.message || "Unknown error" });
+        } finally {
+          done += 1;
+          setBulkProgress({ done, total: questionIds.length });
+        }
+      }
+
+      await refreshRoundData();
+
+      if (failures.length) {
+        setBulkError(
+          `Locked ${questionIds.length - failures.length}/${questionIds.length}. Failed: ${failures.length}. (Refresh done — you can retry.)`
+        );
+      }
+    } catch (err: any) {
+      console.error("[Settlement] bulk lock error", err);
+      setBulkError(err?.message || "Bulk lock failed. Please try again.");
+      // recover UI
+      try {
+        await refreshRoundData();
+      } catch {}
+    } finally {
+      setBulkLocking(false);
+      setBulkTarget(null);
+      setBulkProgress(null);
+    }
+  }
+
+  async function lockAllOpenQuestions() {
+    const ids = questions.filter((q) => q.status === "open").map((q) => q.id);
+    if (!ids.length) return;
+
+    const ok =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Lock ALL open questions for ${roundLabel}?\n\nThis sets them to PENDING (same as clicking LOCK). You can REOPEN any question if needed.`
+          );
+    if (!ok) return;
+
+    await bulkLock(ids, "ALL");
+  }
+
+  async function lockAllOpenQuestionsForGame(gameId: string, matchLabel: string) {
+    const ids = questions
+      .filter((q) => q.gameId === gameId && q.status === "open")
+      .map((q) => q.id);
+
+    if (!ids.length) return;
+
+    const ok =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Lock ALL open questions for:\n${matchLabel}\n\nThis sets them to PENDING. You can REOPEN any question if needed.`
+          );
+    if (!ok) return;
+
+    await bulkLock(ids, gameId);
   }
 
   function statusBadge(status: QuestionStatus) {
@@ -353,21 +384,24 @@ export default function SettlementPage() {
     }
   }
 
+  const bulkBusyText = useMemo(() => {
+    if (!bulkLocking || !bulkProgress) return "";
+    const scope = bulkTarget === "ALL" ? "round" : "game";
+    return `Locking ${bulkProgress.done}/${bulkProgress.total} (${scope})…`;
+  }, [bulkLocking, bulkProgress, bulkTarget]);
+
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-white">
       <section className="max-w-6xl mx-auto px-4 py-8 space-y-6">
         {/* HEADER */}
         <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-3xl font-extrabold tracking-tight">
-              Settlement console
-            </h1>
+            <h1 className="text-3xl font-extrabold tracking-tight">Settlement console</h1>
             <p className="mt-2 text-sm text-slate-200/80 max-w-xl">
-              Lock questions when they&apos;re live, then settle them with the
-              correct outcome. Uses <code className="text-xs">/api/picks</code>{" "}
-              for data and <code className="text-xs">/api/settlement</code> for
-              updates. Reopen is a safety net if you lock or settle the wrong
-              question.
+              Lock questions when they&apos;re live, then settle them with the correct outcome. Uses{" "}
+              <code className="text-xs">/api/picks</code> for data and{" "}
+              <code className="text-xs">/api/settlement</code> for updates. Reopen is a safety net if
+              you lock or settle the wrong question.
             </p>
           </div>
 
@@ -377,58 +411,92 @@ export default function SettlementPage() {
                 AFL Season {CURRENT_SEASON}
               </span>
               <span className="text-xs text-slate-300">
-                Round:{" "}
-                <span className="font-semibold text-white">
-                  {roundLabel}
-                </span>
+                Round: <span className="font-semibold text-white">{roundLabel}</span>
               </span>
             </div>
 
-            <select
-              value={roundKey}
-              onChange={(e) => setRoundKey(e.target.value as RoundKey)}
-              className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
-            >
-              {ROUND_OPTIONS.map((r) => (
-                <option key={r.key} value={r.key}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={roundKey}
+                onChange={(e) => setRoundKey(e.target.value as RoundKey)}
+                className="rounded-full bg-black border border-white/25 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/80 focus:border-orange-500/80"
+              >
+                {ROUND_OPTIONS.map((r) => (
+                  <option key={r.key} value={r.key}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                disabled={loading || bulkLocking}
+                onClick={async () => {
+                  try {
+                    setLoading(true);
+                    setError(null);
+                    await refreshRoundData();
+                  } catch (e: any) {
+                    setError(e?.message || "Refresh failed.");
+                  } finally {
+                    setLoading(false);
+                  }
+                }}
+                className="rounded-full bg-slate-900 border border-white/15 px-4 py-2 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
         </header>
 
-        {/* GAME UNLOCKS PANEL */}
-        <section className="rounded-2xl bg-slate-950/90 border border-sky-500/40 shadow-[0_0_40px_rgba(15,23,42,0.9)] overflow-hidden">
-          <div className="px-4 py-3 border-b border-sky-500/30 bg-gradient-to-r from-sky-900/60 via-slate-900 to-slate-950">
-            <h2 className="text-sm font-bold tracking-wide uppercase text-sky-100">
-              Game unlocks for this round
+        {/* BULK + PER-GAME LOCK PANEL (replaces game unlocks) */}
+        <section className="rounded-2xl bg-slate-950/90 border border-amber-500/35 shadow-[0_0_40px_rgba(15,23,42,0.9)] overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-500/25 bg-gradient-to-r from-amber-900/40 via-slate-900 to-slate-950">
+            <h2 className="text-sm font-bold tracking-wide uppercase text-amber-100">
+              Quick locks (questions)
             </h2>
             <p className="mt-1 text-xs text-slate-100/80 max-w-2xl">
-              Control which matches are unlocked for players to make picks. Only
-              upcoming games, not busted for the player, and{" "}
-              <span className="font-semibold text-sky-200">
-                &quot;Players can pick&quot;
-              </span>{" "}
-              = <code className="text-[11px]">true</code> will allow picks on
-              the Picks page.
+              All games are available to players now. Use this to mass-lock questions to{" "}
+              <strong>PENDING</strong> when matches go live.
             </p>
-            {lockError && (
-              <p className="mt-1 text-xs text-red-300 font-medium">
-                {lockError}
-              </p>
-            )}
+
+            <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="text-[11px] text-slate-200/80">{bulkBusyText}</div>
+              {bulkError && <p className="text-xs text-red-300 font-medium">{bulkError}</p>}
+            </div>
           </div>
 
-          {gameUnlocks.length === 0 ? (
-            <div className="px-4 py-4 text-sm text-slate-200">
-              No games found for this round.
+          <div className="px-4 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-black/30">
+            <div className="text-xs text-slate-300">
+              Open questions this round:{" "}
+              <span className="font-semibold text-white">{openQuestionCount}</span>
             </div>
+
+            <button
+              type="button"
+              disabled={bulkLocking || loading || openQuestionCount === 0}
+              onClick={lockAllOpenQuestions}
+              className={`rounded-full px-5 py-2 text-xs font-extrabold border transition ${
+                openQuestionCount === 0
+                  ? "bg-slate-800/50 text-white/40 border-white/10 cursor-not-allowed"
+                  : bulkLocking
+                  ? "bg-amber-400/60 text-black border-amber-300 opacity-80"
+                  : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
+              }`}
+            >
+              {bulkLocking && bulkTarget === "ALL" ? "Locking…" : "Lock ALL open questions"}
+            </button>
+          </div>
+
+          {gamesForRound.length === 0 ? (
+            <div className="px-4 py-4 text-sm text-slate-200">No games found for this round.</div>
           ) : (
             <div className="divide-y divide-slate-800/60">
-              {gameUnlocks.map((g) => {
+              {gamesForRound.map((g) => {
                 const { date, time } = formatStart(g.startTime);
-                const unlocked = g.isUnlockedForPicks;
+                const openCount = openQuestionCountByGame[g.id] ?? 0;
+                const perGameBulkBusy = bulkLocking && bulkTarget === g.id;
 
                 return (
                   <div
@@ -437,57 +505,37 @@ export default function SettlementPage() {
                   >
                     <div className="flex flex-col gap-1">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-                        <span className="inline-flex items-center rounded-full bg-emerald-500/15 px-2 py-0.5 font-semibold text-emerald-300 border border-emerald-400/40">
-                          Upcoming game
-                        </span>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-0.5 font-semibold border text-xs ${
-                            unlocked
-                              ? "bg-lime-500/10 text-lime-200 border-lime-400/60"
-                              : "bg-slate-700/40 text-slate-200 border-slate-400/70"
-                          }`}
-                        >
-                          {unlocked ? "Unlocked for picks" : "Locked for picks"}
+                        <span className="inline-flex items-center rounded-full bg-black/30 px-2 py-0.5 text-[11px] font-semibold text-white/70 border border-white/10">
+                          {openCount} open questions
                         </span>
                       </div>
-                      <div className="text-sm font-semibold text-white">
-                        {g.match}
-                      </div>
+
+                      <div className="text-sm font-semibold text-white">{g.match}</div>
                       <div className="text-xs text-slate-300">
                         {date && time ? `${date} · ${time} AEDT` : ""}
                       </div>
-                      <div className="text-xs text-slate-400">
-                        {g.venue}
-                      </div>
+                      <div className="text-xs text-slate-400">{g.venue}</div>
                     </div>
 
-                    <div className="flex flex-col items-start md:items-end gap-1">
-                      <p className="text-xs text-slate-300">
-                        {unlocked ? "Players can pick" : "Players can’t pick"}
-                      </p>
-
-                      {/* Toggle switch */}
+                    <div className="flex flex-col items-start md:items-end gap-2">
                       <button
                         type="button"
-                        disabled={lockSavingId === g.id}
-                        onClick={() =>
-                          handleToggleGameLock(g.id, !unlocked)
-                        }
-                        className={`relative inline-flex h-7 w-14 items-center rounded-full border transition ${
-                          unlocked
-                            ? "bg-emerald-500 border-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.8)]"
-                            : "bg-slate-700 border-slate-500"
-                        } ${lockSavingId === g.id ? "opacity-70" : ""}`}
+                        disabled={bulkLocking || openCount === 0}
+                        onClick={() => lockAllOpenQuestionsForGame(g.id, g.match)}
+                        className={`rounded-full px-4 py-2 text-xs font-extrabold border transition ${
+                          openCount === 0
+                            ? "bg-slate-800/50 text-white/40 border-white/10 cursor-not-allowed"
+                            : perGameBulkBusy
+                            ? "bg-amber-400/60 text-black border-amber-300 opacity-80"
+                            : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
+                        }`}
                       >
-                        <span
-                          className={`inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform ${
-                            unlocked ? "translate-x-7" : "translate-x-1"
-                          }`}
-                        />
+                        {perGameBulkBusy ? "Locking…" : "Lock all questions"}
                       </button>
 
-                      <p className="text-[11px] text-slate-400">
-                        Toggle this to open or close picks for this match.
+                      <p className="text-[11px] text-slate-400 max-w-xs text-right">
+                        Sets every <strong>OPEN</strong> question in this match to{" "}
+                        <strong>PENDING</strong>.
                       </p>
                     </div>
                   </div>
@@ -518,6 +566,15 @@ export default function SettlementPage() {
           ))}
         </div>
 
+        {bulkBusyText && (
+          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-100">
+            <span className="font-semibold">{bulkBusyText}</span>{" "}
+            <span className="text-amber-100/80">
+              (UI is optimistic — refresh runs automatically when done.)
+            </span>
+          </div>
+        )}
+
         {/* QUESTIONS TABLE */}
         <section className="rounded-2xl bg-slate-950/90 border border-white/10 shadow-[0_0_40px_rgba(0,0,0,0.7)] overflow-hidden">
           <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between text-xs uppercase tracking-wide text-slate-300 bg-black/80">
@@ -531,15 +588,9 @@ export default function SettlementPage() {
             </div>
           </div>
 
-          {loading && (
-            <div className="px-4 py-6 text-sm text-slate-200">
-              Loading questions…
-            </div>
-          )}
+          {loading && <div className="px-4 py-6 text-sm text-slate-200">Loading questions…</div>}
 
-          {!loading && error && (
-            <div className="px-4 py-6 text-sm text-red-400">{error}</div>
-          )}
+          {!loading && error && <div className="px-4 py-6 text-sm text-red-400">{error}</div>}
 
           {!loading && !error && filteredQuestions.length === 0 && (
             <div className="px-4 py-6 text-sm text-slate-200">
@@ -555,16 +606,10 @@ export default function SettlementPage() {
                   className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
                 >
                   <div className="flex items-start gap-4 md:w-2/3">
-                    <div className="w-10 mt-1 text-sm font-semibold text-slate-200">
-                      Q{q.quarter}
-                    </div>
+                    <div className="w-10 mt-1 text-sm font-semibold text-slate-200">Q{q.quarter}</div>
                     <div>
-                      <div className="text-xs text-slate-400 mb-0.5">
-                        {q.match}
-                      </div>
-                      <div className="text-sm font-semibold text-white">
-                        {q.question}
-                      </div>
+                      <div className="text-xs text-slate-400 mb-0.5">{q.match}</div>
+                      <div className="text-sm font-semibold text-white">{q.question}</div>
                       {q.isSponsorQuestion && (
                         <div className="mt-1 inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
                           Sponsor Question
@@ -580,30 +625,24 @@ export default function SettlementPage() {
                       {/* YES / NO / VOID */}
                       <button
                         type="button"
-                        disabled={savingId === q.id}
-                        onClick={() =>
-                          handleAction(q.id, "final_yes")
-                        }
+                        disabled={savingId === q.id || bulkLocking}
+                        onClick={() => handleAction(q.id, "final_yes")}
                         className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/80 text-black hover:bg-emerald-400 disabled:opacity-60"
                       >
                         YES
                       </button>
                       <button
                         type="button"
-                        disabled={savingId === q.id}
-                        onClick={() =>
-                          handleAction(q.id, "final_no")
-                        }
+                        disabled={savingId === q.id || bulkLocking}
+                        onClick={() => handleAction(q.id, "final_no")}
                         className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/80 text-black hover:bg-red-400 disabled:opacity-60"
                       >
                         NO
                       </button>
                       <button
                         type="button"
-                        disabled={savingId === q.id}
-                        onClick={() =>
-                          handleAction(q.id, "final_void")
-                        }
+                        disabled={savingId === q.id || bulkLocking}
+                        onClick={() => handleAction(q.id, "final_void")}
                         className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/80 text-black hover:bg-slate-400 disabled:opacity-60"
                       >
                         VOID
@@ -612,7 +651,7 @@ export default function SettlementPage() {
                       {/* LOCK / REOPEN */}
                       <button
                         type="button"
-                        disabled={savingId === q.id}
+                        disabled={savingId === q.id || bulkLocking}
                         onClick={() => handleAction(q.id, "lock")}
                         className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
                       >
@@ -620,7 +659,7 @@ export default function SettlementPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={savingId === q.id}
+                        disabled={savingId === q.id || bulkLocking}
                         onClick={() => handleAction(q.id, "reopen")}
                         className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-100 border border-slate-500 hover:bg-slate-700 disabled:opacity-60"
                       >
@@ -635,12 +674,21 @@ export default function SettlementPage() {
         </section>
 
         <p className="text-xs text-slate-400">
-          Changes here update the live picks feed and player streaks. If a
-          question is settled incorrectly, hit <strong>REOPEN</strong> and then
-          settle it again with the correct outcome. Game unlocks above control
-          which matches are open for picks on the player side.
+          Changes here update the live picks feed and player streaks. If a question is settled
+          incorrectly, hit <strong>REOPEN</strong> and then settle it again with the correct outcome.
         </p>
       </section>
     </main>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
