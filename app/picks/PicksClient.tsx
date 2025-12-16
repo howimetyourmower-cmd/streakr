@@ -7,6 +7,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
+import { useSearchParams } from "next/navigation";
 import { db } from "@/lib/firebaseClient";
 import {
   collection,
@@ -88,24 +89,17 @@ type GameLocksResponse = {
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
 
-// ✅ sport + bbl doc persistence keys
-const ACTIVE_SPORT_KEY = "streakr_active_sport_v1";
-const BBL_DOC_ID_KEY = "streakr_bbl_doc_id_v1";
-
-// Normalise any backend outcome value into "yes" | "no" | "void" | null
+// ----- outcome normaliser -----
 const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   if (val == null) return null;
   const s = String(val).toLowerCase();
-
   if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
   if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
   if (["void", "cancelled", "canceled"].includes(s)) return "void";
-
   return null;
 };
 
 // ---------- AFL team logo helpers ----------
-
 type AflTeamKey =
   | "adelaide"
   | "brisbane"
@@ -159,10 +153,8 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
 function normaliseSegment(seg: string) {
   return seg.trim().toLowerCase();
 }
-
 function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   const s = normaliseSegment(seg);
-
   if (s.includes("adelaide")) return "adelaide";
   if (s.includes("brisbane")) return "brisbane";
   if (s.includes("carlton")) return "carlton";
@@ -174,68 +166,38 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("gws") || s.includes("giants")) return "gws";
   if (s.includes("hawthorn") || s.includes("hawks")) return "hawthorn";
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
-  if (s.includes("north melbourne") || s.includes("kangaroos"))
-    return "north-melbourne";
+  if (s.includes("north melbourne") || s.includes("kangaroos")) return "north-melbourne";
   if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
   if (s.includes("west coast") || s.includes("eagles")) return "west-coast";
-  if (s.includes("western bulldogs") || s.includes("bulldogs"))
-    return "western-bulldogs";
-
+  if (s.includes("western bulldogs") || s.includes("bulldogs")) return "western-bulldogs";
   return null;
 }
-
-function parseAflMatchTeams(match: string): {
-  homeKey: AflTeamKey | null;
-  awayKey: AflTeamKey | null;
-  homeLabel: string | null;
-  awayLabel: string | null;
-} {
+function parseAflMatchTeams(match: string) {
   const lower = match.toLowerCase();
   let parts: string[] = [];
-
-  if (lower.includes(" vs ")) {
-    parts = match.split(/vs/i);
-  } else if (lower.includes(" v ")) {
-    parts = match.split(/ v /i);
-  } else if (lower.includes(" - ")) {
-    parts = match.split(" - ");
-  }
-
+  if (lower.includes(" vs ")) parts = match.split(/vs/i);
+  else if (lower.includes(" v ")) parts = match.split(/ v /i);
+  else if (lower.includes(" - ")) parts = match.split(" - ");
   const homeSeg = (parts[0] ?? "").trim();
   const awaySeg = (parts[1] ?? "").trim();
-
   const homeKey = getAflTeamKeyFromSegment(homeSeg);
   const awayKey = getAflTeamKeyFromSegment(awaySeg);
-
-  return {
-    homeKey,
-    awayKey,
-    homeLabel: homeSeg || null,
-    awayLabel: awaySeg || null,
-  };
+  return { homeKey, awayKey, homeLabel: homeSeg || null, awayLabel: awaySeg || null };
 }
 
 // --------------------------------------------------
-
 type SportKey = "AFL" | "BBL";
 
 export default function PicksClient() {
+  const params = useSearchParams();
+  const sportParam = (params.get("sport") || "AFL").toUpperCase();
+  const activeSport: SportKey = sportParam === "BBL" ? "BBL" : "AFL";
+  const bblDocId = (params.get("docId") || "").trim();
+
   const { user } = useAuth();
-
-  const [activeSport, setActiveSport] = useState<SportKey>("AFL");
-
-  /**
-   * ✅ Still required for the BBL API call,
-   * but we REMOVE the on-page input + display (as requested).
-   *
-   * You can still override for testing via:
-   *  - localStorage key: streakr_bbl_doc_id_v1
-   *  - URL: /picks?docId=BBL-.... (added below)
-   */
-  const [bblDocId, setBblDocId] = useState<string>("BBL-2025-12-14-SCO-VS-SIX");
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
@@ -261,32 +223,20 @@ export default function PicksClient() {
   const [submittingComment, setSubmittingComment] = useState(false);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
-
-  // 🆕 How to Play modal
   const [showHowToModal, setShowHowToModal] = useState(false);
 
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
-
-  // ✅ CHANGE: Leader should be highest CURRENT streak (not longest ever)
   const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
-
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
   const [shareStatus, setShareStatus] = useState<string>("");
 
   const [showConfetti, setShowConfetti] = useState(false);
-  const [streakLevelModal, setStreakLevelModal] = useState<(3 | 5 | 10 | 15 | 20) | null>(
-    null
-  );
+  const [streakLevelModal, setStreakLevelModal] = useState<(3 | 5 | 10 | 15 | 20) | null>(null);
   const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
-  const [windowSize, setWindowSize] = useState({
-    width: 0,
-    height: 0,
-  });
-
+  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>({});
-
   const [animatedCurrentStreak, setAnimatedCurrentStreak] = useState<number>(0);
   const [streakResetFx, setStreakResetFx] = useState(false);
   const prevStreakRef = useRef<number>(0);
@@ -297,62 +247,11 @@ export default function PicksClient() {
     rowsRef.current = rows;
   }, [rows]);
 
-  // ✅ Load active sport + bbl doc id from localStorage (per device)
-  // ✅ Also allow URL override: /picks?docId=BBL-....
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    try {
-      const savedSport = window.localStorage.getItem(ACTIVE_SPORT_KEY);
-      if (savedSport === "AFL" || savedSport === "BBL") {
-        setActiveSport(savedSport);
-      }
-
-      const url = new URL(window.location.href);
-      const urlDocId = String(url.searchParams.get("docId") ?? "").trim();
-
-      if (urlDocId) {
-        setBblDocId(urlDocId);
-        window.localStorage.setItem(BBL_DOC_ID_KEY, urlDocId);
-      } else {
-        const savedDoc = window.localStorage.getItem(BBL_DOC_ID_KEY);
-        if (savedDoc && typeof savedDoc === "string") {
-          setBblDocId(savedDoc);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to load sport/doc from localStorage", err);
-    }
-  }, []);
-
-  // ✅ Persist active sport
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(ACTIVE_SPORT_KEY, activeSport);
-    } catch (err) {
-      console.error("Failed to persist activeSport", err);
-    }
-  }, [activeSport]);
-
-  // ✅ Persist bbl doc id (even though UI is removed)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(BBL_DOC_ID_KEY, bblDocId);
-    } catch (err) {
-      console.error("Failed to persist bblDocId", err);
-    }
-  }, [bblDocId]);
-
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleResize = () => {
-      setWindowSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
     };
     handleResize();
     window.addEventListener("resize", handleResize);
@@ -363,7 +262,6 @@ export default function PicksClient() {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
     if (isNaN(d.getTime())) return { date: "", time: "" };
-
     return {
       date: d.toLocaleDateString("en-AU", {
         weekday: "short",
@@ -393,7 +291,6 @@ export default function PicksClient() {
 
         const rawOutcome =
           normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
-
         const correctOutcome: QuestionRow["correctOutcome"] =
           q.status === "final" || q.status === "void" ? rawOutcome : null;
 
@@ -423,13 +320,11 @@ export default function PicksClient() {
       setLoading(true);
       setError("");
     }
-
     try {
       const url =
         activeSport === "BBL"
           ? `/api/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
           : "/api/picks";
-
       const res = await fetch(url);
       if (!res.ok) throw new Error("API error");
 
@@ -442,7 +337,6 @@ export default function PicksClient() {
       }
 
       const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current, activeSport);
-
       setRows(flat);
       setFilteredRows(
         activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter)
@@ -455,7 +349,7 @@ export default function PicksClient() {
     }
   };
 
-  // Load pick history from localStorage (per device) FIRST
+  // Load pick history from localStorage (per device)
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -470,32 +364,36 @@ export default function PicksClient() {
     }
   }, []);
 
-  // 🆕 First-time "How to Play" modal (per device)
+  // First-time "How to Play" modal
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       const seen = window.localStorage.getItem(HOW_TO_PLAY_KEY);
-      if (!seen) {
-        setShowHowToModal(true);
-      }
+      if (!seen) setShowHowToModal(true);
     } catch (err) {
       console.error("Failed to read how-to-play flag", err);
     }
   }, []);
-
   const handleCloseHowToModal = () => {
     if (typeof window !== "undefined") {
       try {
         window.localStorage.setItem(HOW_TO_PLAY_KEY, "true");
-      } catch (err) {
-        console.error("Failed to persist how-to-play flag", err);
-      }
+      } catch {}
     }
     setShowHowToModal(false);
   };
 
-  // Initial picks (and refetch on sport/doc change)
+  // Initial fetch + refetch on sport/doc change
   useEffect(() => {
+    // If user navigates to BBL without docId, show a gentle error and stop.
+    if (activeSport === "BBL" && !bblDocId) {
+      setRows([]);
+      setFilteredRows([]);
+      setRoundNumber(null);
+      setError("No BBL match selected (missing docId).");
+      setLoading(false);
+      return;
+    }
     fetchPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSport, bblDocId]);
@@ -531,7 +429,6 @@ export default function PicksClient() {
 
       return onSnapshot(qRef, (snapshot) => {
         const counts: Record<string, number> = {};
-
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const qid = data.questionId as string;
@@ -543,7 +440,6 @@ export default function PicksClient() {
             counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
           )
         );
-
         setFilteredRows((prev) =>
           prev.map((r) =>
             counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
@@ -557,10 +453,9 @@ export default function PicksClient() {
     };
   }, [questionIds]);
 
-  // Stronger persist: re-apply local pickHistory into rows whenever it changes
+  // Stronger persist of local pick history into rows whenever it changes
   useEffect(() => {
     if (!rowsRef.current.length) return;
-
     setRows((prev) =>
       prev.map((r) => (pickHistory[r.id] ? { ...r, userPick: pickHistory[r.id] } : r))
     );
@@ -569,27 +464,19 @@ export default function PicksClient() {
     );
   }, [pickHistory]);
 
-  // Load picks from backend and merge into history (per user)
+  // Load picks from backend and merge into local history
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) return;
-
       try {
         const idToken = await user.getIdToken();
         const res = await fetch("/api/user-picks", {
           method: "GET",
-          headers: {
-            Authorization: `Bearer ${idToken}`,
-          },
+          headers: { Authorization: `Bearer ${idToken}` },
         });
-
-        if (!res.ok) {
-          console.warn("user-picks GET not ok", await res.text());
-          return;
-        }
+        if (!res.ok) return;
 
         const json = await res.json();
-
         let historyFromApi: PickHistory = {};
 
         if (Array.isArray(json?.picks)) {
@@ -602,41 +489,29 @@ export default function PicksClient() {
             historyFromApi[qid] = outcome;
           }
         }
-
         if (json?.questionId && json?.outcome && !Array.isArray(json?.picks)) {
           const raw = String(json.outcome).toLowerCase();
           const outcome = raw === "yes" || raw === "no" ? (raw as "yes" | "no") : null;
-          if (outcome) {
-            historyFromApi[json.questionId] = outcome;
-          }
+          if (outcome) historyFromApi[json.questionId] = outcome;
         }
 
-        // Server wins where it has a pick; local fallback otherwise.
         if (Object.keys(historyFromApi).length) {
           setPickHistory((prev) => {
-            const merged: PickHistory = {
-              ...prev,
-              ...historyFromApi,
-            };
+            const merged: PickHistory = { ...prev, ...historyFromApi };
             try {
               if (typeof window !== "undefined") {
                 window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(merged));
               }
-            } catch (err) {
-              console.error("Failed to persist merged pick history", err);
-            }
+            } catch {}
             return merged;
           });
         }
 
-        if (rowsRef.current.length) {
-          fetchPicks({ silent: true });
-        }
+        if (rowsRef.current.length) fetchPicks({ silent: true });
       } catch (err) {
         console.error("Failed to load picks from API", err);
       }
     };
-
     loadServerPicks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
@@ -645,32 +520,25 @@ export default function PicksClient() {
   useEffect(() => {
     if (activeSport !== "AFL") return;
     if (roundNumber === null) return;
-
     const loadLocks = async () => {
       try {
         const res = await fetch(`/api/admin/game-lock?round=${roundNumber}`);
-        if (!res.ok) {
-          console.warn("game-lock GET not ok", await res.text());
-          return;
-        }
+        if (!res.ok) return;
         const json: GameLocksResponse = await res.json();
         setGameLocks(json.locks || {});
       } catch (err) {
         console.error("Failed to load game locks", err);
       }
     };
-
     loadLocks();
   }, [roundNumber, activeSport]);
 
-  // ✅ Leader listener — CURRENT streak (not longest ever)
+  // Leader = highest currentStreak
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
-
     const usersRef = collection(db, "users");
     const topQ = query(usersRef, orderBy("currentStreak", "desc"), limit(1));
-
     const unsub = onSnapshot(
       topQ,
       (snapshot) => {
@@ -683,13 +551,11 @@ export default function PicksClient() {
         setLeaderCurrentStreak(leaderVal);
         setStreakLoading(false);
       },
-      (err) => {
-        console.error("Leader streak listener error", err);
+      () => {
         setStreakError("Could not load streak tracker.");
         setStreakLoading(false);
       }
     );
-
     return () => unsub();
   }, []);
 
@@ -700,12 +566,10 @@ export default function PicksClient() {
       setUnlockedBadges({});
       return;
     }
-
     setStreakLoading(true);
     setStreakError("");
 
     const userRef = doc(db, "users", user.uid);
-
     const unsub = onSnapshot(
       userRef,
       (userSnap) => {
@@ -716,7 +580,6 @@ export default function PicksClient() {
             data.streakBadges && typeof data.streakBadges === "object"
               ? (data.streakBadges as Record<string, boolean>)
               : {};
-
           setUserCurrentStreak(current);
           setUnlockedBadges(badges);
         } else {
@@ -725,20 +588,17 @@ export default function PicksClient() {
         }
         setStreakLoading(false);
       },
-      (err) => {
-        console.error("User streak listener error", err);
+      () => {
         setStreakError("Could not load streak tracker.");
         setStreakLoading(false);
       }
     );
-
     return () => unsub();
   }, [user]);
 
-  // Animate streak gain + shake/glow on reset
+  // Animate streak gain / reset effects
   useEffect(() => {
     if (typeof userCurrentStreak !== "number") return;
-
     const prev = prevStreakRef.current;
     prevStreakRef.current = userCurrentStreak;
 
@@ -754,24 +614,18 @@ export default function PicksClient() {
 
     const from = typeof animatedCurrentStreak === "number" ? animatedCurrentStreak : 0;
     const to = userCurrentStreak;
-
     if (from === to) return;
 
     const start = performance.now();
     const duration = 520;
-
     const tick = (now: number) => {
       const t = Math.min(1, (now - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
       const next = Math.round(from + (to - from) * eased);
       setAnimatedCurrentStreak(next);
-      if (t < 1) {
-        streakAnimRef.current = requestAnimationFrame(tick);
-      } else {
-        streakAnimRef.current = null;
-      }
+      if (t < 1) streakAnimRef.current = requestAnimationFrame(tick);
+      else streakAnimRef.current = null;
     };
-
     streakAnimRef.current = requestAnimationFrame(tick);
 
     return () => {
@@ -796,55 +650,6 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  // Streak celebration (confetti + badge modal once per level)
-  useEffect(() => {
-    if (!userCurrentStreak || userCurrentStreak <= lastCelebratedStreak) return;
-
-    const milestones: Array<3 | 5 | 10 | 15 | 20> = [3, 5, 10, 15, 20];
-    const hit = milestones.find((m) => userCurrentStreak === m);
-    if (!hit) return;
-
-    let timer: any;
-
-    const run = async () => {
-      const key = String(hit);
-      const alreadyUnlocked = !!unlockedBadges[key];
-
-      setLastCelebratedStreak(userCurrentStreak);
-      setShowConfetti(true);
-
-      if (!alreadyUnlocked) {
-        setStreakLevelModal(hit);
-
-        if (user) {
-          try {
-            const userRef = doc(db, "users", user.uid);
-            await setDoc(
-              userRef,
-              {
-                streakBadges: {
-                  ...(unlockedBadges || {}),
-                  [key]: true,
-                },
-              },
-              { merge: true }
-            );
-          } catch (err) {
-            console.error("Failed to persist streak badge", err);
-          }
-        }
-      }
-
-      timer = setTimeout(() => setShowConfetti(false), 5000);
-    };
-
-    run();
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
-  }, [userCurrentStreak, lastCelebratedStreak, unlockedBadges, user]);
-
   const applyFilter = (f: QuestionStatus | "all") => {
     setActiveFilter(f);
     if (f === "all") setFilteredRows(rows);
@@ -856,9 +661,7 @@ export default function PicksClient() {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
       }
-    } catch (err) {
-      console.error("Failed to persist pick history", err);
-    }
+    } catch {}
   };
 
   const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
@@ -868,14 +671,12 @@ export default function PicksClient() {
     }
 
     const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
-
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
     setFilteredRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
     );
-
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev, [row.id]: pick };
       persistPickHistory(next);
@@ -884,7 +685,7 @@ export default function PicksClient() {
 
     try {
       const idToken = await user.getIdToken();
-      const res = await fetch("/api/user-picks", {
+      await fetch("/api/user-picks", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -898,10 +699,6 @@ export default function PicksClient() {
           docId: activeSport === "BBL" ? bblDocId : undefined,
         }),
       });
-
-      if (!res.ok) {
-        console.error("user-picks error:", await res.text());
-      }
     } catch (e) {
       console.error("Pick save error:", e);
     }
@@ -909,14 +706,12 @@ export default function PicksClient() {
 
   const handleClearPick = async (row: QuestionRow) => {
     const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
-
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
     setFilteredRows((prev) =>
       prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
     );
-
     setPickHistory((prev) => {
       const next: PickHistory = { ...prev };
       delete next[row.id];
@@ -925,10 +720,9 @@ export default function PicksClient() {
     });
 
     if (!user) return;
-
     try {
       const idToken = await user.getIdToken();
-      const res = await fetch("/api/user-picks", {
+      await fetch("/api/user-picks", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -943,10 +737,6 @@ export default function PicksClient() {
           docId: activeSport === "BBL" ? bblDocId : undefined,
         }),
       });
-
-      if (!res.ok) {
-        console.error("user-picks clear error:", await res.text());
-      }
     } catch (e) {
       console.error("Pick clear error:", e);
     }
@@ -973,11 +763,9 @@ export default function PicksClient() {
     setCommentText("");
     setCommentsError("");
     setCommentsLoading(true);
-
     try {
       const res = await fetch(`/api/comments/${row.id}`);
       if (!res.ok) throw new Error("Failed to load comments");
-
       const data = await res.json();
       const source = data.items || data.comments || [];
       const list: Comment[] = source.map((c: any) => ({
@@ -986,7 +774,6 @@ export default function PicksClient() {
         displayName: c.displayName,
         createdAt: c.createdAt,
       }));
-
       setComments(list);
     } catch (e) {
       console.error(e);
@@ -995,33 +782,26 @@ export default function PicksClient() {
       setCommentsLoading(false);
     }
   };
-
   const closeComments = () => {
     setCommentsOpenFor(null);
     setComments([]);
     setCommentText("");
     setCommentsError("");
   };
-
   const handleCommentChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     setCommentText(e.target.value);
   };
-
   const submitComment = async () => {
     if (!commentsOpenFor || !commentText.trim()) return;
-
     setSubmittingComment(true);
     setCommentsError("");
-
     try {
       const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: commentText.trim() }),
       });
-
       if (!res.ok) throw new Error("Failed to post comment");
-
       const created = await res.json();
       const newComment: Comment = {
         id: created.id || Math.random().toString(36),
@@ -1029,7 +809,6 @@ export default function PicksClient() {
         displayName: created.displayName,
         createdAt: created.createdAt,
       };
-
       setComments((prev) => [newComment, ...prev]);
       setCommentText("");
     } catch (e) {
@@ -1040,14 +819,14 @@ export default function PicksClient() {
     }
   };
 
-  // ✅ CHANGE: bars compare CURRENT vs CURRENT leader (not longest)
+  // Bars compare CURRENT vs CURRENT leader
   const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
   const barWidth = (val: number | null) =>
     `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // ✅ Picks made per game (use ALL rows, not filtered)
+  // Picks made per game
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -1059,7 +838,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // ✅ Game score per game (clean sweep logic)
+  // Game score per game (clean sweep)
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -1068,7 +847,6 @@ export default function PicksClient() {
       | { kind: "zero"; pickedCount: number };
 
     const byGame: Record<string, GameScoreInfo> = {};
-
     const groups: Record<string, QuestionRow[]> = {};
     for (const r of rows) {
       if (!groups[r.gameId]) groups[r.gameId] = [];
@@ -1077,7 +855,6 @@ export default function PicksClient() {
 
     for (const gameId of Object.keys(groups)) {
       const gameRows = groups[gameId];
-
       let pickedCount = 0;
       let pendingPicked = 0;
       let losses = 0;
@@ -1091,17 +868,9 @@ export default function PicksClient() {
         pickedCount++;
 
         const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
+        if (r.status === "void" || outcome === "void") continue;
 
-        if (r.status === "void" || outcome === "void") {
-          continue;
-        }
-
-        if (r.status !== "final") {
-          pendingPicked++;
-          continue;
-        }
-
-        if (!outcome) {
+        if (r.status !== "final" || !outcome) {
           pendingPicked++;
           continue;
         }
@@ -1110,15 +879,10 @@ export default function PicksClient() {
         else losses++;
       }
 
-      if (pickedCount === 0) {
-        byGame[gameId] = { kind: "no-picks" };
-      } else if (pendingPicked > 0) {
-        byGame[gameId] = { kind: "pending", pickedCount };
-      } else if (losses > 0) {
-        byGame[gameId] = { kind: "zero", pickedCount };
-      } else {
-        byGame[gameId] = { kind: "scored", score: wins, pickedCount };
-      }
+      if (pickedCount === 0) byGame[gameId] = { kind: "no-picks" };
+      else if (pendingPicked > 0) byGame[gameId] = { kind: "pending", pickedCount };
+      else if (losses > 0) byGame[gameId] = { kind: "zero", pickedCount };
+      else byGame[gameId] = { kind: "scored", score: wins, pickedCount };
     }
 
     return byGame;
@@ -1128,7 +892,6 @@ export default function PicksClient() {
     try {
       const shareUrl =
         typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
-
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({
           title: "STREAKr – How long can you last?",
@@ -1136,121 +899,48 @@ export default function PicksClient() {
           url: shareUrl,
         });
         setShareStatus("Shared!");
-      } else if (
-        typeof navigator !== "undefined" &&
-        navigator.clipboard &&
-        navigator.clipboard.writeText
-      ) {
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(shareUrl);
         setShareStatus("Link copied to clipboard.");
       } else {
         setShareStatus("Share not supported in this browser.");
       }
-    } catch (err) {
-      console.error("Share error", err);
+    } catch {
       setShareStatus("Could not share right now.");
     }
-
     setTimeout(() => setShareStatus(""), 3000);
   };
 
   const getStreakModalContent = () => {
     if (!streakLevelModal) return null;
-
     switch (streakLevelModal) {
       case 3:
-        return {
-          title: "3 in a row!",
-          subtitle: "Keep building 😎",
-          body: "Nice start. You’re building momentum – keep your head and stack that streak.",
-        };
+        return { title: "3 in a row!", subtitle: "Keep building 😎", body: "Nice start. You’re building momentum – keep your head and stack that streak." };
       case 5:
-        return {
-          title: "Bang! 5 straight!",
-          subtitle: "You’re on the money 🔥",
-          body: "That’s a serious run. Lock in, stay sharp and push for double digits.",
-        };
+        return { title: "Bang! 5 straight!", subtitle: "You’re on the money 🔥", body: "That’s a serious run. Lock in, stay sharp and push for double digits." };
       case 10:
-        return {
-          title: "Streak Level 10",
-          subtitle: "That’s elite 💪🏻",
-          body: "Ten straight is no joke. You’ve earned your first STREAKr badge – make sure your mates know about it.",
-        };
+        return { title: "Streak Level 10", subtitle: "That’s elite 💪🏻", body: "Ten straight is no joke. You’ve earned your first STREAKr badge – make sure your mates know about it." };
       case 15:
-        return {
-          title: "15 in a row",
-          subtitle: "Dominance level unlocked 💪🏻",
-          body: "This run is getting ridiculous. You’re in rare air now – every pick is appointment viewing.",
-        };
+        return { title: "15 in a row", subtitle: "Dominance level unlocked 💪🏻", body: "This run is getting ridiculous. You’re in rare air now – every pick is appointment viewing." };
       case 20:
-        return {
-          title: "20 straight",
-          subtitle: "What are we witnessing? GOAT 🏆",
-          body: "Twenty in a row is all-time. You’ve unlocked legendary STREAKr status – screenshotted or it didn’t happen.",
-        };
+        return { title: "20 straight", subtitle: "What are we witnessing? GOAT 🏆", body: "Twenty in a row is all-time. You’ve unlocked legendary STREAKr status – screenshotted or it didn’t happen." };
       default:
         return null;
     }
   };
-
   const streakModalContent = getStreakModalContent();
 
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
-        <Confetti
-          width={windowSize.width}
-          height={windowSize.height}
-          numberOfPieces={350}
-          recycle={false}
-        />
+        <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={350} recycle={false} />
       )}
 
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
         <style jsx>{`
-          @keyframes streakrShake {
-            0% {
-              transform: translateX(0);
-            }
-            18% {
-              transform: translateX(-3px);
-            }
-            36% {
-              transform: translateX(3px);
-            }
-            54% {
-              transform: translateX(-2px);
-            }
-            72% {
-              transform: translateX(2px);
-            }
-            100% {
-              transform: translateX(0);
-            }
-          }
-
-          @keyframes streakrGlowRed {
-            0% {
-              filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0));
-              transform: translateX(0);
-            }
-            35% {
-              filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.9));
-              transform: translateX(-2px);
-            }
-            70% {
-              filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.95));
-              transform: translateX(2px);
-            }
-            100% {
-              filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0));
-              transform: translateX(0);
-            }
-          }
-
-          .streakr-reset-fx {
-            animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
-          }
+          @keyframes streakrShake { 0%{transform:translateX(0)}18%{transform:translateX(-3px)}36%{transform:translateX(3px)}54%{transform:translateX(-2px)}72%{transform:translateX(2px)}100%{transform:translateX(0)} }
+          @keyframes streakrGlowRed { 0%{filter:drop-shadow(0 0 0 rgba(239,68,68,0));transform:translateX(0)}35%{filter:drop-shadow(0 0 14px rgba(239,68,68,0.9));transform:translateX(-2px)}70%{filter:drop-shadow(0 0 18px rgba(239,68,68,0.95));transform:translateX(2px)}100%{filter:drop-shadow(0 0 0 rgba(239,68,68,0));transform:translateX(0)} }
+          .streakr-reset-fx { animation: streakrShake .38s ease-in-out, streakrGlowRed .7s ease-in-out; }
         `}</style>
 
         <div className="flex flex-col gap-3 mb-4">
@@ -1266,59 +956,25 @@ export default function PicksClient() {
                   </span>
                 </p>
               )}
-
-              {/* ✅ REMOVED: BBL “Match Doc” display line */}
             </div>
 
-            <div className="flex items-center gap-3">
-              {/* ✅ SPORT TOGGLE */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveSport("AFL")}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${
-                    activeSport === "AFL"
-                      ? "bg-orange-500 text-black border-orange-400"
-                      : "bg-black/40 text-white/70 border-white/15 hover:bg-white/5"
-                  }`}
-                >
-                  AFL
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveSport("BBL")}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold border transition ${
-                    activeSport === "BBL"
-                      ? "bg-orange-500 text-black border-orange-400"
-                      : "bg-black/40 text-white/70 border-white/15 hover:bg-white/5"
-                  }`}
-                >
-                  BBL
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowHowToModal(true)}
-                className="inline-flex items-center justify-center rounded-full border border-orange-400/70 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/10 transition"
-              >
-                How to play STREAKr
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowHowToModal(true)}
+              className="inline-flex items-center justify-center rounded-full border border-orange-400/70 px-3 py-1.5 text-xs font-semibold text-orange-200 hover:bg-orange-500/10 transition"
+            >
+              How to play STREAKr
+            </button>
           </div>
-
-          {/* ✅ REMOVED: BBL Doc ID input box entirely */}
         </div>
 
-        {/* STREAK PROGRESS TRACKER + SHARE */}
+        {/* STREAK PROGRESS + SHARE */}
         <div className="mb-6 rounded-2xl bg-[#020617] border border-sky-500/30 p-4 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
               <p className="text-[11px] uppercase tracking-wide text-white/60">Streak progress</p>
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
-                Your streak is calculated using the <span className="font-semibold">Clean sweep rule</span>{" "}
-                (to carry your streak forward, you need a clean sweep in that match).
+                Your streak uses the <span className="font-semibold">Clean sweep rule</span> per match.
               </p>
             </div>
 
@@ -1326,12 +982,7 @@ export default function PicksClient() {
               <div className="flex items-center gap-4">
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Current</p>
-                  <p
-                    className={[
-                      "text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.85)]",
-                      streakResetFx ? "streakr-reset-fx" : "",
-                    ].join(" ")}
-                  >
+                  <p className={["text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.85)]", streakResetFx ? "streakr-reset-fx" : ""].join(" ")}>
                     {user ? animatedCurrentStreak : "-"}
                   </p>
                 </div>
@@ -1358,15 +1009,10 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Current streak</span>
-                <span className="font-semibold text-orange-300">
-                  {user ? animatedCurrentStreak ?? 0 : 0}
-                </span>
+                <span className="font-semibold text-orange-300">{user ? animatedCurrentStreak ?? 0 : 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
-                  style={{ width: barWidth(userCurrentStreak) }}
-                />
+                <div className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600" style={{ width: barWidth(userCurrentStreak) }} />
               </div>
             </div>
 
@@ -1376,10 +1022,7 @@ export default function PicksClient() {
                 <span className="font-semibold text-sky-300">{leaderCurrentStreak ?? 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600"
-                  style={{ width: barWidth(leaderCurrentStreak) }}
-                />
+                <div className="h-full bg-gradient-to-r from-sky-400 via-sky-500 to-sky-600" style={{ width: barWidth(leaderCurrentStreak) }} />
               </div>
             </div>
           </div>
@@ -1395,8 +1038,7 @@ export default function PicksClient() {
               Sponsor Question
             </span>
             <span className="text-[12px] sm:text-[13px]">
-              Look for the <span className="font-semibold">Sponsor Question</span> tag. Get it right
-              to go into the draw for this round&apos;s $100 sponsor gift card.*
+              Get it right to enter this round&apos;s $100 sponsor gift card draw.*
             </span>
           </div>
         )}
@@ -1408,9 +1050,7 @@ export default function PicksClient() {
             <button
               key={f}
               onClick={() => applyFilter(f === "all" ? "all" : f)}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-                activeFilter === f ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"
-              }`}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeFilter === f ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"}`}
             >
               {f.toUpperCase()}
             </button>
@@ -1436,17 +1076,11 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked =
-                activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
-
+              const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-              const effectivePick = (pickHistory[row.id] ?? row.userPick) as
-                | "yes"
-                | "no"
-                | undefined;
-
+              const effectivePick = (pickHistory[row.id] ?? row.userPick) as "yes" | "no" | undefined;
               const hasPicked = effectivePick === "yes" || effectivePick === "no";
 
               const isYesPicked = effectivePick === "yes";
@@ -1457,24 +1091,13 @@ export default function PicksClient() {
 
               const isSponsor = !!row.isSponsorQuestion;
 
-              const parsed =
-                row.sport.toUpperCase() === "AFL" ? parseAflMatchTeams(row.match) : null;
-
-              const homeTeam =
-                parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
-                  ? AFL_TEAM_LOGOS[parsed.homeKey]
-                  : null;
-              const awayTeam =
-                parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
-                  ? AFL_TEAM_LOGOS[parsed.awayKey]
-                  : null;
-
+              const parsed = row.sport.toUpperCase() === "AFL" ? parseAflMatchTeams(row.match) : null;
+              const homeTeam = parsed?.homeKey && AFL_TEAM_LOGOS[parsed.homeKey] ? AFL_TEAM_LOGOS[parsed.homeKey] : null;
+              const awayTeam = parsed?.awayKey && AFL_TEAM_LOGOS[parsed.awayKey] ? AFL_TEAM_LOGOS[parsed.awayKey] : null;
               const useAflLayout = !!parsed && (homeTeam || awayTeam);
 
               type OutcomeKind = "win" | "loss" | "void" | "settled-no-result" | null;
-
               const outcome = normaliseOutcome((row.correctOutcome as any) ?? (row as any).outcome);
-
               let outcomeKind: OutcomeKind = null;
 
               if (row.status === "void" || outcome === "void") {
@@ -1490,15 +1113,10 @@ export default function PicksClient() {
               }
 
               let outcomeLabel: string | null = null;
-              if (outcomeKind === "void") {
-                outcomeLabel = "Question voided – no streak change";
-              } else if (outcomeKind === "win") {
-                outcomeLabel = "Correct pick";
-              } else if (outcomeKind === "loss") {
-                outcomeLabel = "Wrong pick";
-              } else if (outcomeKind === "settled-no-result") {
-                outcomeLabel = "Finalised";
-              }
+              if (outcomeKind === "void") outcomeLabel = "Question voided – no streak change";
+              else if (outcomeKind === "win") outcomeLabel = "Correct pick";
+              else if (outcomeKind === "loss") outcomeLabel = "Wrong pick";
+              else if (outcomeKind === "settled-no-result") outcomeLabel = "Finalised";
 
               const outcomeClasses =
                 outcomeKind === "void"
@@ -1517,7 +1135,6 @@ export default function PicksClient() {
                   ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
                   : "bg-green-600 hover:bg-green-700 text-white border-transparent",
               ].join(" ");
-
               const noButtonClasses = [
                 "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
                 isNoPicked
@@ -1565,8 +1182,7 @@ export default function PicksClient() {
                             {row.match}
                           </div>
                           <div className="text-[11px] sm:text-xs text-white/70">
-                            {row.venue} • {formatStartDate(row.startTime).date}{" "}
-                            {formatStartDate(row.startTime).time} AEDT
+                            {row.venue} • {formatStartDate(row.startTime).date} {formatStartDate(row.startTime).time} AEDT
                           </div>
                         </div>
 
@@ -1594,51 +1210,55 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-6 md:col-span-1">
-                        <span
-                          className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}
-                        >
+                        <span className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}>
                           {row.status.toUpperCase()}
                         </span>
                       </div>
 
                       <div className="col-span-12 md:col-span-3">
-                        {useAflLayout ? (
-                          <>
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-1 min-w-0">
-                                {homeTeam && (
-                                  <Image
-                                    src={homeTeam.logo}
-                                    alt={homeTeam.name}
-                                    width={32}
-                                    height={32}
-                                    className="rounded-full border border-white/20 bg-black/60"
-                                  />
-                                )}
-                                <span className="text-sm font-semibold truncate">
-                                  {parsed?.homeLabel || homeTeam?.name || ""}
-                                </span>
-                              </div>
+                        {row.sport.toUpperCase() === "AFL" ? (
+                          (() => {
+                            const parsed = parseAflMatchTeams(row.match);
+                            const homeTeam =
+                              parsed.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
+                                ? AFL_TEAM_LOGOS[parsed.homeKey]
+                                : null;
+                            const awayTeam =
+                              parsed.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
+                                ? AFL_TEAM_LOGOS[parsed.awayKey]
+                                : null;
+                            const useAflLayout = (homeTeam || awayTeam) ? true : false;
 
-                              <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
-
-                              <div className="flex items-center gap-1 min-w-0">
-                                <span className="text-sm font-semibold truncate">
-                                  {parsed?.awayLabel || awayTeam?.name || ""}
-                                </span>
-                                {awayTeam && (
-                                  <Image
-                                    src={awayTeam.logo}
-                                    alt={awayTeam.name}
-                                    width={32}
-                                    height={32}
-                                    className="rounded-full border border-white/20 bg-black/60"
-                                  />
-                                )}
-                              </div>
-                            </div>
-                            <div className="text-[11px] text-white/80 mt-0.5">{row.venue}</div>
-                          </>
+                            return useAflLayout ? (
+                              <>
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    {homeTeam && (
+                                      <Image src={homeTeam.logo} alt={homeTeam.name} width={32} height={32} className="rounded-full border border-white/20 bg-black/60" />
+                                    )}
+                                    <span className="text-sm font-semibold truncate">
+                                      {parsed.homeLabel || homeTeam?.name || ""}
+                                    </span>
+                                  </div>
+                                  <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="text-sm font-semibold truncate">
+                                      {parsed.awayLabel || awayTeam?.name || ""}
+                                    </span>
+                                    {awayTeam && (
+                                      <Image src={awayTeam.logo} alt={awayTeam.name} width={32} height={32} className="rounded-full border border-white/20 bg-black/60" />
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="text-[11px] text-white/80 mt-0.5">{row.venue}</div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-sm font-semibold">{row.match}</div>
+                                <div className="text-[11px] text-white/80">{row.venue}</div>
+                              </>
+                            );
+                          })()
                         ) : (
                           <>
                             <div className="text-sm font-semibold">{row.match}</div>
@@ -1656,21 +1276,17 @@ export default function PicksClient() {
                       <div className="col-span-9 md:col-span-2">
                         <div className="text-sm leading-snug font-medium">{row.question}</div>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                          <button
-                            type="button"
-                            onClick={() => openComments(row)}
-                            className="text-[11px] text-sky-300 underline"
-                          >
+                          <button type="button" onClick={() => openComments(row)} className="text-[11px] text-sky-300 underline">
                             Comments ({row.commentCount ?? 0})
                           </button>
 
-                          {showMatchLockedLabel && (
+                          {activeSport === "AFL" && !isMatchUnlocked && (
                             <span className="inline-flex items-center rounded-full bg-red-600/80 px-2 py-0.5 text-[10px] font-semibold text-white shadow-[0_0_8px_rgba(248,113,113,0.8)]">
                               Match closed for picks
                             </span>
                           )}
 
-                          {showStatusLockedLabel && (
+                          {!isQuestionOpen && isMatchUnlocked && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
@@ -1691,7 +1307,13 @@ export default function PicksClient() {
                               type="button"
                               onClick={() => handlePick(row, "yes")}
                               disabled={!isSelectable}
-                              className={yesButtonClasses}
+                              className={["px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+                                (effectivePick === "yes")
+                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                                  : !isSelectable
+                                  ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
+                                  : "bg-green-600 hover:bg-green-700 text-white border-transparent",
+                              ].join(" ")}
                             >
                               Yes
                             </button>
@@ -1700,7 +1322,13 @@ export default function PicksClient() {
                               type="button"
                               onClick={() => handlePick(row, "no")}
                               disabled={!isSelectable}
-                              className={noButtonClasses}
+                              className={["px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+                                (effectivePick === "no")
+                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                                  : !isSelectable
+                                  ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
+                                  : "bg-red-600 hover:bg-red-700 text-white border-transparent",
+                              ].join(" ")}
                             >
                               No
                             </button>
@@ -1714,22 +1342,45 @@ export default function PicksClient() {
                               aria-label="Clear selection"
                               className="group inline-flex items-center justify-center h-7 w-7 rounded-full border border-white/15 bg-black/40 hover:bg-white/10 transition"
                             >
-                              <span className="text-white/70 group-hover:text-white text-sm leading-none">
-                                ✕
-                              </span>
+                              <span className="text-white/70 group-hover:text-white text-sm leading-none">✕</span>
                             </button>
                           )}
                         </div>
 
-                        {outcomeLabel && (
-                          <div className="mt-2">
-                            <span
-                              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
-                            >
-                              {outcomeLabel}
-                            </span>
-                          </div>
-                        )}
+                        {(() => {
+                          let outcomeLabel: string | null = null;
+                          const outcome = normaliseOutcome((row.correctOutcome as any) ?? (row as any).outcome);
+                          let outcomeKind: "win" | "loss" | "void" | "settled-no-result" | null = null;
+
+                          if (row.status === "void" || outcome === "void") outcomeKind = "void";
+                          else if (row.status === "final") {
+                            if (!hasPicked) outcomeKind = null;
+                            else if (outcome) outcomeKind = effectivePick === outcome ? "win" : "loss";
+                            else outcomeKind = "settled-no-result";
+                          }
+
+                          if (outcomeKind === "void") outcomeLabel = "Question voided – no streak change";
+                          else if (outcomeKind === "win") outcomeLabel = "Correct pick";
+                          else if (outcomeKind === "loss") outcomeLabel = "Wrong pick";
+                          else if (outcomeKind === "settled-no-result") outcomeLabel = "Finalised";
+
+                          const outcomeClasses =
+                            outcomeKind === "void"
+                              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
+                              : outcomeKind === "win"
+                              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
+                              : outcomeKind === "loss"
+                              ? "bg-red-500/15 border-red-400/60 text-red-300"
+                              : "bg-slate-700/60 border-slate-500/60 text-slate-100";
+
+                          return outcomeLabel ? (
+                            <div className="mt-2">
+                              <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}>
+                                {outcomeLabel}
+                              </span>
+                            </div>
+                          ) : null;
+                        })()}
 
                         <div className="text-[11px] text-white/85">
                           Yes: {Math.round(yesPct)}% • No: {Math.round(noPct)}%
@@ -1749,34 +1400,16 @@ export default function PicksClient() {
             <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
               <div className="flex items-start justify-between mb-4">
                 <h2 className="text-lg font-semibold">Log in to play</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowAuthModal(false)}
-                  className="text-sm text-gray-400 hover:text-white"
-                >
-                  ✕
-                </button>
+                <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm text-gray-400 hover:text-white">✕</button>
               </div>
-
               <p className="text-sm text-white/70 mb-4">
-                You need a free STREAKr account to make picks, build your streak and appear on the
-                leaderboard.
+                You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
               </p>
-
               <div className="flex flex-col sm:flex-row gap-3">
-                <Link
-                  href="/auth?mode=login&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-                  onClick={() => setShowAuthModal(false)}
-                >
+                <Link href="/auth?mode=login&returnTo=/picks" className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors" onClick={() => setShowAuthModal(false)}>
                   Login
                 </Link>
-
-                <Link
-                  href="/auth?mode=signup&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-                  onClick={() => setShowAuthModal(false)}
-                >
+                <Link href="/auth?mode=signup&returnTo=/picks" className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors" onClick={() => setShowAuthModal(false)}>
                   Sign up
                 </Link>
               </div>
@@ -1791,18 +1424,12 @@ export default function PicksClient() {
               <div className="flex items-start justify-between mb-4">
                 <div>
                   <h2 className="text-lg font-semibold mb-1">
-                    Comments –{" "}
-                    {commentsOpenFor.quarter === 0 ? "Match" : `Q${commentsOpenFor.quarter}`}
+                    Comments – {commentsOpenFor.quarter === 0 ? "Match" : `Q${commentsOpenFor.quarter}`}
                   </h2>
                   <p className="text-sm text-gray-300">{commentsOpenFor.question}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeComments}
-                  className="text-sm text-gray-400 hover:text-white"
-                >
-                  ✕
-                </button>
+                <button type="button" onClick={() => {}} className="hidden" />
+                <button type="button" onClick={closeComments} className="text-sm text-gray-400 hover:text-white">✕</button>
               </div>
 
               <div className="mb-4">
@@ -1826,7 +1453,7 @@ export default function PicksClient() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto border-t border-gray-800 pt-3">
+              <div className="flex-1 overflow-y-auto border-top border-gray-800 pt-3">
                 {commentsLoading ? (
                   <p className="text-sm text-gray-400">Loading comments…</p>
                 ) : comments.length === 0 ? (
@@ -1837,9 +1464,7 @@ export default function PicksClient() {
                       <li key={c.id} className="bg-[#0b1220] rounded-md px-3 py-2 text-sm">
                         <div className="flex justify-between mb-1">
                           <span className="font-semibold">{c.displayName || "User"}</span>
-                          {c.createdAt && (
-                            <span className="text-[11px] text-gray-400">{c.createdAt}</span>
-                          )}
+                          {c.createdAt && <span className="text-[11px] text-gray-400">{c.createdAt}</span>}
                         </div>
                         <p className="text-sm text-gray-100">{c.body}</p>
                       </li>
@@ -1856,133 +1481,50 @@ export default function PicksClient() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
             <div className="relative w-full max-w-md rounded-3xl bg-[#020617] border border-orange-500/60 shadow-[0_0_80px_rgba(248,113,22,0.85)] px-6 py-6 overflow-hidden">
               <div className="pointer-events-none absolute inset-0 rounded-3xl border border-orange-400/30 shadow-[0_0_40px_rgba(248,113,22,0.65)]" />
-
               <div className="relative mx-auto mb-4 mt-2 w-40 h-56 rounded-3xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-white/10 flex flex-col items-center justify-center shadow-[0_0_40px_rgba(15,23,42,0.9)]">
-                <div className="absolute inset-x-4 top-4 text-center text-[11px] font-bold uppercase tracking-wide text-slate-200">
-                  Streak Level
-                </div>
-                <div className="mt-4 text-5xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.9)]">
-                  {streakLevelModal}
-                </div>
-                <div className="mt-3 h-10 w-10 rounded-full bg-gradient-to-tr from-orange-500 via-yellow-400 to-amber-500 flex items-center justify-center text-2xl">
-                  🏉
-                </div>
-                <div className="mt-3 px-3 py-1 rounded-full bg-black/40 text-[11px] font-semibold tracking-wide text-slate-100">
-                  STREAKr Badge
-                </div>
+                <div className="absolute inset-x-4 top-4 text-center text-[11px] font-bold uppercase tracking-wide text-slate-200">Streak Level</div>
+                <div className="mt-4 text-5xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.9)]">{streakLevelModal}</div>
+                <div className="mt-3 h-10 w-10 rounded-full bg-gradient-to-tr from-orange-500 via-yellow-400 to-amber-500 flex items-center justify-center text-2xl">🏉</div>
+                <div className="mt-3 px-3 py-1 rounded-full bg-black/40 text-[11px] font-semibold tracking-wide text-slate-100">STREAKr Badge</div>
               </div>
 
-              <h2 className="relative text-xl font-extrabold text-white text-center">
-                {streakModalContent.title}
-              </h2>
-              <p className="relative mt-1 text-sm text-orange-200 text-center">
-                {streakModalContent.subtitle}
-              </p>
-              <p className="relative mt-3 text-sm text-slate-100 text-center">
-                {streakModalContent.body}
-              </p>
+              <h2 className="relative text-xl font-extrabold text-white text-center">{streakModalContent.title}</h2>
+              <p className="relative mt-1 text-sm text-orange-200 text-center">{streakModalContent.subtitle}</p>
+              <p className="relative mt-3 text-sm text-slate-100 text-center">{streakModalContent.body}</p>
 
               <div className="relative mt-5 flex flex-col sm:flex-row gap-3 justify-center">
-                <button
-                  type="button"
-                  onClick={() => setStreakLevelModal(null)}
-                  className="inline-flex items-center justify-center rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400"
-                >
-                  Keep playing
-                </button>
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-2 text-sm font-semibold text-white hover:border-orange-400 hover:text-orange-300"
-                >
-                  Share this streak
-                </button>
+                <button type="button" onClick={() => setStreakLevelModal(null)} className="inline-flex items-center justify-center rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400">Keep playing</button>
+                <button type="button" onClick={handleShare} className="inline-flex items-center justify-center rounded-full border border-white/30 px-5 py-2 text-sm font-semibold text-white hover:border-orange-400 hover:text-orange-300">Share this streak</button>
               </div>
             </div>
           </div>
         )}
 
-        {/* 🆕 HOW TO PLAY MODAL */}
+        {/* HOW TO PLAY MODAL */}
         {showHowToModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
             <div className="w-full max-w-lg rounded-2xl bg-[#050816] border border-white/15 shadow-[0_20px_70px_rgba(0,0,0,0.9)] p-6 sm:p-7">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">
-                    New to STREAKr?
-                  </p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">New to STREAKr?</p>
                   <h2 className="text-xl sm:text-2xl font-bold">How to play Picks</h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleCloseHowToModal}
-                  className="ml-3 text-sm text-white/50 hover:text-white"
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
+                <button type="button" onClick={handleCloseHowToModal} className="ml-3 text-sm text-white/50 hover:text-white" aria-label="Close">✕</button>
               </div>
 
-              <p className="text-sm text-white/75 mb-4">
-                Quick rundown so you don&apos;t stitch yourself up early:
-              </p>
+              <p className="text-sm text-white/75 mb-4">Quick rundown so you don&apos;t stitch yourself up early:</p>
 
               <ul className="space-y-2.5 text-sm text-white/80 mb-5">
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">All matches are open</span> from the start of the
-                    round (until each match closes for picks).
-                  </span>
-                </li>
-
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    Make <span className="font-semibold">Yes / No</span> picks on live questions.
-                    Pick as many (or as few) as you want across any games.
-                  </span>
-                </li>
-
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">Clean sweep rule:</span> to carry your streak
-                    forward, you need a <span className="font-semibold">clean sweep in that match</span>.
-                    If <span className="font-semibold">any</span> pick in a match is wrong, your streak
-                    resets to <span className="font-semibold">0</span> at the end of that match.
-                  </span>
-                </li>
-
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    <span className="font-semibold">Voided questions</span> don&apos;t count as right or
-                    wrong. <span className="font-semibold">No picks</span> in a match don&apos;t affect your
-                    streak at all.
-                  </span>
-                </li>
-
-                <li className="flex gap-2">
-                  <span className="mt-1 text-orange-300">•</span>
-                  <span>
-                    Change your pick anytime before lock. To remove a pick completely, hit the{" "}
-                    <span className="font-semibold">✕</span> (clear selection).
-                  </span>
-                </li>
+                <li className="flex gap-2"><span className="mt-1 text-orange-300">•</span><span><span className="font-semibold">All matches are open</span> from the start of the round (until each match closes for picks).</span></li>
+                <li className="flex gap-2"><span className="mt-1 text-orange-300">•</span><span>Make <span className="font-semibold">Yes / No</span> picks on live questions. Pick as many (or as few) as you want across any games.</span></li>
+                <li className="flex gap-2"><span className="mt-1 text-orange-300">•</span><span><span className="font-semibold">Clean sweep rule:</span> to carry your streak forward, you need a <span className="font-semibold">clean sweep in that match</span>. If <span className="font-semibold">any</span> pick in a match is wrong, your streak resets to <span className="font-semibold">0</span> at the end of that match.</span></li>
+                <li className="flex gap-2"><span className="mt-1 text-orange-300">•</span><span><span className="font-semibold">Voided questions</span> don&apos;t count as right or wrong. <span className="font-semibold">No picks</span> in a match don&apos;t affect your streak at all.</span></li>
+                <li className="flex gap-2"><span className="mt-1 text-orange-300">•</span><span>Change your pick anytime before lock. To remove a pick completely, hit the <span className="font-semibold">✕</span> (clear selection).</span></li>
               </ul>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <p className="text-xs text-white/60">
-                  Tip: back your best reads. Don&apos;t spray picks like it&apos;s a multis promo.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleCloseHowToModal}
-                  className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold text-sm px-5 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.8)]"
-                >
-                  Got it – let me pick
-                </button>
+                <p className="text-xs text-white/60">Tip: back your best reads. Don&apos;t spray picks like it&apos;s a multis promo.</p>
+                <button type="button" onClick={handleCloseHowToModal} className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold text-sm px-5 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.8)]">Got it – let me pick</button>
               </div>
             </div>
           </div>
