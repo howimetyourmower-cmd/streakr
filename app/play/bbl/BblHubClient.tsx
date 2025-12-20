@@ -1,109 +1,120 @@
-// /app/play/bbl/page.tsx
+// /app/play/bbl/BblHubClient.tsx
 "use client";
 
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useMemo, useState } from "react";
 
-type CurrentBblApi =
-  | {
-      ok: true;
-      docId: string;
-      match?: string;
-      venue?: string;
-      startTime?: string; // ISO
-    }
-  | {
-      ok: true;
-      docId: null;
-      reason: string;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
+import { db } from "@/lib/firebaseClient";
+import { doc, getDoc } from "firebase/firestore";
 
-export default function BblHubPage() {
+type MatchDoc = {
+  gameNumber?: number;
+  league?: string; // "BBL"
+  match?: string; // "Perth Scorchers vs Sydney Sixers"
+  matchId?: string; // "BBL-2025-12-14-SCO-VS-SIX"
+  startTime?: string; // ISO string in your docs
+  venue?: string;
+};
+
+export default function BblHubClient() {
   const router = useRouter();
+  const params = useSearchParams();
   const { user } = useAuth();
-
-  const [loading, setLoading] = useState(true);
-  const [apiError, setApiError] = useState("");
-  const [docId, setDocId] = useState<string>("");
-  const [match, setMatch] = useState<string>("");
-  const [venue, setVenue] = useState<string>("");
-  const [startTime, setStartTime] = useState<string>("");
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
+  // allow url prefill like /play/bbl?docId=BBL-...
+  const urlDocId = (params.get("docId") || "").trim();
+
+  // input-controlled docId (matches your screenshot: "Enter a BBL match code to start")
+  const [docIdInput, setDocIdInput] = useState(urlDocId);
+
+  // fetched match info (so we can show Match #)
+  const [matchDoc, setMatchDoc] = useState<MatchDoc | null>(null);
+  const [loadingMatch, setLoadingMatch] = useState(false);
+  const [matchError, setMatchError] = useState("");
+
+  const cleanedDocId = docIdInput.trim();
+
+  const picksHref = useMemo(() => {
+    if (!cleanedDocId) return "";
+    return `/picks?sport=BBL&docId=${encodeURIComponent(cleanedDocId)}`;
+  }, [cleanedDocId]);
+
+  // Fetch match document when docId changes
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      setApiError("");
+    let cancelled = false;
 
+    const run = async () => {
+      setMatchError("");
+      setMatchDoc(null);
+
+      if (!cleanedDocId) return;
+
+      setLoadingMatch(true);
       try {
-        const res = await fetch("/api/bbl/current", { cache: "no-store" });
-        const data: CurrentBblApi = await res.json();
+        // IMPORTANT: update this collection name if yours is different
+        // From your screenshot, your doc id is like "BBL-2025-12-14-SCO-VS-SIX"
+        // This assumes collection is "bblMatches"
+        const ref = doc(db, "bblMatches", cleanedDocId);
+        const snap = await getDoc(ref);
 
-        if (!res.ok || !data || (data as any).ok === false) {
-          const msg =
-            (data as any)?.error ||
-            "Failed to load current BBL match. Check /api/bbl/current.";
-          throw new Error(msg);
+        if (!snap.exists()) {
+          if (!cancelled) setMatchError("No match found for that code.");
+          return;
         }
 
-        if (data.ok && data.docId) {
-          setDocId(data.docId);
-          setMatch(data.match || "");
-          setVenue(data.venue || "");
-          setStartTime(data.startTime || "");
-        } else {
-          setDocId("");
-          setMatch("");
-          setVenue("");
-          setStartTime("");
-        }
-      } catch (e: any) {
+        const data = snap.data() as any;
+
+        const parsed: MatchDoc = {
+          gameNumber: typeof data.gameNumber === "number" ? data.gameNumber : undefined,
+          league: typeof data.league === "string" ? data.league : "BBL",
+          match: typeof data.match === "string" ? data.match : "",
+          matchId: typeof data.matchId === "string" ? data.matchId : "",
+          startTime: typeof data.startTime === "string" ? data.startTime : "",
+          venue: typeof data.venue === "string" ? data.venue : "",
+        };
+
+        if (!cancelled) setMatchDoc(parsed);
+      } catch (e) {
         console.error(e);
-        setApiError(e?.message || "Failed to load BBL match.");
+        if (!cancelled) setMatchError("Couldn’t load match details.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoadingMatch(false);
       }
     };
 
-    load();
-  }, []);
-
-  const picksHref = useMemo(() => {
-    if (!docId) return "";
-    return `/picks?sport=BBL&docId=${encodeURIComponent(docId)}`;
-  }, [docId]);
-
-  const formatStartDate = (iso: string) => {
-    if (!iso) return { date: "", time: "" };
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return { date: "", time: "" };
-
-    return {
-      date: d.toLocaleDateString("en-AU", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-        timeZone: "Australia/Melbourne",
-      }),
-      time: d.toLocaleTimeString("en-AU", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "Australia/Melbourne",
-      }),
+    run();
+    return () => {
+      cancelled = true;
     };
+  }, [cleanedDocId]);
+
+  const formatStart = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const date = d.toLocaleDateString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      timeZone: "Australia/Melbourne",
+    });
+    const time = d.toLocaleTimeString("en-AU", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "Australia/Melbourne",
+    });
+    return `${date} • ${time} AEDT`;
   };
 
-  const onPlay = () => {
-    if (!docId) return;
+  const onContinue = () => {
+    if (!cleanedDocId) return;
 
     if (!user) {
       setShowAuthModal(true);
@@ -112,8 +123,6 @@ export default function BblHubPage() {
 
     router.push(picksHref);
   };
-
-  const { date, time } = formatStartDate(startTime);
 
   return (
     <main className="min-h-screen bg-black text-white relative">
@@ -124,27 +133,28 @@ export default function BblHubPage() {
           </Link>
         </div>
 
-        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
-          <div>
-            {/* Pills */}
-            <div className="mb-4">
-              <div className="w-full overflow-hidden">
-                <div className="flex items-center gap-2 w-full flex-nowrap">
-                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                    BBL
-                  </span>
+        {/* Header pills like AFL page */}
+        <div className="mb-6">
+          <div className="w-full overflow-hidden">
+            <div className="flex items-center gap-2 w-full flex-nowrap">
+              <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                BBL
+              </span>
 
-                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                    SELECT A MATCH
-                  </span>
+              <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                SELECT A MATCH
+              </span>
 
-                  <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                    FREE TO PLAY. AUSSIE AS.
-                  </span>
-                </div>
-              </div>
+              <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                FREE TO PLAY. AUSSIE AS.
+              </span>
             </div>
+          </div>
+        </div>
 
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-start">
+          {/* Left */}
+          <div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Cricket. Banter. Bragging rights.
@@ -155,13 +165,13 @@ export default function BblHubPage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your cricket? Back your gut, ride the hot hand, and
-              roast your mates when you&apos;re on a heater. One wrong call and
-              your streak is cooked — back to zip.
+              Think you know your cricket? Back your gut, ride the hot hand, and roast
+              your mates when you&apos;re on a heater. One wrong call and your streak is cooked —
+              back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
-              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
+              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.25)]">
                 <span className="text-sm font-semibold text-orange-200">
                   Prizes &amp; venue rewards coming*
                 </span>
@@ -171,59 +181,71 @@ export default function BblHubPage() {
               </span>
             </div>
 
-            {/* Main CTA block */}
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              {apiError ? (
-                <p className="text-sm text-red-400">{apiError}</p>
-              ) : loading ? (
-                <p className="text-sm text-white/70">Loading BBL match…</p>
-              ) : !docId ? (
-                <p className="text-sm text-white/70">
-                  No BBL match is selected right now.
-                </p>
-              ) : (
+            {/* Match code input */}
+            <div className="mt-6 rounded-3xl border border-white/10 bg-[#020617] p-5 max-w-2xl">
+              <p className="text-sm font-semibold mb-3">Enter a BBL match code to start</p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  value={docIdInput}
+                  onChange={(e) => setDocIdInput(e.target.value)}
+                  placeholder="Match code (docId)"
+                  className="flex-1 rounded-2xl bg-black/40 border border-white/15 px-4 py-3 text-sm outline-none focus:border-orange-400/70"
+                />
+
                 <button
                   type="button"
-                  onClick={onPlay}
-                  className="w-full text-left group"
+                  onClick={onContinue}
+                  disabled={!cleanedDocId}
+                  className={`rounded-2xl px-6 py-3 text-sm font-semibold transition ${
+                    cleanedDocId
+                      ? "bg-[#FF7A00] text-black hover:bg-orange-500"
+                      : "bg-white/10 text-white/40 cursor-not-allowed"
+                  }`}
                 >
-                  {/* Make the whole card clickable */}
-                  <div className="rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition p-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div>
-                        <p className="text-xs text-white/60 mb-1">
-                          {date && time ? (
-                            <>
-                              {date} • {time} AEDT
-                            </>
-                          ) : (
-                            "BBL match"
-                          )}
-                        </p>
-                        <p className="text-base sm:text-lg font-extrabold text-white">
-                          {match || "BBL Match"}
-                        </p>
-                        {venue ? (
-                          <p className="text-sm text-white/70 mt-1">{venue}</p>
-                        ) : null}
-                      </div>
+                  Continue
+                </button>
+              </div>
 
-                      <div className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] text-black text-sm font-bold px-5 py-2 shadow-[0_0_24px_rgba(255,122,0,0.7)] group-hover:bg-orange-500 transition">
-                        Continue
-                      </div>
+              {/* Match preview */}
+              <div className="mt-4">
+                {loadingMatch ? (
+                  <p className="text-xs text-white/60">Loading match details…</p>
+                ) : matchError ? (
+                  <p className="text-xs text-red-400">{matchError}</p>
+                ) : matchDoc ? (
+                  <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1">
+                      {typeof matchDoc.gameNumber === "number" ? (
+                        <span className="font-semibold text-orange-200">
+                          Match {matchDoc.gameNumber}
+                        </span>
+                      ) : null}
+                      {typeof matchDoc.gameNumber === "number" ? <span>•</span> : null}
+                      <span className="uppercase tracking-wide">
+                        {matchDoc.league || "BBL"}
+                      </span>
                     </div>
 
-                    <p className="text-[11px] text-white/45 mt-3">
-                      Clean sweep per match — get one wrong and you&apos;re back
-                      to zero.
-                    </p>
-                  </div>
-                </button>
-              )}
+                    <div className="text-sm sm:text-base font-semibold">
+                      {matchDoc.match || cleanedDocId}
+                    </div>
 
-              <p className="text-[11px] text-white/50 mt-3">
-                *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
-                gambling. 18+ only. Don&apos;t be a mug — play for fun.
+                    <div className="mt-1 text-xs text-white/60">
+                      {formatStart(matchDoc.startTime)}
+                      {matchDoc.venue ? ` • ${matchDoc.venue}` : ""}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-white/50">
+                    (Temporary) This will be replaced with an auto “Next match” selector.
+                  </p>
+                )}
+              </div>
+
+              <p className="mt-4 text-[11px] text-white/50">
+                *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No gambling. 18+ only.
+                Don&apos;t be a mug — play for fun.
               </p>
             </div>
           </div>
@@ -233,7 +255,7 @@ export default function BblHubPage() {
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
                 src="/mcg-hero.jpg"
-                alt="Stadium lights"
+                alt="Night stadium"
                 fill
                 className="object-cover opacity-85"
                 priority
@@ -260,24 +282,9 @@ export default function BblHubPage() {
             </div>
           </div>
         </section>
-
-        <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
-            <p>
-              STREAKr is a free game of skill. No gambling. 18+ only. Prizes
-              subject to terms and conditions. Play responsibly.
-            </p>
-            <Link
-              href="/faq"
-              className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
-            >
-              FAQ
-            </Link>
-          </div>
-        </footer>
       </div>
 
-      {/* Auth Modal */}
+      {/* Auth modal */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
@@ -293,8 +300,7 @@ export default function BblHubPage() {
             </div>
 
             <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak
-              and appear on the leaderboard.
+              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
