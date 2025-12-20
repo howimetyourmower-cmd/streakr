@@ -59,7 +59,7 @@ export default function BblHubClient() {
         // IMPORTANT: update this collection name if yours is different
         // From your screenshot, your doc id is like "BBL-2025-12-14-SCO-VS-SIX"
         // This assumes collection is "bblMatches"
-        const ref = doc(db, "bblMatches", cleanedDocId);
+        const ref = doc(db, "cicketRounds", cleanedDocId);
         const snap = await getDoc(ref);
 
         if (!snap.exists()) {
