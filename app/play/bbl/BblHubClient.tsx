@@ -254,8 +254,8 @@ export default function BblHubClient() {
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
-                src="/mcg-hero.jpg"
-                alt="Night stadium"
+                src="/cricket.png"
+                alt="day stadium"
                 fill
                 className="object-cover opacity-85"
                 priority
