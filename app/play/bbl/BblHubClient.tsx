@@ -3,129 +3,148 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
 import { useEffect, useMemo, useState } from "react";
-
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
-import { doc, getDoc } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  where,
+  Timestamp,
+} from "firebase/firestore";
 
-type MatchDoc = {
-  gameNumber?: number;
-  league?: string; // "BBL"
-  match?: string; // "Perth Scorchers vs Sydney Sixers"
-  matchId?: string; // "BBL-2025-12-14-SCO-VS-SIX"
-  startTime?: string; // ISO string in your docs
+type BblRoundDoc = {
+  match?: string;
   venue?: string;
+  startTime?: string; // ISO string in your docs
+  league?: string; // "BBL" | "WBBL"
+  gameNumber?: number; // Match 8 etc
 };
 
-export default function BblHubClient() {
-  const router = useRouter();
-  const params = useSearchParams();
-  const { user } = useAuth();
+type MatchCard = {
+  docId: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  gameNumber?: number;
+};
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
+function formatStart(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
 
-  // allow url prefill like /play/bbl?docId=BBL-...
-  const urlDocId = (params.get("docId") || "").trim();
-
-  // input-controlled docId (matches your screenshot: "Enter a BBL match code to start")
-  const [docIdInput, setDocIdInput] = useState(urlDocId);
-
-  // fetched match info (so we can show Match #)
-  const [matchDoc, setMatchDoc] = useState<MatchDoc | null>(null);
-  const [loadingMatch, setLoadingMatch] = useState(false);
-  const [matchError, setMatchError] = useState("");
-
-  const cleanedDocId = docIdInput.trim();
-
-  const picksHref = useMemo(() => {
-    if (!cleanedDocId) return "";
-    return `/picks?sport=BBL&docId=${encodeURIComponent(cleanedDocId)}`;
-  }, [cleanedDocId]);
-
-  // Fetch match document when docId changes
-  useEffect(() => {
-    let cancelled = false;
-
-    const run = async () => {
-      setMatchError("");
-      setMatchDoc(null);
-
-      if (!cleanedDocId) return;
-
-      setLoadingMatch(true);
-      try {
-        // IMPORTANT: update this collection name if yours is different
-        // From your screenshot, your doc id is like "BBL-2025-12-14-SCO-VS-SIX"
-        // This assumes collection is "bblMatches"
-        const ref = doc(db, "cicketRounds", cleanedDocId);
-        const snap = await getDoc(ref);
-
-        if (!snap.exists()) {
-          if (!cancelled) setMatchError("No match found for that code.");
-          return;
-        }
-
-        const data = snap.data() as any;
-
-        const parsed: MatchDoc = {
-          gameNumber: typeof data.gameNumber === "number" ? data.gameNumber : undefined,
-          league: typeof data.league === "string" ? data.league : "BBL",
-          match: typeof data.match === "string" ? data.match : "",
-          matchId: typeof data.matchId === "string" ? data.matchId : "",
-          startTime: typeof data.startTime === "string" ? data.startTime : "",
-          venue: typeof data.venue === "string" ? data.venue : "",
-        };
-
-        if (!cancelled) setMatchDoc(parsed);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setMatchError("Couldn’t load match details.");
-      } finally {
-        if (!cancelled) setLoadingMatch(false);
-      }
-    };
-
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [cleanedDocId]);
-
-  const formatStart = (iso?: string) => {
-    if (!iso) return "";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const date = d.toLocaleDateString("en-AU", {
+  return {
+    date: d.toLocaleDateString("en-AU", {
       weekday: "short",
       day: "2-digit",
       month: "short",
-      year: "numeric",
       timeZone: "Australia/Melbourne",
-    });
-    const time = d.toLocaleTimeString("en-AU", {
+    }),
+    time: d.toLocaleTimeString("en-AU", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
       timeZone: "Australia/Melbourne",
-    });
-    return `${date} • ${time} AEDT`;
+    }),
   };
+}
 
-  const onContinue = () => {
-    if (!cleanedDocId) return;
+export default function BblHubClient({ initialDocId }: { initialDocId: string }) {
+  const router = useRouter();
+  const { user } = useAuth();
+
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Manual input (still useful for admin/testing)
+  const [manualDocId, setManualDocId] = useState(initialDocId || "");
+  const cleanedManualDocId = manualDocId.trim();
+
+  // Auto selector
+  const [upcoming, setUpcoming] = useState<MatchCard[]>([]);
+  const [loadingUpcoming, setLoadingUpcoming] = useState(true);
+  const [upcomingError, setUpcomingError] = useState("");
+
+  // If we came in with ?docId=... we treat it as "selected"
+  const selectedDocId = useMemo(() => cleanedManualDocId, [cleanedManualDocId]);
+
+  const picksHref = useMemo(() => {
+    if (!selectedDocId) return "";
+    return `/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`;
+  }, [selectedDocId]);
+
+  const goPlay = (docId: string) => {
+    const d = (docId || "").trim();
+    if (!d) return;
 
     if (!user) {
       setShowAuthModal(true);
       return;
     }
 
-    router.push(picksHref);
+    router.push(`/picks?sport=BBL&docId=${encodeURIComponent(d)}`);
   };
 
+  // Load upcoming matches from cricketRounds where league == "BBL" and startTime >= now
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadUpcoming = async () => {
+      setLoadingUpcoming(true);
+      setUpcomingError("");
+
+      try {
+        const nowIso = new Date().toISOString();
+
+        // NOTE: This assumes your docs store startTime as an ISO string.
+        // If you later switch to Firestore Timestamp, we can adjust quickly.
+        const qRef = query(
+          collection(db, "cricketRounds"),
+          where("league", "==", "BBL"),
+          where("startTime", ">=", nowIso),
+          orderBy("startTime", "asc"),
+          limit(6)
+        );
+
+        const snap = await getDocs(qRef);
+
+        const rows: MatchCard[] = snap.docs.map((d) => {
+          const data = d.data() as BblRoundDoc;
+
+          return {
+            docId: d.id,
+            match: data.match || d.id,
+            venue: data.venue || "",
+            startTime: data.startTime || "",
+            gameNumber: typeof data.gameNumber === "number" ? data.gameNumber : undefined,
+          };
+        });
+
+        if (!cancelled) {
+          setUpcoming(rows);
+        }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) {
+          setUpcomingError("Couldn’t load upcoming matches. Use match code for now.");
+        }
+      } finally {
+        if (!cancelled) setLoadingUpcoming(false);
+      }
+    };
+
+    loadUpcoming();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
-    <main className="min-h-screen bg-black text-white relative">
+    <main className="min-h-screen bg-black text-white">
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pb-16 pt-8 sm:pt-10">
         <div className="mb-6">
           <Link href="/" className="text-sm text-white/70 hover:text-white">
@@ -133,28 +152,26 @@ export default function BblHubClient() {
           </Link>
         </div>
 
-        {/* Header pills like AFL page */}
-        <div className="mb-6">
-          <div className="w-full overflow-hidden">
-            <div className="flex items-center gap-2 w-full flex-nowrap">
-              <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                BBL
-              </span>
-
-              <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                SELECT A MATCH
-              </span>
-
-              <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                FREE TO PLAY. AUSSIE AS.
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-start">
-          {/* Left */}
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-start mb-10">
           <div>
+            <div className="mb-4">
+              <div className="w-full overflow-hidden">
+                <div className="flex items-center gap-2 w-full flex-nowrap">
+                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    BBL
+                  </span>
+
+                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    SELECT A MATCH
+                  </span>
+
+                  <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                    FREE TO PLAY. AUSSIE AS.
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Cricket. Banter. Bragging rights.
@@ -166,13 +183,13 @@ export default function BblHubClient() {
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
               Think you know your cricket? Back your gut, ride the hot hand, and roast
-              your mates when you&apos;re on a heater. One wrong call and your streak is cooked —
-              back to zip.
+              your mates when you&apos;re on a heater. One wrong call and your streak is
+              cooked — back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
-              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.25)]">
-                <span className="text-sm font-semibold text-orange-200">
+              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/40 shadow-[0_0_18px_rgba(255,122,0,0.25)]">
+                <span className="text-sm font-semibold text-white/85">
                   Prizes &amp; venue rewards coming*
                 </span>
               </div>
@@ -181,24 +198,91 @@ export default function BblHubClient() {
               </span>
             </div>
 
-            {/* Match code input */}
-            <div className="mt-6 rounded-3xl border border-white/10 bg-[#020617] p-5 max-w-2xl">
-              <p className="text-sm font-semibold mb-3">Enter a BBL match code to start</p>
+            {/* AUTO UPCOMING MATCHES */}
+            <div className="rounded-2xl border border-white/10 bg-[#020617] p-4 sm:p-5">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h2 className="text-sm sm:text-base font-bold">Upcoming matches</h2>
+                <span className="text-[11px] text-white/50">
+                  Tap a match to play
+                </span>
+              </div>
+
+              {upcomingError ? (
+                <p className="text-sm text-red-400 mb-2">{upcomingError}</p>
+              ) : null}
+
+              {loadingUpcoming ? (
+                <p className="text-sm text-white/70">Loading…</p>
+              ) : null}
+
+              {!loadingUpcoming && upcoming.length === 0 && !upcomingError ? (
+                <p className="text-sm text-white/60">
+                  No upcoming BBL matches found. Use the match code below for now.
+                </p>
+              ) : null}
+
+              <div className="grid gap-3">
+                {upcoming.map((m) => {
+                  const { date, time } = formatStart(m.startTime);
+                  return (
+                    <button
+                      key={m.docId}
+                      type="button"
+                      onClick={() => goPlay(m.docId)}
+                      className="group text-left w-full rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 hover:border-orange-400/40 transition p-4"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1">
+                            {typeof m.gameNumber === "number" ? (
+                              <span className="inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/40 px-2.5 py-0.5 text-orange-200 font-semibold">
+                                Match {m.gameNumber}
+                              </span>
+                            ) : null}
+                            <span>{date}</span>
+                            <span>•</span>
+                            <span>{time} AEDT</span>
+                          </div>
+
+                          <div className="text-sm sm:text-base font-semibold text-white group-hover:text-orange-200 transition truncate">
+                            {m.match}
+                          </div>
+
+                          {m.venue ? (
+                            <div className="text-xs text-white/55 mt-1 truncate">
+                              {m.venue}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="shrink-0 inline-flex items-center justify-center rounded-full bg-[#FF7A00] text-black text-xs font-bold px-3 py-1 shadow-[0_0_18px_rgba(255,122,0,0.35)]">
+                          Play →
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* MANUAL DOC ID (keep for now) */}
+            <div className="mt-4 rounded-2xl border border-white/10 bg-[#020617] p-4 sm:p-5">
+              <p className="text-sm font-semibold mb-2">Enter a BBL match code to start</p>
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <input
-                  value={docIdInput}
-                  onChange={(e) => setDocIdInput(e.target.value)}
+                  value={manualDocId}
+                  onChange={(e) => setManualDocId(e.target.value)}
                   placeholder="Match code (docId)"
-                  className="flex-1 rounded-2xl bg-black/40 border border-white/15 px-4 py-3 text-sm outline-none focus:border-orange-400/70"
+                  className="flex-1 rounded-xl bg-black/40 border border-white/10 px-4 py-3 text-sm outline-none focus:border-orange-400/60"
                 />
 
                 <button
                   type="button"
-                  onClick={onContinue}
-                  disabled={!cleanedDocId}
-                  className={`rounded-2xl px-6 py-3 text-sm font-semibold transition ${
-                    cleanedDocId
+                  onClick={() => goPlay(cleanedManualDocId)}
+                  disabled={!cleanedManualDocId}
+                  className={`rounded-xl px-5 py-3 text-sm font-bold transition ${
+                    cleanedManualDocId
                       ? "bg-[#FF7A00] text-black hover:bg-orange-500"
                       : "bg-white/10 text-white/40 cursor-not-allowed"
                   }`}
@@ -207,55 +291,23 @@ export default function BblHubClient() {
                 </button>
               </div>
 
-              {/* Match preview */}
-              <div className="mt-4">
-                {loadingMatch ? (
-                  <p className="text-xs text-white/60">Loading match details…</p>
-                ) : matchError ? (
-                  <p className="text-xs text-red-400">{matchError}</p>
-                ) : matchDoc ? (
-                  <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1">
-                      {typeof matchDoc.gameNumber === "number" ? (
-                        <span className="font-semibold text-orange-200">
-                          Match {matchDoc.gameNumber}
-                        </span>
-                      ) : null}
-                      {typeof matchDoc.gameNumber === "number" ? <span>•</span> : null}
-                      <span className="uppercase tracking-wide">
-                        {matchDoc.league || "BBL"}
-                      </span>
-                    </div>
+              <p className="mt-2 text-[11px] text-white/50">
+                (Temporary) This will be replaced with an auto “Next match” selector.
+              </p>
 
-                    <div className="text-sm sm:text-base font-semibold">
-                      {matchDoc.match || cleanedDocId}
-                    </div>
-
-                    <div className="mt-1 text-xs text-white/60">
-                      {formatStart(matchDoc.startTime)}
-                      {matchDoc.venue ? ` • ${matchDoc.venue}` : ""}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-white/50">
-                    (Temporary) This will be replaced with an auto “Next match” selector.
-                  </p>
-                )}
-              </div>
-
-              <p className="mt-4 text-[11px] text-white/50">
+              <p className="mt-2 text-[11px] text-white/50">
                 *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No gambling. 18+ only.
                 Don&apos;t be a mug — play for fun.
               </p>
             </div>
           </div>
 
-          {/* Right hero card */}
+          {/* RIGHT HERO CARD */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
-                src="/cricket.png"
-                alt="day stadium"
+                src="/bbl-hero.jpg"
+                alt="Big Bash under lights"
                 fill
                 className="object-cover opacity-85"
                 priority
@@ -282,9 +334,23 @@ export default function BblHubClient() {
             </div>
           </div>
         </section>
+
+        <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
+            <p>
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.
+              Play responsibly.
+            </p>
+            <Link
+              href="/faq"
+              className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
+            >
+              FAQ
+            </Link>
+          </div>
+        </footer>
       </div>
 
-      {/* Auth modal */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
