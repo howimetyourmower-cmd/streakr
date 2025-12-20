@@ -1,9 +1,12 @@
+// /app/play/bbl/page.tsx
 "use client";
+
+export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 export default function BblHubClient() {
   const router = useRouter();
@@ -11,20 +14,34 @@ export default function BblHubClient() {
   const { user } = useAuth();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [manualDocId, setManualDocId] = useState("");
 
   const docId = (params.get("docId") || "").trim();
+
+  // Keep the input in sync if someone lands with ?docId=
+  useEffect(() => {
+    if (docId) setManualDocId(docId);
+  }, [docId]);
 
   const picksHref = useMemo(() => {
     if (!docId) return "";
     return `/picks?sport=BBL&docId=${encodeURIComponent(docId)}`;
   }, [docId]);
 
+  const goWithDocId = () => {
+    const next = manualDocId.trim();
+    if (!next) return;
+    router.push(`/play/bbl?docId=${encodeURIComponent(next)}`);
+  };
+
   const onPlay = () => {
     if (!docId) return;
+
     if (!user) {
       setShowAuthModal(true);
       return;
     }
+
     router.push(picksHref);
   };
 
@@ -47,18 +64,37 @@ export default function BblHubClient() {
         {!docId ? (
           <div className="mt-8 rounded-2xl border border-white/10 bg-[#020617] p-5">
             <p className="text-sm text-white/70">
-              No BBL match is selected right now.
+              Pick a match to start your BBL streak.
             </p>
-            <p className="mt-2 text-xs text-white/50">
-              Admin/testing: open{" "}
-              <span className="text-orange-300">/play/bbl?docId=YOUR_DOC_ID</span>
+
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <input
+                value={manualDocId}
+                onChange={(e) => setManualDocId(e.target.value)}
+                placeholder="Enter match code (docId)"
+                className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white placeholder:text-white/40 outline-none focus:border-orange-400"
+              />
+
+              <button
+                type="button"
+                onClick={goWithDocId}
+                disabled={!manualDocId.trim()}
+                className="w-full sm:w-auto rounded-full bg-[#FF7A00] px-6 py-3 font-semibold text-black hover:bg-orange-500 transition disabled:opacity-40 disabled:hover:bg-[#FF7A00]"
+              >
+                Continue
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-white/45">
+              (For now) you’ll enter a match code to load a specific BBL match.
+              Next step is making this auto-load the next match.
             </p>
           </div>
         ) : (
           <button
             type="button"
             onClick={onPlay}
-            className="mt-8 rounded-full bg-[#FF7A00] px-6 py-3 font-semibold text-black hover:bg-orange-500 transition"
+            className="mt-8 w-full sm:w-auto rounded-full bg-[#FF7A00] px-6 py-3 font-semibold text-black hover:bg-orange-500 transition"
           >
             Play BBL now
           </button>
@@ -80,7 +116,8 @@ export default function BblHubClient() {
             </div>
 
             <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks and build your streak.
+              You need a free STREAKr account to make picks and build your
+              streak.
             </p>
 
             <div className="flex gap-3">
