@@ -9,7 +9,7 @@ export default function HomeClient() {
       <div className="mb-6">
         <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/80">
           <span className="h-2 w-2 rounded-full bg-[#FF7A00]" />
-          STREAKr
+          STREAKr — Multi-Sport
         </span>
       </div>
 
@@ -26,8 +26,11 @@ export default function HomeClient() {
 
       {/* Main cards */}
       <section className="grid gap-5 md:grid-cols-2">
-        {/* AFL */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm">
+        {/* AFL (whole card clickable) */}
+        <Link
+          href="/afl"
+          className="group block rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#FF7A00]/60"
+        >
           <div className="mb-2 flex items-center justify-between">
             <div className="text-xs font-semibold tracking-widest text-white/50">
               PLAY NOW
@@ -42,16 +45,16 @@ export default function HomeClient() {
             Quarter-by-quarter player &amp; team stat picks.
           </p>
 
-          <Link
-            href="/afl"
-            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#FF7A00] hover:opacity-90"
-          >
+          <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#FF7A00] group-hover:opacity-90">
             Enter AFL hub →
-          </Link>
-        </div>
+          </div>
+        </Link>
 
-        {/* BBL */}
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm">
+        {/* BBL (whole card clickable) */}
+        <Link
+          href="/bbl"
+          className="group block rounded-2xl border border-white/10 bg-white/5 p-6 shadow-sm transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-[#FF7A00]/60"
+        >
           <div className="mb-2 flex items-center justify-between">
             <div className="text-xs font-semibold tracking-widest text-white/50">
               PLAY NOW
@@ -63,13 +66,10 @@ export default function HomeClient() {
             Cricket Yes/No picks. Clean sweep per match.
           </p>
 
-          <Link
-            href="/bbl"
-            className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#FF7A00] hover:opacity-90"
-          >
+          <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#FF7A00] group-hover:opacity-90">
             Enter BBL hub →
-          </Link>
-        </div>
+          </div>
+        </Link>
       </section>
 
       {/* Coming soon */}
