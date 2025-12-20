@@ -1,10 +1,20 @@
-import { Suspense } from "react";
-import HomeClient from "./HomeClient";
+"use client";
 
-export default function Page() {
+import { useSearchParams } from "next/navigation";
+
+export default function HomeClient() {
+  const searchParams = useSearchParams();
+
+  // whatever you were doing with searchParams before:
+  // const sport = searchParams.get("sport");
+
   return (
-    <Suspense fallback={<div className="p-6">Loading…</div>}>
-      <HomeClient />
-    </Suspense>
+    <main className="min-h-screen">
+      {/* put your existing homepage UI here */}
+      {/* (everything that previously lived in /app/page.tsx if it was client) */}
+      <div className="p-6">
+        STREAKr Home
+      </div>
+    </main>
   );
 }
