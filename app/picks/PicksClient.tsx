@@ -1271,14 +1271,7 @@ export default function PicksClient() {
                             Comments ({row.commentCount ?? 0})
                           </button>
 
-                          {/* If you want this label removed entirely, tell me and I’ll strip it. */}
-                          {activeSport === "AFL" && !isMatchUnlocked && (
-                            <span className="inline-flex items-center rounded-full bg-red-600/80 px-2 py-0.5 text-[10px] font-semibold text-white shadow-[0_0_8px_rgba(248,113,113,0.8)]">
-                              Match closed for picks
-                            </span>
-                          )}
-
-                          {!isQuestionOpen && isMatchUnlocked && (
+                           {!isQuestionOpen && isMatchUnlocked && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
