@@ -1,4 +1,6 @@
 // /app/faq/page.tsx
+
+export const dynamic = "force-dynamic"
 "use client";
 
 import { FormEvent, useState } from "react";
