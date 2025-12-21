@@ -1,3 +1,4 @@
+// /app/play/afl/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -155,6 +156,7 @@ export default function AflHubPage() {
 
   return (
     <main className="min-h-screen bg-black text-white relative">
+      {/* ========= PRELOADER ========= */}
       {showPreloader && (
         <div
           className={`fixed inset-0 z-50 flex items-center justify-center bg-black transition-opacity duration-700 ${
@@ -185,6 +187,12 @@ export default function AflHubPage() {
         </div>
       )}
 
+      {/* ========= PAGE BG ========= */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_18%_22%,rgba(255,122,0,0.12),transparent_42%),radial-gradient(circle_at_75%_25%,rgba(56,189,248,0.06),transparent_45%),radial-gradient(circle_at_35%_85%,rgba(255,122,0,0.08),transparent_45%)]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-black via-black/90 to-black" />
+      </div>
+
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pb-16 pt-8 sm:pt-10">
         <div className="mb-6">
           <Link href="/" className="text-sm text-white/70 hover:text-white">
@@ -192,33 +200,86 @@ export default function AflHubPage() {
           </Link>
         </div>
 
-        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
-          <div>
-            <div className="mb-4">
-              <div className="w-full overflow-hidden">
-                <div className="flex items-center gap-2 w-full flex-nowrap">
-                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+        {/* ========= SUPER CLEAR AFL BANNER ========= */}
+        <div className="mb-8 rounded-3xl border border-orange-500/35 bg-gradient-to-r from-orange-500/18 via-[#020617] to-[#020617] px-5 py-4 shadow-[0_18px_70px_rgba(0,0,0,0.85)]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-4">
+              {/* AFL Icon */}
+              <div className="relative h-14 w-14 rounded-2xl border border-orange-400/40 bg-orange-500/10 shadow-[0_0_44px_rgba(255,122,0,0.25)] flex items-center justify-center">
+                <svg
+                  viewBox="0 0 120 80"
+                  className="h-10 w-10 text-[#FF7A00]"
+                  fill="none"
+                >
+                  <ellipse
+                    cx="60"
+                    cy="40"
+                    rx="46"
+                    ry="30"
+                    stroke="currentColor"
+                    strokeWidth="6"
+                  />
+                  <path
+                    d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    d="M60 18v44"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    opacity="0.6"
+                  />
+                </svg>
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] text-black px-3 py-1 text-[11px] font-extrabold tracking-wide uppercase shadow-[0_0_24px_rgba(255,122,0,0.75)]">
+                    YOU’RE IN AFL
+                  </span>
+                  <span className="inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
                     AFL SEASON 2026
                   </span>
-
-                  <span className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
+                  <span className="inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
                     ROUND {roundNumber ?? "—"}
                   </span>
-
-                  <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
-                    FREE TO PLAY. AUSSIE AS.
-                  </span>
                 </div>
+
+                <p className="mt-2 text-sm text-white/70">
+                  Quarter-by-quarter player-stat picks. One wrong call and your streak is cooked.
+                </p>
               </div>
             </div>
 
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                href="/picks?sport=AFL"
+                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
+              >
+                Play AFL now →
+              </Link>
+              <Link
+                href="/"
+                className="inline-flex items-center justify-center rounded-full border border-white/20 bg-white/5 hover:border-orange-400 hover:text-orange-200 px-6 py-3 text-sm text-white/80"
+              >
+                Switch sport
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* ========= MAIN HERO ========= */}
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
+          <div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Footy. Banter. Bragging rights.
               </span>
               <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">
-                How Long Can You Last?
+                AFL STREAKr
               </span>
+              <span className="block text-white mt-2">How Long Can You Last?</span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
@@ -241,7 +302,7 @@ export default function AflHubPage() {
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <Link
                 href="/picks?sport=AFL"
-                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
+                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
               >
                 Play now – make your next pick
               </Link>
@@ -269,11 +330,21 @@ export default function AflHubPage() {
                 priority
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
+
+              {/* BIG AFL TAG TOP RIGHT */}
+              <div className="absolute top-4 right-4">
+                <span className="inline-flex items-center gap-2 rounded-full bg-black/75 border border-orange-400/50 px-4 py-2 text-xs font-extrabold text-orange-200 shadow-[0_0_28px_rgba(255,122,0,0.45)]">
+                  <span className="h-2 w-2 rounded-full bg-[#FF7A00]" />
+                  AFL MODE
+                </span>
+              </div>
+
               <div className="absolute top-4 left-4 flex items-center gap-2">
                 <span className="rounded-full bg-black/70 border border-white/20 px-3 py-1 text-[11px] font-semibold">
                   Live AFL player-stat picks
                 </span>
               </div>
+
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
                   <p className="text-[11px] text-white/60 mb-1">
@@ -291,55 +362,79 @@ export default function AflHubPage() {
           </div>
         </section>
 
+        {/* ========= HOW IT WORKS ========= */}
         <section className="mb-10">
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">How STREAKr works</h2>
+          <h2 className="text-xl sm:text-2xl font-bold mb-2">
+            How AFL STREAKr works
+          </h2>
           <p className="text-sm text-white/70 mb-4 max-w-2xl">
             It&apos;s like tipping&apos;s louder cousin. Quick picks, live sweat, and bragging rights that last all week.
           </p>
 
           <div className="grid sm:grid-cols-3 gap-4">
             <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">1 · Pick a player question</p>
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                1 · Pick an AFL question
+              </p>
               <p className="text-sm text-white/80">
-                Every quarter has hand-picked AFL player-stat questions. <span className="font-semibold">Yes</span> or <span className="font-semibold">No</span> — back your gut and lock in your pick.
+                Every quarter has hand-picked AFL player-stat questions.{" "}
+                <span className="font-semibold">Yes</span> or{" "}
+                <span className="font-semibold">No</span> — back your gut and lock in your pick.
               </p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">2 · Build a filthy streak</p>
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                2 · Build a filthy AFL streak
+              </p>
               <p className="text-sm text-white/80">
-                Every correct answer adds <span className="font-semibold">+1</span> to your streak. One wrong pick and you&apos;re <span className="font-semibold">back to zero</span>. No safety nets. Just nerve. Put your balls on the line.
+                Every correct answer adds{" "}
+                <span className="font-semibold">+1</span> to your streak. One wrong pick and you&apos;re{" "}
+                <span className="font-semibold">back to zero</span>. No safety nets. Just nerve.
               </p>
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">3 · Flex on your mates</p>
+              <p className="text-xs font-semibold text-orange-300 mb-1">
+                3 · Flex on your mates
+              </p>
               <p className="text-sm text-white/80">
-                Climb the round ladder, earn <span className="font-semibold">badges</span>, win <span className="font-semibold">prizes</span>, and send screenshots straight into the group chat. Long streak = loudest voice.
+                Climb the round ladder, earn{" "}
+                <span className="font-semibold">badges</span>, win{" "}
+                <span className="font-semibold">prizes</span>, and send screenshots straight into the group chat.
               </p>
             </div>
           </div>
 
           <div className="mt-5 grid sm:grid-cols-3 gap-4 text-sm text-white/75">
             <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">Built for</p>
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                Built for
+              </p>
               <p>Group chats, office comps, pub and venue leagues.</p>
             </div>
             <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">No deposit, no drama</p>
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                No deposit, no drama
+              </p>
               <p>Free to play. No odds, no multis, no gambling nonsense.</p>
             </div>
             <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">Just the footy chat</p>
-              <p>Back your eye for the game, not your bank account. Be the one everyone hates losing to.</p>
+              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
+                Pure footy chat
+              </p>
+              <p>Back your eye for the game, not your bank account.</p>
             </div>
           </div>
         </section>
 
+        {/* ========= PREVIEW ========= */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-xl sm:text-2xl font-bold">Tonight&apos;s live picks preview</h2>
+              <h2 className="text-xl sm:text-2xl font-bold">
+                Tonight&apos;s live AFL picks preview
+              </h2>
               <p className="text-sm text-white/70">
                 A taste of the open questions right now. Jump into Picks to actually lock yours in.
               </p>
@@ -372,7 +467,9 @@ export default function AflHubPage() {
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
-                        <span className="font-semibold text-orange-200">Q{q.quarter}</span>
+                        <span className="font-semibold text-orange-200">
+                          AFL Q{q.quarter}
+                        </span>
                         <span>•</span>
                         <span>
                           {date} • {time} AEDT
@@ -423,11 +520,12 @@ export default function AflHubPage() {
         </footer>
       </div>
 
+      {/* ========= AUTH MODAL ========= */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Log in to play</h2>
+              <h2 className="text-lg font-semibold">Log in to play AFL</h2>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
