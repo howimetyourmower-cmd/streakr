@@ -1,7 +1,7 @@
 // app/admin/page.tsx
-export const dynamic = "force-dynamic"
-"use client";
 
+"use client";
+export const dynamic = "force-dynamic"
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
