@@ -1,5 +1,5 @@
 // /app/api/profile/route.ts
-
+export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 import rounds2026 from "@/data/rounds-2026.json";
