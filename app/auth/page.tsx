@@ -1,3 +1,6 @@
+
+export const dynamic = "force-dynamic";
+
 // app/auth/page.tsx
 "use client";
 
