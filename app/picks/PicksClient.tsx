@@ -191,9 +191,22 @@ type SportKey = "AFL" | "BBL";
 
 export default function PicksClient() {
   const params = useSearchParams();
-  const sportParam = (params.get("sport") || "AFL").toUpperCase();
-  const activeSport: SportKey = sportParam === "BBL" ? "BBL" : "AFL";
-  const bblDocId = (params.get("docId") || "").trim();
+
+  // ✅ Robust sport resolution:
+  // - If sport param is provided, trust it.
+  // - Else if docId looks like BBL, infer BBL.
+  // - Else default AFL.
+  const rawSport = (params.get("sport") || "").trim().toUpperCase();
+  const rawDocId = (params.get("docId") || "").trim();
+  const inferredSport: SportKey =
+    rawSport === "BBL" || rawSport === "AFL"
+      ? (rawSport as SportKey)
+      : rawDocId
+      ? "BBL"
+      : "AFL";
+
+  const activeSport: SportKey = inferredSport;
+  const bblDocId = rawDocId;
 
   const { user } = useAuth();
 
@@ -317,12 +330,21 @@ export default function PicksClient() {
       setError("");
     }
     try {
+      // ✅ Guard BBL requests: must have docId
+      if (activeSport === "BBL" && !bblDocId) {
+        setRows([]);
+        setFilteredRows([]);
+        setRoundNumber(null);
+        setError("No BBL match selected (missing docId).");
+        return;
+      }
+
       const url =
         activeSport === "BBL"
           ? `/api/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
           : "/api/picks";
 
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) throw new Error("API error");
 
       const data: PicksApiResponse = await res.json();
@@ -376,15 +398,11 @@ export default function PicksClient() {
 
   // Initial fetch + refetch on sport/doc change
   useEffect(() => {
-    if (activeSport === "BBL" && !bblDocId) {
-      setRows([]);
-      setFilteredRows([]);
-      setRoundNumber(null);
-      setError("No BBL match selected (missing docId).");
-      setLoading(false);
-      return;
-    }
-    fetchPicks();
+    setError("");
+    setLoading(true);
+    fetchPicks()
+      .catch(() => {})
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSport, bblDocId]);
 
@@ -993,6 +1011,19 @@ export default function PicksClient() {
                   </span>
                 </p>
               )}
+
+              {/* ✅ Helpful BBL context header */}
+              {activeSport === "BBL" && (
+                <p className="text-sm text-white/70">
+                  Sport: <span className="font-semibold text-orange-400">BBL</span>
+                  {bblDocId ? (
+                    <>
+                      {" "}
+                      • Match: <span className="font-semibold text-white/80">{bblDocId}</span>
+                    </>
+                  ) : null}
+                </p>
+              )}
             </div>
 
             <button
@@ -1083,7 +1114,9 @@ export default function PicksClient() {
             <span className="uppercase tracking-wide text-[11px] font-semibold text-amber-300">
               Sponsor Question
             </span>
-            <span className="text-[12px] sm:text-[13px]">Get it right to enter this round&apos;s $100 sponsor gift card draw.*</span>
+            <span className="text-[12px] sm:text-[13px]">
+              Get it right to enter this round&apos;s $100 sponsor gift card draw.*
+            </span>
           </div>
         )}
 
@@ -1114,9 +1147,6 @@ export default function PicksClient() {
         </div>
 
         {loading && <p>Loading…</p>}
-
-        {/* --- Your big render block is unchanged from here down in behaviour --- */}
-        {/* NOTE: I left your UI + logic intact. */}
 
         {/* (Render list) */}
         <div className="space-y-2">
@@ -1227,11 +1257,15 @@ export default function PicksClient() {
                                         className="rounded-full border border-white/20 bg-black/60"
                                       />
                                     )}
-                                    <span className="text-sm font-semibold truncate">{parsed.homeLabel || homeTeam?.name || ""}</span>
+                                    <span className="text-sm font-semibold truncate">
+                                      {parsed.homeLabel || homeTeam?.name || ""}
+                                    </span>
                                   </div>
                                   <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
                                   <div className="flex items-center gap-1 min-w-0">
-                                    <span className="text-sm font-semibold truncate">{parsed.awayLabel || awayTeam?.name || ""}</span>
+                                    <span className="text-sm font-semibold truncate">
+                                      {parsed.awayLabel || awayTeam?.name || ""}
+                                    </span>
                                     {awayTeam && (
                                       <Image
                                         src={awayTeam.logo}
@@ -1271,7 +1305,7 @@ export default function PicksClient() {
                             Comments ({row.commentCount ?? 0})
                           </button>
 
-                           {!isQuestionOpen && isMatchUnlocked && (
+                          {!isQuestionOpen && isMatchUnlocked && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
@@ -1362,14 +1396,18 @@ export default function PicksClient() {
 
                           return outcomeLabel ? (
                             <div className="mt-2">
-                              <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}>
+                              <span
+                                className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${outcomeClasses}`}
+                              >
                                 {outcomeLabel}
                               </span>
                             </div>
                           ) : null;
                         })()}
 
-                        <div className="text-[11px] text-white/85">Yes: {Math.round(yesPct)}% • No: {Math.round(noPct)}%</div>
+                        <div className="text-[11px] text-white/85">
+                          Yes: {Math.round(yesPct)}% • No: {Math.round(noPct)}%
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1385,29 +1423,44 @@ export default function PicksClient() {
             <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
               <div className="flex items-start justify-between mb-4">
                 <h2 className="text-lg font-semibold">Log in to play</h2>
-                <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm text-gray-400 hover:text-white">
+                <button
+                  type="button"
+                  onClick={() => setShowAuthModal(false)}
+                  className="text-sm text-gray-400 hover:text-white"
+                >
                   ✕
                 </button>
               </div>
               <p className="text-sm text-white/70 mb-4">
                 You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
               </p>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Link
-                  href="/auth?mode=login&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-                  onClick={() => setShowAuthModal(false)}
-                >
-                  Login
-                </Link>
-                <Link
-                  href="/auth?mode=signup&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-                  onClick={() => setShowAuthModal(false)}
-                >
-                  Sign up
-                </Link>
-              </div>
+
+              {/* ✅ Preserve sport/docId through auth redirects */}
+              {(() => {
+                const returnTo =
+                  activeSport === "BBL"
+                    ? `/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
+                    : "/picks";
+
+                return (
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <Link
+                      href={`/auth?mode=login&returnTo=${encodeURIComponent(returnTo)}`}
+                      className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                      onClick={() => setShowAuthModal(false)}
+                    >
+                      Login
+                    </Link>
+                    <Link
+                      href={`/auth?mode=signup&returnTo=${encodeURIComponent(returnTo)}`}
+                      className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                      onClick={() => setShowAuthModal(false)}
+                    >
+                      Sign up
+                    </Link>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -1578,7 +1631,9 @@ export default function PicksClient() {
               </ul>
 
               <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                <p className="text-xs text-white/60">Tip: back your best reads. Don&apos;t spray picks like it&apos;s a multis promo.</p>
+                <p className="text-xs text-white/60">
+                  Tip: back your best reads. Don&apos;t spray picks like it&apos;s a multis promo.
+                </p>
                 <button
                   type="button"
                   onClick={handleCloseHowToModal}
