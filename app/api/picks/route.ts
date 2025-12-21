@@ -34,7 +34,7 @@ type ApiQuestion = {
   noPercent?: number;
   commentCount?: number;
 
-  // ✅ outcome-pill fields
+  // outcome-pill fields
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null;
@@ -75,60 +75,6 @@ type GameLockDoc = {
   gameId: string;
   isUnlockedForPicks?: boolean;
   updatedAt?: FirebaseFirestore.Timestamp;
-};
-
-// ─────────────────────────────────────────────
-// BBL / Cricket shapes (support BOTH structures)
-// ─────────────────────────────────────────────
-
-// Structure A:
-// cricketRounds/{docId} contains match/meta + questions[]
-type CricketMatchQuestion = {
-  id: string;
-  quarter: number; // 0 for match-level
-  question: string;
-  status?: QuestionStatus | string;
-  outcome?: QuestionOutcome | string; // ✅ NEW (Option B)
-  isSponsorQuestion?: boolean;
-};
-
-type CricketMatchDoc = {
-  league?: string; // "BBL"
-  sport?: string; // "BBL"
-  match?: string;
-  matchId?: string;
-  venue?: string;
-  startTime?: string;
-  questions?: CricketMatchQuestion[];
-};
-
-// Structure B:
-// cricketRounds/{docId} contains games:[{match,venue,startTime,questions:[]}]
-type CricketSeedQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status?: QuestionStatus | string;
-  outcome?: QuestionOutcome | string; // ✅ NEW (Option B)
-  isSponsorQuestion?: boolean;
-};
-
-type CricketSeedGame = {
-  id?: string;
-  match: string;
-  venue?: string;
-  startTime?: string;
-  sport?: string;
-  questions: CricketSeedQuestion[];
-};
-
-type CricketRoundDoc = {
-  season?: number;
-  roundNumber?: number;
-  round?: number;
-  label?: string;
-  sport?: string;
-  games?: CricketSeedGame[];
 };
 
 // ─────────────────────────────────────────────
@@ -357,9 +303,28 @@ async function getGameLocksForRound(
 }
 
 // ─────────────────────────────────────────────
-// BBL helper: build API response from either doc shape
-// ✅ Option B: status/outcome comes from cricketRounds doc itself
+// BBL parsing helpers (tolerant to key casing + variants)
 // ─────────────────────────────────────────────
+
+function firstString(obj: any, keys: string[], fallback = ""): string {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return fallback;
+}
+
+function firstArray(obj: any, keys: string[]): any[] {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (Array.isArray(v)) return v;
+  }
+  return [];
+}
+
+function safeUpper(val: string) {
+  return String(val || "").trim().toUpperCase();
+}
 
 function enrichQuestionForApi(params: {
   q: {
@@ -383,7 +348,6 @@ function enrichQuestionForApi(params: {
 
   let correctPick: boolean | null = null;
   if (correctOutcome && userPick) {
-    // if void, keep null (void shouldn't mark correct/incorrect)
     if (correctOutcome === "void") correctPick = null;
     else correctPick = userPick === correctOutcome;
   }
@@ -406,41 +370,96 @@ function enrichQuestionForApi(params: {
   };
 }
 
+function normaliseCricketQuestion(
+  rawQ: any,
+  fallbackId: string,
+  gameId: string,
+  sport: string
+): {
+  id: string;
+  gameId: string;
+  quarter: number;
+  question: string;
+  status: QuestionStatus;
+  outcome?: QuestionOutcome;
+  sport: string;
+  isSponsorQuestion?: boolean;
+} {
+  const id =
+    (typeof rawQ?.id === "string" && rawQ.id.trim()) ||
+    (typeof rawQ?.Id === "string" && rawQ.Id.trim()) ||
+    fallbackId;
+
+  const question = firstString(rawQ, ["question", "Question"], "").trim();
+  const quarterRaw = rawQ?.quarter ?? rawQ?.Quarter ?? 0;
+  const quarter = Number.isFinite(Number(quarterRaw)) ? Number(quarterRaw) : 0;
+
+  const statusRaw = rawQ?.status ?? rawQ?.Status ?? "open";
+  const status = normaliseStatusValue(statusRaw);
+
+  const outcomeRaw =
+    rawQ?.outcome ??
+    rawQ?.Outcome ??
+    rawQ?.result ??
+    rawQ?.Result ??
+    rawQ?.correctOutcome ??
+    rawQ?.CorrectOutcome;
+
+  const outcome = normaliseOutcomeValue(outcomeRaw);
+
+  const isSponsorQuestion = Boolean(
+    rawQ?.isSponsorQuestion ??
+      rawQ?.IsSponsorQuestion ??
+      rawQ?.sponsor ??
+      rawQ?.Sponsor ??
+      false
+  );
+
+  return {
+    id,
+    gameId,
+    quarter,
+    question,
+    status,
+    outcome,
+    sport,
+    isSponsorQuestion,
+  };
+}
+
 function buildBblGameFromMatchDoc(
   docId: string,
-  data: CricketMatchDoc,
+  raw: any,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
   userPicks: Record<string, "yes" | "no">
 ): ApiGame {
-  const sport = String(data.sport || data.league || "BBL").trim().toUpperCase();
-  const match = String(data.match || "").trim();
-  const venue = String(data.venue || "").trim();
-  const startTime = String(data.startTime || "").trim();
+  const sport = safeUpper(
+    firstString(raw, ["sport", "Sport", "league", "League"], "BBL")
+  );
 
-  const questionsArr = Array.isArray(data.questions) ? data.questions : [];
+  const match = firstString(raw, ["match", "Match"], "").trim();
+  const venue = firstString(raw, ["venue", "Venue"], "").trim();
+  const startTime = firstString(raw, ["startTime", "StartTime"], "").trim();
 
-  const questions: ApiQuestion[] = questionsArr.map((q, idx) => {
-    const qid = String(q.id || "").trim() || `${docId}-Q${idx + 1}`;
+  const questionsArr = firstArray(raw, [
+    "questions",
+    "Questions",
+    "matchQuestions",
+    "MatchQuestions",
+  ]);
 
-    const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
+  const questions: ApiQuestion[] = questionsArr.map((q: any, idx: number) => {
+    const fallbackId = `${docId}-Q${idx + 1}`;
+    const base = normaliseCricketQuestion(q, fallbackId, docId, sport);
+
+    const stats = pickStats[base.id] ?? { yes: 0, no: 0, total: 0 };
     const total = stats.total;
     const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
     const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-    const base = {
-      id: qid,
-      gameId: docId,
-      quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
-      question: String(q.question || "").trim(),
-      status: normaliseStatusValue(q.status ?? "open"),
-      outcome: normaliseOutcomeValue(String(q.outcome ?? "")), // ✅ from doc
-      sport,
-      isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-    };
-
     return enrichQuestionForApi({
       q: base,
-      userPick: userPicks[qid],
+      userPick: userPicks[base.id],
       yesPercent,
       noPercent,
     });
@@ -459,43 +478,36 @@ function buildBblGameFromMatchDoc(
 
 function buildBblGamesFromRoundDoc(
   docId: string,
-  data: CricketRoundDoc,
+  raw: any,
   pickStats: Record<string, { yes: number; no: number; total: number }>,
   userPicks: Record<string, "yes" | "no">
 ): ApiGame[] {
-  const gamesArr = Array.isArray(data.games) ? data.games : [];
-  const baseSport = String(data.sport || "BBL").trim().toUpperCase();
+  const baseSport = safeUpper(firstString(raw, ["sport", "Sport"], "BBL"));
 
-  return gamesArr.map((g, gi) => {
-    const gameId = String(g.id || "").trim() || `${docId}-G${gi + 1}`;
-    const match = String(g.match || "").trim();
-    const venue = String(g.venue || "").trim();
-    const startTime = String(g.startTime || "").trim();
-    const sport = String(g.sport || baseSport || "BBL").trim().toUpperCase();
+  const gamesArr = firstArray(raw, ["games", "Games", "matches", "Matches"]);
 
-    const qs = Array.isArray(g.questions) ? g.questions : [];
-    const questions: ApiQuestion[] = qs.map((q, qi) => {
-      const qid = String(q.id || "").trim() || `${gameId}-Q${qi + 1}`;
+  return gamesArr.map((g: any, gi: number) => {
+    const gameId =
+      firstString(g, ["id", "Id"], "")?.trim() || `${docId}-G${gi + 1}`;
 
-      const stats = pickStats[qid] ?? { yes: 0, no: 0, total: 0 };
+    const match = firstString(g, ["match", "Match"], "").trim();
+    const venue = firstString(g, ["venue", "Venue"], "").trim();
+    const startTime = firstString(g, ["startTime", "StartTime"], "").trim();
+    const sport = safeUpper(firstString(g, ["sport", "Sport"], baseSport));
+
+    const qs = firstArray(g, ["questions", "Questions"]);
+    const questions: ApiQuestion[] = qs.map((q: any, qi: number) => {
+      const fallbackId = `${gameId}-Q${qi + 1}`;
+      const base = normaliseCricketQuestion(q, fallbackId, gameId, sport);
+
+      const stats = pickStats[base.id] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
       const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
       const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
-      const base = {
-        id: qid,
-        gameId,
-        quarter: Number.isFinite(Number(q.quarter)) ? Number(q.quarter) : 0,
-        question: String(q.question || "").trim(),
-        status: normaliseStatusValue(q.status ?? "open"),
-        outcome: normaliseOutcomeValue(String(q.outcome ?? "")), // ✅ from doc
-        sport,
-        isSponsorQuestion: Boolean(q.isSponsorQuestion ?? false),
-      };
-
       return enrichQuestionForApi({
         q: base,
-        userPick: userPicks[qid],
+        userPick: userPicks[base.id],
         yesPercent,
         noPercent,
       });
@@ -540,10 +552,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
 
     // ─────────────────────────────
-    // BBL / Cricket path (Firestore) — OPTION B
+    // BBL / Cricket path (Firestore) — tolerant parsing
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
-      const docId = String(url.searchParams.get("docId") ?? "").trim();
+      // support docId or docid
+      const docId = String(
+        url.searchParams.get("docId") ?? url.searchParams.get("docid") ?? ""
+      ).trim();
 
       if (!docId) {
         const empty: PicksApiResponse = { games: [], roundNumber };
@@ -565,31 +580,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const raw = snap.data() || {};
 
-      const hasGamesArray = Array.isArray((raw as any).games);
-      const hasQuestionsArray = Array.isArray((raw as any).questions);
+      // detect games or questions (support casing/variants)
+      const gamesArr = firstArray(raw as any, ["games", "Games", "matches", "Matches"]);
+      const questionsArr = firstArray(raw as any, [
+        "questions",
+        "Questions",
+        "matchQuestions",
+        "MatchQuestions",
+      ]);
 
       let games: ApiGame[] = [];
       let effectiveRoundNumber = roundNumber;
 
-      if (hasGamesArray) {
-        const data = raw as CricketRoundDoc;
+      if (gamesArr.length) {
         effectiveRoundNumber =
-          Number(data.roundNumber ?? data.round ?? roundNumber) || 0;
+          Number(
+            (raw as any).roundNumber ??
+              (raw as any).RoundNumber ??
+              (raw as any).round ??
+              (raw as any).Round ??
+              roundNumber
+          ) || 0;
 
-        games = buildBblGamesFromRoundDoc(docId, data, pickStats, userPicks);
-      } else if (hasQuestionsArray) {
-        const data = raw as CricketMatchDoc;
+        games = buildBblGamesFromRoundDoc(docId, raw, pickStats, userPicks);
+      } else if (questionsArr.length) {
         effectiveRoundNumber = roundNumber;
-
-        games = [buildBblGameFromMatchDoc(docId, data, pickStats, userPicks)];
+        games = [buildBblGameFromMatchDoc(docId, raw, pickStats, userPicks)];
       } else {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
           error:
-            `cricketRounds/${docId} exists but has no games[] or questions[]. ` +
-            `Expected either:\n- games: [{ match, venue, startTime, questions: [...] }]\n` +
-            `OR\n- match/venue/startTime + questions: [...]`,
+            `cricketRounds/${docId} exists but has no games[] or questions[] (including casing variants). ` +
+            `Tried: games/Games/matches/Matches and questions/Questions/matchQuestions/MatchQuestions.`,
         });
       }
 
