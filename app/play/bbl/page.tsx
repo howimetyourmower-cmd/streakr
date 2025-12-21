@@ -2,14 +2,18 @@
 import { Suspense } from "react";
 import BblHubClient from "./BblHubClient";
 
-export const dynamic = "force-dynamic";
-
-export default function BblHubPage({
+export default function Page({
   searchParams,
 }: {
-  searchParams?: { docId?: string };
+  searchParams?: { [key: string]: string | string[] | undefined };
 }) {
-  const initialDocId = (searchParams?.docId || "").trim();
+  const raw = searchParams?.docId;
+  const initialDocId =
+    typeof raw === "string"
+      ? raw
+      : Array.isArray(raw)
+      ? raw[0] || ""
+      : "";
 
   return (
     <Suspense fallback={<div className="min-h-screen bg-black text-white" />}>
