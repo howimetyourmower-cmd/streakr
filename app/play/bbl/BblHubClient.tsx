@@ -55,20 +55,15 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
-  // ✅ Source of truth for selected match
+  // ✅ Resolve initial docId from query > props
   const initialFromProps = (initialDocId || "").trim();
   const initialFromQuery = (searchParams?.get("docId") || "").trim();
   const initialResolved = initialFromQuery || initialFromProps;
 
+  // ✅ Selected match (AFL-style: one match only)
   const [selectedDocId, setSelectedDocId] = useState<string>(initialResolved);
-  const [matchCode, setMatchCode] = useState<string>(initialResolved);
 
-  // Mobile picker modal
-  const [showMatchPicker, setShowMatchPicker] = useState(false);
-
-  // Upcoming matches
+  // Upcoming matches (used only to auto-pick the one “upcoming/live” match)
   const [upcoming, setUpcoming] = useState<UpcomingMatch[]>([]);
   const [loadingUpcoming, setLoadingUpcoming] = useState(true);
   const [upcomingError, setUpcomingError] = useState("");
@@ -84,8 +79,8 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
   const seasonChip = "BBL SEASON 2025/26";
 
-  // Prevent auto-select from overriding an explicit selection
-  const didAutoSelectRef = useRef(false);
+  // Prevent repeated auto-pick loops
+  const didAutoPickRef = useRef(false);
 
   // ---- Helpers ----
   const formatStartDate = (iso?: string) => {
@@ -109,71 +104,46 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     };
   };
 
+  // Keep URL in sync so refresh keeps the match (same as AFL behaviour)
   const syncUrlWithDocId = (docId: string) => {
     const clean = (docId || "").trim();
     if (!clean) return;
 
-    // Keep whatever query params exist, but set docId
     const params = new URLSearchParams(searchParams?.toString() || "");
     if (params.get("docId") === clean) return;
 
     params.set("docId", clean);
-    // keep sport tag if you ever use it here
-    // params.set("sport", "BBL");
-
     router.replace(`${pathname}?${params.toString()}`);
   };
 
-  const setSelected = (docId: string, { closePicker }: { closePicker?: boolean } = {}) => {
-    const clean = (docId || "").trim();
-    if (!clean) return;
-
-    setSelectedDocId(clean);
-    setMatchCode(clean);
-    syncUrlWithDocId(clean);
-
-    if (closePicker) setShowMatchPicker(false);
-  };
-
+  // Choose the “best” match for players: prefer live/soonest upcoming.
   const pickBestAutoMatch = (list: UpcomingMatch[]) => {
     if (!Array.isArray(list) || list.length === 0) return "";
 
-    // Choose the soonest match that starts in the future (or now). If none, fall back to earliest.
     const now = Date.now();
-    const withTimes = list
+    const parsed = list
       .map((m) => ({
         ...m,
         ts: m.startTime ? new Date(m.startTime).getTime() : 0,
       }))
       .filter((m) => m.ts > 0);
 
-    if (withTimes.length === 0) return list[0]?.id || "";
+    if (parsed.length === 0) return list[0]?.id || "";
 
-    const future = withTimes
-      .filter((m) => m.ts >= now - 5 * 60 * 1000) // allow 5 min grace
+    // Prefer matches that are “now-ish” or upcoming (5 min grace)
+    const future = parsed
+      .filter((m) => m.ts >= now - 5 * 60 * 1000)
       .sort((a, b) => a.ts - b.ts);
 
     if (future[0]?.id) return future[0].id;
 
-    const earliest = withTimes.sort((a, b) => a.ts - b.ts)[0];
-    return earliest?.id || list[0]?.id || "";
+    // Else earliest match we can find
+    parsed.sort((a, b) => a.ts - b.ts);
+    return parsed[0]?.id || list[0]?.id || "";
   };
 
   const selectedMeta = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    return found || null;
-  }, [upcoming, selectedDocId]);
-
-  const selectedMatchLabel = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    if (!found) return "SELECT A MATCH";
-    if (typeof found.gameNumber === "number") return `MATCH ${found.gameNumber}`;
-    return "MATCH SELECTED";
-  }, [upcoming, selectedDocId]);
-
-  const selectedMatchDisplay = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    return found?.match || "";
+    return upcoming.find((m) => m.id === selectedDocId) || null;
   }, [upcoming, selectedDocId]);
 
   const picksHref = useMemo(() => {
@@ -183,9 +153,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
   // ---- Preloader ----
   useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.body.style.overflow = "hidden";
-    }
+    if (typeof document !== "undefined") document.body.style.overflow = "hidden";
     const fadeTimer = window.setTimeout(() => setIsPreloaderFading(true), 2500);
     const hideTimer = window.setTimeout(() => {
       setShowPreloader(false);
@@ -199,32 +167,28 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     };
   }, []);
 
-  // ---- Keep state in sync if query docId changes (e.g. user navigates with a link) ----
+  // ---- Sync if URL docId changes (e.g. share link) ----
   useEffect(() => {
     const q = (searchParams?.get("docId") || "").trim();
     if (!q) return;
     if (q === selectedDocId) return;
-    // Query param wins
     setSelectedDocId(q);
-    setMatchCode(q);
-    // do not call syncUrlWithDocId here (already in the URL)
   }, [searchParams, selectedDocId]);
 
-  // ---- Load upcoming matches ----
+  // ---- Load upcoming matches and AUTO-SELECT ONE MATCH (AFL behaviour) ----
   useEffect(() => {
     const loadUpcoming = async () => {
       try {
         setLoadingUpcoming(true);
         setUpcomingError("");
 
-        // Expected: { matches: [{ id, match, venue, startTime, gameNumber }] }
         const res = await fetch("/api/bbl/upcoming", { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
 
         const data = (await res.json()) as { matches?: UpcomingMatch[] };
         const list = Array.isArray(data.matches) ? data.matches : [];
 
-        // Sort by startTime asc (fallback to 0)
+        // sort by start time
         list.sort((a, b) => {
           const da = a.startTime ? new Date(a.startTime).getTime() : 0;
           const db = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -233,25 +197,28 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
         setUpcoming(list);
 
-        // ✅ AUTO-SELECT + ✅ write docId into URL so it stays on refresh
-        if (!didAutoSelectRef.current) {
-          didAutoSelectRef.current = true;
+        // ✅ AFL-style: if no match selected, pick the best one automatically
+        if (!didAutoPickRef.current) {
+          didAutoPickRef.current = true;
 
-          const hasExplicit =
-            !!(searchParams?.get("docId") || "").trim() || !!(initialFromProps || "").trim() || !!selectedDocId;
+          const hasExplicit = !!(searchParams?.get("docId") || "").trim() || !!initialFromProps || !!selectedDocId;
 
           if (!hasExplicit) {
-            const bestId = pickBestAutoMatch(list);
-            if (bestId) setSelected(bestId);
+            const best = pickBestAutoMatch(list);
+            if (best) {
+              setSelectedDocId(best);
+              syncUrlWithDocId(best);
+            }
           } else {
-            // If they already have a selection, ensure URL matches it
-            const existing = (searchParams?.get("docId") || "").trim();
-            if (!existing && selectedDocId) syncUrlWithDocId(selectedDocId);
+            // Ensure URL has docId if selectedDocId exists (helps refresh / sharing)
+            if (!((searchParams?.get("docId") || "").trim()) && selectedDocId) {
+              syncUrlWithDocId(selectedDocId);
+            }
           }
         }
       } catch (e) {
         console.error(e);
-        setUpcomingError("Couldn't load upcoming matches. Use match code for now.");
+        setUpcomingError("Couldn't load upcoming matches right now.");
       } finally {
         setLoadingUpcoming(false);
       }
@@ -305,7 +272,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
         setQuestions(flat);
       } catch (e) {
         console.error(e);
-        setError("Failed to load preview questions.");
+        setError("Failed to load picks preview.");
         setQuestions([]);
       } finally {
         setLoading(false);
@@ -315,28 +282,23 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     loadPreview();
   }, [selectedDocId]);
 
-  const previewQuestions = useMemo(() => questions.slice(0, 6), [questions]);
+  // AFL-style count (6–8)
+  const previewQuestions = useMemo(() => questions.slice(0, 8), [questions]);
 
-  // ---- Actions ----
-  const requireMatchThenAuth = (after?: () => void) => {
-    if (!selectedDocId) {
-      setShowMatchPicker(true);
-      return;
-    }
+  // ---- Navigation actions (AFL behaviour: preview click -> picks page) ----
+  const requireAuthThenGo = () => {
+    // AFL hub usually lets you browse without login but requires login to actually pick.
+    // Your picks page likely handles login too, but keep this consistent:
     if (!user) {
-      setShowAuthModal(true);
+      router.push(`/auth?mode=login&returnTo=${encodeURIComponent(picksHref)}`);
       return;
     }
-    after?.();
+    router.push(picksHref);
   };
 
-  const handlePlayNow = () => requireMatchThenAuth(() => router.push(picksHref));
-  const handlePreviewPick = () => requireMatchThenAuth(() => router.push(picksHref));
-
-  const openMatchPicker = () => setShowMatchPicker(true);
-
-  const applyDocId = (docId: string) => {
-    setSelected(docId, { closePicker: true });
+  const goToPicks = () => {
+    if (!selectedDocId) return;
+    requireAuthThenGo();
   };
 
   return (
@@ -387,15 +349,6 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                 {seasonChip}
               </span>
 
-              <button
-                type="button"
-                onClick={openMatchPicker}
-                className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap hover:bg-orange-500/15 transition"
-                title="Select a match"
-              >
-                {loadingUpcoming ? "LOADING…" : selectedMatchLabel}
-              </button>
-
               <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
                 FREE TO PLAY. AUSSIE AS.
               </span>
@@ -404,69 +357,68 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
           {selectedMeta ? (
             <p className="mt-2 text-xs text-white/60">
-              Selected: <span className="text-white/80 font-semibold">{selectedMeta.match}</span>
+              Tonight: <span className="text-white/80 font-semibold">{selectedMeta.match}</span>
               {selectedMeta.venue ? <span className="text-white/50"> • {selectedMeta.venue}</span> : null}
+              {selectedMeta.startTime ? (
+                <span className="text-white/50">
+                  {" "}
+                  •{" "}
+                  {(() => {
+                    const { date, time } = formatStartDate(selectedMeta.startTime);
+                    return date && time ? `${date} • ${time} AEDT` : "";
+                  })()}
+                </span>
+              ) : null}
             </p>
           ) : (
-            <p className="mt-2 text-xs text-white/50">
-              {loadingUpcoming ? "Loading matches…" : "Select a match to preview questions and play."}
-            </p>
+            <p className="mt-2 text-xs text-white/50">{loadingUpcoming ? "Loading tonight’s match…" : "No match found."}</p>
           )}
 
           {upcomingError ? <p className="mt-2 text-xs text-red-300">{upcomingError}</p> : null}
         </div>
 
         {/* HERO */}
-        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-10">
           <div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Cricket. Banter. Bragging rights.
               </span>
-
               <span className="block text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">BBL STREAKr</span>
-
               <span className="block text-white">How Long Can You Last?</span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your cricket? Prove it or pipe down. Back your gut, ride the hot hand, and roast your
-              mates when you&apos;re on a heater. One wrong call and your streak is cooked — back to zip.
+              Quick yes/no picks during the match. One wrong call and your streak is cooked — back to zero.
             </p>
-
-            <div className="inline-flex flex-wrap items-center gap-3 mb-6">
-              <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
-                <span className="text-sm font-semibold text-orange-200">Prizes &amp; venue rewards coming*</span>
-              </div>
-              <span className="hidden sm:inline text-[11px] text-white/60">
-                Free to play • 18+ • No gambling • Just bragging rights
-              </span>
-            </div>
 
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
               <button
                 type="button"
-                onClick={handlePlayNow}
-                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-semibold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
+                onClick={goToPicks}
+                disabled={!selectedDocId}
+                className={`inline-flex items-center justify-center rounded-full font-semibold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)] ${
+                  selectedDocId
+                    ? "bg-[#FF7A00] hover:bg-orange-500 text-black"
+                    : "bg-white/10 text-white/50 cursor-not-allowed"
+                }`}
               >
-                Play now – make your next pick
+                Go to Picks
               </button>
 
               <Link
                 href="/leaderboards"
                 className="inline-flex items-center justify-center rounded-full border border-white/25 hover:border-sky-400/80 hover:text-sky-300 px-6 py-3 text-sm sm:text-base text-white/85"
               >
-                Check who&apos;s talking big
+                Leaderboard
               </Link>
             </div>
 
             <p className="text-[11px] text-white/50">
-              *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No gambling. 18+ only. Don&apos;t be a mug —
-              play for fun.
+              STREAKr is a free game of skill. No gambling. 18+ only. Play responsibly.
             </p>
           </div>
 
-          {/* Right card */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image src="/cricket.png" alt="Cricket under lights" fill className="object-cover opacity-85" priority />
@@ -482,140 +434,48 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                   BBL MODE
                 </span>
               </div>
-
-              <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
-                <div>
-                  <p className="text-[11px] text-white/60 mb-1">Group chats. Pub banter. Office comps.</p>
-                  <p className="text-sm font-semibold text-white">One streak. Battle your mates. Endless sledging.</p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={openMatchPicker}
-                  className="rounded-full bg-white/10 border border-white/20 text-white text-xs font-bold px-3 py-1 hover:border-orange-400/70 hover:text-orange-200 transition"
-                >
-                  Select match
-                </button>
-              </div>
             </div>
           </div>
         </section>
 
-        {/* HOW IT WORKS */}
-        <section className="mb-10">
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">How BBL STREAKr works</h2>
-          <p className="text-sm text-white/70 mb-4 max-w-2xl">
-            It&apos;s like tipping&apos;s louder cousin. Quick picks, live sweat, and bragging rights that last all week.
-          </p>
-
-          <div className="grid sm:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">1 · Pick a cricket question</p>
-              <p className="text-sm text-white/80">
-                Each match has hand-picked BBL questions. <span className="font-semibold">Yes</span> or{" "}
-                <span className="font-semibold">No</span> — back your gut and lock it in.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">2 · Build a filthy streak</p>
-              <p className="text-sm text-white/80">
-                Every correct answer adds <span className="font-semibold">+1</span> to your streak. One wrong pick and
-                you&apos;re <span className="font-semibold">back to zero</span>. No safety nets. Just nerve.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">3 · Flex on your mates</p>
-              <p className="text-sm text-white/80">
-                Climb the ladder, earn <span className="font-semibold">badges</span>, win{" "}
-                <span className="font-semibold">prizes</span>, and send screenshots into the group chat.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid sm:grid-cols-3 gap-4 text-sm text-white/75">
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">Built for</p>
-              <p>Group chats, office comps, pub and venue leagues.</p>
-            </div>
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">No deposit, no drama</p>
-              <p>Free to play. No odds, no multis, no gambling nonsense.</p>
-            </div>
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">Pure cricket chat</p>
-              <p>Back your eye for the game, not your bank account.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* PREVIEW */}
+        {/* ✅ AFL-STYLE: ONE MATCH + 6–8 PICKS (CLICK -> PICKS PAGE) */}
         <section className="mb-12">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold">Tonight&apos;s live BBL picks preview</h2>
-              <p className="text-sm text-white/70">
-                A taste of the open questions for the selected match. Jump into Picks to actually lock yours in.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={handlePlayNow}
-              className="text-sm text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
-            >
-              Make your next pick →
-            </button>
+          <div className="mb-4">
+            <h2 className="text-xl sm:text-2xl font-bold">Tonight&apos;s live BBL picks</h2>
+            <p className="text-sm text-white/70">
+              A taste of the open questions for tonight’s match. Tap any pick to jump into Picks.
+            </p>
           </div>
 
           <div className="mb-4 rounded-2xl border border-white/10 bg-[#020617] px-4 py-3">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="text-sm text-white/80">
-                <span className="font-semibold text-orange-200">Selected match:</span>{" "}
+                <span className="font-semibold text-orange-200">Match:</span>{" "}
                 {selectedMeta ? (
                   <>
                     <span className="font-semibold">{selectedMeta.match}</span>
                     {selectedMeta.venue ? <span className="text-white/60"> • {selectedMeta.venue}</span> : null}
-                    {selectedMeta.startTime ? (
-                      <>
-                        <span className="text-white/60"> • </span>
-                        <span className="text-white/70">
-                          {(() => {
-                            const { date, time } = formatStartDate(selectedMeta.startTime);
-                            return date && time ? `${date} • ${time} AEDT` : "";
-                          })()}
-                        </span>
-                      </>
-                    ) : null}
                   </>
                 ) : (
-                  <span className="text-white/60">{loadingUpcoming ? "Loading…" : "None selected"}</span>
+                  <span className="text-white/60">{loadingUpcoming ? "Loading…" : "Not available"}</span>
                 )}
               </div>
 
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={openMatchPicker}
-                  className="rounded-full border border-white/20 bg-white/5 px-4 py-2 text-xs font-semibold hover:border-orange-400/70 hover:text-orange-200 transition"
-                >
-                  Select match
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handlePlayNow}
-                  className="rounded-full bg-[#FF7A00] px-4 py-2 text-xs font-extrabold text-black hover:bg-orange-500 transition"
-                >
-                  Play →
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={goToPicks}
+                disabled={!selectedDocId}
+                className={`rounded-full px-4 py-2 text-xs font-extrabold transition ${
+                  selectedDocId ? "bg-[#FF7A00] text-black hover:bg-orange-500" : "bg-white/10 text-white/50 cursor-not-allowed"
+                }`}
+              >
+                Go to Picks →
+              </button>
             </div>
           </div>
 
           {error ? <p className="text-sm text-red-400 mb-3">{error}</p> : null}
-          {loading ? <p className="text-sm text-white/70">Loading questions…</p> : null}
+          {loading ? <p className="text-sm text-white/70">Loading picks…</p> : null}
 
           {!loading && !error && selectedDocId && previewQuestions.length === 0 ? (
             <p className="text-sm text-white/60">
@@ -624,16 +484,18 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           ) : null}
 
           {!loading && !error && !selectedDocId ? (
-            <p className="text-sm text-white/60">No match selected. Pick a match and the preview will load automatically.</p>
+            <p className="text-sm text-white/60">No match selected / found yet.</p>
           ) : null}
 
           <div className="space-y-3">
             {previewQuestions.map((q) => {
               const { date, time } = formatStartDate(q.startTime);
               return (
-                <div
+                <button
                   key={q.id}
-                  className="rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-orange-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
+                  type="button"
+                  onClick={goToPicks}
+                  className="w-full text-left rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-orange-500/25 hover:border-orange-400/60 transition shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-4 py-3 sm:px-5 sm:py-4"
                 >
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                     <div className="flex-1">
@@ -643,32 +505,20 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                         <span>
                           {date} • {time} AEDT
                         </span>
-                        <span>•</span>
-                        <span>{q.match}</span>
-                        <span>•</span>
-                        <span>{q.venue}</span>
                       </div>
                       <div className="text-sm sm:text-base font-semibold">{q.question}</div>
                     </div>
 
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
-                      <button
-                        type="button"
-                        onClick={handlePreviewPick}
-                        className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white transition"
-                      >
+                      <span className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-green-600 text-white">
                         Yes
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handlePreviewPick}
-                        className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition"
-                      >
+                      </span>
+                      <span className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-red-600 text-white">
                         No
-                      </button>
+                      </span>
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -678,206 +528,15 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           </div>
         </section>
 
-        {/* Footer */}
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
-            <p>
-              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.
-            </p>
+            <p>STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.</p>
             <Link href="/faq" className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline">
               FAQ
             </Link>
           </div>
         </footer>
       </div>
-
-      {/* MATCH PICKER MODAL */}
-      {showMatchPicker && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-2xl rounded-3xl bg-[#050816] border border-white/10 p-5 shadow-xl">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h2 className="text-lg font-extrabold text-white">Select a BBL match</h2>
-                <p className="text-sm text-white/60">Pick from upcoming matches, or paste a match code (docId).</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMatchPicker(false)}
-                className="text-sm text-gray-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-4">
-              {/* Upcoming */}
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-bold">Upcoming matches</p>
-                  <span className="text-[11px] text-white/50">Tap to select</span>
-                </div>
-
-                {upcomingError ? <p className="text-sm text-red-300">{upcomingError}</p> : null}
-                {loadingUpcoming ? <p className="text-sm text-white/70">Loading…</p> : null}
-
-                <div className="space-y-2 mt-2 max-h-[320px] overflow-auto pr-1">
-                  {upcoming.slice(0, 12).map((m) => {
-                    const { date, time } = formatStartDate(m.startTime);
-                    const active = m.id === selectedDocId;
-
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => applyDocId(m.id)}
-                        className={`w-full text-left rounded-2xl border px-3 py-3 transition ${
-                          active
-                            ? "border-orange-400/70 bg-orange-500/10"
-                            : "border-white/10 bg-black/20 hover:border-orange-400/50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1">
-                              <span className="inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/50 px-2 py-0.5 text-[10px] font-bold text-orange-200">
-                                {typeof m.gameNumber === "number" ? `Match ${m.gameNumber}` : "BBL"}
-                              </span>
-                              {date && time ? (
-                                <>
-                                  <span>•</span>
-                                  <span>
-                                    {date} • {time} AEDT
-                                  </span>
-                                </>
-                              ) : null}
-                            </div>
-                            <div className="font-extrabold text-sm text-white truncate">{m.match}</div>
-                            {m.venue ? <div className="text-xs text-white/60 truncate">{m.venue}</div> : null}
-                          </div>
-
-                          <span className="shrink-0 text-xs font-extrabold text-black rounded-full bg-[#FF7A00] px-3 py-1">
-                            Select
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Match code */}
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-sm font-bold mb-2">Enter match code (docId)</p>
-
-                <label className="block text-xs font-semibold text-white/70 mb-2">Match code</label>
-                <input
-                  value={matchCode}
-                  onChange={(e) => setMatchCode(e.target.value)}
-                  placeholder="BBL-2025-12-21-Ren-vs-Hur"
-                  className="w-full rounded-full bg-black/40 border border-white/15 px-4 py-2.5 text-sm outline-none focus:border-orange-400/70"
-                />
-
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applyDocId(matchCode)}
-                    className="flex-1 rounded-full bg-[#FF7A00] px-4 py-2.5 font-extrabold text-black hover:bg-orange-500 transition"
-                  >
-                    Use this match
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMatchCode("");
-                      setSelectedDocId("");
-                      // remove docId from URL
-                      const params = new URLSearchParams(searchParams?.toString() || "");
-                      params.delete("docId");
-                      router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname);
-                    }}
-                    className="rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/80 hover:border-orange-400/60 hover:text-orange-200 transition"
-                  >
-                    Clear
-                  </button>
-                </div>
-
-                <div className="mt-4 rounded-2xl border border-white/10 bg-black/30 p-3">
-                  <p className="text-[11px] text-white/60">
-                    Tip: the match code is the Firestore document ID under{" "}
-                    <span className="text-orange-200 font-semibold">cricketRounds</span>.
-                  </p>
-                </div>
-
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowMatchPicker(false)}
-                    className="w-full rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/80 hover:border-orange-400/60 hover:text-orange-200 transition"
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-col sm:flex-row gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowMatchPicker(false);
-                  handlePlayNow();
-                }}
-                className="flex-1 inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm"
-              >
-                Play selected match →
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowMatchPicker(false)}
-                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 bg-white/5 hover:border-orange-400/70 hover:text-orange-200 px-6 py-3 text-sm text-white/80"
-              >
-                Keep browsing
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AUTH MODAL */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold">Log in to play</h2>
-              <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm text-gray-400 hover:text-white">
-                ✕
-              </button>
-            </div>
-
-            <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href={`/auth?mode=login&returnTo=${encodeURIComponent(picksHref)}`}
-                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-                onClick={() => setShowAuthModal(false)}
-              >
-                Login
-              </Link>
-
-              <Link
-                href={`/auth?mode=signup&returnTo=${encodeURIComponent(picksHref)}`}
-                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-                onClick={() => setShowAuthModal(false)}
-              >
-                Sign up
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
