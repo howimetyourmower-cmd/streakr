@@ -1,5 +1,5 @@
 // /app/api/leaderboard/route.ts
-
+export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
 
