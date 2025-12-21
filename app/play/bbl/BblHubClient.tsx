@@ -7,20 +7,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
-import {
-  collection,
-  getDocs,
-  limit,
-  orderBy,
-  query,
-  where,
-  Timestamp,
-} from "firebase/firestore";
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 
 type BblRoundDoc = {
   match?: string;
   venue?: string;
-  startTime?: string; // ISO string in your docs
+  startTime?: string; // ISO string
   league?: string; // "BBL" | "WBBL"
   gameNumber?: number; // Match 8 etc
 };
@@ -59,16 +51,13 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Manual input (still useful for admin/testing)
   const [manualDocId, setManualDocId] = useState(initialDocId || "");
   const cleanedManualDocId = manualDocId.trim();
 
-  // Auto selector
   const [upcoming, setUpcoming] = useState<MatchCard[]>([]);
   const [loadingUpcoming, setLoadingUpcoming] = useState(true);
   const [upcomingError, setUpcomingError] = useState("");
 
-  // If we came in with ?docId=... we treat it as "selected"
   const selectedDocId = useMemo(() => cleanedManualDocId, [cleanedManualDocId]);
 
   const picksHref = useMemo(() => {
@@ -88,7 +77,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
     router.push(`/picks?sport=BBL&docId=${encodeURIComponent(d)}`);
   };
 
-  // Load upcoming matches from cricketRounds where league == "BBL" and startTime >= now
+  // ✅ INDEX-FREE: orderBy(startTime) only, then filter in JS
   useEffect(() => {
     let cancelled = false;
 
@@ -97,21 +86,18 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
       setUpcomingError("");
 
       try {
-        const nowIso = new Date().toISOString();
+        const now = Date.now();
 
-        // NOTE: This assumes your docs store startTime as an ISO string.
-        // If you later switch to Firestore Timestamp, we can adjust quickly.
+        // Single-field index only (startTime)
         const qRef = query(
           collection(db, "cricketRounds"),
-          where("league", "==", "BBL"),
-          where("startTime", ">=", nowIso),
           orderBy("startTime", "asc"),
-          limit(6)
+          limit(50)
         );
 
         const snap = await getDocs(qRef);
 
-        const rows: MatchCard[] = snap.docs.map((d) => {
+        const rowsAll: MatchCard[] = snap.docs.map((d) => {
           const data = d.data() as BblRoundDoc;
 
           return {
@@ -123,13 +109,28 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
           };
         });
 
-        if (!cancelled) {
-          setUpcoming(rows);
-        }
+        // Filter: league BBL + startTime in the future
+        const filtered = rowsAll
+          .filter((m) => {
+            const leagueOk = true; // default true if missing
+            const startOk = !!m.startTime && !Number.isNaN(new Date(m.startTime).getTime());
+            if (!startOk) return false;
+
+            const data = snap.docs.find((x) => x.id === m.docId)?.data() as BblRoundDoc | undefined;
+            const isBbl = (data?.league || "").toUpperCase() === "BBL";
+
+            const startMs = new Date(m.startTime).getTime();
+            return isBbl && startMs >= now;
+          })
+          .slice(0, 6);
+
+        if (!cancelled) setUpcoming(filtered);
       } catch (e) {
         console.error(e);
         if (!cancelled) {
-          setUpcomingError("Couldn’t load upcoming matches. Use match code for now.");
+          setUpcomingError(
+            "Couldn’t load upcoming matches. Check Firestore rules for cricketRounds."
+          );
         }
       } finally {
         if (!cancelled) setLoadingUpcoming(false);
@@ -137,7 +138,6 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
     };
 
     loadUpcoming();
-
     return () => {
       cancelled = true;
     };
@@ -198,13 +198,10 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
               </span>
             </div>
 
-            {/* AUTO UPCOMING MATCHES */}
             <div className="rounded-2xl border border-white/10 bg-[#020617] p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h2 className="text-sm sm:text-base font-bold">Upcoming matches</h2>
-                <span className="text-[11px] text-white/50">
-                  Tap a match to play
-                </span>
+                <span className="text-[11px] text-white/50">Tap a match to play</span>
               </div>
 
               {upcomingError ? (
@@ -217,7 +214,8 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
 
               {!loadingUpcoming && upcoming.length === 0 && !upcomingError ? (
                 <p className="text-sm text-white/60">
-                  No upcoming BBL matches found. Use the match code below for now.
+                  No upcoming BBL matches found. Add future startTime values (and league: "BBL")
+                  to cricketRounds.
                 </p>
               ) : null}
 
@@ -265,7 +263,6 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
               </div>
             </div>
 
-            {/* MANUAL DOC ID (keep for now) */}
             <div className="mt-4 rounded-2xl border border-white/10 bg-[#020617] p-4 sm:p-5">
               <p className="text-sm font-semibold mb-2">Enter a BBL match code to start</p>
 
@@ -302,7 +299,6 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
             </div>
           </div>
 
-          {/* RIGHT HERO CARD */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
               <Image
@@ -338,8 +334,8 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
-              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.
-              Play responsibly.
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and
+              conditions. Play responsibly.
             </p>
             <Link
               href="/faq"
@@ -366,7 +362,8 @@ export default function BblHubClient({ initialDocId }: { initialDocId: string })
             </div>
 
             <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
+              You need a free STREAKr account to make picks, build your streak and appear on the
+              leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
