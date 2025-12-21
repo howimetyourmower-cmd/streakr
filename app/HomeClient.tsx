@@ -62,7 +62,6 @@ function IconWrap({
         accentClasses
       )}
     >
-      {/* soft highlight ring */}
       <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-tr from-white/0 via-white/10 to-white/0 opacity-40" />
       {children}
     </div>
@@ -180,22 +179,13 @@ function TileCard({
         isClickable && "cursor-pointer hover:-translate-y-1"
       )}
     >
-      {/* Background texture layers */}
-      <div className={cn("pointer-events-none absolute inset-0 opacity-100")}>
-        {/* top glow */}
+      <div className="pointer-events-none absolute inset-0 opacity-100">
         <div className={cn("absolute inset-0 bg-gradient-to-br", topGradient)} />
-
-        {/* subtle vignette */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/20 to-transparent" />
-
-        {/* shimmer sweep */}
         <div className="absolute -left-1/2 top-0 h-full w-1/2 rotate-12 bg-gradient-to-r from-transparent via-white/7 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 animate-shimmer" />
-
-        {/* grain */}
         <div className="absolute inset-0 opacity-[0.06] mix-blend-overlay bg-[radial-gradient(circle_at_20%_30%,white,transparent_40%),radial-gradient(circle_at_80%_70%,white,transparent_35%)]" />
       </div>
 
-      {/* TOP */}
       <div className="relative flex items-start gap-5">
         <IconWrap accent={tile.accent}>{tile.icon}</IconWrap>
 
@@ -214,7 +204,6 @@ function TileCard({
         </div>
       </div>
 
-      {/* BOTTOM */}
       <div className="relative pt-6">
         <div className="flex items-center justify-between gap-3">
           {tile.status === "live" ? (
@@ -234,7 +223,6 @@ function TileCard({
           )}
         </div>
 
-        {/* tiny helper text */}
         {tile.status === "live" ? (
           <p className="mt-3 text-[11px] text-white/45">
             Free to play • 18+ • No gambling • Just bragging rights
@@ -246,7 +234,6 @@ function TileCard({
         )}
       </div>
 
-      {/* Hover outline glow */}
       <div className="pointer-events-none absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
         <div className="absolute inset-0 rounded-3xl ring-1 ring-white/10" />
       </div>
@@ -265,13 +252,170 @@ function TileCard({
 }
 
 /* =========================
+   MOBILE PICKER
+========================= */
+
+function MobilePickerModal({
+  open,
+  tiles,
+  aflLiveCount,
+  bblLiveCount,
+  onClose,
+}: {
+  open: boolean;
+  tiles: Tile[];
+  aflLiveCount?: number;
+  bblLiveCount?: number;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 md:hidden">
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Close picker"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/75"
+      />
+
+      {/* Sheet */}
+      <div className="absolute left-0 right-0 bottom-0 rounded-t-3xl border-t border-white/10 bg-[#050816] shadow-[0_-30px_100px_rgba(0,0,0,0.85)]">
+        <div className="px-5 pt-4 pb-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-white/60 uppercase tracking-[0.22em]">
+                Choose a sport
+              </p>
+              <p className="text-lg font-extrabold">Play STREAKr</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-semibold text-white/75"
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="mt-3 h-1 w-12 rounded-full bg-white/15 mx-auto" />
+        </div>
+
+        <div className="px-5 pb-6">
+          <div className="grid gap-4">
+            {tiles.map((t) => {
+              const liveCount =
+                t.key === "AFL" ? aflLiveCount : t.key === "BBL" ? bblLiveCount : undefined;
+
+              const isClickable = Boolean(t.href) && t.status === "live";
+
+              const row = (
+                <div
+                  className={cn(
+                    "group relative overflow-hidden rounded-2xl border border-white/10 bg-[#020617] px-4 py-4",
+                    "shadow-[0_18px_60px_rgba(0,0,0,0.7)]",
+                    isClickable && "active:scale-[0.99]"
+                  )}
+                >
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/0 via-white/6 to-white/0 opacity-60" />
+
+                  <div className="relative flex items-center gap-4">
+                    <IconWrap accent={t.accent}>{t.icon}</IconWrap>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-white/55 uppercase tracking-wide">
+                        {t.status === "live" ? "Live now" : "Coming soon"}
+                      </p>
+                      <p className="text-lg font-extrabold text-white leading-tight">
+                        {t.title}
+                      </p>
+                      <p className="mt-1 text-sm text-white/70 line-clamp-2">
+                        {t.subtitle}
+                      </p>
+
+                      <div className="mt-3">
+                        {t.status === "live" ? (
+                          <LivePill count={liveCount} />
+                        ) : (
+                          <SoonPill text={t.comingText || "Coming soon"} />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      {t.status === "live" ? (
+                        <span className="rounded-full bg-[#FF7A00] px-4 py-2 text-xs font-extrabold text-black shadow-[0_0_26px_rgba(255,122,0,0.6)]">
+                          Play →
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-bold text-white/55">
+                          Locked
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+
+              if (isClickable && t.href) {
+                return (
+                  <Link
+                    key={t.key}
+                    href={t.href}
+                    className="block"
+                    onClick={onClose}
+                  >
+                    {row}
+                  </Link>
+                );
+              }
+
+              return (
+                <div key={t.key} className="opacity-90">
+                  {row}
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="mt-4 text-[11px] text-white/45">
+            Free to play • 18+ • No gambling • Just bragging rights
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================
    PAGE
 ========================= */
 
 export default function HomeClient() {
-  // Live match counts
   const [aflLiveCount, setAflLiveCount] = useState<number | undefined>(undefined);
   const [bblLiveCount, setBblLiveCount] = useState<number | undefined>(undefined);
+
+  // Mobile picker
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -295,14 +439,13 @@ export default function HomeClient() {
           setBblLiveCount(countLiveGames(bblData));
         }
       } catch {
-        // silent — UI still looks great without counts
+        // silent
       }
     };
 
     loadCounts();
-
-    // Optional: refresh live counts periodically
     const t = window.setInterval(loadCounts, 60_000);
+
     return () => {
       cancelled = true;
       window.clearInterval(t);
@@ -368,20 +511,38 @@ export default function HomeClient() {
             <span className="text-[#FF7A00] font-extrabold">No</span> picks.
             Clean sweep per match — get one wrong, back to zero.
           </p>
+
+          {/* Mobile primary CTA -> picker */}
+          <div className="mt-6 md:hidden">
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="w-full rounded-2xl bg-[#FF7A00] px-5 py-4 text-black font-extrabold shadow-[0_18px_60px_rgba(0,0,0,0.7)] active:scale-[0.99]"
+            >
+              Choose a sport to play →
+            </button>
+
+            <div className="mt-3 flex items-center justify-between text-[11px] text-white/55">
+              <span>Free to play • 18+</span>
+              <span>No gambling • Bragging rights</span>
+            </div>
+          </div>
         </div>
 
-        {/* TILES */}
-        <section className="grid gap-6 md:grid-cols-3">
+        {/* TILES (desktop & tablet) */}
+        <section className="hidden md:grid gap-6 md:grid-cols-3">
           {tiles.map((t) => (
             <TileCard
               key={t.key}
               tile={t}
-              liveCount={t.key === "AFL" ? aflLiveCount : t.key === "BBL" ? bblLiveCount : undefined}
+              liveCount={
+                t.key === "AFL" ? aflLiveCount : t.key === "BBL" ? bblLiveCount : undefined
+              }
             />
           ))}
         </section>
 
-        {/* “Other sports coming soon” — keep your vibe */}
+        {/* “Other sports coming soon” */}
         <div className="mt-10 rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
           <div className="text-sm font-semibold text-white/85 mb-3">
             Other sports coming soon
@@ -402,6 +563,15 @@ export default function HomeClient() {
           Built for group chats, office comps, pub and venue leagues. Free to play • 18+ • No gambling • Just bragging rights.
         </footer>
       </div>
+
+      {/* MOBILE PICKER MODAL */}
+      <MobilePickerModal
+        open={pickerOpen}
+        tiles={tiles}
+        aflLiveCount={aflLiveCount}
+        bblLiveCount={bblLiveCount}
+        onClose={() => setPickerOpen(false)}
+      />
 
       {/* Keyframes for shimmer */}
       <style jsx global>{`
