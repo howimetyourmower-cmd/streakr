@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -52,6 +52,7 @@ type UpcomingMatch = {
 export default function BblHubClient({ initialDocId }: { initialDocId?: string }) {
   const { user } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -108,6 +109,56 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     };
   };
 
+  const syncUrlWithDocId = (docId: string) => {
+    const clean = (docId || "").trim();
+    if (!clean) return;
+
+    // Keep whatever query params exist, but set docId
+    const params = new URLSearchParams(searchParams?.toString() || "");
+    if (params.get("docId") === clean) return;
+
+    params.set("docId", clean);
+    // keep sport tag if you ever use it here
+    // params.set("sport", "BBL");
+
+    router.replace(`${pathname}?${params.toString()}`);
+  };
+
+  const setSelected = (docId: string, { closePicker }: { closePicker?: boolean } = {}) => {
+    const clean = (docId || "").trim();
+    if (!clean) return;
+
+    setSelectedDocId(clean);
+    setMatchCode(clean);
+    syncUrlWithDocId(clean);
+
+    if (closePicker) setShowMatchPicker(false);
+  };
+
+  const pickBestAutoMatch = (list: UpcomingMatch[]) => {
+    if (!Array.isArray(list) || list.length === 0) return "";
+
+    // Choose the soonest match that starts in the future (or now). If none, fall back to earliest.
+    const now = Date.now();
+    const withTimes = list
+      .map((m) => ({
+        ...m,
+        ts: m.startTime ? new Date(m.startTime).getTime() : 0,
+      }))
+      .filter((m) => m.ts > 0);
+
+    if (withTimes.length === 0) return list[0]?.id || "";
+
+    const future = withTimes
+      .filter((m) => m.ts >= now - 5 * 60 * 1000) // allow 5 min grace
+      .sort((a, b) => a.ts - b.ts);
+
+    if (future[0]?.id) return future[0].id;
+
+    const earliest = withTimes.sort((a, b) => a.ts - b.ts)[0];
+    return earliest?.id || list[0]?.id || "";
+  };
+
   const selectedMeta = useMemo(() => {
     const found = upcoming.find((m) => m.id === selectedDocId);
     return found || null;
@@ -153,8 +204,10 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     const q = (searchParams?.get("docId") || "").trim();
     if (!q) return;
     if (q === selectedDocId) return;
+    // Query param wins
     setSelectedDocId(q);
     setMatchCode(q);
+    // do not call syncUrlWithDocId here (already in the URL)
   }, [searchParams, selectedDocId]);
 
   // ---- Load upcoming matches ----
@@ -171,6 +224,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
         const data = (await res.json()) as { matches?: UpcomingMatch[] };
         const list = Array.isArray(data.matches) ? data.matches : [];
 
+        // Sort by startTime asc (fallback to 0)
         list.sort((a, b) => {
           const da = a.startTime ? new Date(a.startTime).getTime() : 0;
           const db = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -179,19 +233,20 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
         setUpcoming(list);
 
-        // ✅ AUTO-SELECT (this is what you asked for)
-        // If user has not selected anything (no prop, no query, no state), choose first upcoming.
-        // And only do this once.
+        // ✅ AUTO-SELECT + ✅ write docId into URL so it stays on refresh
         if (!didAutoSelectRef.current) {
-          const hasExplicit = !!selectedDocId;
-          const firstId = list[0]?.id;
+          didAutoSelectRef.current = true;
 
-          if (!hasExplicit && firstId) {
-            didAutoSelectRef.current = true;
-            setSelectedDocId(firstId);
-            setMatchCode(firstId);
+          const hasExplicit =
+            !!(searchParams?.get("docId") || "").trim() || !!(initialFromProps || "").trim() || !!selectedDocId;
+
+          if (!hasExplicit) {
+            const bestId = pickBestAutoMatch(list);
+            if (bestId) setSelected(bestId);
           } else {
-            didAutoSelectRef.current = true;
+            // If they already have a selection, ensure URL matches it
+            const existing = (searchParams?.get("docId") || "").trim();
+            if (!existing && selectedDocId) syncUrlWithDocId(selectedDocId);
           }
         }
       } catch (e) {
@@ -220,11 +275,9 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
         setLoading(true);
         setError("");
 
-        // Assumes /api/picks supports sport=BBL & docId
-        const res = await fetch(
-          `/api/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`,
-          { cache: "no-store" }
-        );
+        const res = await fetch(`/api/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`, {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
@@ -262,7 +315,6 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     loadPreview();
   }, [selectedDocId]);
 
-  // ✅ Make the preview feel alive even when there are lots of open questions
   const previewQuestions = useMemo(() => questions.slice(0, 6), [questions]);
 
   // ---- Actions ----
@@ -284,11 +336,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
   const openMatchPicker = () => setShowMatchPicker(true);
 
   const applyDocId = (docId: string) => {
-    const clean = (docId || "").trim();
-    if (!clean) return;
-    setSelectedDocId(clean);
-    setMatchCode(clean);
-    setShowMatchPicker(false);
+    setSelected(docId, { closePicker: true });
   };
 
   return (
@@ -310,9 +358,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
             <div className="pointer-events-none absolute bottom-10 left-1/2 -translate-x-1/2 text-center px-4">
-              <p className="text-xs sm:text-sm text-white/70 tracking-[0.25em] uppercase mb-1">
-                Welcome to
-              </p>
+              <p className="text-xs sm:text-sm text-white/70 tracking-[0.25em] uppercase mb-1">Welcome to</p>
               <p className="text-3xl sm:text-4xl font-extrabold text-[#FF7A00] drop-shadow-[0_0_24px_rgba(255,122,0,0.9)]">
                 STREAKr
               </p>
@@ -358,8 +404,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
           {selectedMeta ? (
             <p className="mt-2 text-xs text-white/60">
-              Selected:{" "}
-              <span className="text-white/80 font-semibold">{selectedMeta.match}</span>
+              Selected: <span className="text-white/80 font-semibold">{selectedMeta.match}</span>
               {selectedMeta.venue ? <span className="text-white/50"> • {selectedMeta.venue}</span> : null}
             </p>
           ) : (
@@ -379,16 +424,14 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                 Cricket. Banter. Bragging rights.
               </span>
 
-              <span className="block text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">
-                BBL STREAKr
-              </span>
+              <span className="block text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">BBL STREAKr</span>
 
               <span className="block text-white">How Long Can You Last?</span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your cricket? Prove it or pipe down. Back your gut, ride the hot hand, and roast
-              your mates when you&apos;re on a heater. One wrong call and your streak is cooked — back to zip.
+              Think you know your cricket? Prove it or pipe down. Back your gut, ride the hot hand, and roast your
+              mates when you&apos;re on a heater. One wrong call and your streak is cooked — back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
@@ -547,9 +590,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                     ) : null}
                   </>
                 ) : (
-                  <span className="text-white/60">
-                    {loadingUpcoming ? "Loading…" : "None selected"}
-                  </span>
+                  <span className="text-white/60">{loadingUpcoming ? "Loading…" : "None selected"}</span>
                 )}
               </div>
 
@@ -583,9 +624,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           ) : null}
 
           {!loading && !error && !selectedDocId ? (
-            <p className="text-sm text-white/60">
-              No match selected. Pick a match and the preview will load automatically.
-            </p>
+            <p className="text-sm text-white/60">No match selected. Pick a match and the preview will load automatically.</p>
           ) : null}
 
           <div className="space-y-3">
@@ -751,6 +790,10 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                     onClick={() => {
                       setMatchCode("");
                       setSelectedDocId("");
+                      // remove docId from URL
+                      const params = new URLSearchParams(searchParams?.toString() || "");
+                      params.delete("docId");
+                      router.replace(params.toString() ? `${pathname}?${params.toString()}` : pathname);
                     }}
                     className="rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/80 hover:border-orange-400/60 hover:text-orange-200 transition"
                   >
@@ -806,11 +849,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
             <div className="flex items-start justify-between mb-4">
               <h2 className="text-lg font-semibold">Log in to play</h2>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(false)}
-                className="text-sm text-gray-400 hover:text-white"
-              >
+              <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm text-gray-400 hover:text-white">
                 ✕
               </button>
             </div>
