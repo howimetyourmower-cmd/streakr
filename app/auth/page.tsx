@@ -1,9 +1,8 @@
 
-export const dynamic = "force-dynamic";
-
 // app/auth/page.tsx
 "use client";
 
+export const dynamic = "force-dynamic";
 import { useEffect, useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import {
