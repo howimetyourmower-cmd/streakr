@@ -1,8 +1,8 @@
 // /app/faq/page.tsx
 
-export const dynamic = "force-dynamic"
-"use client";
 
+"use client";
+export const dynamic = "force-dynamic"
 import { FormEvent, useState } from "react";
 
 type ContactCategory =
