@@ -31,12 +31,16 @@ type Scope =
   | "round-23"
   | "finals";
 
+type Sport = "AFL" | "BBL";
+
 type LeaderboardEntry = {
   uid: string;
   displayName: string;
   username?: string;
   avatarUrl?: string;
   rank: number;
+
+  // sport-scoped stats
   currentStreak: number;
   longestStreak: number;
   totalWins: number;
@@ -58,10 +62,22 @@ type LeaderboardApiResponse = {
   userLifetime: UserLifetimeStats | null;
 };
 
+function normalizeSport(input: string | null): Sport {
+  const s = (input || "").trim().toUpperCase();
+  if (s === "BBL") return "BBL";
+  return "AFL"; // default
+}
+
+function num(v: any, fallback = 0): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
+
     const scope = (url.searchParams.get("scope") || "overall") as Scope;
+    const sport: Sport = normalizeSport(url.searchParams.get("sport"));
 
     // Identify current user (for highlighting / lifetime box)
     let currentUid: string | null = null;
@@ -76,6 +92,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // NOTE: your existing behavior: "overall" sorts by longestStreak,
+    // everything else sorts by currentStreak.
     const useLongest = scope === "overall";
 
     const snap = await db.collection("users").get();
@@ -90,28 +108,42 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const firstName = (data.firstName as string) || "";
       const surname = (data.surname as string) || "";
       const username = (data.username as string) || "";
-      const avatarUrl =
-        (data.avatarUrl as string) ||
-        (data.photoURL as string) ||
-        "";
+      const avatarUrl = (data.avatarUrl as string) || (data.photoURL as string) || "";
 
       const displayName =
         firstName || surname
           ? `${firstName} ${surname}`.trim()
           : username || "Player";
 
-      const currentStreak =
-        typeof data.currentStreak === "number" ? data.currentStreak : 0;
-      const longestStreak =
-        typeof data.longestStreak === "number" ? data.longestStreak : 0;
-      const totalWins =
-        typeof data.totalWins === "number" ? data.totalWins : 0;
-      const totalLosses =
-        typeof data.totalLosses === "number" ? data.totalLosses : 0;
-      const totalPicks =
-        typeof data.totalPicks === "number"
-          ? data.totalPicks
-          : totalWins + totalLosses;
+      /**
+       * ✅ Sport-scoped stats live here:
+       * users/{uid}.stats.AFL or users/{uid}.stats.BBL
+       *
+       * Backwards compatibility:
+       * if stats[sport] doesn't exist yet, fall back to old top-level fields
+       * so nothing crashes while you migrate settlement.
+       */
+      const sportStats = (data?.stats && data.stats[sport]) ? data.stats[sport] : null;
+
+      const currentStreak = sportStats
+        ? num(sportStats.currentStreak, 0)
+        : num(data.currentStreak, 0);
+
+      const longestStreak = sportStats
+        ? num(sportStats.longestStreak, 0)
+        : num(data.longestStreak, 0);
+
+      const totalWins = sportStats
+        ? num(sportStats.totalWins, 0)
+        : num(data.totalWins, 0);
+
+      const totalLosses = sportStats
+        ? num(sportStats.totalLosses, 0)
+        : num(data.totalLosses, 0);
+
+      const totalPicks = sportStats
+        ? num(sportStats.totalPicks, totalWins + totalLosses)
+        : num(data.totalPicks, totalWins + totalLosses);
 
       const games = totalPicks > 0 ? totalPicks : totalWins + totalLosses;
       const winPct = games > 0 ? totalWins / games : 0;
@@ -146,6 +178,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     entries.sort((a, b) => {
       const aVal = useLongest ? a.longestStreak : a.currentStreak;
       const bVal = useLongest ? b.longestStreak : b.currentStreak;
+
       if (bVal !== aVal) return bVal - aVal;
       // tie-breaker: higher win% first
       if (b.winPct !== a.winPct) return b.winPct - a.winPct;
