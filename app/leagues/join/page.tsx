@@ -1,4 +1,6 @@
 // /app/leagues/join/page.tsx
+
+export const dynamic = "force-dynamic"
 import { Suspense } from "react";
 import JoinLeagueClient from "./JoinLeagueClient";
 
