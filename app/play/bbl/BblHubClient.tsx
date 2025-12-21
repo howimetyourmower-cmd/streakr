@@ -1,10 +1,10 @@
 // /app/play/bbl/BblHubClient.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -52,12 +52,17 @@ type UpcomingMatch = {
 export default function BblHubClient({ initialDocId }: { initialDocId?: string }) {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Match selection
-  const [selectedDocId, setSelectedDocId] = useState<string>((initialDocId || "").trim());
-  const [matchCode, setMatchCode] = useState<string>((initialDocId || "").trim());
+  // ✅ Source of truth for selected match
+  const initialFromProps = (initialDocId || "").trim();
+  const initialFromQuery = (searchParams?.get("docId") || "").trim();
+  const initialResolved = initialFromQuery || initialFromProps;
+
+  const [selectedDocId, setSelectedDocId] = useState<string>(initialResolved);
+  const [matchCode, setMatchCode] = useState<string>(initialResolved);
 
   // Mobile picker modal
   const [showMatchPicker, setShowMatchPicker] = useState(false);
@@ -72,34 +77,16 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Optional preloader (if you have it on AFL and want identical feel)
+  // Optional preloader (safe if video missing)
   const [showPreloader, setShowPreloader] = useState(true);
   const [isPreloaderFading, setIsPreloaderFading] = useState(false);
 
   const seasonChip = "BBL SEASON 2025/26";
 
-  const selectedMatchLabel = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    if (!found) return "SELECT A MATCH";
-    if (typeof found.gameNumber === "number") return `MATCH ${found.gameNumber}`;
-    return "MATCH SELECTED";
-  }, [upcoming, selectedDocId]);
+  // Prevent auto-select from overriding an explicit selection
+  const didAutoSelectRef = useRef(false);
 
-  const selectedMatchDisplay = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    return found?.match || "";
-  }, [upcoming, selectedDocId]);
-
-  const selectedMeta = useMemo(() => {
-    const found = upcoming.find((m) => m.id === selectedDocId);
-    return found || null;
-  }, [upcoming, selectedDocId]);
-
-  const picksHref = useMemo(() => {
-    if (!selectedDocId) return "/picks?sport=BBL";
-    return `/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`;
-  }, [selectedDocId]);
-
+  // ---- Helpers ----
   const formatStartDate = (iso?: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -121,7 +108,29 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     };
   };
 
-  // Preloader timing (safe if you don't have /preloadervideo.mp4 — it still won't break builds)
+  const selectedMeta = useMemo(() => {
+    const found = upcoming.find((m) => m.id === selectedDocId);
+    return found || null;
+  }, [upcoming, selectedDocId]);
+
+  const selectedMatchLabel = useMemo(() => {
+    const found = upcoming.find((m) => m.id === selectedDocId);
+    if (!found) return "SELECT A MATCH";
+    if (typeof found.gameNumber === "number") return `MATCH ${found.gameNumber}`;
+    return "MATCH SELECTED";
+  }, [upcoming, selectedDocId]);
+
+  const selectedMatchDisplay = useMemo(() => {
+    const found = upcoming.find((m) => m.id === selectedDocId);
+    return found?.match || "";
+  }, [upcoming, selectedDocId]);
+
+  const picksHref = useMemo(() => {
+    if (!selectedDocId) return "/picks?sport=BBL";
+    return `/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`;
+  }, [selectedDocId]);
+
+  // ---- Preloader ----
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.body.style.overflow = "hidden";
@@ -139,7 +148,16 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     };
   }, []);
 
-  // Load upcoming matches (your working setup)
+  // ---- Keep state in sync if query docId changes (e.g. user navigates with a link) ----
+  useEffect(() => {
+    const q = (searchParams?.get("docId") || "").trim();
+    if (!q) return;
+    if (q === selectedDocId) return;
+    setSelectedDocId(q);
+    setMatchCode(q);
+  }, [searchParams, selectedDocId]);
+
+  // ---- Load upcoming matches ----
   useEffect(() => {
     const loadUpcoming = async () => {
       try {
@@ -161,10 +179,20 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
 
         setUpcoming(list);
 
-        // If no selected match, auto-select first
-        if (!selectedDocId && list[0]?.id) {
-          setSelectedDocId(list[0].id);
-          setMatchCode(list[0].id);
+        // ✅ AUTO-SELECT (this is what you asked for)
+        // If user has not selected anything (no prop, no query, no state), choose first upcoming.
+        // And only do this once.
+        if (!didAutoSelectRef.current) {
+          const hasExplicit = !!selectedDocId;
+          const firstId = list[0]?.id;
+
+          if (!hasExplicit && firstId) {
+            didAutoSelectRef.current = true;
+            setSelectedDocId(firstId);
+            setMatchCode(firstId);
+          } else {
+            didAutoSelectRef.current = true;
+          }
         }
       } catch (e) {
         console.error(e);
@@ -178,7 +206,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load preview questions for selected match
+  // ---- Load preview questions for selected match (AUTO LOAD) ----
   useEffect(() => {
     const loadPreview = async () => {
       if (!selectedDocId) {
@@ -192,7 +220,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
         setLoading(true);
         setError("");
 
-        // Assumes your /api/picks supports sport=BBL & docId
+        // Assumes /api/picks supports sport=BBL & docId
         const res = await fetch(
           `/api/picks?sport=BBL&docId=${encodeURIComponent(selectedDocId)}`,
           { cache: "no-store" }
@@ -225,6 +253,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
       } catch (e) {
         console.error(e);
         setError("Failed to load preview questions.");
+        setQuestions([]);
       } finally {
         setLoading(false);
       }
@@ -233,8 +262,10 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     loadPreview();
   }, [selectedDocId]);
 
-  const previewQuestions = questions.slice(0, 6);
+  // ✅ Make the preview feel alive even when there are lots of open questions
+  const previewQuestions = useMemo(() => questions.slice(0, 6), [questions]);
 
+  // ---- Actions ----
   const requireMatchThenAuth = (after?: () => void) => {
     if (!selectedDocId) {
       setShowMatchPicker(true);
@@ -247,13 +278,8 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
     after?.();
   };
 
-  const handlePlayNow = () => {
-    requireMatchThenAuth(() => router.push(picksHref));
-  };
-
-  const handlePreviewPick = () => {
-    requireMatchThenAuth(() => router.push(picksHref));
-  };
+  const handlePlayNow = () => requireMatchThenAuth(() => router.push(picksHref));
+  const handlePreviewPick = () => requireMatchThenAuth(() => router.push(picksHref));
 
   const openMatchPicker = () => setShowMatchPicker(true);
 
@@ -321,7 +347,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                 className="shrink-0 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap hover:bg-orange-500/15 transition"
                 title="Select a match"
               >
-                {selectedMatchLabel}
+                {loadingUpcoming ? "LOADING…" : selectedMatchLabel}
               </button>
 
               <span className="min-w-0 flex-1 inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[10px] sm:text-[11px] font-semibold tracking-wide uppercase text-orange-200 whitespace-nowrap">
@@ -330,13 +356,19 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
             </div>
           </div>
 
-          {selectedMatchDisplay ? (
+          {selectedMeta ? (
             <p className="mt-2 text-xs text-white/60">
-              Selected: <span className="text-white/80 font-semibold">{selectedMatchDisplay}</span>
+              Selected:{" "}
+              <span className="text-white/80 font-semibold">{selectedMeta.match}</span>
+              {selectedMeta.venue ? <span className="text-white/50"> • {selectedMeta.venue}</span> : null}
             </p>
           ) : (
-            <p className="mt-2 text-xs text-white/50">Select a match to preview questions and play.</p>
+            <p className="mt-2 text-xs text-white/50">
+              {loadingUpcoming ? "Loading matches…" : "Select a match to preview questions and play."}
+            </p>
           )}
+
+          {upcomingError ? <p className="mt-2 text-xs text-red-300">{upcomingError}</p> : null}
         </div>
 
         {/* HERO */}
@@ -394,13 +426,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           {/* Right card */}
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
-              <Image
-                src="/cricket.png"
-                alt="Cricket under lights"
-                fill
-                className="object-cover opacity-85"
-                priority
-              />
+              <Image src="/cricket.png" alt="Cricket under lights" fill className="object-cover opacity-85" priority />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
               <div className="absolute top-4 left-4 flex items-center gap-2">
@@ -417,9 +443,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
               <div className="absolute bottom-4 left-4 right-4 flex items-end justify-between">
                 <div>
                   <p className="text-[11px] text-white/60 mb-1">Group chats. Pub banter. Office comps.</p>
-                  <p className="text-sm font-semibold text-white">
-                    One streak. Battle your mates. Endless sledging.
-                  </p>
+                  <p className="text-sm font-semibold text-white">One streak. Battle your mates. Endless sledging.</p>
                 </div>
 
                 <button
@@ -510,9 +534,22 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                   <>
                     <span className="font-semibold">{selectedMeta.match}</span>
                     {selectedMeta.venue ? <span className="text-white/60"> • {selectedMeta.venue}</span> : null}
+                    {selectedMeta.startTime ? (
+                      <>
+                        <span className="text-white/60"> • </span>
+                        <span className="text-white/70">
+                          {(() => {
+                            const { date, time } = formatStartDate(selectedMeta.startTime);
+                            return date && time ? `${date} • ${time} AEDT` : "";
+                          })()}
+                        </span>
+                      </>
+                    ) : null}
                   </>
                 ) : (
-                  <span className="text-white/60">None selected</span>
+                  <span className="text-white/60">
+                    {loadingUpcoming ? "Loading…" : "None selected"}
+                  </span>
                 )}
               </div>
 
@@ -539,9 +576,15 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
           {error ? <p className="text-sm text-red-400 mb-3">{error}</p> : null}
           {loading ? <p className="text-sm text-white/70">Loading questions…</p> : null}
 
-          {!loading && previewQuestions.length === 0 && !error ? (
+          {!loading && !error && selectedDocId && previewQuestions.length === 0 ? (
             <p className="text-sm text-white/60">
               No open questions right now for this match. Could be between toss/innings — check back soon.
+            </p>
+          ) : null}
+
+          {!loading && !error && !selectedDocId ? (
+            <p className="text-sm text-white/60">
+              No match selected. Pick a match and the preview will load automatically.
             </p>
           ) : null}
 
@@ -589,6 +632,10 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                 </div>
               );
             })}
+          </div>
+
+          <div className="mt-5 text-[11px] text-white/50">
+            STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.
           </div>
         </section>
 
@@ -687,7 +734,7 @@ export default function BblHubClient({ initialDocId }: { initialDocId?: string }
                 <input
                   value={matchCode}
                   onChange={(e) => setMatchCode(e.target.value)}
-                  placeholder="BBL-2025-12-14-SCO-VS-SIX"
+                  placeholder="BBL-2025-12-21-Ren-vs-Hur"
                   className="w-full rounded-full bg-black/40 border border-white/15 px-4 py-2.5 text-sm outline-none focus:border-orange-400/70"
                 />
 
