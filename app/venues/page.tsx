@@ -1,12 +1,12 @@
 // /app/venues/page.tsx
 import { Suspense } from "react";
-import VenuesClient from "./VenuesClient";
+import venuesClient from "./venuesClient";
 
 export const dynamic = "force-dynamic";
 
 export default function VenuesPage() {
   return (
-    <Suspense fallback={<VenuesLoading />}>
+    <Suspense fallback={<venuesLoading />}>
       <VenuesClient />
     </Suspense>
   );
