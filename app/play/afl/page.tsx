@@ -54,6 +54,9 @@ export default function AflHubPage() {
   const [showPreloader, setShowPreloader] = useState(true);
   const [isPreloaderFading, setIsPreloaderFading] = useState(false);
 
+  const picksHref = "/picks?sport=AFL";
+  const encodedReturnTo = encodeURIComponent(picksHref);
+
   useEffect(() => {
     if (typeof document !== "undefined") {
       document.body.style.overflow = "hidden";
@@ -151,7 +154,17 @@ export default function AflHubPage() {
       setShowAuthModal(true);
       return;
     }
-    router.push("/picks?sport=AFL");
+    router.push(picksHref);
+  };
+
+  // ✅ Use this for any Link → Picks so it routes through auth modal
+  const onClickGoToPicks = (e: React.MouseEvent) => {
+    if (!user) {
+      e.preventDefault();
+      setShowAuthModal(true);
+      return;
+    }
+    // allow normal navigation (Link) OR you can router.push
   };
 
   return (
@@ -247,18 +260,22 @@ export default function AflHubPage() {
                 </div>
 
                 <p className="mt-2 text-sm text-white/70">
-                  Quarter-by-quarter player-stat picks. One wrong call and your streak is cooked.
+                  Quarter-by-quarter player-stat picks. One wrong call and your
+                  streak is cooked.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
+              {/* ✅ Goes through modal if logged out */}
               <Link
-                href="/picks?sport=AFL"
+                href={picksHref}
+                onClick={onClickGoToPicks}
                 className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
               >
                 Play AFL now →
               </Link>
+
               <Link
                 href="/"
                 className="inline-flex items-center justify-center rounded-full border border-white/20 bg-white/5 hover:border-orange-400 hover:text-orange-200 px-6 py-3 text-sm text-white/80"
@@ -279,13 +296,15 @@ export default function AflHubPage() {
               <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">
                 AFL STREAKr
               </span>
-              <span className="block text-white mt-2">How Long Can You Last?</span>
+              <span className="block text-white mt-2">
+                How Long Can You Last?
+              </span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your AFL? Prove it or pipe down. Back your gut, ride
-              the hot hand, and roast your mates when you&apos;re on a heater. One
-              wrong call and your streak is cooked — back to zip.
+              Think you know your AFL? Prove it or pipe down. Back your gut,
+              ride the hot hand, and roast your mates when you&apos;re on a
+              heater. One wrong call and your streak is cooked — back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
@@ -300,12 +319,15 @@ export default function AflHubPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-4 mb-4">
+              {/* ✅ Goes through modal if logged out */}
               <Link
-                href="/picks?sport=AFL"
+                href={picksHref}
+                onClick={onClickGoToPicks}
                 className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm sm:text-base shadow-[0_14px_40px_rgba(0,0,0,0.65)]"
               >
                 Play now – make your next pick
               </Link>
+
               <Link
                 href="/leaderboards"
                 className="inline-flex items-center justify-center rounded-full border border-white/25 hover:border-sky-400/80 hover:text-sky-300 px-6 py-3 text-sm sm:text-base text-white/85"
@@ -368,7 +390,8 @@ export default function AflHubPage() {
             How AFL STREAKr works
           </h2>
           <p className="text-sm text-white/70 mb-4 max-w-2xl">
-            It&apos;s like tipping&apos;s louder cousin. Quick picks, live sweat, and bragging rights that last all week.
+            It&apos;s like tipping&apos;s louder cousin. Quick picks, live sweat,
+            and bragging rights that last all week.
           </p>
 
           <div className="grid sm:grid-cols-3 gap-4">
@@ -379,7 +402,8 @@ export default function AflHubPage() {
               <p className="text-sm text-white/80">
                 Every quarter has hand-picked AFL player-stat questions.{" "}
                 <span className="font-semibold">Yes</span> or{" "}
-                <span className="font-semibold">No</span> — back your gut and lock in your pick.
+                <span className="font-semibold">No</span> — back your gut and
+                lock in your pick.
               </p>
             </div>
 
@@ -389,8 +413,10 @@ export default function AflHubPage() {
               </p>
               <p className="text-sm text-white/80">
                 Every correct answer adds{" "}
-                <span className="font-semibold">+1</span> to your streak. One wrong pick and you&apos;re{" "}
-                <span className="font-semibold">back to zero</span>. No safety nets. Just nerve.
+                <span className="font-semibold">+1</span> to your streak. One
+                wrong pick and you&apos;re{" "}
+                <span className="font-semibold">back to zero</span>. No safety
+                nets. Just nerve.
               </p>
             </div>
 
@@ -401,7 +427,8 @@ export default function AflHubPage() {
               <p className="text-sm text-white/80">
                 Climb the round ladder, earn{" "}
                 <span className="font-semibold">badges</span>, win{" "}
-                <span className="font-semibold">prizes</span>, and send screenshots straight into the group chat.
+                <span className="font-semibold">prizes</span>, and send
+                screenshots straight into the group chat.
               </p>
             </div>
           </div>
@@ -436,11 +463,15 @@ export default function AflHubPage() {
                 Tonight&apos;s live AFL picks preview
               </h2>
               <p className="text-sm text-white/70">
-                A taste of the open questions right now. Jump into Picks to actually lock yours in.
+                A taste of the open questions right now. Jump into Picks to
+                actually lock yours in.
               </p>
             </div>
+
+            {/* ✅ Goes through modal if logged out */}
             <Link
-              href="/picks?sport=AFL"
+              href={picksHref}
+              onClick={onClickGoToPicks}
               className="text-sm text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
             >
               Make your next pick →
@@ -448,11 +479,14 @@ export default function AflHubPage() {
           </div>
 
           {error ? <p className="text-sm text-red-400 mb-3">{error}</p> : null}
-          {loading ? <p className="text-sm text-white/70">Loading questions…</p> : null}
+          {loading ? (
+            <p className="text-sm text-white/70">Loading questions…</p>
+          ) : null}
 
           {!loading && previewQuestions.length === 0 && !error ? (
             <p className="text-sm text-white/60">
-              No open questions right now. Schedule&apos;s probably between games — check back closer to bounce.
+              No open questions right now. Schedule&apos;s probably between
+              games — check back closer to bounce.
             </p>
           ) : null}
 
@@ -479,7 +513,9 @@ export default function AflHubPage() {
                         <span>•</span>
                         <span>{q.venue}</span>
                       </div>
-                      <div className="text-sm sm:text-base font-semibold">{q.question}</div>
+                      <div className="text-sm sm:text-base font-semibold">
+                        {q.question}
+                      </div>
                     </div>
 
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
@@ -508,7 +544,8 @@ export default function AflHubPage() {
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
-              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes
+              subject to terms and conditions. Play responsibly.
             </p>
             <Link
               href="/faq"
@@ -536,12 +573,13 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
+              You need a free STREAKr account to make picks, build your streak
+              and appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
               <Link
-                href="/auth?mode=login&returnTo=/picks?sport=AFL"
+                href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
                 className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                 onClick={() => setShowAuthModal(false)}
               >
@@ -549,7 +587,7 @@ export default function AflHubPage() {
               </Link>
 
               <Link
-                href="/auth?mode=signup&returnTo=/picks?sport=AFL"
+                href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
                 className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
                 onClick={() => setShowAuthModal(false)}
               >
