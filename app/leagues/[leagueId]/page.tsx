@@ -29,14 +29,14 @@ type Member = {
   uid: string;
   displayName: string;
   role: "manager" | "member";
-  joinedAt?: string;
+  joinedAt?: any;
 };
 
 type League = {
   id: string;
   name: string;
-  code: string;
-  managerUid: string;
+  inviteCode: string;
+  managerId: string;
   description?: string;
   memberCount?: number;
 };
@@ -65,7 +65,7 @@ export default function LeagueDetailPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
-  const isManager = user && league && user.uid === league.managerUid;
+  const isManager = !!user && !!league && user.uid === league.managerId;
 
   // --- Chat state ---
   const [messages, setMessages] = useState<Message[]>([]);
@@ -95,13 +95,20 @@ export default function LeagueDetailPage() {
         }
 
         const data = leagueSnap.data() as any;
+
+        // ✅ Support both old + new schemas
+        const managerId: string =
+          data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+        const inviteCode: string =
+          data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+
         const leagueData: League = {
           id: leagueSnap.id,
           name: data.name ?? "Unnamed league",
-          code: data.code ?? "",
-          managerUid: data.managerUid,
+          inviteCode,
+          managerId,
           description: data.description ?? "",
-          memberCount: data.memberCount ?? 0,
+          memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
         };
 
         setLeague(leagueData);
@@ -109,11 +116,7 @@ export default function LeagueDetailPage() {
         setDescription(leagueData.description ?? "");
 
         const membersRef = collection(leagueRef, "members");
-        const membersQ = query(
-          membersRef,
-          orderBy("joinedAt", "asc"),
-          limit(100)
-        );
+        const membersQ = query(membersRef, orderBy("joinedAt", "asc"), limit(200));
         const membersSnap = await getDocs(membersQ);
 
         const loadedMembers: Member[] = membersSnap.docs.map((docSnap) => {
@@ -150,9 +153,12 @@ export default function LeagueDetailPage() {
 
     try {
       const leagueRef = doc(db, "leagues", league.id);
+
+      // ✅ Keep writing to the "new" schema fields
       await updateDoc(leagueRef, {
         name: name.trim() || league.name,
         description: description.trim(),
+        updatedAt: serverTimestamp(),
       });
 
       setLeague((prev) =>
@@ -200,12 +206,12 @@ export default function LeagueDetailPage() {
   const isMemberUser =
     !!user &&
     !!league &&
-    (user.uid === league.managerUid ||
-      members.some((m) => m.uid === user.uid));
+    (user.uid === league.managerId || members.some((m) => m.uid === user.uid));
 
   // --- Load live chat messages for this league (members only) ---
   useEffect(() => {
     if (!leagueId) return;
+
     if (!isMemberUser) {
       setMessages([]);
       return;
@@ -224,9 +230,7 @@ export default function LeagueDetailPage() {
           const data = docSnap.data() as any;
           let created: Date | null = null;
           try {
-            if (data.createdAt?.toDate) {
-              created = data.createdAt.toDate();
-            }
+            if (data.createdAt?.toDate) created = data.createdAt.toDate();
           } catch {
             created = null;
           }
@@ -248,9 +252,7 @@ export default function LeagueDetailPage() {
       }
     );
 
-    return () => {
-      unsub();
-    };
+    return () => unsub();
   }, [leagueId, isMemberUser]);
 
   // --- Auto scroll to latest message ---
@@ -261,16 +263,14 @@ export default function LeagueDetailPage() {
 
   const formatMessageTime = (d?: Date | null) => {
     if (!d) return "";
-    return d.toLocaleTimeString("en-AU", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return d.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
   };
 
   // --- Send chat message ---
   const handleSendMessage = async (e: FormEvent) => {
     e.preventDefault();
     if (!leagueId) return;
+
     if (!user) {
       setChatError("You need to be logged in to chat.");
       return;
@@ -318,10 +318,7 @@ export default function LeagueDetailPage() {
   if (!league) {
     return (
       <div className="py-6 md:py-8 space-y-4">
-        <Link
-          href="/leagues"
-          className="text-sm text-sky-400 hover:text-sky-300"
-        >
+        <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
           ← Back to leagues
         </Link>
         <p className="text-sm text-red-400">
@@ -333,10 +330,7 @@ export default function LeagueDetailPage() {
 
   return (
     <div className="py-6 md:py-8 space-y-6">
-      <Link
-        href="/leagues"
-        className="text-sm text-sky-400 hover:text-sky-300"
-      >
+      <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
         ← Back to leagues
       </Link>
 
@@ -349,20 +343,21 @@ export default function LeagueDetailPage() {
           </div>
           <p className="mt-1 text-sm text-white/70 max-w-2xl">
             Private league. Your streak still counts on the global ladder – this
-            page is just for bragging rights with your mates, work crew or
-            fantasy league.
+            page is just for bragging rights with your mates, work crew or fantasy
+            league.
           </p>
         </div>
 
         <div className="flex flex-col items-start md:items-end gap-2 text-xs">
           <div className="flex items-center gap-2">
             <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-1">
-              {league.code}
+              {league.inviteCode || "—"}
             </span>
             <button
               type="button"
-              onClick={() => navigator.clipboard.writeText(league.code)}
-              className="text-sky-400 hover:text-sky-300"
+              onClick={() => league.inviteCode && navigator.clipboard.writeText(league.inviteCode)}
+              className="text-sky-400 hover:text-sky-300 disabled:opacity-60"
+              disabled={!league.inviteCode}
             >
               Copy invite code
             </button>
@@ -498,8 +493,7 @@ export default function LeagueDetailPage() {
 
         {user && !isMemberUser && (
           <p className="text-sm text-white/70">
-            You&apos;re not a member of this league. Join the league to access
-            chat.
+            You&apos;re not a member of this league. Join the league to access chat.
           </p>
         )}
 
@@ -514,14 +508,9 @@ export default function LeagueDetailPage() {
                 </p>
               ) : (
                 messages.map((msg) => {
-                  const isOwn = user && msg.uid === user.uid;
+                  const isOwn = !!user && msg.uid === user.uid;
                   return (
-                    <div
-                      key={msg.id}
-                      className={`flex ${
-                        isOwn ? "justify-end" : "justify-start"
-                      }`}
-                    >
+                    <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
                       <div
                         className={`max-w-[80%] rounded-2xl px-3 py-2 border text-xs ${
                           isOwn
@@ -530,18 +519,14 @@ export default function LeagueDetailPage() {
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2 mb-0.5">
-                          <span className="font-semibold truncate">
-                            {msg.displayName}
-                          </span>
+                          <span className="font-semibold truncate">{msg.displayName}</span>
                           {msg.createdAt && (
                             <span className="text-[10px] opacity-70">
                               {formatMessageTime(msg.createdAt)}
                             </span>
                           )}
                         </div>
-                        <p className="whitespace-pre-wrap break-words">
-                          {msg.body}
-                        </p>
+                        <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                       </div>
                     </div>
                   );
@@ -550,14 +535,9 @@ export default function LeagueDetailPage() {
               <div ref={messagesEndRef} />
             </div>
 
-            {chatError && (
-              <p className="text-xs text-red-400">{chatError}</p>
-            )}
+            {chatError && <p className="text-xs text-red-400">{chatError}</p>}
 
-            <form
-              onSubmit={handleSendMessage}
-              className="mt-2 flex flex-col sm:flex-row gap-2"
-            >
+            <form onSubmit={handleSendMessage} className="mt-2 flex flex-col sm:flex-row gap-2">
               <textarea
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
