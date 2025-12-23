@@ -1,6 +1,8 @@
 // app/rewards/page.tsx
 "use client";
 
+export const dynamic = "force-dynamic";
+
 export default function RewardsPage() {
   return (
     <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-zinc-50">
@@ -19,7 +21,8 @@ export default function RewardsPage() {
             Rewards
           </h1>
           <p className="mt-3 max-w-2xl text-sm text-zinc-300 md:text-base">
-            Every round we give away prizes and STREAK<span className="text-orange-500">r</span>{" "}
+            Every round we give away prizes and STREAK
+            <span className="text-orange-500">r</span>{" "}
             gear. Keep your streak alive and stack up rewards.
           </p>
         </header>
@@ -49,13 +52,16 @@ export default function RewardsPage() {
 
             <ul className="text-xs text-zinc-300 space-y-1.5 list-disc list-inside">
               <li>
-                You must have a <span className="font-semibold">verified account</span>.
+                You must have a{" "}
+                <span className="font-semibold">verified account</span>.
               </li>
               <li>
-                <span className="font-semibold">Void</span> questions don&apos;t count.
+                <span className="font-semibold">Void</span> questions don&apos;t
+                count.
               </li>
               <li>
-                If there&apos;s a tie, we&apos;ll apply tie-break rules (published in the final T&amp;Cs).
+                If there&apos;s a tie, we&apos;ll apply tie-break rules (published
+                in the final T&amp;Cs).
               </li>
             </ul>
           </div>
@@ -74,12 +80,18 @@ export default function RewardsPage() {
             </h2>
 
             <p className="text-sm text-zinc-200 mb-4">
-              Get the <span className="font-semibold text-amber-200">Sponsor Question</span>{" "}
+              Get the{" "}
+              <span className="font-semibold text-amber-200">
+                Sponsor Question
+              </span>{" "}
               right and you go into the draw for the round&apos;s sponsor prize.
             </p>
 
             <ul className="text-xs text-zinc-300 space-y-1.5 list-disc list-inside">
-              <li>Only questions tagged <span className="font-semibold">Sponsor Question</span> count.</li>
+              <li>
+                Only questions tagged{" "}
+                <span className="font-semibold">Sponsor Question</span> count.
+              </li>
               <li>You must have made a pick on the sponsor question.</li>
               <li>Winners are drawn after the round settles.</li>
             </ul>
@@ -99,9 +111,7 @@ export default function RewardsPage() {
             <ul className="list-disc list-inside space-y-1.5">
               <li>All prizes are in AUD.</li>
               <li>You must have a verified account and follow the rules to be eligible.</li>
-              <li>
-                Full Terms &amp; Conditions will be published before prizes go live.
-              </li>
+              <li>Full Terms &amp; Conditions will be published before prizes go live.</li>
             </ul>
 
             <p className="text-xs text-zinc-400 pt-1">
