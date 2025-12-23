@@ -238,7 +238,7 @@ export default function RoundsClient() {
     } finally {
       setSponsorSaving(false);
     }
-  };
+  }
 
   const activeSponsorRound = sponsorRoundId ? rounds.find((r) => r.id === sponsorRoundId) : null;
 
