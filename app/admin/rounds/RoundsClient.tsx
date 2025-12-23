@@ -238,7 +238,7 @@ export default function RoundsClient() {
     } finally {
       setSponsorSaving(false);
     }
-  }
+  };
 
   const activeSponsorRound = sponsorRoundId ? rounds.find((r) => r.id === sponsorRoundId) : null;
 
@@ -391,3 +391,50 @@ export default function RoundsClient() {
                                     </span>
                                   )}
                                 </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-400">No questions for this game.</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <div className="text-[11px] text-gray-400">
+                  Only one Sponsor Question is allowed per round. Saving will mark the selected question as the Sponsor
+                  Question and update <code>config/season-{SEASON}.sponsorQuestion</code> to match the new ID (e.g.
+                  OR-G1-Q1).
+                  {sponsorSavedMessage && (
+                    <div className="mt-1 text-emerald-400">{sponsorSavedMessage}</div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelSponsorEditor}
+                    className="rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!sponsorSelection || sponsorSaving}
+                    onClick={handleSaveSponsorQuestion}
+                    className="rounded-full bg-amber-500 px-4 py-1.5 text-xs font-semibold disabled:opacity-60"
+                  >
+                    {sponsorSaving ? "Saving sponsor question…" : "Save sponsor question"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
