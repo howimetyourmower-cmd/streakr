@@ -354,4 +354,197 @@ export default function AuthClient() {
             </div>
 
             {/* Phone */}
-            <div className="
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">Phone</label>
+              <input
+                type="tel"
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                placeholder="04xx xxx xxx"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+
+            {/* Gender & Favourite team */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Gender
+                </label>
+                <select
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                >
+                  <option value="">Prefer not to say</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-white/70">
+                  Favourite AFL team
+                </label>
+                <select
+                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={team}
+                  onChange={(e) => setTeam(e.target.value)}
+                >
+                  <option value="">Select a team</option>
+                  <option>Adelaide Crows</option>
+                  <option>Brisbane Lions</option>
+                  <option>Carlton</option>
+                  <option>Collingwood</option>
+                  <option>Essendon</option>
+                  <option>Fremantle</option>
+                  <option>Geelong Cats</option>
+                  <option>Gold Coast Suns</option>
+                  <option>GWS Giants</option>
+                  <option>Hawthorn</option>
+                  <option>Melbourne</option>
+                  <option>North Melbourne</option>
+                  <option>Port Adelaide</option>
+                  <option>Richmond</option>
+                  <option>St Kilda</option>
+                  <option>Sydney Swans</option>
+                  <option>West Coast Eagles</option>
+                  <option>Western Bulldogs</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">Email</label>
+              <input
+                type="email"
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            {/* Password + confirm */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Password
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={showPasswordSignup ? "text" : "password"}
+                  className="flex-1 rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordSignup((v) => !v)}
+                  className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
+                >
+                  {showPasswordSignup ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Confirm password
+              </label>
+              <input
+                type={showPasswordSignup ? "text" : "password"}
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+
+            {/* consent checkboxes */}
+            <div className="mt-2 space-y-2 text-[11px] text-white/80">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
+                />
+                <span>
+                  I confirm I&apos;m 18+ and agree to the{" "}
+                  <span className="underline">Terms &amp; Conditions</span> and{" "}
+                  <span className="underline">Privacy Policy</span>.
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={marketingOptIn}
+                  onChange={(e) => setMarketingOptIn(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
+                />
+                <span>
+                  Send me STREAKr news, tips and prize updates. You can opt out
+                  any time.
+                </span>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-3 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
+            >
+              {submitting ? "Creating account…" : "Sign up"}
+            </button>
+          </form>
+        )}
+
+        {/* LOGIN FORM */}
+        {!isSignup && (
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">Email</label>
+              <input
+                type="email"
+                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-white/70">
+                Password
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type={showPasswordLogin ? "text" : "password"}
+                  className="flex-1 rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordLogin((v) => !v)}
+                  className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
+                >
+                  {showPasswordLogin ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-2 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
+            >
+              {submitting ? "Logging in…" : "Log in"}
+            </button>
+          </form>
+        )}
+      </div>
+    </main>
+  );
+}
