@@ -1,76 +1,40 @@
-// app/admin/venues/page.tsx
+// app/admin/venues/new/AdminNewVenueClient.tsx
 "use client";
 
-export const dynamic = "force-dynamic";
-
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
+import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
 type SubscriptionStatus = "active" | "paused" | "cancelled";
 
-type VenueLeague = {
-  id: string;
-  name: string;
-  code: string;
-  venueName?: string;
-  location?: string;
-  subscriptionStatus: SubscriptionStatus;
-};
+function generateVenueCode(length = 6): string {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return out;
+}
 
-export default function AdminVenueLeaguesPage() {
+export default function AdminNewVenueClient() {
+  const router = useRouter();
   const { user, isAdmin, loading } = useAuth();
 
-  const [venues, setVenues] = useState<VenueLeague[]>([]);
-  const [venuesLoading, setVenuesLoading] = useState(true);
-  const [venuesError, setVenuesError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [venueName, setVenueName] = useState("");
+  const [location, setLocation] = useState("");
+  const [description, setDescription] = useState("");
+  const [subscriptionStatus, setSubscriptionStatus] =
+    useState<SubscriptionStatus>("active");
 
-  useEffect(() => {
-    if (!isAdmin) return;
+  const [venueAdminEmail, setVenueAdminEmail] = useState("");
+  const [prizesHeadline, setPrizesHeadline] = useState("");
+  const [prizesBody, setPrizesBody] = useState("");
 
-    setVenuesLoading(true);
-    setVenuesError(null);
-
-    const venuesRef = collection(db, "venueLeagues");
-    const q = query(venuesRef, orderBy("createdAt", "desc"));
-
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const list: VenueLeague[] = snap.docs.map((docSnap) => {
-          const data = docSnap.data() as any;
-          const subscriptionStatus: SubscriptionStatus =
-            (data.subscriptionStatus as SubscriptionStatus) ?? "active";
-
-          return {
-            id: docSnap.id,
-            name: data.name ?? "Venue League",
-            code: data.code ?? "",
-            venueName: data.venueName ?? data.venue ?? undefined,
-            location: data.location ?? undefined,
-            subscriptionStatus,
-          };
-        });
-        setVenues(list);
-        setVenuesLoading(false);
-      },
-      (err) => {
-        console.error("Failed to load venue leagues", err);
-        setVenues([]);
-        setVenuesLoading(false);
-        setVenuesError("Failed to load venue leagues.");
-      }
-    );
-
-    return () => unsub();
-  }, [isAdmin]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -93,171 +57,295 @@ export default function AdminVenueLeaguesPage() {
             have access, double-check that you&apos;re logged in with the
             correct email.
           </p>
-          <Link
-            href="/"
+          <button
+            type="button"
+            onClick={() => router.push("/")}
             className="inline-flex items-center justify-center rounded-full bg-amber-500 px-5 py-2 text-sm font-semibold text-black hover:bg-amber-400 transition"
           >
             Back to home
-          </Link>
+          </button>
         </div>
       </div>
     );
   }
 
+  const handleCreateVenue = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError("League name is required.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      const code = generateVenueCode();
+
+      const trimmedAdminEmail =
+        venueAdminEmail.trim().length > 0
+          ? venueAdminEmail.trim().toLowerCase()
+          : null;
+
+      await addDoc(collection(db, "venueLeagues"), {
+        name: name.trim(),
+        venueName: venueName.trim() || null,
+        location: location.trim() || null,
+        description: description.trim() || null,
+        code,
+        subscriptionStatus,
+        memberCount: 0,
+        prizesHeadline: prizesHeadline.trim() || null,
+        prizesBody: prizesBody.trim() || null,
+        venueAdminEmail: trimmedAdminEmail,
+        venueAdminUid: null,
+        createdAt: serverTimestamp(),
+        createdBy: user.uid,
+      });
+
+      router.push("/admin/venues");
+    } catch (err) {
+      console.error("Failed to create venue league", err);
+      setError("Failed to create venue league. Please try again.");
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-[60vh] bg-[#050814] text-slate-100">
-      {/* Top bar / heading */}
+      {/* Top bar */}
       <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950/80 via-slate-900/80 to-slate-950/80">
-        <div className="mx-auto max-w-6xl px-4 py-8">
+        <div className="mx-auto max-w-5xl px-4 py-8">
+          <button
+            type="button"
+            onClick={() => router.push("/admin/venues")}
+            className="text-xs text-slate-400 hover:text-slate-200 mb-3"
+          >
+            ← Back to venue leagues
+          </button>
           <p className="text-xs tracking-[0.2em] uppercase text-slate-500 mb-2">
-            Admin · Venue leagues
+            Admin • Venue leagues
           </p>
-          <h1 className="text-3xl md:text-4xl font-semibold mb-3">
-            Venue leagues console
+          <h1 className="text-3xl md:text-4xl font-semibold mb-2">
+            Create a new venue league
           </h1>
           <p className="text-sm md:text-base text-slate-400 max-w-2xl">
-            Create and manage STREAKr venue leagues for pubs, clubs and sports
-            bars. Control subscription status, join codes and see which venues
-            are live.
+            Set up a STREAKr league for a pub, club or sports bar. Players still
+            build the same streak as general play, but this venue gets its own
+            leaderboard, prizes and promotions.
           </p>
         </div>
       </div>
 
       {/* Content */}
-      <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <Link
-            href="/admin"
-            className="text-xs text-slate-400 hover:text-slate-200"
-          >
-            ← Back to admin
-          </Link>
-          <Link
-            href="/admin/venues/new"
-            className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-xs px-4 py-2 transition"
-          >
-            Create venue league
-          </Link>
-        </div>
-
-        <section className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/80 px-5 py-5 shadow-lg shadow-black/40 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-base md:text-lg font-semibold text-slate-50">
-              All venue leagues
-            </h2>
-            <span className="text-[11px] text-slate-400">
-              {venuesLoading
-                ? "Loading…"
-                : `${venues.length} venue${
-                    venues.length === 1 ? "" : "s"
-                  }`}
-            </span>
-          </div>
-
-          {venuesError && (
-            <p className="text-sm text-red-400">{venuesError}</p>
-          )}
-
-          {venuesLoading && !venuesError && (
-            <p className="text-sm text-slate-400">Loading venue leagues…</p>
-          )}
-
-          {!venuesLoading && !venuesError && venues.length === 0 && (
-            <p className="text-sm text-slate-400">
-              No venue leagues found yet. Use{" "}
-              <span className="text-slate-100 font-medium">
-                Create venue league
-              </span>{" "}
-              to add the first partner venue.
+      <div className="mx-auto max-w-5xl px-4 py-8">
+        <form
+          onSubmit={handleCreateVenue}
+          className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950/80 to-slate-900/80 px-5 py-6 shadow-lg shadow-black/40 space-y-6"
+        >
+          {error && (
+            <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+              {error}
             </p>
           )}
 
-          {!venuesLoading && !venuesError && venues.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-slate-800 bg-[#030713]/80">
-              <div className="hidden md:grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-slate-400 border-b border-slate-800">
-                <div className="col-span-4">Venue / league</div>
-                <div className="col-span-2">Location</div>
-                <div className="col-span-2">Code</div>
-                <div className="col-span-2 text-center">Status</div>
-                <div className="col-span-2 text-right">Actions</div>
+          {/* Basic venue details */}
+          <section className="space-y-4">
+            <h2 className="text-base md:text-lg font-semibold text-slate-50">
+              Venue details
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-300">
+                  League name *
+                </label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                  placeholder="E.g. The Royal Hotel STREAKr League"
+                />
+                <p className="text-[11px] text-slate-500">
+                  This is what players will see on the leaderboard.
+                </p>
               </div>
 
-              <ul className="divide-y divide-slate-800">
-                {venues.map((v) => {
-                  const statusLabel =
-                    v.subscriptionStatus === "active"
-                      ? "Active"
-                      : v.subscriptionStatus === "paused"
-                      ? "Paused"
-                      : "Cancelled";
-
-                  const statusClass =
-                    v.subscriptionStatus === "active"
-                      ? "text-emerald-300 border-emerald-400/60 bg-emerald-500/10"
-                      : v.subscriptionStatus === "paused"
-                      ? "text-amber-300 border-amber-400/60 bg-amber-500/10"
-                      : "text-red-300 border-red-400/60 bg-red-500/10";
-
-                  return (
-                    <li
-                      key={v.id}
-                      className="px-4 py-3 text-sm md:grid md:grid-cols-12 md:items-center flex flex-col gap-2"
-                    >
-                      {/* Venue / league */}
-                      <div className="md:col-span-4 flex flex-col">
-                        <span className="font-semibold text-slate-50">
-                          {v.name}
-                        </span>
-                        {v.venueName && (
-                          <span className="text-xs text-slate-400">
-                            {v.venueName}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Location */}
-                      <div className="md:col-span-2 text-xs text-slate-400">
-                        {v.location ?? "-"}
-                      </div>
-
-                      {/* Code */}
-                      <div className="md:col-span-2 flex items-center gap-2 text-xs text-slate-300">
-                        <span className="font-mono bg-slate-900/80 border border-slate-700 rounded-md px-2 py-1">
-                          {v.code}
-                        </span>
-                      </div>
-
-                      {/* Status */}
-                      <div className="md:col-span-2">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-[2px] text-[10px] font-semibold uppercase tracking-wide ${statusClass}`}
-                        >
-                          {statusLabel}
-                        </span>
-                      </div>
-
-                      {/* Actions */}
-                      <div className="md:col-span-2 md:text-right flex md:justify-end gap-2">
-                        <Link
-                          href={`/venues/${v.id}`}
-                          className="inline-flex items-center justify-center rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-[11px] px-3 py-1 transition"
-                        >
-                          View public
-                        </Link>
-                        <Link
-                          href={`/venues/${v.id}/admin`}
-                          className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-[11px] px-3 py-1 transition"
-                        >
-                          Venue admin
-                        </Link>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-300">
+                  Venue name (optional)
+                </label>
+                <input
+                  type="text"
+                  value={venueName}
+                  onChange={(e) => setVenueName(e.target.value)}
+                  className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                  placeholder="E.g. The Royal Hotel"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Used with the location, e.g. &quot;The Royal Hotel •
+                  Richmond&quot;.
+                </p>
+              </div>
             </div>
-          )}
-        </section>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-300">
+                  Location (optional)
+                </label>
+                <input
+                  type="text"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                  placeholder="E.g. Richmond, VIC"
+                />
+                <p className="text-[11px] text-slate-500">
+                  Helps players confirm they&apos;re joining the right venue.
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-300">
+                  Initial status
+                </label>
+                <select
+                  value={subscriptionStatus}
+                  onChange={(e) =>
+                    setSubscriptionStatus(e.target.value as SubscriptionStatus)
+                  }
+                  className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                >
+                  <option value="active">Active (players can join)</option>
+                  <option value="paused">Paused (no new play, keep data)</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                <p className="text-[11px] text-slate-500">
+                  Use Paused/Cancelled if billing isn&apos;t set up yet.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Description (optional)
+              </label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder="E.g. Friday night streak comp running all AFL season. Grab a QR from the bar to join."
+              />
+              <p className="text-[11px] text-slate-500">
+                Short description of how the comp runs at this venue.
+              </p>
+            </div>
+          </section>
+
+          {/* Prize promo copy */}
+          <section className="space-y-4 border-t border-slate-800 pt-5">
+            <h2 className="text-base md:text-lg font-semibold text-slate-50">
+              Prize spotlight (optional)
+            </h2>
+            <p className="text-xs text-slate-400 max-w-xl">
+              This copy shows up in the orange &quot;Venue prize spotlight&quot;
+              banner on the public leaderboard. Venue admins can edit this
+              later.
+            </p>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Prize headline
+              </label>
+              <input
+                type="text"
+                value={prizesHeadline}
+                onChange={(e) => setPrizesHeadline(e.target.value)}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder="E.g. Longest streak each round wins a $50 bar tab"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Prize description
+              </label>
+              <textarea
+                value={prizesBody}
+                onChange={(e) => setPrizesBody(e.target.value)}
+                rows={4}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder={`E.g.\nTop streak for each AFL round wins a $50 bar tab.\nTie-breaker: earliest streak.\nSeason-long champion wins a $200 venue voucher.`}
+              />
+              <p className="text-[11px] text-slate-500">
+                Explain weekly prizes, tie-break rules and any season-long
+                prizes. Keep it venue-specific.
+              </p>
+            </div>
+          </section>
+
+          {/* Venue admin details */}
+          <section className="space-y-4 border-t border-slate-800 pt-5">
+            <h2 className="text-base md:text-lg font-semibold text-slate-50">
+              Venue admin access
+            </h2>
+            <p className="text-xs text-slate-400 max-w-xl">
+              The venue admin can log in to STREAKr and manage their prizes and
+              vouchers at{" "}
+              <span className="font-mono text-slate-200">
+                /venues/&lt;id&gt;/admin
+              </span>
+              . They can only access their own venue.
+            </p>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-300">
+                Venue admin email (recommended)
+              </label>
+              <input
+                type="email"
+                value={venueAdminEmail}
+                onChange={(e) => setVenueAdminEmail(e.target.value)}
+                className="w-full rounded-md bg-[#050816]/70 border border-slate-700 px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500/80 focus:border-amber-500/80"
+                placeholder="E.g. manager@royalhotel.com.au"
+              />
+              <p className="text-[11px] text-slate-500">
+                They must sign up or log in with this email to get venue admin
+                access. You can change it later from the venue admin console.
+              </p>
+            </div>
+          </section>
+
+          {/* Footer / actions */}
+          <section className="border-t border-slate-800 pt-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs text-slate-400">
+            <div className="max-w-md space-y-1">
+              <p>
+                A 6-character join code will be{" "}
+                <span className="text-slate-100 font-medium">
+                  generated automatically
+                </span>{" "}
+                for this venue. You can print it on table tents, posters or TV
+                slides.
+              </p>
+              <p>
+                Players join from the{" "}
+                <span className="text-slate-100 font-medium">Venue Leagues</span>{" "}
+                page by entering that code, and they&apos;ll appear on this
+                venue&apos;s leaderboard instantly.
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-full bg-amber-500 hover:bg-amber-400 text-black font-semibold text-sm px-6 py-2.5 transition disabled:opacity-60"
+            >
+              {saving ? "Creating venue…" : "Create venue league"}
+            </button>
+          </section>
+        </form>
       </div>
     </div>
   );
