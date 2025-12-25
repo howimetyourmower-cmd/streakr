@@ -1,21 +1,12 @@
-// app/venues/page.tsx
-"use client";
+// /app/venues/page.tsx
+import dynamic from "next/dynamic";
 
 export const dynamic = "force-dynamic";
 
-import { Suspense } from "react";
-import VenuesClient from "./VenuesClient";
+const VenuesClient = dynamic(() => import("./VenuesClient"), {
+  ssr: false,
+});
 
 export default function VenuesPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-black text-white flex items-center justify-center">
-          <div className="text-sm text-white/70">Loading venues…</div>
-        </div>
-      }
-    >
-      <VenuesClient />
-    </Suspense>
-  );
+  return <VenuesClient />;
 }
