@@ -2,15 +2,11 @@
 import { Suspense } from "react";
 import AdminClient from "./AdminClient";
 
-export default function Page() {
+export const dynamic = "force-dynamic";
+
+export default function AdminPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-[#050814] text-slate-200 flex items-center justify-center">
-          Loading admin…
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="p-6 text-slate-200">Loading admin…</div>}>
       <AdminClient />
     </Suspense>
   );
