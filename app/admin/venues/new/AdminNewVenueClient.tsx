@@ -79,15 +79,17 @@ export default function AdminNewVenueClient() {
         createdBy: user.uid,
         memberCount: 0,
 
-        // Defaults
         prizesHeadline: null,
         prizesBody: null,
+
         voucherJoinEnabled: false,
         voucherJoinTitle: null,
         voucherJoinDescription: null,
+
         voucherMilestoneEnabled: false,
         voucherMilestoneTitle: null,
         voucherMilestoneDescription: null,
+
         venueAdminEmail: null,
         venueAdminUid: null,
       };
@@ -107,8 +109,7 @@ export default function AdminNewVenueClient() {
       <div className="mx-auto max-w-3xl px-4 py-10 space-y-6">
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-bold">
-            Create Venue League{" "}
-            <span className="text-orange-500">Admin</span>
+            Create Venue League <span className="text-orange-500">Admin</span>
           </h1>
           <button
             type="button"
@@ -206,7 +207,7 @@ export default function AdminNewVenueClient() {
           </div>
         </form>
 
-        knowing sponsors like:
+        {/* Sponsor banner placeholder */}
         <div className="rounded-2xl bg-gradient-to-r from-orange-500/20 to-orange-600/10 p-4 border border-orange-500/30 text-center text-sm">
           Sponsor banner placeholder
         </div>
