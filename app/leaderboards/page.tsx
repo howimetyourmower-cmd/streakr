@@ -1,6 +1,9 @@
 // app/leaderboards/page.tsx
+import dynamic from "next/dynamic";
 
-import LeaderboardClient from "./LeaderboardClient";
+const LeaderboardClient = dynamic(() => import("./LeaderboardClient"), {
+  ssr: false,
+});
 
 export default function LeaderboardsPage() {
   return (
