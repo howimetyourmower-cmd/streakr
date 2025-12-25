@@ -1,22 +1,13 @@
-// app/venues/[venueId]/admin/page.tsx
-import { Suspense } from "react";
-import VenueAdminClient from "./VenueAdminClient";
+// app/admin/venues/[venueId]/page.tsx
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
-export default function Page() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-[60vh] flex items-center justify-center text-slate-200">
-          <div className="space-y-2 text-sm">
-            <div className="h-8 w-8 rounded-full border-2 border-slate-500 border-t-transparent animate-spin mx-auto" />
-            Loading venue admin…
-          </div>
-        </div>
-      }
-    >
-      <VenueAdminClient />
-    </Suspense>
-  );
+type Props = {
+  params: { venueId: string };
+};
+
+export default function Page({ params }: Props) {
+  // Admin path just redirects to the real venue admin console.
+  redirect(`/venues/${params.venueId}/admin`);
 }
