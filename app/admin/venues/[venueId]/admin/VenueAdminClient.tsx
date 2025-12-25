@@ -1,6 +1,8 @@
 // app/venues/[venueId]/admin/VenueAdminClient.tsx
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState, FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { doc, getDoc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -220,7 +222,9 @@ export default function VenueAdminClient() {
             ← Back to venue leaderboard
           </button>
 
-          <h1 className="text-3xl font-bold">{venue?.name ?? "Venue league"}</h1>
+          <h1 className="text-3xl font-bold">
+            {venue?.name ?? "Venue league"}
+          </h1>
           <p className="text-sm text-slate-400 mt-1">
             Venue admin console — manage prizes and in-venue offers
           </p>
