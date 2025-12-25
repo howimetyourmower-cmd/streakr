@@ -1,6 +1,6 @@
 // /app/admin/AdminClient.tsx
 "use client";
-
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
