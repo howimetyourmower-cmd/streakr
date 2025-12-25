@@ -85,6 +85,7 @@ export default function VenueAdminClient() {
           venueAdminUid: data.venueAdminUid ?? null,
           subscriptionStatus:
             (data.subscriptionStatus as SubscriptionStatus) ?? "active",
+
           voucherJoinEnabled: data.voucherJoinEnabled ?? false,
           voucherJoinTitle: data.voucherJoinTitle ?? "",
           voucherJoinDescription: data.voucherJoinDescription ?? "",
@@ -94,11 +95,14 @@ export default function VenueAdminClient() {
         };
 
         setVenue(v);
+
         setHeadline(v.prizesHeadline ?? "");
         setBody(v.prizesBody ?? "");
+
         setVoucherJoinEnabled(!!v.voucherJoinEnabled);
         setVoucherJoinTitle(v.voucherJoinTitle ?? "");
         setVoucherJoinDescription(v.voucherJoinDescription ?? "");
+
         setVoucherMilestoneEnabled(!!v.voucherMilestoneEnabled);
         setVoucherMilestoneTitle(v.voucherMilestoneTitle ?? "");
         setVoucherMilestoneDescription(v.voucherMilestoneDescription ?? "");
@@ -216,9 +220,7 @@ export default function VenueAdminClient() {
             ← Back to venue leaderboard
           </button>
 
-          <h1 className="text-3xl font-bold">
-            {venue?.name ?? "Venue league"}
-          </h1>
+          <h1 className="text-3xl font-bold">{venue?.name ?? "Venue league"}</h1>
           <p className="text-sm text-slate-400 mt-1">
             Venue admin console — manage prizes and in-venue offers
           </p>
