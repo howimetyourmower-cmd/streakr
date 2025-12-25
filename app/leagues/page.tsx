@@ -1,17 +1,12 @@
 // /app/leagues/page.tsx
-import { Suspense } from "react";
-import LeaguesClient from "./LeaguesClient";
+import dynamic from "next/dynamic";
+
+const LeaguesClient = dynamic(() => import("./LeaguesClient"), { ssr: false });
 
 export default function Page() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-black text-white p-6">
-          Loading leagues…
-        </div>
-      }
-    >
+    <main className="min-h-screen bg-black text-white p-6">
       <LeaguesClient />
-    </Suspense>
+    </main>
   );
 }
