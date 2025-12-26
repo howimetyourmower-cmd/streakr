@@ -851,65 +851,158 @@ export default function PicksClient() {
     return byGame;
   }, [rows, pickHistory]);
 
-  // -------- STREAK JOURNEY (per round, per game) --------
-  const streakJourney = useMemo(() => {
-    type Line =
-      | { gameId: string; match: string; kind: "clean"; plus: number }
-      | { gameId: string; match: string; kind: "in-progress"; picks: number }
-      | { gameId: string; match: string; kind: "not-picked" }
-      | { gameId: string; match: string; kind: "locked" };
+  const journeyByGame = useMemo(() => {
+    type JourneyInfo = {
+      gameId: string;
+      match: string;
+      startTime: string;
+      venue: string;
+      pickedCount: number;
+      isFinal: boolean;
+      earned: number; // 0..12
+      label: "not-picked" | "in-progress" | "final";
+      summary: string;
+    };
 
-    // Preserve game order as they appear in rows
-    const order: string[] = [];
-    const matchByGame: Record<string, string> = {};
+    const groups: Record<string, QuestionRow[]> = {};
     for (const r of rows) {
-      if (!order.includes(r.gameId)) order.push(r.gameId);
-      if (!matchByGame[r.gameId]) matchByGame[r.gameId] = r.match;
+      if (!groups[r.gameId]) groups[r.gameId] = [];
+      groups[r.gameId].push(r);
     }
 
-    const lines: Line[] = [];
+    const out: JourneyInfo[] = [];
 
-    for (const gameId of order) {
-      const match = matchByGame[gameId] || "Game";
-      const unlocked = isGameUnlocked(gameId);
+    for (const gameId of Object.keys(groups)) {
+      const gameRows = groups[gameId];
 
-      const pickedCount = picksMadeByGame[gameId] ?? 0;
-      const info = gameScoreByGame[gameId];
+      // Sort for stable match/venue/startTime
+      gameRows.sort((a, b) => {
+        const da = new Date(a.startTime).getTime();
+        const db = new Date(b.startTime).getTime();
+        if (da !== db) return da - db;
+        return a.quarter - b.quarter;
+      });
 
-      // If picks are closed and user hasn't picked anything, show locked state
-      if (!unlocked && pickedCount === 0) {
-        lines.push({ gameId, match, kind: "locked" });
-        continue;
+      const first = gameRows[0];
+      const isFinal = gameRows.every((r) => r.status === "final" || r.status === "void");
+
+      let pickedCount = 0;
+      let wins = 0;
+      let losses = 0;
+
+      for (const r of gameRows) {
+        const effectivePick = (pickHistory[r.id] ?? r.userPick) as any;
+        const hasPicked = effectivePick === "yes" || effectivePick === "no";
+        if (!hasPicked) continue;
+
+        pickedCount++;
+
+        // void never counts either way
+        const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
+        if (r.status === "void" || outcome === "void") continue;
+
+        // only score when final + has outcome
+        if (r.status !== "final" || !outcome) continue;
+
+        if (effectivePick === outcome) wins++;
+        else losses++;
       }
+
+      // Earned is ONLY meaningful once the whole game is finalised.
+      // Clean sweep => earned = wins (0..12). If any loss => 0.
+      let earned = 0;
+      if (isFinal && pickedCount > 0 && losses === 0) {
+        earned = wins;
+      } else if (isFinal) {
+        earned = 0;
+      }
+
+      let label: JourneyInfo["label"] = "in-progress";
+      let summary = "";
 
       if (pickedCount === 0) {
-        lines.push({ gameId, match, kind: "not-picked" });
-        continue;
+        label = "not-picked";
+        summary = isFinal ? "FINAL • Earned 0" : "Not picked yet";
+      } else if (!isFinal) {
+        label = "in-progress";
+        summary = `In progress • ${pickedCount} picks`;
+      } else {
+        label = "final";
+        summary = `FINAL • Earned ${earned}`;
       }
 
-      if (!info || info.kind === "no-picks") {
-        lines.push({ gameId, match, kind: "not-picked" });
-        continue;
-      }
-
-      if (info.kind === "pending") {
-        lines.push({ gameId, match, kind: "in-progress", picks: info.pickedCount });
-        continue;
-      }
-
-      if (info.kind === "zero") {
-        // Keep it simple: treat as "in progress" once you've picked, even if you've already stitched it up.
-        // If you want an explicit ❌ line, say the word and I'll add it.
-        lines.push({ gameId, match, kind: "in-progress", picks: pickedCount });
-        continue;
-      }
-
-      // scored = clean sweep
-      lines.push({ gameId, match, kind: "clean", plus: info.score });
+      out.push({
+        gameId,
+        match: first?.match ?? "",
+        startTime: first?.startTime ?? "",
+        venue: first?.venue ?? "",
+        pickedCount,
+        isFinal,
+        earned,
+        label,
+        summary,
+      });
     }
 
-    return lines;
-  }, [rows, picksMadeByGame, gameScoreByGame, isGameUnlocked]);
+    // Order by game start time
+    out.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    return out;
+  }, [rows, pickHistory]);
+
+  
+            {/* STREAK JOURNEY THIS ROUND */}
+          <div className="mt-4 rounded-2xl bg-[#020617] border border-white/10 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-white/60">Your streak journey this round</p>
+                <p className="text-xs text-white/70">Updates to FINAL once the match is completed.</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {journeyByGame.map((g, idx) => {
+                const icon =
+                  g.label === "final"
+                    ? "✅"
+                    : g.label === "in-progress"
+                    ? "⏳"
+                    : "📝";
+
+                const pillClasses =
+                  g.label === "final"
+                    ? "bg-emerald-500/15 border-emerald-400/50 text-emerald-200"
+                    : g.label === "in-progress"
+                    ? "bg-amber-500/15 border-amber-400/50 text-amber-200"
+                    : "bg-slate-700/40 border-white/10 text-white/75";
+
+                const earnedText =
+                  g.isFinal ? `Earned ${g.earned}` : `${g.pickedCount} picks`;
+
+                return (
+                  <div
+                    key={g.gameId}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">
+                        Game {idx + 1}: {g.match}
+                      </p>
+                      <p className="text-[11px] text-white/55 truncate">{g.venue}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-lg">{icon}</span>
+                      <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-extrabold ${pillClasses}`}>
+                        {g.isFinal ? "FINAL" : g.label === "in-progress" ? "IN PROGRESS" : "NOT PICKED"}
+                        <span className="ml-2 font-semibold opacity-90">• {earnedText}</span>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
 
   const handleShare = async () => {
     try {
