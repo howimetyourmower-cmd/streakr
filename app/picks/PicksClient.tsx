@@ -199,7 +199,7 @@ export default function PicksClient() {
 
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
 
-  // game locks: which matches are open for picks (AFL only)
+  // game locks: which matches are open for picks
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
   const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
@@ -228,6 +228,15 @@ export default function PicksClient() {
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
 
+  // ✅ IMPORTANT: default to UNLOCKED if there is no key in gameLocks.
+  // This prevents “Game 2 not selectable” when the API doesn't return a value for that gameId.
+  const isGameUnlocked = useCallback(
+    (gameId: string) => {
+      return gameLocks[gameId] ?? true;
+    },
+    [gameLocks]
+  );
+
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -239,7 +248,6 @@ export default function PicksClient() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const formatStartDate = useCallback((iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -260,63 +268,64 @@ export default function PicksClient() {
     };
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
-  const flattenApi = useCallback((
-    data: PicksApiResponse,
-    history: PickHistory
-  ): QuestionRow[] =>
-    data.games.flatMap((g: ApiGame) =>
-      g.questions.map((q: ApiQuestion) => {
-        const historyPick = history[q.id];
+  const flattenApi = useCallback(
+    (data: PicksApiResponse, history: PickHistory): QuestionRow[] =>
+      data.games.flatMap((g: ApiGame) =>
+        g.questions.map((q: ApiQuestion) => {
+          const historyPick = history[q.id];
 
-        const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
-        const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void" ? rawOutcome : null;
+          const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
+          const correctOutcome: QuestionRow["correctOutcome"] =
+            q.status === "final" || q.status === "void" ? rawOutcome : null;
 
-        return {
-          id: q.id,
-          gameId: g.id,
-          match: g.match,
-          venue: g.venue ?? q.venue ?? "",
-          startTime: g.startTime ?? q.startTime ?? "",
-          quarter: q.quarter,
-          question: q.question,
-          status: q.status,
-          userPick: q.userPick ?? historyPick,
-          yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
-          noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
-          sport: (q.sport ?? g.sport ?? "AFL").toString(),
-          commentCount: q.commentCount ?? 0,
-          isSponsorQuestion: !!q.isSponsorQuestion,
-          correctOutcome,
-        };
-      })
-    ), []);
+          return {
+            id: q.id,
+            gameId: g.id,
+            match: g.match,
+            venue: g.venue ?? q.venue ?? "",
+            startTime: g.startTime ?? q.startTime ?? "",
+            quarter: q.quarter,
+            question: q.question,
+            status: q.status,
+            userPick: q.userPick ?? historyPick,
+            yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
+            noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
+            sport: (q.sport ?? g.sport ?? "AFL").toString(),
+            commentCount: q.commentCount ?? 0,
+            isSponsorQuestion: !!q.isSponsorQuestion,
+            correctOutcome,
+          };
+        })
+      ),
+    []
+  );
 
-  // ✅ OPTIMIZED: Memoized with useCallback
-  const fetchPicks = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!opts?.silent) {
-      setLoading(true);
-      setError("");
-    }
-    try {
-      const res = await fetch("/api/picks", { cache: "no-store" });
-      if (!res.ok) throw new Error("API error");
+  const fetchPicks = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!opts?.silent) {
+        setLoading(true);
+        setError("");
+      }
+      try {
+        const res = await fetch("/api/picks", { cache: "no-store" });
+        if (!res.ok) throw new Error("API error");
 
-      const data: PicksApiResponse = await res.json();
+        const data: PicksApiResponse = await res.json();
 
-      if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
+        if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
 
-      const flat = flattenApi(data, pickHistory);
-      setRows(flat);
-      setFilteredRows(activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter));
-    } catch (e) {
-      console.error(e);
-      if (!opts?.silent) setError("Failed to load picks");
-    } finally {
-      if (!opts?.silent) setLoading(false);
-    }
-  }, [pickHistory, activeFilter, flattenApi]);
+        const flat = flattenApi(data, pickHistory);
+        setRows(flat);
+        setFilteredRows(activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter));
+      } catch (e) {
+        console.error(e);
+        if (!opts?.silent) setError("Failed to load picks");
+      } finally {
+        if (!opts?.silent) setLoading(false);
+      }
+    },
+    [pickHistory, activeFilter, flattenApi]
+  );
 
   // Load pick history from localStorage (per device)
   useEffect(() => {
@@ -342,7 +351,6 @@ export default function PicksClient() {
     }
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const handleCloseHowToModal = useCallback(() => {
     if (typeof window !== "undefined") {
       try {
@@ -360,7 +368,7 @@ export default function PicksClient() {
       .catch(() => {})
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - only run once
+  }, []);
 
   // Auto-refresh every 15s
   useEffect(() => {
@@ -370,7 +378,6 @@ export default function PicksClient() {
     return () => clearInterval(id);
   }, [fetchPicks]);
 
-  // ✅ OPTIMIZED: Memoize questionIds to prevent recalculation
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   // Comment-count live updates
@@ -458,7 +465,7 @@ export default function PicksClient() {
     loadServerPicks();
   }, [user]);
 
-  // Load game lock state for this round (AFL ONLY)
+  // Load game lock state for this round
   useEffect(() => {
     if (roundNumber === null) return;
     const loadLocks = async () => {
@@ -589,14 +596,15 @@ export default function PicksClient() {
     }
   }, [user, userCurrentStreak]);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
-  const applyFilter = useCallback((f: QuestionStatus | "all") => {
-    setActiveFilter(f);
-    if (f === "all") setFilteredRows(rows);
-    else setFilteredRows(rows.filter((r) => r.status === f));
-  }, [rows]);
+  const applyFilter = useCallback(
+    (f: QuestionStatus | "all") => {
+      setActiveFilter(f);
+      if (f === "all") setFilteredRows(rows);
+      else setFilteredRows(rows.filter((r) => r.status === f));
+    },
+    [rows]
+  );
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const persistPickHistory = useCallback((next: PickHistory) => {
     try {
       if (typeof window !== "undefined") {
@@ -605,79 +613,83 @@ export default function PicksClient() {
     } catch {}
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
-  const handlePick = useCallback(async (row: QuestionRow, pick: "yes" | "no") => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
+  const handlePick = useCallback(
+    async (row: QuestionRow, pick: "yes" | "no") => {
+      if (!user) {
+        setShowAuthModal(true);
+        return;
+      }
 
-    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
-    if (row.status !== "open" || !isMatchUnlocked) return;
+      const unlocked = isGameUnlocked(row.gameId);
+      if (row.status !== "open" || !unlocked) return;
 
-    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
-    setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
-    setPickHistory((prev) => {
-      const next: PickHistory = { ...prev, [row.id]: pick };
-      persistPickHistory(next);
-      return next;
-    });
-
-    try {
-      const idToken = await user.getIdToken();
-      await fetch("/api/user-picks", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          questionId: row.id,
-          outcome: pick,
-          roundNumber,
-          sport: "AFL",
-        }),
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
+      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
+      setPickHistory((prev) => {
+        const next: PickHistory = { ...prev, [row.id]: pick };
+        persistPickHistory(next);
+        return next;
       });
-    } catch (e) {
-      console.error("Pick save error:", e);
-    }
-  }, [user, gameLocks, roundNumber, persistPickHistory]);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
-  const handleClearPick = useCallback(async (row: QuestionRow) => {
-    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
-    if (row.status !== "open" || !isMatchUnlocked) return;
+      try {
+        const idToken = await user.getIdToken();
+        await fetch("/api/user-picks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            questionId: row.id,
+            outcome: pick,
+            roundNumber,
+            sport: "AFL",
+          }),
+        });
+      } catch (e) {
+        console.error("Pick save error:", e);
+      }
+    },
+    [user, roundNumber, persistPickHistory, isGameUnlocked]
+  );
 
-    setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
-    setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
-    setPickHistory((prev) => {
-      const next: PickHistory = { ...prev };
-      delete next[row.id];
-      persistPickHistory(next);
-      return next;
-    });
+  const handleClearPick = useCallback(
+    async (row: QuestionRow) => {
+      const unlocked = isGameUnlocked(row.gameId);
+      if (row.status !== "open" || !unlocked) return;
 
-    if (!user) return;
-    try {
-      const idToken = await user.getIdToken();
-      await fetch("/api/user-picks", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          questionId: row.id,
-          action: "clear",
-          outcome: null,
-          roundNumber,
-          sport: "AFL",
-        }),
+      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
+      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
+      setPickHistory((prev) => {
+        const next: PickHistory = { ...prev };
+        delete next[row.id];
+        persistPickHistory(next);
+        return next;
       });
-    } catch (e) {
-      console.error("Pick clear error:", e);
-    }
-  }, [user, gameLocks, roundNumber, persistPickHistory]);
+
+      if (!user) return;
+      try {
+        const idToken = await user.getIdToken();
+        await fetch("/api/user-picks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            questionId: row.id,
+            action: "clear",
+            outcome: null,
+            roundNumber,
+            sport: "AFL",
+          }),
+        });
+      } catch (e) {
+        console.error("Pick clear error:", e);
+      }
+    },
+    [user, roundNumber, persistPickHistory, isGameUnlocked]
+  );
 
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
@@ -759,15 +771,12 @@ export default function PicksClient() {
     }
   };
 
-  // Bars compare CURRENT vs CURRENT leader
   const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
   const barWidth = (val: number | null) =>
     `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // ✅ OPTIMIZED
-// ✅ OPTIMIZED: Memoize picksMadeByGame calculation
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -779,7 +788,6 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // ✅ OPTIMIZED: Memoize gameScoreByGame calculation
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -1087,7 +1095,7 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked = gameLocks[row.gameId] ?? false;
+              const isMatchUnlocked = isGameUnlocked(row.gameId);
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
@@ -1140,6 +1148,11 @@ export default function PicksClient() {
                           <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/80 border border-white/10">
                             {headerPicksMade} picks made this game
                           </span>
+                          {!isMatchUnlocked && (
+                            <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/70 border border-white/10">
+                              Picks closed
+                            </span>
+                          )}
                           {gameScoreChip}
                         </div>
                       </div>
@@ -1236,7 +1249,8 @@ export default function PicksClient() {
                             Comments ({row.commentCount ?? 0})
                           </button>
 
-                          {!isQuestionOpen && isMatchUnlocked && (
+                          {/* ✅ FIXED: show "Locked" when match is NOT unlocked */}
+                          {!isMatchUnlocked && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
