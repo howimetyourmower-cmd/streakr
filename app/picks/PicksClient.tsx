@@ -199,7 +199,7 @@ export default function PicksClient() {
 
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
 
-  // game locks: which matches are open for picks
+  // game locks: which matches are open for picks (AFL only)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
   const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
@@ -228,15 +228,6 @@ export default function PicksClient() {
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
 
-  // ✅ IMPORTANT: default to UNLOCKED if there is no key in gameLocks.
-  // This prevents “Game 2 not selectable” when the API doesn't return a value for that gameId.
-  const isGameUnlocked = useCallback(
-    (gameId: string) => {
-      return gameLocks[gameId] ?? true;
-    },
-    [gameLocks]
-  );
-
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -248,6 +239,7 @@ export default function PicksClient() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const formatStartDate = useCallback((iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -268,6 +260,7 @@ export default function PicksClient() {
     };
   }, []);
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const flattenApi = useCallback(
     (data: PicksApiResponse, history: PickHistory): QuestionRow[] =>
       data.games.flatMap((g: ApiGame) =>
@@ -300,6 +293,7 @@ export default function PicksClient() {
     []
   );
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const fetchPicks = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!opts?.silent) {
@@ -351,6 +345,7 @@ export default function PicksClient() {
     }
   }, []);
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const handleCloseHowToModal = useCallback(() => {
     if (typeof window !== "undefined") {
       try {
@@ -368,7 +363,7 @@ export default function PicksClient() {
       .catch(() => {})
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, []); // Empty dependency array - only run once
 
   // Auto-refresh every 15s
   useEffect(() => {
@@ -378,6 +373,7 @@ export default function PicksClient() {
     return () => clearInterval(id);
   }, [fetchPicks]);
 
+  // ✅ OPTIMIZED: Memoize questionIds to prevent recalculation
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   // Comment-count live updates
@@ -465,7 +461,7 @@ export default function PicksClient() {
     loadServerPicks();
   }, [user]);
 
-  // Load game lock state for this round
+  // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
     if (roundNumber === null) return;
     const loadLocks = async () => {
@@ -480,6 +476,17 @@ export default function PicksClient() {
     };
     loadLocks();
   }, [roundNumber]);
+
+  // ✅ IMPORTANT FIX:
+  // If a gameId isn't present in gameLocks, we default to TRUE (open),
+  // otherwise any missing game lock entry makes picks impossible (your "Game 2" issue).
+  const isGameUnlocked = useCallback(
+    (gameId: string) => {
+      const val = gameLocks[gameId];
+      return typeof val === "boolean" ? val : true;
+    },
+    [gameLocks]
+  );
 
   // Leader = highest currentStreak
   useEffect(() => {
@@ -596,6 +603,7 @@ export default function PicksClient() {
     }
   }, [user, userCurrentStreak]);
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const applyFilter = useCallback(
     (f: QuestionStatus | "all") => {
       setActiveFilter(f);
@@ -605,6 +613,7 @@ export default function PicksClient() {
     [rows]
   );
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const persistPickHistory = useCallback((next: PickHistory) => {
     try {
       if (typeof window !== "undefined") {
@@ -613,6 +622,7 @@ export default function PicksClient() {
     } catch {}
   }, []);
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const handlePick = useCallback(
     async (row: QuestionRow, pick: "yes" | "no") => {
       if (!user) {
@@ -620,8 +630,8 @@ export default function PicksClient() {
         return;
       }
 
-      const unlocked = isGameUnlocked(row.gameId);
-      if (row.status !== "open" || !unlocked) return;
+      const isMatchUnlocked = isGameUnlocked(row.gameId);
+      if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
       setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
@@ -653,10 +663,11 @@ export default function PicksClient() {
     [user, roundNumber, persistPickHistory, isGameUnlocked]
   );
 
+  // ✅ OPTIMIZED: Memoized with useCallback
   const handleClearPick = useCallback(
     async (row: QuestionRow) => {
-      const unlocked = isGameUnlocked(row.gameId);
-      if (row.status !== "open" || !unlocked) return;
+      const isMatchUnlocked = isGameUnlocked(row.gameId);
+      if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
       setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
@@ -771,12 +782,14 @@ export default function PicksClient() {
     }
   };
 
+  // Bars compare CURRENT vs CURRENT leader
   const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
   const barWidth = (val: number | null) =>
     `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
+  // ✅ OPTIMIZED: Memoize picksMadeByGame calculation
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -788,6 +801,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
+  // ✅ OPTIMIZED: Memoize gameScoreByGame calculation
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -836,6 +850,66 @@ export default function PicksClient() {
 
     return byGame;
   }, [rows, pickHistory]);
+
+  // -------- STREAK JOURNEY (per round, per game) --------
+  const streakJourney = useMemo(() => {
+    type Line =
+      | { gameId: string; match: string; kind: "clean"; plus: number }
+      | { gameId: string; match: string; kind: "in-progress"; picks: number }
+      | { gameId: string; match: string; kind: "not-picked" }
+      | { gameId: string; match: string; kind: "locked" };
+
+    // Preserve game order as they appear in rows
+    const order: string[] = [];
+    const matchByGame: Record<string, string> = {};
+    for (const r of rows) {
+      if (!order.includes(r.gameId)) order.push(r.gameId);
+      if (!matchByGame[r.gameId]) matchByGame[r.gameId] = r.match;
+    }
+
+    const lines: Line[] = [];
+
+    for (const gameId of order) {
+      const match = matchByGame[gameId] || "Game";
+      const unlocked = isGameUnlocked(gameId);
+
+      const pickedCount = picksMadeByGame[gameId] ?? 0;
+      const info = gameScoreByGame[gameId];
+
+      // If picks are closed and user hasn't picked anything, show locked state
+      if (!unlocked && pickedCount === 0) {
+        lines.push({ gameId, match, kind: "locked" });
+        continue;
+      }
+
+      if (pickedCount === 0) {
+        lines.push({ gameId, match, kind: "not-picked" });
+        continue;
+      }
+
+      if (!info || info.kind === "no-picks") {
+        lines.push({ gameId, match, kind: "not-picked" });
+        continue;
+      }
+
+      if (info.kind === "pending") {
+        lines.push({ gameId, match, kind: "in-progress", picks: info.pickedCount });
+        continue;
+      }
+
+      if (info.kind === "zero") {
+        // Keep it simple: treat as "in progress" once you've picked, even if you've already stitched it up.
+        // If you want an explicit ❌ line, say the word and I'll add it.
+        lines.push({ gameId, match, kind: "in-progress", picks: pickedCount });
+        continue;
+      }
+
+      // scored = clean sweep
+      lines.push({ gameId, match, kind: "clean", plus: info.score });
+    }
+
+    return lines;
+  }, [rows, picksMadeByGame, gameScoreByGame, isGameUnlocked]);
 
   const handleShare = async () => {
     try {
@@ -1043,6 +1117,95 @@ export default function PicksClient() {
             </div>
           </div>
 
+          {/* ✅ STREAK JOURNEY THIS ROUND (under progress bars) */}
+          <div className="mt-5 rounded-2xl bg-black/40 border border-white/10 p-4">
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🏉</span>
+                <p className="text-xs sm:text-sm font-extrabold tracking-widest text-white/90">
+                  YOUR STREAK JOURNEY THIS ROUND
+                </p>
+              </div>
+              <span className="text-[10px] sm:text-[11px] text-white/50">
+                {roundNumber === 0 ? "Opening Round" : roundNumber ? `Round ${roundNumber}` : ""}
+              </span>
+            </div>
+
+            <div className="space-y-2 text-sm">
+              {streakJourney.length === 0 ? (
+                <p className="text-xs text-white/60">No games loaded yet…</p>
+              ) : (
+                streakJourney.map((line, idx) => {
+                  const gameNum = idx + 1;
+
+                  if (line.kind === "clean") {
+                    return (
+                      <div
+                        key={line.gameId}
+                        className="flex items-center justify-between rounded-xl bg-emerald-500/10 border border-emerald-400/30 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base">✅</span>
+                          <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
+                          <span className="truncate text-emerald-200 font-bold">Clean Sweep!</span>
+                        </div>
+                        <span className="text-emerald-200 font-extrabold">(+{line.plus})</span>
+                      </div>
+                    );
+                  }
+
+                  if (line.kind === "in-progress") {
+                    return (
+                      <div
+                        key={line.gameId}
+                        className="flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-400/30 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base">⏳</span>
+                          <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
+                          <span className="truncate text-amber-200 font-bold">In Progress</span>
+                        </div>
+                        <span className="text-amber-200 font-semibold text-xs sm:text-sm">
+                          ({line.picks} picks)
+                        </span>
+                      </div>
+                    );
+                  }
+
+                  if (line.kind === "locked") {
+                    return (
+                      <div
+                        key={line.gameId}
+                        className="flex items-center justify-between rounded-xl bg-slate-700/30 border border-slate-400/20 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base">🔒</span>
+                          <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
+                          <span className="truncate text-white/80 font-semibold">Picks closed</span>
+                        </div>
+                        <span className="text-white/50 text-xs sm:text-sm">Locked</span>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={line.gameId}
+                      className="flex items-center justify-between rounded-xl bg-slate-800/40 border border-white/10 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base">📝</span>
+                        <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
+                        <span className="truncate text-white/80 font-semibold">Not picked yet</span>
+                      </div>
+                      <span className="text-white/40 text-xs sm:text-sm">—</span>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
           {streakLoading && <p className="mt-2 text-[10px] text-white/50">Loading streak data…</p>}
           {streakError && <p className="mt-2 text-[10px] text-red-400">{streakError}</p>}
           {shareStatus && <p className="mt-2 text-[10px] text-sky-300">{shareStatus}</p>}
@@ -1148,11 +1311,6 @@ export default function PicksClient() {
                           <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/80 border border-white/10">
                             {headerPicksMade} picks made this game
                           </span>
-                          {!isMatchUnlocked && (
-                            <span className="inline-flex items-center rounded-full bg-black/40 px-3 py-1 text-[11px] font-semibold text-white/70 border border-white/10">
-                              Picks closed
-                            </span>
-                          )}
                           {gameScoreChip}
                         </div>
                       </div>
@@ -1249,8 +1407,7 @@ export default function PicksClient() {
                             Comments ({row.commentCount ?? 0})
                           </button>
 
-                          {/* ✅ FIXED: show "Locked" when match is NOT unlocked */}
-                          {!isMatchUnlocked && (
+                          {!isSelectable && (
                             <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
