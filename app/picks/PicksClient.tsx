@@ -1,12 +1,11 @@
 // /app/picks/PicksClient.tsx
 "use client";
 
-import { useEffect, useState, useMemo, useRef, ChangeEvent } from "react";
+import { useEffect, useState, useMemo, useRef, ChangeEvent, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
-import { useSearchParams } from "next/navigation";
 import { db } from "@/lib/firebaseClient";
 import {
   collection,
@@ -81,7 +80,7 @@ type PickHistory = Record<string, "yes" | "no">;
 
 type GameLocksResponse = {
   roundNumber: number;
-  locks: Record<string, boolean>; // gameId -> isUnlockedForPicks
+  locks: Record<string, boolean>;
 };
 
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
@@ -151,6 +150,7 @@ const AFL_TEAM_LOGOS: Record<AflTeamKey, { name: string; logo: string }> = {
 function normaliseSegment(seg: string) {
   return seg.trim().toLowerCase();
 }
+
 function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   const s = normaliseSegment(seg);
   if (s.includes("adelaide")) return "adelaide";
@@ -173,6 +173,7 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("western bulldogs") || s.includes("bulldogs")) return "western-bulldogs";
   return null;
 }
+
 function parseAflMatchTeams(match: string) {
   const lower = match.toLowerCase();
   let parts: string[] = [];
@@ -186,28 +187,7 @@ function parseAflMatchTeams(match: string) {
   return { homeKey, awayKey, homeLabel: homeSeg || null, awayLabel: awaySeg || null };
 }
 
-// --------------------------------------------------
-type SportKey = "AFL" | "BBL";
-
 export default function PicksClient() {
-  const params = useSearchParams();
-
-  // ✅ Robust sport resolution:
-  // - If sport param is provided, trust it.
-  // - Else if docId looks like BBL, infer BBL.
-  // - Else default AFL.
-  const rawSport = (params.get("sport") || "").trim().toUpperCase();
-  const rawDocId = (params.get("docId") || "").trim();
-  const inferredSport: SportKey =
-    rawSport === "BBL" || rawSport === "AFL"
-      ? (rawSport as SportKey)
-      : rawDocId
-      ? "BBL"
-      : "AFL";
-
-  const activeSport: SportKey = inferredSport;
-  const bblDocId = rawDocId;
-
   const { user } = useAuth();
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
@@ -218,10 +198,6 @@ export default function PicksClient() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
-  const pickHistoryRef = useRef<PickHistory>({});
-  useEffect(() => {
-    pickHistoryRef.current = pickHistory;
-  }, [pickHistory]);
 
   // game locks: which matches are open for picks (AFL only)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
@@ -245,18 +221,12 @@ export default function PicksClient() {
 
   const [showConfetti, setShowConfetti] = useState(false);
   const [streakLevelModal, setStreakLevelModal] = useState<(3 | 5 | 10 | 15 | 20) | null>(null);
-  const [lastCelebratedStreak, setLastCelebratedStreak] = useState(0);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>({});
   const [animatedCurrentStreak, setAnimatedCurrentStreak] = useState<number>(0);
   const [streakResetFx, setStreakResetFx] = useState(false);
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
-
-  const rowsRef = useRef<QuestionRow[]>([]);
-  useEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
 
   // window size for Confetti
   useEffect(() => {
@@ -269,7 +239,8 @@ export default function PicksClient() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const formatStartDate = (iso: string) => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const formatStartDate = useCallback((iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
     if (isNaN(d.getTime())) return { date: "", time: "" };
@@ -287,17 +258,15 @@ export default function PicksClient() {
         timeZone: "Australia/Melbourne",
       }),
     };
-  };
+  }, []);
 
-  const flattenApi = (
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const flattenApi = useCallback((
     data: PicksApiResponse,
-    prevRows: QuestionRow[],
-    history: PickHistory,
-    sportFallback: SportKey
+    history: PickHistory
   ): QuestionRow[] =>
     data.games.flatMap((g: ApiGame) =>
       g.questions.map((q: ApiQuestion) => {
-        const prev = prevRows.find((r) => r.id === q.id);
         const historyPick = history[q.id];
 
         const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
@@ -313,46 +282,32 @@ export default function PicksClient() {
           quarter: q.quarter,
           question: q.question,
           status: q.status,
-          userPick: q.userPick ?? historyPick ?? prev?.userPick,
-          yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : prev?.yesPercent,
-          noPercent: typeof q.noPercent === "number" ? q.noPercent : prev?.noPercent,
-          sport: (q.sport ?? g.sport ?? sportFallback).toString(),
-          commentCount: q.commentCount ?? prev?.commentCount ?? 0,
+          userPick: q.userPick ?? historyPick,
+          yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
+          noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
+          sport: (q.sport ?? g.sport ?? "AFL").toString(),
+          commentCount: q.commentCount ?? 0,
           isSponsorQuestion: !!q.isSponsorQuestion,
           correctOutcome,
         };
       })
-    );
+    ), []);
 
-  const fetchPicks = async (opts?: { silent?: boolean }) => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const fetchPicks = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) {
       setLoading(true);
       setError("");
     }
     try {
-      // ✅ Guard BBL requests: must have docId
-      if (activeSport === "BBL" && !bblDocId) {
-        setRows([]);
-        setFilteredRows([]);
-        setRoundNumber(null);
-        setError("No BBL match selected (missing docId).");
-        return;
-      }
-
-      const url =
-        activeSport === "BBL"
-          ? `/api/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
-          : "/api/picks";
-
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetch("/api/picks", { cache: "no-store" });
       if (!res.ok) throw new Error("API error");
 
       const data: PicksApiResponse = await res.json();
 
       if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
-      else if (activeSport === "BBL") setRoundNumber(null);
 
-      const flat = flattenApi(data, rowsRef.current, pickHistoryRef.current, activeSport);
+      const flat = flattenApi(data, pickHistory);
       setRows(flat);
       setFilteredRows(activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter));
     } catch (e) {
@@ -361,7 +316,7 @@ export default function PicksClient() {
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  };
+  }, [pickHistory, activeFilter, flattenApi]);
 
   // Load pick history from localStorage (per device)
   useEffect(() => {
@@ -387,16 +342,17 @@ export default function PicksClient() {
     }
   }, []);
 
-  const handleCloseHowToModal = () => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const handleCloseHowToModal = useCallback(() => {
     if (typeof window !== "undefined") {
       try {
         window.localStorage.setItem(HOW_TO_PLAY_KEY, "true");
       } catch {}
     }
     setShowHowToModal(false);
-  };
+  }, []);
 
-  // Initial fetch + refetch on sport/doc change
+  // Initial fetch - only runs once on mount
   useEffect(() => {
     setError("");
     setLoading(true);
@@ -404,17 +360,17 @@ export default function PicksClient() {
       .catch(() => {})
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSport, bblDocId]);
+  }, []); // Empty dependency array - only run once
 
-  // Auto-refresh (always uses current sport/doc)
+  // Auto-refresh every 15s
   useEffect(() => {
     const id = setInterval(() => {
       fetchPicks({ silent: true });
     }, 15000);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSport, bblDocId]);
+  }, [fetchPicks]);
 
+  // ✅ OPTIMIZED: Memoize questionIds to prevent recalculation
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   // Comment-count live updates
@@ -450,15 +406,6 @@ export default function PicksClient() {
 
     return () => unsubs.forEach((unsub) => unsub());
   }, [questionIds]);
-
-  // Stronger persist of local pick history into rows whenever it changes
-  useEffect(() => {
-    if (!rowsRef.current.length) return;
-    setRows((prev) => prev.map((r) => (pickHistory[r.id] ? { ...r, userPick: pickHistory[r.id] } : r)));
-    setFilteredRows((prev) =>
-      prev.map((r) => (pickHistory[r.id] ? { ...r, userPick: pickHistory[r.id] } : r))
-    );
-  }, [pickHistory]);
 
   // Load picks from backend and merge into local history
   useEffect(() => {
@@ -503,20 +450,16 @@ export default function PicksClient() {
             return merged;
           });
         }
-
-        if (rowsRef.current.length) fetchPicks({ silent: true });
       } catch (err) {
         console.error("Failed to load picks from API", err);
       }
     };
 
     loadServerPicks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
-    if (activeSport !== "AFL") return;
     if (roundNumber === null) return;
     const loadLocks = async () => {
       try {
@@ -529,7 +472,7 @@ export default function PicksClient() {
       }
     };
     loadLocks();
-  }, [roundNumber, activeSport]);
+  }, [roundNumber]);
 
   // Leader = highest currentStreak
   useEffect(() => {
@@ -632,8 +575,7 @@ export default function PicksClient() {
         streakAnimRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userCurrentStreak]);
+  }, [userCurrentStreak, animatedCurrentStreak]);
 
   useEffect(() => {
     if (!user) {
@@ -645,30 +587,32 @@ export default function PicksClient() {
       setAnimatedCurrentStreak(userCurrentStreak);
       prevStreakRef.current = userCurrentStreak;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, userCurrentStreak]);
 
-  const applyFilter = (f: QuestionStatus | "all") => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const applyFilter = useCallback((f: QuestionStatus | "all") => {
     setActiveFilter(f);
     if (f === "all") setFilteredRows(rows);
     else setFilteredRows(rows.filter((r) => r.status === f));
-  };
+  }, [rows]);
 
-  const persistPickHistory = (next: PickHistory) => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const persistPickHistory = useCallback((next: PickHistory) => {
     try {
       if (typeof window !== "undefined") {
         window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
       }
     } catch {}
-  };
+  }, []);
 
-  const handlePick = async (row: QuestionRow, pick: "yes" | "no") => {
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const handlePick = useCallback(async (row: QuestionRow, pick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
 
-    const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
@@ -691,17 +635,17 @@ export default function PicksClient() {
           questionId: row.id,
           outcome: pick,
           roundNumber,
-          sport: activeSport,
-          docId: activeSport === "BBL" ? bblDocId : undefined,
+          sport: "AFL",
         }),
       });
     } catch (e) {
       console.error("Pick save error:", e);
     }
-  };
+  }, [user, gameLocks, roundNumber, persistPickHistory]);
 
-  const handleClearPick = async (row: QuestionRow) => {
-    const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+  // ✅ OPTIMIZED: Memoized with useCallback
+  const handleClearPick = useCallback(async (row: QuestionRow) => {
+    const isMatchUnlocked = gameLocks[row.gameId] ?? false;
     if (row.status !== "open" || !isMatchUnlocked) return;
 
     setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
@@ -727,14 +671,13 @@ export default function PicksClient() {
           action: "clear",
           outcome: null,
           roundNumber,
-          sport: activeSport,
-          docId: activeSport === "BBL" ? bblDocId : undefined,
+          sport: "AFL",
         }),
       });
     } catch (e) {
       console.error("Pick clear error:", e);
     }
-  };
+  }, [user, gameLocks, roundNumber, persistPickHistory]);
 
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
@@ -823,7 +766,8 @@ export default function PicksClient() {
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // Picks made per game
+  // ✅ OPTIMIZED
+// ✅ OPTIMIZED: Memoize picksMadeByGame calculation
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -835,7 +779,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // Game score per game (clean sweep)
+  // ✅ OPTIMIZED: Memoize gameScoreByGame calculation
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -891,7 +835,7 @@ export default function PicksClient() {
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({
           title: "STREAKr – How long can you last?",
-          text: "I’m playing STREAKr. See if you can beat my streak!",
+          text: "I'm playing STREAKr. See if you can beat my streak!",
           url: shareUrl,
         });
         setShareStatus("Shared!");
@@ -914,31 +858,31 @@ export default function PicksClient() {
         return {
           title: "3 in a row!",
           subtitle: "Keep building 😎",
-          body: "Nice start. You’re building momentum – keep your head and stack that streak.",
+          body: "Nice start. You're building momentum – keep your head and stack that streak.",
         };
       case 5:
         return {
           title: "Bang! 5 straight!",
-          subtitle: "You’re on the money 🔥",
-          body: "That’s a serious run. Lock in, stay sharp and push for double digits.",
+          subtitle: "You're on the money 🔥",
+          body: "That's a serious run. Lock in, stay sharp and push for double digits.",
         };
       case 10:
         return {
           title: "Streak Level 10",
-          subtitle: "That’s elite 💪🏻",
-          body: "Ten straight is no joke. You’ve earned your first STREAKr badge – make sure your mates know about it.",
+          subtitle: "That's elite 💪🏻",
+          body: "Ten straight is no joke. You've earned your first STREAKr badge – make sure your mates know about it.",
         };
       case 15:
         return {
           title: "15 in a row",
           subtitle: "Dominance level unlocked 💪🏻",
-          body: "This run is getting ridiculous. You’re in rare air now – every pick is appointment viewing.",
+          body: "This run is getting ridiculous. You're in rare air now – every pick is appointment viewing.",
         };
       case 20:
         return {
           title: "20 straight",
           subtitle: "What are we witnessing? GOAT 🏆",
-          body: "Twenty in a row is all-time. You’ve unlocked legendary STREAKr status – screenshotted or it didn’t happen.",
+          body: "Twenty in a row is all-time. You've unlocked legendary STREAKr status – screenshotted or it didn't happen.",
         };
       default:
         return null;
@@ -1003,25 +947,12 @@ export default function PicksClient() {
             <div className="flex flex-col gap-1">
               <h1 className="text-3xl sm:text-4xl font-bold">Picks</h1>
 
-              {roundNumber !== null && activeSport === "AFL" && (
+              {roundNumber !== null && (
                 <p className="text-sm text-white/70">
                   Current Round:{" "}
                   <span className="font-semibold text-orange-400">
                     {roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`}
                   </span>
-                </p>
-              )}
-
-              {/* ✅ Helpful BBL context header */}
-              {activeSport === "BBL" && (
-                <p className="text-sm text-white/70">
-                  Sport: <span className="font-semibold text-orange-400">BBL</span>
-                  {bblDocId ? (
-                    <>
-                      {" "}
-                      • Match: <span className="font-semibold text-white/80">{bblDocId}</span>
-                    </>
-                  ) : null}
                 </p>
               )}
             </div>
@@ -1148,7 +1079,7 @@ export default function PicksClient() {
 
         {loading && <p>Loading…</p>}
 
-        {/* (Render list) */}
+        {/* Render list */}
         <div className="space-y-2">
           {(() => {
             let lastGameId: string | null = null;
@@ -1156,7 +1087,7 @@ export default function PicksClient() {
             return filteredRows.map((row) => {
               const { date, time } = formatStartDate(row.startTime);
 
-              const isMatchUnlocked = activeSport === "BBL" ? true : (gameLocks[row.gameId] ?? false);
+              const isMatchUnlocked = gameLocks[row.gameId] ?? false;
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
@@ -1435,32 +1366,22 @@ export default function PicksClient() {
                 You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
               </p>
 
-              {/* ✅ Preserve sport/docId through auth redirects */}
-              {(() => {
-                const returnTo =
-                  activeSport === "BBL"
-                    ? `/picks?sport=BBL&docId=${encodeURIComponent(bblDocId)}`
-                    : "/picks";
-
-                return (
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <Link
-                      href={`/auth?mode=login&returnTo=${encodeURIComponent(returnTo)}`}
-                      className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-                      onClick={() => setShowAuthModal(false)}
-                    >
-                      Login
-                    </Link>
-                    <Link
-                      href={`/auth?mode=signup&returnTo=${encodeURIComponent(returnTo)}`}
-                      className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-                      onClick={() => setShowAuthModal(false)}
-                    >
-                      Sign up
-                    </Link>
-                  </div>
-                );
-              })()}
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Link
+                  href="/auth?mode=login&returnTo=/picks"
+                  className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                  onClick={() => setShowAuthModal(false)}
+                >
+                  Login
+                </Link>
+                <Link
+                  href="/auth?mode=signup&returnTo=/picks"
+                  className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                  onClick={() => setShowAuthModal(false)}
+                >
+                  Sign up
+                </Link>
+              </div>
             </div>
           </div>
         )}
