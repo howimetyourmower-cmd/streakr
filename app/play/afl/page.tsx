@@ -41,6 +41,15 @@ type QuestionRow = {
   question: string;
 };
 
+type PreviewFocusPayload = {
+  sport: "AFL";
+  questionId: string;
+  intendedPick: "yes" | "no";
+  createdAt: number;
+};
+
+const PREVIEW_FOCUS_KEY = "streakr_preview_focus_v1";
+
 export default function AflHubPage() {
   const { user } = useAuth();
   const router = useRouter();
@@ -149,11 +158,24 @@ export default function AflHubPage() {
 
   const previewQuestions = questions.slice(0, 6);
 
-  const handlePreviewPick = () => {
+  const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
     if (!user) {
       setShowAuthModal(true);
       return;
     }
+
+    try {
+      const payload: PreviewFocusPayload = {
+        sport: "AFL",
+        questionId,
+        intendedPick,
+        createdAt: Date.now(),
+      };
+      window.localStorage.setItem(PREVIEW_FOCUS_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore
+    }
+
     router.push(picksHref);
   };
 
@@ -164,7 +186,6 @@ export default function AflHubPage() {
       setShowAuthModal(true);
       return;
     }
-    // allow normal navigation (Link) OR you can router.push
   };
 
   return (
@@ -267,7 +288,6 @@ export default function AflHubPage() {
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* ✅ Goes through modal if logged out */}
               <Link
                 href={picksHref}
                 onClick={onClickGoToPicks}
@@ -287,7 +307,7 @@ export default function AflHubPage() {
         </div>
 
         {/* ========= MAIN HERO ========= */}
-        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-14">
+        <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-12">
           <div>
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-tight mb-3">
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
@@ -318,8 +338,7 @@ export default function AflHubPage() {
               </span>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-4 mb-4">
-              {/* ✅ Goes through modal if logged out */}
+            <div className="flex flex-col sm:flex-row gap-4 mb-3">
               <Link
                 href={picksHref}
                 onClick={onClickGoToPicks}
@@ -336,10 +355,58 @@ export default function AflHubPage() {
               </Link>
             </div>
 
-            <p className="text-[11px] text-white/50">
+            <p className="text-[11px] text-white/50 mb-5">
               *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
               gambling. 18+ only. Don&apos;t be a mug — play for fun.
             </p>
+
+            {/* ✅ HOW TO PLAY BOXES (DIRECTLY UNDER HERO CTA) */}
+            <div className="rounded-3xl border border-white/10 bg-gradient-to-r from-white/5 via-[#020617] to-[#020617] p-4 sm:p-5 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h2 className="text-base sm:text-lg font-extrabold">How to play</h2>
+                  <p className="text-[12px] text-white/70">
+                    3 steps. Fast picks. Big sweat.
+                  </p>
+                </div>
+                <Link
+                  href={picksHref}
+                  onClick={onClickGoToPicks}
+                  className="text-[12px] text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
+                >
+                  Go to Picks →
+                </Link>
+              </div>
+
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4 hover:border-orange-400/40 transition">
+                  <p className="text-[11px] font-extrabold text-orange-300 mb-1 uppercase tracking-wide">
+                    1) Pick Yes / No
+                  </p>
+                  <p className="text-sm text-white/80">
+                    Live AFL player-stat questions pop up each quarter. Back your read.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4 hover:border-orange-400/40 transition">
+                  <p className="text-[11px] font-extrabold text-orange-300 mb-1 uppercase tracking-wide">
+                    2) Clean sweep per match
+                  </p>
+                  <p className="text-sm text-white/80">
+                    Any wrong pick in a match = streak resets to <span className="font-semibold">0</span>.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4 hover:border-orange-400/40 transition">
+                  <p className="text-[11px] font-extrabold text-orange-300 mb-1 uppercase tracking-wide">
+                    3) Flex on the ladder
+                  </p>
+                  <p className="text-sm text-white/80">
+                    Beat your mates, climb leaderboards, win prizes, talk big.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="relative">
@@ -353,7 +420,6 @@ export default function AflHubPage() {
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
-              {/* BIG AFL TAG TOP RIGHT */}
               <div className="absolute top-4 right-4">
                 <span className="inline-flex items-center gap-2 rounded-full bg-black/75 border border-orange-400/50 px-4 py-2 text-xs font-extrabold text-orange-200 shadow-[0_0_28px_rgba(255,122,0,0.45)]">
                   <span className="h-2 w-2 rounded-full bg-[#FF7A00]" />
@@ -384,91 +450,16 @@ export default function AflHubPage() {
           </div>
         </section>
 
-        {/* ========= HOW IT WORKS ========= */}
-        <section className="mb-10">
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">
-            How AFL STREAKr works
-          </h2>
-          <p className="text-sm text-white/70 mb-4 max-w-2xl">
-            It&apos;s like tipping&apos;s louder cousin. Quick picks, live sweat,
-            and bragging rights that last all week.
-          </p>
-
-          <div className="grid sm:grid-cols-3 gap-4">
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">
-                1 · Pick an AFL question
-              </p>
-              <p className="text-sm text-white/80">
-                Every quarter has hand-picked AFL player-stat questions.{" "}
-                <span className="font-semibold">Yes</span> or{" "}
-                <span className="font-semibold">No</span> — back your gut and
-                lock in your pick.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">
-                2 · Build a filthy AFL streak
-              </p>
-              <p className="text-sm text-white/80">
-                Every correct answer adds{" "}
-                <span className="font-semibold">+1</span> to your streak. One
-                wrong pick and you&apos;re{" "}
-                <span className="font-semibold">back to zero</span>. No safety
-                nets. Just nerve.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-white/10 bg-[#020617] px-4 py-4">
-              <p className="text-xs font-semibold text-orange-300 mb-1">
-                3 · Flex on your mates
-              </p>
-              <p className="text-sm text-white/80">
-                Climb the round ladder, earn{" "}
-                <span className="font-semibold">badges</span>, win{" "}
-                <span className="font-semibold">prizes</span>, and send
-                screenshots straight into the group chat.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-5 grid sm:grid-cols-3 gap-4 text-sm text-white/75">
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
-                Built for
-              </p>
-              <p>Group chats, office comps, pub and venue leagues.</p>
-            </div>
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
-                No deposit, no drama
-              </p>
-              <p>Free to play. No odds, no multis, no gambling nonsense.</p>
-            </div>
-            <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3">
-              <p className="text-xs font-semibold text-white/70 mb-1 uppercase tracking-wide">
-                Pure footy chat
-              </p>
-              <p>Back your eye for the game, not your bank account.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* ========= PREVIEW ========= */}
+        {/* ========= NEXT 6 PICKS PREVIEW ========= */}
         <section className="mb-12">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-xl sm:text-2xl font-bold">
-                Tonight&apos;s live AFL picks preview
-              </h2>
+              <h2 className="text-xl sm:text-2xl font-bold">Next 6 available picks</h2>
               <p className="text-sm text-white/70">
-                A taste of the open questions right now. Jump into Picks to
-                actually lock yours in.
+                New player? Tap <span className="font-semibold">Yes</span> or <span className="font-semibold">No</span> to see exactly how it works.
               </p>
             </div>
 
-            {/* ✅ Goes through modal if logged out */}
             <Link
               href={picksHref}
               onClick={onClickGoToPicks}
@@ -479,14 +470,11 @@ export default function AflHubPage() {
           </div>
 
           {error ? <p className="text-sm text-red-400 mb-3">{error}</p> : null}
-          {loading ? (
-            <p className="text-sm text-white/70">Loading questions…</p>
-          ) : null}
+          {loading ? <p className="text-sm text-white/70">Loading questions…</p> : null}
 
           {!loading && previewQuestions.length === 0 && !error ? (
             <p className="text-sm text-white/60">
-              No open questions right now. Schedule&apos;s probably between
-              games — check back closer to bounce.
+              No open questions right now. Schedule&apos;s probably between games — check back closer to bounce.
             </p>
           ) : null}
 
@@ -501,9 +489,7 @@ export default function AflHubPage() {
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-1.5">
-                        <span className="font-semibold text-orange-200">
-                          AFL Q{q.quarter}
-                        </span>
+                        <span className="font-semibold text-orange-200">AFL Q{q.quarter}</span>
                         <span>•</span>
                         <span>
                           {date} • {time} AEDT
@@ -513,22 +499,20 @@ export default function AflHubPage() {
                         <span>•</span>
                         <span>{q.venue}</span>
                       </div>
-                      <div className="text-sm sm:text-base font-semibold">
-                        {q.question}
-                      </div>
+                      <div className="text-sm sm:text-base font-semibold">{q.question}</div>
                     </div>
 
                     <div className="flex items-center gap-3 md:ml-4 shrink-0">
                       <button
                         type="button"
-                        onClick={handlePreviewPick}
+                        onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
                         className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white transition"
                       >
                         Yes
                       </button>
                       <button
                         type="button"
-                        onClick={handlePreviewPick}
+                        onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
                         className="px-4 py-1.5 rounded-full text-xs sm:text-sm font-bold bg-red-600 hover:bg-red-700 text-white transition"
                       >
                         No
@@ -544,8 +528,7 @@ export default function AflHubPage() {
         <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
             <p>
-              STREAKr is a free game of skill. No gambling. 18+ only. Prizes
-              subject to terms and conditions. Play responsibly.
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.
             </p>
             <Link
               href="/faq"
@@ -573,8 +556,7 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-sm text-white/70 mb-4">
-              You need a free STREAKr account to make picks, build your streak
-              and appear on the leaderboard.
+              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
