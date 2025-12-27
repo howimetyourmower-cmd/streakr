@@ -296,24 +296,6 @@ export default function AflHubPage() {
               </div>
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href={picksHref}
-                onClick={onClickGoToPicks}
-                className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] hover:bg-orange-500 text-black font-extrabold px-6 py-3 text-sm shadow-[0_14px_40px_rgba(0,0,0,0.65)] transition-all"
-              >
-                Play AFL now →
-              </Link>
-
-              <Link
-                href="/"
-                className="inline-flex items-center justify-center rounded-full border border-white/20 bg-white/5 hover:border-orange-400 hover:text-orange-200 px-6 py-3 text-sm text-white/80 transition-all"
-              >
-                Switch sport
-              </Link>
-            </div>
-          </div>
-        </div>
 
         {/* ========= MAIN HERO ========= */}
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-16">
