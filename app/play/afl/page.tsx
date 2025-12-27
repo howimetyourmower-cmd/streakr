@@ -295,8 +295,8 @@ export default function AflHubPage() {
                 </p>
               </div>
             </div>
-
-
+ </div>
+ </div>
         {/* ========= MAIN HERO ========= */}
         <section className="grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-10 items-center mb-16">
           <div>
