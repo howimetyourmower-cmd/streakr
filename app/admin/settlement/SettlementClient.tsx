@@ -17,12 +17,18 @@ type SettlementAction =
 
 type RoundKey = (typeof ROUND_OPTIONS)[number]["key"];
 
+type QuestionOutcome = "yes" | "no" | "void";
+
 type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
   isSponsorQuestion?: boolean;
+  // ✅ Optional: backend may already return one of these (we read any we can find)
+  outcome?: QuestionOutcome | null;
+  correctOutcome?: QuestionOutcome | null;
+  result?: QuestionOutcome | null;
 };
 
 type ApiGame = {
@@ -48,6 +54,8 @@ type QuestionRow = {
   venue: string;
   startTime: string;
   isSponsorQuestion?: boolean;
+  // ✅ What you want highlighted: final YES/NO/VOID
+  outcome?: QuestionOutcome | null;
 };
 
 // Map ROUND_OPTIONS.key → numeric roundNumber used by /api/picks & /api/settlement
@@ -80,6 +88,27 @@ function formatStart(iso: string) {
   });
 
   return { date, time };
+}
+
+function extractOutcome(q: any): QuestionOutcome | null {
+  const raw =
+    q?.outcome ??
+    q?.correctOutcome ??
+    q?.result ??
+    q?.finalOutcome ??
+    q?.resolvedOutcome ??
+    null;
+
+  if (raw === "yes" || raw === "no" || raw === "void") return raw;
+  if (raw === "YES") return "yes";
+  if (raw === "NO") return "no";
+  if (raw === "VOID") return "void";
+  return null;
+}
+
+function outcomeLabel(outcome: QuestionOutcome | null | undefined) {
+  if (!outcome) return "";
+  return outcome.toUpperCase();
 }
 
 export default function SettlementClient() {
@@ -139,6 +168,8 @@ export default function SettlementClient() {
     const flatQuestions: QuestionRow[] = [];
     for (const game of json.games || []) {
       for (const q of game.questions || []) {
+        const out = extractOutcome(q);
+
         flatQuestions.push({
           id: q.id,
           gameId: game.id,
@@ -149,6 +180,7 @@ export default function SettlementClient() {
           venue: game.venue,
           startTime: game.startTime,
           isSponsorQuestion: q.isSponsorQuestion,
+          outcome: out,
         });
       }
     }
@@ -274,6 +306,20 @@ export default function SettlementClient() {
     }
   }
 
+  function actionToOutcome(action: SettlementAction): QuestionOutcome | null {
+    switch (action) {
+      case "final_yes":
+        return "yes";
+      case "final_no":
+        return "no";
+      case "final_void":
+      case "void":
+        return "void";
+      default:
+        return null;
+    }
+  }
+
   // ─────────────────────────────────────────────
   // Single question action
   // ─────────────────────────────────────────────
@@ -282,33 +328,42 @@ export default function SettlementClient() {
       setSavingId(questionId);
       setError(null);
 
-      // Optimistic local status update
+      // Optimistic local status/outcome update
       setQuestions((prev) =>
         prev.map((q) => {
           if (q.id !== questionId) return q;
 
           let newStatus: QuestionStatus = q.status;
+          let newOutcome: QuestionOutcome | null | undefined = q.outcome ?? null;
 
           switch (action) {
             case "lock":
               newStatus = "pending";
+              // keep outcome as-is (admin might lock after prior final, rare)
               break;
+
             case "reopen":
               newStatus = "open";
+              newOutcome = null; // ✅ reopening clears the previous settlement highlight
               break;
+
             case "final_yes":
             case "final_no":
               newStatus = "final";
+              newOutcome = actionToOutcome(action);
               break;
+
             case "final_void":
             case "void":
               newStatus = "void";
+              newOutcome = "void";
               break;
+
             default:
               break;
           }
 
-          return { ...q, status: newStatus };
+          return { ...q, status: newStatus, outcome: newOutcome ?? null };
         })
       );
 
@@ -446,6 +501,83 @@ export default function SettlementClient() {
           </span>
         );
     }
+  }
+
+  function outcomeChip(outcome: QuestionOutcome | null | undefined) {
+    if (!outcome) return null;
+
+    if (outcome === "yes") {
+      return (
+        <span className="inline-flex items-center rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-extrabold text-emerald-200 border border-emerald-300/40">
+          SET: YES
+        </span>
+      );
+    }
+    if (outcome === "no") {
+      return (
+        <span className="inline-flex items-center rounded-full bg-red-400/15 px-3 py-1 text-[11px] font-extrabold text-red-200 border border-red-300/40">
+          SET: NO
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center rounded-full bg-slate-400/15 px-3 py-1 text-[11px] font-extrabold text-slate-200 border border-slate-300/40">
+        SET: VOID
+      </span>
+    );
+  }
+
+  function outcomeButtonClass(
+    kind: QuestionOutcome,
+    selected: boolean,
+    disabled: boolean
+  ) {
+    const base =
+      "px-3 py-1 rounded-full text-xs font-semibold border transition focus:outline-none focus:ring-2 focus:ring-orange-500/70";
+
+    const dis = disabled ? " opacity-60 cursor-not-allowed" : "";
+
+    // Selected state: strong highlight + ring + brighter text
+    if (kind === "yes") {
+      return (
+        base +
+        (selected
+          ? " bg-emerald-400 text-black border-emerald-200 ring-2 ring-emerald-300/70 shadow-[0_0_0_3px_rgba(52,211,153,0.20)]"
+          : " bg-emerald-500/70 text-black border-emerald-400/40 hover:bg-emerald-400") +
+        dis
+      );
+    }
+
+    if (kind === "no") {
+      return (
+        base +
+        (selected
+          ? " bg-red-400 text-black border-red-200 ring-2 ring-red-300/70 shadow-[0_0_0_3px_rgba(248,113,113,0.20)]"
+          : " bg-red-500/70 text-black border-red-400/40 hover:bg-red-400") +
+        dis
+      );
+    }
+
+    // void
+    return (
+      base +
+      (selected
+        ? " bg-slate-300 text-black border-slate-200 ring-2 ring-slate-200/70 shadow-[0_0_0_3px_rgba(226,232,240,0.14)]"
+        : " bg-slate-500/70 text-black border-slate-400/40 hover:bg-slate-400") +
+      dis
+    );
+  }
+
+  function rowTintClass(q: QuestionRow) {
+    // ✅ Subtle row tint so "settled" visually pops
+    if (q.status === "final") {
+      if (q.outcome === "yes") return "bg-emerald-500/10";
+      if (q.outcome === "no") return "bg-red-500/10";
+      return "bg-sky-500/10"; // final but unknown outcome
+    }
+    if (q.status === "void") return "bg-slate-500/10";
+    if (q.status === "pending") return "bg-amber-500/10";
+    return "bg-black/40";
   }
 
   const bulkBusyText = useMemo(() => {
@@ -729,76 +861,128 @@ export default function SettlementClient() {
                     </div>
 
                     <div className="divide-y divide-white/10">
-                      {items.map((q) => (
-                        <div
-                          key={q.id}
-                          className="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-black/40"
-                        >
-                          <div className="flex items-start gap-4 md:w-2/3">
-                            <div className="w-10 mt-1 text-sm font-semibold text-slate-200">
-                              Q{q.quarter}
-                            </div>
-                            <div>
-                              <div className="text-sm font-semibold text-white">
-                                {q.question}
+                      {items.map((q) => {
+                        const isBusy = savingId === q.id || bulkLocking;
+
+                        const selectedYes =
+                          q.status === "final" && q.outcome === "yes";
+                        const selectedNo =
+                          q.status === "final" && q.outcome === "no";
+                        const selectedVoid =
+                          q.status === "void" || q.outcome === "void";
+
+                        return (
+                          <div
+                            key={q.id}
+                            className={`px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between ${rowTintClass(
+                              q
+                            )}`}
+                          >
+                            <div className="flex items-start gap-4 md:w-2/3">
+                              <div className="w-10 mt-1 text-sm font-semibold text-slate-200">
+                                Q{q.quarter}
                               </div>
-                              {q.isSponsorQuestion && (
-                                <div className="mt-1 inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
-                                  Sponsor Question
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white">
+                                  {q.question}
                                 </div>
-                              )}
+
+                                <div className="mt-2 flex flex-wrap items-center gap-2">
+                                  {q.isSponsorQuestion && (
+                                    <div className="inline-flex items-center rounded-full bg-yellow-400/15 border border-yellow-400/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-yellow-200">
+                                      Sponsor Question
+                                    </div>
+                                  )}
+
+                                  {(q.status === "final" || q.status === "void") &&
+                                    outcomeChip(
+                                      q.status === "void"
+                                        ? "void"
+                                        : q.outcome ?? null
+                                    )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-3 md:w-1/3">
+                              <div className="flex items-center gap-2">
+                                {statusBadge(q.status)}
+                                {(q.status === "final" || q.status === "void") &&
+                                  q.outcome && (
+                                    <span className="text-[11px] font-bold text-white/75">
+                                      • {outcomeLabel(q.outcome)}
+                                    </span>
+                                  )}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(q.id, "final_yes")}
+                                  className={outcomeButtonClass(
+                                    "yes",
+                                    selectedYes,
+                                    isBusy
+                                  )}
+                                >
+                                  YES
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(q.id, "final_no")}
+                                  className={outcomeButtonClass(
+                                    "no",
+                                    selectedNo,
+                                    isBusy
+                                  )}
+                                >
+                                  NO
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() =>
+                                    handleAction(q.id, "final_void")
+                                  }
+                                  className={outcomeButtonClass(
+                                    "void",
+                                    selectedVoid,
+                                    isBusy
+                                  )}
+                                >
+                                  VOID
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(q.id, "lock")}
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition focus:outline-none focus:ring-2 focus:ring-orange-500/70 ${
+                                    q.status === "pending"
+                                      ? "bg-amber-300 text-black border-amber-200 ring-2 ring-amber-200/70"
+                                      : "bg-amber-400 text-black border-amber-300 hover:bg-amber-300"
+                                  } ${isBusy ? "opacity-60 cursor-not-allowed" : ""}`}
+                                >
+                                  LOCK
+                                </button>
+
+                                <button
+                                  type="button"
+                                  disabled={isBusy}
+                                  onClick={() => handleAction(q.id, "reopen")}
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition focus:outline-none focus:ring-2 focus:ring-orange-500/70 bg-slate-800 text-slate-100 border-slate-500 hover:bg-slate-700 ${
+                                    isBusy ? "opacity-60 cursor-not-allowed" : ""
+                                  }`}
+                                >
+                                  REOPEN
+                                </button>
+                              </div>
                             </div>
                           </div>
-
-                          <div className="flex flex-col md:flex-row md:items-center md:justify-end gap-3 md:w-1/3">
-                            <div>{statusBadge(q.status)}</div>
-
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={savingId === q.id || bulkLocking}
-                                onClick={() => handleAction(q.id, "final_yes")}
-                                className="px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/80 text-black hover:bg-emerald-400 disabled:opacity-60"
-                              >
-                                YES
-                              </button>
-                              <button
-                                type="button"
-                                disabled={savingId === q.id || bulkLocking}
-                                onClick={() => handleAction(q.id, "final_no")}
-                                className="px-3 py-1 rounded-full text-xs font-semibold bg-red-500/80 text-black hover:bg-red-400 disabled:opacity-60"
-                              >
-                                NO
-                              </button>
-                              <button
-                                type="button"
-                                disabled={savingId === q.id || bulkLocking}
-                                onClick={() => handleAction(q.id, "final_void")}
-                                className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-500/80 text-black hover:bg-slate-400 disabled:opacity-60"
-                              >
-                                VOID
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={savingId === q.id || bulkLocking}
-                                onClick={() => handleAction(q.id, "lock")}
-                                className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-400 text-black hover:bg-amber-300 disabled:opacity-60"
-                              >
-                                LOCK
-                              </button>
-                              <button
-                                type="button"
-                                disabled={savingId === q.id || bulkLocking}
-                                onClick={() => handleAction(q.id, "reopen")}
-                                className="px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-100 border border-slate-500 hover:bg-slate-700 disabled:opacity-60"
-                              >
-                                REOPEN
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
