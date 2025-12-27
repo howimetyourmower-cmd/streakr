@@ -13,7 +13,7 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: QuestionStatus;
+  status: any; // API may send "Open"/"Final" etc
   match: string;
   venue: string;
   startTime: string;
@@ -39,6 +39,7 @@ type QuestionRow = {
   startTime: string;
   quarter: number;
   question: string;
+  status: QuestionStatus;
 };
 
 type PreviewFocusPayload = {
@@ -49,6 +50,16 @@ type PreviewFocusPayload = {
 };
 
 const PREVIEW_FOCUS_KEY = "streakr_preview_focus_v1";
+
+function normaliseStatus(val: any): QuestionStatus {
+  const s = String(val ?? "").toLowerCase().trim();
+  if (s === "open") return "open";
+  if (s === "final") return "final";
+  if (s === "pending") return "pending";
+  if (s === "void") return "void";
+  // If the API ever sends something unexpected, safest default:
+  return "open";
+}
 
 export default function AflHubPage() {
   const { user } = useAuth();
@@ -66,30 +77,45 @@ export default function AflHubPage() {
   const picksHref = "/picks?sport=AFL";
   const encodedReturnTo = encodeURIComponent(picksHref);
 
+  // ✅ FIX 1: Only lock scroll while preloader is visible, always restore safely.
   useEffect(() => {
-    if (typeof document !== "undefined") {
+    if (typeof document === "undefined") return;
+
+    const prevOverflow = document.body.style.overflow;
+
+    if (showPreloader) {
       document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = prevOverflow || "";
     }
+
+    return () => {
+      document.body.style.overflow = prevOverflow || "";
+    };
+  }, [showPreloader]);
+
+  // Preloader timing (fallback)
+  useEffect(() => {
+    if (!showPreloader) return;
 
     const fadeTimer = window.setTimeout(() => {
       setIsPreloaderFading(true);
-    }, 3500);
+    }, 2000);
 
     const hideTimer = window.setTimeout(() => {
       setShowPreloader(false);
-      if (typeof document !== "undefined") {
-        document.body.style.overflow = "";
-      }
-    }, 4200);
+    }, 2700);
 
     return () => {
       window.clearTimeout(fadeTimer);
       window.clearTimeout(hideTimer);
-      if (typeof document !== "undefined") {
-        document.body.style.overflow = "";
-      }
     };
-  }, []);
+  }, [showPreloader]);
+
+  const hidePreloaderNow = () => {
+    setIsPreloaderFading(true);
+    window.setTimeout(() => setShowPreloader(false), 550);
+  };
 
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
@@ -127,27 +153,32 @@ export default function AflHubPage() {
           setRoundNumber(data.roundNumber);
         }
 
-        const flat: QuestionRow[] = data.games.flatMap((g) =>
-          g.questions
-            .filter((q) => q.status === "open")
-            .map((q) => ({
+        // ✅ FIX 2: Normalise status so "Open" becomes "open"
+        const flat: QuestionRow[] = (data.games || []).flatMap((g) =>
+          (g.questions || []).map((q) => {
+            const status = normaliseStatus(q.status);
+            return {
               id: q.id,
               match: g.match,
               venue: g.venue,
               startTime: g.startTime,
               quarter: q.quarter,
               question: q.question,
-            }))
+              status,
+            };
+          })
         );
 
-        flat.sort((a, b) => {
+        const openOnly = flat.filter((q) => q.status === "open");
+
+        openOnly.sort((a, b) => {
           const da = new Date(a.startTime).getTime();
           const db = new Date(b.startTime).getTime();
           if (da !== db) return da - db;
           return a.quarter - b.quarter;
         });
 
-        setQuestions(flat);
+        setQuestions(openOnly);
       } catch (e) {
         console.error(e);
         setError("Failed to load preview questions.");
@@ -205,6 +236,8 @@ export default function AflHubPage() {
               autoPlay
               muted
               playsInline
+              onEnded={hidePreloaderNow}
+              onError={hidePreloaderNow}
               className="absolute inset-0 w-full h-full object-contain bg-black"
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
