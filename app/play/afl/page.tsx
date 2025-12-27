@@ -1,7 +1,7 @@
 // /app/play/afl/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, MouseEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -115,6 +115,9 @@ export default function AflHubPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        setError("");
+        setLoading(true);
+
         const res = await fetch("/api/picks?sport=AFL", { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
 
@@ -179,7 +182,7 @@ export default function AflHubPage() {
     router.push(picksHref);
   };
 
-  const onClickGoToPicks = (e: React.MouseEvent) => {
+  const onClickGoToPicks = (e: MouseEvent) => {
     if (!user) {
       e.preventDefault();
       setShowAuthModal(true);
@@ -206,15 +209,11 @@ export default function AflHubPage() {
             />
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
             <div className="pointer-events-none absolute bottom-10 left-1/2 -translate-x-1/2 text-center px-4">
-              <p className="text-xs sm:text-sm text-white/70 tracking-[0.25em] uppercase mb-1">
-                Welcome to
-              </p>
+              <p className="text-xs sm:text-sm text-white/70 tracking-[0.25em] uppercase mb-1">Welcome to</p>
               <p className="text-3xl sm:text-4xl font-extrabold text-[#FF7A00] drop-shadow-[0_0_24px_rgba(255,122,0,0.9)]">
                 STREAKr
               </p>
-              <p className="mt-1 text-[11px] sm:text-xs text-white/60">
-                How Long Can You Last?
-              </p>
+              <p className="mt-1 text-[11px] sm:text-xs text-white/60">How Long Can You Last?</p>
             </div>
           </div>
         </div>
@@ -238,37 +237,17 @@ export default function AflHubPage() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-4">
               <div className="relative h-14 w-14 rounded-2xl border border-orange-400/40 bg-orange-500/10 shadow-[0_0_44px_rgba(255,122,0,0.25)] flex items-center justify-center">
-                <svg
-                  viewBox="0 0 120 80"
-                  className="h-10 w-10 text-[#FF7A00]"
-                  fill="none"
-                >
-                  <ellipse
-                    cx="60"
-                    cy="40"
-                    rx="46"
-                    ry="30"
-                    stroke="currentColor"
-                    strokeWidth="6"
-                  />
-                  <path
-                    d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    d="M60 18v44"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                    opacity="0.6"
-                  />
+                <svg viewBox="0 0 120 80" className="h-10 w-10 text-[#FF7A00]" fill="none">
+                  <ellipse cx="60" cy="40" rx="46" ry="30" stroke="currentColor" strokeWidth="6" />
+                  <path d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0" stroke="currentColor" strokeWidth="4" />
+                  <path d="M60 18v44" stroke="currentColor" strokeWidth="4" opacity="0.6" />
                 </svg>
               </div>
 
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="inline-flex items-center justify-center rounded-full bg-[#FF7A00] text-black px-3 py-1 text-[11px] font-extrabold tracking-wide uppercase shadow-[0_0_24px_rgba(255,122,0,0.75)]">
-                    YOU'RE IN AFL
+                    YOU&apos;RE IN AFL
                   </span>
                   <span className="inline-flex items-center justify-center rounded-full bg-orange-500/10 border border-orange-400/60 px-3 py-1 text-[11px] font-semibold tracking-wide uppercase text-orange-200">
                     AFL SEASON 2026
@@ -279,8 +258,7 @@ export default function AflHubPage() {
                 </div>
 
                 <p className="mt-2 text-sm text-white/70">
-                  Quarter-by-quarter player-stat picks. One wrong call and your
-                  streak is cooked.
+                  Quarter-by-quarter player-stat picks. One wrong call and your streak is cooked.
                 </p>
               </div>
             </div>
@@ -311,25 +289,18 @@ export default function AflHubPage() {
               <span className="block text-sm sm:text-base font-semibold text-white/60 mb-2">
                 Footy. Banter. Bragging rights.
               </span>
-              <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">
-                AFL STREAKr
-              </span>
-              <span className="block text-white mt-2">
-                How Long Can You Last?
-              </span>
+              <span className="text-[#FF7A00] drop-shadow-[0_0_20px_rgba(255,122,0,0.8)]">AFL STREAKr</span>
+              <span className="block text-white mt-2">How Long Can You Last?</span>
             </h1>
 
             <p className="text-base sm:text-lg text-white/80 max-w-xl mb-6">
-              Think you know your AFL? Prove it or pipe down. Back your gut,
-              ride the hot hand, and roast your mates when you&apos;re on a
-              heater. One wrong call and your streak is cooked — back to zip.
+              Think you know your AFL? Prove it or pipe down. Back your gut, ride the hot hand, and roast your mates
+              when you&apos;re on a heater. One wrong call and your streak is cooked — back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
               <div className="rounded-full px-4 py-1.5 bg-[#020617] border border-orange-400/70 shadow-[0_0_24px_rgba(255,122,0,0.5)]">
-                <span className="text-sm font-semibold text-orange-200">
-                  Up to $1,000 in prizes every round*
-                </span>
+                <span className="text-sm font-semibold text-orange-200">Up to $1,000 in prizes every round*</span>
               </div>
               <span className="hidden sm:inline text-[11px] text-white/60">
                 Free to play • 18+ • No gambling • Just bragging rights
@@ -354,20 +325,14 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-[11px] text-white/50">
-              *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No
-              gambling. 18+ only. Don&apos;t be a mug — play for fun.
+              *Prizes subject to T&amp;Cs. STREAKr is a free game of skill. No gambling. 18+ only. Don&apos;t be a mug —
+              play for fun.
             </p>
           </div>
 
           <div className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px] lg:h-[360px] rounded-3xl overflow-hidden border border-orange-500/40 shadow-[0_28px_80px_rgba(0,0,0,0.85)] bg-[#020617]">
-              <Image
-                src="/mcg-hero.jpg"
-                alt="Night footy at the G"
-                fill
-                className="object-cover opacity-85"
-                priority
-              />
+              <Image src="/mcg-hero.jpg" alt="Night footy at the G" fill className="object-cover opacity-85" priority />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
               <div className="absolute top-4 right-4">
@@ -385,12 +350,8 @@ export default function AflHubPage() {
 
               <div className="absolute bottom-4 left-4 right-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                 <div>
-                  <p className="text-[11px] text-white/60 mb-1">
-                    Group chats. Pub banter. Office comps.
-                  </p>
-                  <p className="text-sm font-semibold text-white">
-                    One streak. Battle your mates. Endless sledging.
-                  </p>
+                  <p className="text-[11px] text-white/60 mb-1">Group chats. Pub banter. Office comps.</p>
+                  <p className="text-sm font-semibold text-white">One streak. Battle your mates. Endless sledging.</p>
                 </div>
                 <div className="rounded-full bg-[#FF7A00] text-black text-xs font-bold px-3 py-1 shadow-[0_0_24px_rgba(255,122,0,0.9)] whitespace-nowrap">
                   Start playing now
@@ -400,7 +361,7 @@ export default function AflHubPage() {
           </div>
         </section>
 
-        {/* ========= HOW TO PLAY - PROMINENT SECTION ========= */}
+        {/* ========= HOW TO PLAY ========= */}
         <section className="mb-16">
           <div className="text-center mb-8">
             <h2 className="text-2xl sm:text-3xl font-extrabold mb-2">
@@ -412,18 +373,16 @@ export default function AflHubPage() {
           </div>
 
           <div className="grid sm:grid-cols-3 gap-5 mb-6">
-            {/* Step 1 */}
             <div className="relative rounded-3xl border border-orange-500/30 bg-gradient-to-br from-orange-500/10 via-[#020617] to-[#020617] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.9)] hover:border-orange-400/50 transition-all group">
               <div className="absolute top-4 left-4 h-10 w-10 rounded-full bg-[#FF7A00] flex items-center justify-center text-black font-extrabold text-lg shadow-[0_0_24px_rgba(255,122,0,0.6)]">
                 1
               </div>
-              
               <div className="mt-16">
                 <h3 className="text-lg font-extrabold mb-3 text-white group-hover:text-orange-300 transition-colors">
                   Pick Yes / No
                 </h3>
                 <p className="text-sm text-white/75 leading-relaxed mb-4">
-                  Live AFL player-stat questions drop each quarter. Will Nick Daicos get 25+ disposals? Will Charlie Curnow kick 3+ goals? Back your read.
+                  Live AFL player-stat questions drop each quarter. Back your read.
                 </p>
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center rounded-full bg-green-600/20 border border-green-500/40 px-3 py-1 text-xs font-bold text-green-300">
@@ -437,45 +396,39 @@ export default function AflHubPage() {
               </div>
             </div>
 
-            {/* Step 2 */}
             <div className="relative rounded-3xl border border-orange-500/30 bg-gradient-to-br from-orange-500/10 via-[#020617] to-[#020617] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.9)] hover:border-orange-400/50 transition-all group">
               <div className="absolute top-4 left-4 h-10 w-10 rounded-full bg-[#FF7A00] flex items-center justify-center text-black font-extrabold text-lg shadow-[0_0_24px_rgba(255,122,0,0.6)]">
                 2
               </div>
-              
               <div className="mt-16">
                 <h3 className="text-lg font-extrabold mb-3 text-white group-hover:text-orange-300 transition-colors">
                   Clean sweep per match
                 </h3>
                 <p className="text-sm text-white/75 leading-relaxed mb-4">
-                  To keep your streak alive, you need a <span className="font-semibold text-orange-300">clean sweep</span> in that match. Get <span className="font-semibold">ANY</span> pick wrong and your streak resets to <span className="font-extrabold text-red-400">0</span>.
+                  To carry your streak forward, you need a{" "}
+                  <span className="font-semibold text-orange-300">clean sweep</span> in that match. Any wrong pick resets
+                  you to <span className="font-extrabold text-red-400">0</span>.
                 </p>
                 <div className="rounded-lg bg-red-500/10 border border-red-400/30 px-3 py-2">
-                  <p className="text-xs font-semibold text-red-300">
-                    ⚠️ One wrong = back to zero
-                  </p>
+                  <p className="text-xs font-semibold text-red-300">⚠️ One wrong = back to zero</p>
                 </div>
               </div>
             </div>
 
-            {/* Step 3 */}
             <div className="relative rounded-3xl border border-orange-500/30 bg-gradient-to-br from-orange-500/10 via-[#020617] to-[#020617] p-6 shadow-[0_20px_70px_rgba(0,0,0,0.9)] hover:border-orange-400/50 transition-all group">
               <div className="absolute top-4 left-4 h-10 w-10 rounded-full bg-[#FF7A00] flex items-center justify-center text-black font-extrabold text-lg shadow-[0_0_24px_rgba(255,122,0,0.6)]">
                 3
               </div>
-              
               <div className="mt-16">
                 <h3 className="text-lg font-extrabold mb-3 text-white group-hover:text-orange-300 transition-colors">
                   Climb the leaderboard
                 </h3>
                 <p className="text-sm text-white/75 leading-relaxed mb-4">
-                  Longest streak wins the round. Beat your mates in private leagues. Win prizes. Talk big. Screenshot your 20-streak before it crumbles.
+                  Longest streak wins the round. Beat your mates, win prizes, talk big.
                 </p>
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center rounded-full bg-sky-500/20 border border-sky-400/40 px-3 py-1 text-xs font-bold text-sky-300">
-                    🏆 $1,000 prizes
-                  </span>
-                </div>
+                <span className="inline-flex items-center rounded-full bg-sky-500/20 border border-sky-400/40 px-3 py-1 text-xs font-bold text-sky-300">
+                  🏆 Up to $1,000 prizes
+                </span>
               </div>
             </div>
           </div>
@@ -498,7 +451,8 @@ export default function AflHubPage() {
               Next <span className="text-[#FF7A00]">6</span> available picks
             </h2>
             <p className="text-sm sm:text-base text-white/70 max-w-2xl mx-auto">
-              New player? Tap <span className="font-semibold text-green-400">Yes</span> or <span className="font-semibold text-red-400">No</span> below to see exactly how it works. You'll jump straight to the picks page.
+              Tap <span className="font-semibold text-green-400">Yes</span> or{" "}
+              <span className="font-semibold text-red-400">No</span> to jump straight into Picks.
             </p>
           </div>
 
@@ -525,7 +479,7 @@ export default function AflHubPage() {
           {!loading && previewQuestions.length === 0 && !error ? (
             <div className="rounded-2xl bg-white/5 border border-white/10 px-6 py-8 text-center">
               <p className="text-sm text-white/60 mb-4">
-                No open questions right now. Schedule&apos;s probably between games — check back closer to bounce.
+                No open questions right now. Check back closer to bounce.
               </p>
               <Link
                 href={picksHref}
@@ -545,37 +499,32 @@ export default function AflHubPage() {
                   key={q.id}
                   className="relative rounded-2xl bg-gradient-to-r from-[#0B1220] via-[#020617] to-[#020617] border border-orange-500/25 shadow-[0_18px_60px_rgba(0,0,0,0.9)] px-5 py-4 hover:border-orange-400/50 transition-all group"
                 >
-                  {/* Pick number badge */}
                   <div className="absolute -top-3 -left-3 h-8 w-8 rounded-full bg-[#FF7A00] border-2 border-black flex items-center justify-center text-black font-extrabold text-sm shadow-[0_0_20px_rgba(255,122,0,0.7)]">
                     {idx + 1}
                   </div>
 
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      {/* Meta info */}
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60 mb-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 border border-orange-400/40 px-2 py-0.5 font-bold text-orange-300">
                           <span className="h-1.5 w-1.5 rounded-full bg-orange-400 animate-pulse" />
                           AFL Q{q.quarter}
                         </span>
                         <span>•</span>
-                        <span className="font-semibold">{date} • {time} AEDT</span>
+                        <span className="font-semibold">
+                          {date} • {time} AEDT
+                        </span>
                         <span>•</span>
                         <span>{q.venue}</span>
                       </div>
 
-                      {/* Match */}
-                      <div className="text-xs sm:text-sm font-bold text-white/90 mb-2">
-                        {q.match}
-                      </div>
+                      <div className="text-xs sm:text-sm font-bold text-white/90 mb-2">{q.match}</div>
 
-                      {/* Question */}
                       <div className="text-sm sm:text-base font-semibold text-white group-hover:text-orange-300 transition-colors">
                         {q.question}
                       </div>
                     </div>
 
-                    {/* CTA buttons */}
                     <div className="flex items-center gap-3 lg:ml-6 shrink-0">
                       <button
                         type="button"
@@ -594,101 +543,93 @@ export default function AflHubPage() {
                     </div>
                   </div>
                 </div>
-                {previewQuestions.length > 0 && (
-        <div className="mt-8 text-center">
-          <Link
-            href={picksHref}
-            onClick={onClickGoToPicks}
-            className="inline-flex items-center justify-center rounded-full border-2 border-orange-400/70 bg-orange-500/10 hover:bg-orange-500/20 text-orange-200 hover:text-orange-100 font-bold px-8 py-4 text-base transition-all"
-          >
-            View all {questions.length} open picks →
-          </Link>
+              );
+            })}
+          </div>
+
+          {questions.length > 0 ? (
+            <div className="mt-8 text-center">
+              <Link
+                href={picksHref}
+                onClick={onClickGoToPicks}
+                className="inline-flex items-center justify-center rounded-full border-2 border-orange-400/70 bg-orange-500/10 hover:bg-orange-500/20 text-orange-200 hover:text-orange-100 font-bold px-8 py-4 text-base transition-all"
+              >
+                View all {questions.length} open picks →
+              </Link>
+            </div>
+          ) : null}
+        </section>
+
+        {/* ========= SOCIAL PROOF / STATS ========= */}
+        <section className="mb-16 rounded-3xl border border-sky-500/30 bg-gradient-to-r from-sky-500/10 via-[#020617] to-[#020617] px-6 py-8 shadow-[0_20px_70px_rgba(0,0,0,0.9)]">
+          <div className="grid sm:grid-cols-3 gap-6 text-center">
+            <div>
+              <div className="text-3xl sm:text-4xl font-extrabold text-sky-300 mb-1">Live</div>
+              <p className="text-sm text-white/70">Real-time picks during every AFL match</p>
+            </div>
+            <div>
+              <div className="text-3xl sm:text-4xl font-extrabold text-orange-400 mb-1">$1,000</div>
+              <p className="text-sm text-white/70">In prizes every round*</p>
+            </div>
+            <div>
+              <div className="text-3xl sm:text-4xl font-extrabold text-green-400 mb-1">Free</div>
+              <p className="text-sm text-white/70">No gambling. Just skill &amp; bragging rights</p>
+            </div>
+          </div>
+        </section>
+
+        <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
+            <p>
+              STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play
+              responsibly.
+            </p>
+            <Link href="/faq" className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline">
+              FAQ
+            </Link>
+          </div>
+        </footer>
+      </div>
+
+      {/* ========= AUTH MODAL ========= */}
+      {showAuthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
+            <div className="flex items-start justify-between mb-4">
+              <h2 className="text-lg font-semibold">Log in to play AFL</h2>
+              <button
+                type="button"
+                onClick={() => setShowAuthModal(false)}
+                className="text-sm text-gray-400 hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-sm text-white/70 mb-4">
+              You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Link
+                href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
+                className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Login
+              </Link>
+
+              <Link
+                href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
+                className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
+                onClick={() => setShowAuthModal(false)}
+              >
+                Sign up
+              </Link>
+            </div>
+          </div>
         </div>
       )}
-    </section>
-
-    {/* ========= SOCIAL PROOF / STATS ========= */}
-    <section className="mb-16 rounded-3xl border border-sky-500/30 bg-gradient-to-r from-sky-500/10 via-[#020617] to-[#020617] px-6 py-8 shadow-[0_20px_70px_rgba(0,0,0,0.9)]">
-      <div className="grid sm:grid-cols-3 gap-6 text-center">
-        <div>
-          <div className="text-3xl sm:text-4xl font-extrabold text-sky-300 mb-1">
-            Live
-          </div>
-          <p className="text-sm text-white/70">
-            Real-time picks during every AFL match
-          </p>
-        </div>
-        <div>
-          <div className="text-3xl sm:text-4xl font-extrabold text-orange-400 mb-1">
-            $1,000
-          </div>
-          <p className="text-sm text-white/70">
-            In prizes every round*
-          </p>
-        </div>
-        <div>
-          <div className="text-3xl sm:text-4xl font-extrabold text-green-400 mb-1">
-            Free
-          </div>
-          <p className="text-sm text-white/70">
-            No gambling. Just skill & bragging rights
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <footer className="border-t border-white/10 pt-6 mt-4 text-sm text-white/70">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/50">
-        <p>
-          STREAKr is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play responsibly.
-        </p>
-        <Link
-          href="/faq"
-          className="text-orange-300 hover:text-orange-200 underline-offset-2 hover:underline"
-        >
-          FAQ
-        </Link>
-      </div>
-    </footer>
-  </div>
-
-  {/* ========= AUTH MODAL ========= */}
-  {showAuthModal && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-2xl bg-[#050816] border border-white/10 p-6 shadow-xl">
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-semibold">Log in to play AFL</h2>
-          <button
-            type="button"
-            onClick={() => setShowAuthModal(false)}
-            className="text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            ✕
-          </button>
-        </div>
-
-        <p className="text-sm text-white/70 mb-4">
-          You need a free STREAKr account to make picks, build your streak and appear on the leaderboard.
-        </p>
-
-        <div className="flex flex-col sm:flex-row gap-3">
-          <Link
-            href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
-            className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-            onClick={() => setShowAuthModal(false)}
-          >
-            Login
-          </Link>
-
-          <Link
-            href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
-            className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
-            onClick={() => setShowAuthModal(false)}
-          >
-            Sign up
-          </Link>
-        </div>
-      </div>
-    </div>
-  )}
-</main>
+    </main>
+  );
+}
