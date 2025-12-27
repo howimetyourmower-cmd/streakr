@@ -1,7 +1,14 @@
 // /app/picks/PicksClient.tsx
 "use client";
 
-import { useEffect, useState, useMemo, useRef, ChangeEvent, useCallback } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useRef,
+  ChangeEvent,
+  useCallback,
+} from "react";
 import Link from "next/link";
 import Image from "next/image";
 import Confetti from "react-confetti";
@@ -231,15 +238,12 @@ export default function PicksClient() {
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const handleResize = () => {
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    };
+    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const formatStartDate = useCallback((iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -260,7 +264,6 @@ export default function PicksClient() {
     };
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const flattenApi = useCallback(
     (data: PicksApiResponse, history: PickHistory): QuestionRow[] =>
       data.games.flatMap((g: ApiGame) =>
@@ -293,7 +296,6 @@ export default function PicksClient() {
     []
   );
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const fetchPicks = useCallback(
     async (opts?: { silent?: boolean }) => {
       if (!opts?.silent) {
@@ -303,7 +305,6 @@ export default function PicksClient() {
       try {
         const res = await fetch("/api/picks", { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
-
         const data: PicksApiResponse = await res.json();
 
         if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
@@ -321,7 +322,7 @@ export default function PicksClient() {
     [pickHistory, activeFilter, flattenApi]
   );
 
-  // Load pick history from localStorage (per device)
+  // Load pick history from localStorage
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -345,7 +346,6 @@ export default function PicksClient() {
     }
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const handleCloseHowToModal = useCallback(() => {
     if (typeof window !== "undefined") {
       try {
@@ -355,7 +355,7 @@ export default function PicksClient() {
     setShowHowToModal(false);
   }, []);
 
-  // Initial fetch - only runs once on mount
+  // Initial fetch - only once
   useEffect(() => {
     setError("");
     setLoading(true);
@@ -363,7 +363,7 @@ export default function PicksClient() {
       .catch(() => {})
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty dependency array - only run once
+  }, []);
 
   // Auto-refresh every 15s
   useEffect(() => {
@@ -373,7 +373,6 @@ export default function PicksClient() {
     return () => clearInterval(id);
   }, [fetchPicks]);
 
-  // ✅ OPTIMIZED: Memoize questionIds to prevent recalculation
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
 
   // Comment-count live updates
@@ -400,7 +399,9 @@ export default function PicksClient() {
           counts[qid] = (counts[qid] ?? 0) + 1;
         });
 
-        setRows((prev) => prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r)));
+        setRows((prev) =>
+          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
+        );
         setFilteredRows((prev) =>
           prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
         );
@@ -477,9 +478,8 @@ export default function PicksClient() {
     loadLocks();
   }, [roundNumber]);
 
-  // ✅ IMPORTANT FIX:
-  // If a gameId isn't present in gameLocks, we default to TRUE (open),
-  // otherwise any missing game lock entry makes picks impossible (your "Game 2" issue).
+  // IMPORTANT:
+  // If a gameId isn't present in gameLocks, default TRUE (open)
   const isGameUnlocked = useCallback(
     (gameId: string) => {
       const val = gameLocks[gameId];
@@ -603,7 +603,6 @@ export default function PicksClient() {
     }
   }, [user, userCurrentStreak]);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const applyFilter = useCallback(
     (f: QuestionStatus | "all") => {
       setActiveFilter(f);
@@ -613,7 +612,6 @@ export default function PicksClient() {
     [rows]
   );
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const persistPickHistory = useCallback((next: PickHistory) => {
     try {
       if (typeof window !== "undefined") {
@@ -622,7 +620,6 @@ export default function PicksClient() {
     } catch {}
   }, []);
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const handlePick = useCallback(
     async (row: QuestionRow, pick: "yes" | "no") => {
       if (!user) {
@@ -635,6 +632,7 @@ export default function PicksClient() {
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
       setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
+
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev, [row.id]: pick };
         persistPickHistory(next);
@@ -663,7 +661,6 @@ export default function PicksClient() {
     [user, roundNumber, persistPickHistory, isGameUnlocked]
   );
 
-  // ✅ OPTIMIZED: Memoized with useCallback
   const handleClearPick = useCallback(
     async (row: QuestionRow) => {
       const isMatchUnlocked = isGameUnlocked(row.gameId);
@@ -671,6 +668,7 @@ export default function PicksClient() {
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
       setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
+
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev };
         delete next[row.id];
@@ -789,7 +787,7 @@ export default function PicksClient() {
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
-  // ✅ OPTIMIZED: Memoize picksMadeByGame calculation
+  // Picks made per game
   const picksMadeByGame = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const r of rows) {
@@ -801,7 +799,7 @@ export default function PicksClient() {
     return counts;
   }, [rows, pickHistory]);
 
-  // ✅ OPTIMIZED: Memoize gameScoreByGame calculation
+  // Clean-sweep score per game (wins only when finalised & no losses)
   const gameScoreByGame = useMemo(() => {
     type GameScoreInfo =
       | { kind: "no-picks" }
@@ -811,6 +809,7 @@ export default function PicksClient() {
 
     const byGame: Record<string, GameScoreInfo> = {};
     const groups: Record<string, QuestionRow[]> = {};
+
     for (const r of rows) {
       if (!groups[r.gameId]) groups[r.gameId] = [];
       groups[r.gameId].push(r);
@@ -818,6 +817,7 @@ export default function PicksClient() {
 
     for (const gameId of Object.keys(groups)) {
       const gameRows = groups[gameId];
+
       let pickedCount = 0;
       let pendingPicked = 0;
       let losses = 0;
@@ -851,6 +851,7 @@ export default function PicksClient() {
     return byGame;
   }, [rows, pickHistory]);
 
+  // ---- Journey per game (final/in-progress/not-picked + earned) ----
   const journeyByGame = useMemo(() => {
     type JourneyInfo = {
       gameId: string;
@@ -860,7 +861,6 @@ export default function PicksClient() {
       pickedCount: number;
       isFinal: boolean;
       earned: number; // 0..12
-      label: "not-picked" | "in-progress" | "final";
       summary: string;
     };
 
@@ -875,7 +875,6 @@ export default function PicksClient() {
     for (const gameId of Object.keys(groups)) {
       const gameRows = groups[gameId];
 
-      // Sort for stable match/venue/startTime
       gameRows.sort((a, b) => {
         const da = new Date(a.startTime).getTime();
         const db = new Date(b.startTime).getTime();
@@ -897,39 +896,23 @@ export default function PicksClient() {
 
         pickedCount++;
 
-        // void never counts either way
         const outcome = normaliseOutcome((r.correctOutcome as any) ?? (r as any).outcome);
         if (r.status === "void" || outcome === "void") continue;
 
-        // only score when final + has outcome
         if (r.status !== "final" || !outcome) continue;
 
         if (effectivePick === outcome) wins++;
         else losses++;
       }
 
-      // Earned is ONLY meaningful once the whole game is finalised.
-      // Clean sweep => earned = wins (0..12). If any loss => 0.
       let earned = 0;
-      if (isFinal && pickedCount > 0 && losses === 0) {
-        earned = wins;
-      } else if (isFinal) {
-        earned = 0;
-      }
+      if (isFinal && pickedCount > 0 && losses === 0) earned = wins;
+      else if (isFinal) earned = 0;
 
-      let label: JourneyInfo["label"] = "in-progress";
       let summary = "";
-
-      if (pickedCount === 0) {
-        label = "not-picked";
-        summary = isFinal ? "FINAL • Earned 0" : "Not picked yet";
-      } else if (!isFinal) {
-        label = "in-progress";
-        summary = `In progress • ${pickedCount} picks`;
-      } else {
-        label = "final";
-        summary = `FINAL • Earned ${earned}`;
-      }
+      if (pickedCount === 0) summary = isFinal ? "FINAL • Earned 0" : "Not picked yet";
+      else if (!isFinal) summary = `In progress • ${pickedCount} picks`;
+      else summary = `FINAL • Earned ${earned}`;
 
       out.push({
         gameId,
@@ -939,74 +922,75 @@ export default function PicksClient() {
         pickedCount,
         isFinal,
         earned,
-        label,
         summary,
       });
     }
 
-    // Order by game start time
     out.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
     return out;
   }, [rows, pickHistory]);
 
-  
-            {/* STREAK JOURNEY THIS ROUND */}
-          <div className="mt-4 rounded-2xl bg-[#020617] border border-white/10 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-white/60">Your streak journey this round</p>
-                <p className="text-xs text-white/70">Updates to FINAL once the match is completed.</p>
-              </div>
-            </div>
+  // ✅ THIS is the variable your JSX was referencing (streakJourney)
+  // It’s built from journeyByGame + locks + score so the UI can show:
+  // ✅ Clean Sweep (+X) | ⏳ In Progress (N picks) | 🔒 Locked | 📝 Not picked | 💀 Cooked (0)
+  const streakJourney = useMemo(() => {
+    type Line =
+      | { kind: "clean"; gameId: string; plus: number }
+      | { kind: "cooked"; gameId: string; picks: number }
+      | { kind: "in-progress"; gameId: string; picks: number }
+      | { kind: "locked"; gameId: string }
+      | { kind: "not-picked"; gameId: string };
 
-            <div className="space-y-2">
-              {journeyByGame.map((g, idx) => {
-                const icon =
-                  g.label === "final"
-                    ? "✅"
-                    : g.label === "in-progress"
-                    ? "⏳"
-                    : "📝";
+    const lines: Line[] = [];
 
-                const pillClasses =
-                  g.label === "final"
-                    ? "bg-emerald-500/15 border-emerald-400/50 text-emerald-200"
-                    : g.label === "in-progress"
-                    ? "bg-amber-500/15 border-amber-400/50 text-amber-200"
-                    : "bg-slate-700/40 border-white/10 text-white/75";
+    for (const g of journeyByGame) {
+      const picked = g.pickedCount || 0;
+      const unlocked = isGameUnlocked(g.gameId);
+      const scoreInfo = gameScoreByGame[g.gameId];
 
-                const earnedText =
-                  g.isFinal ? `Earned ${g.earned}` : `${g.pickedCount} picks`;
+      // If game is explicitly locked AND user hasn't picked yet -> show LOCKED
+      if (!unlocked && picked === 0) {
+        lines.push({ kind: "locked", gameId: g.gameId });
+        continue;
+      }
 
-                return (
-                  <div
-                    key={g.gameId}
-                    className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/25 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">
-                        Game {idx + 1}: {g.match}
-                      </p>
-                      <p className="text-[11px] text-white/55 truncate">{g.venue}</p>
-                    </div>
+      // Finalised games: show clean/cooked (if they made picks)
+      if (g.isFinal) {
+        if (picked === 0) {
+          lines.push({ kind: "not-picked", gameId: g.gameId });
+        } else if (g.earned > 0) {
+          lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
+        } else {
+          // final + picked + earned 0
+          lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
+        }
+        continue;
+      }
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-lg">{icon}</span>
-                      <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-extrabold ${pillClasses}`}>
-                        {g.isFinal ? "FINAL" : g.label === "in-progress" ? "IN PROGRESS" : "NOT PICKED"}
-                        <span className="ml-2 font-semibold opacity-90">• {earnedText}</span>
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+      // Not final:
+      if (picked === 0) {
+        // if locked mid-game, show locked, otherwise not picked
+        if (!unlocked) lines.push({ kind: "locked", gameId: g.gameId });
+        else lines.push({ kind: "not-picked", gameId: g.gameId });
+        continue;
+      }
 
+      // Picked something and not final => in progress
+      // If your scoreInfo says pending, still in progress
+      if (!scoreInfo || scoreInfo.kind === "pending" || scoreInfo.kind === "scored" || scoreInfo.kind === "zero") {
+        lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
+      } else {
+        lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
+      }
+    }
+
+    return lines;
+  }, [journeyByGame, isGameUnlocked, gameScoreByGame]);
 
   const handleShare = async () => {
     try {
-      const shareUrl = typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
+      const shareUrl =
+        typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({
           title: "STREAKr – How long can you last?",
@@ -1069,7 +1053,12 @@ export default function PicksClient() {
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
-        <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={350} recycle={false} />
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          numberOfPieces={350}
+          recycle={false}
+        />
       )}
 
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
@@ -1243,6 +1232,24 @@ export default function PicksClient() {
                           <span className="truncate text-emerald-200 font-bold">Clean Sweep!</span>
                         </div>
                         <span className="text-emerald-200 font-extrabold">(+{line.plus})</span>
+                      </div>
+                    );
+                  }
+
+                  if (line.kind === "cooked") {
+                    return (
+                      <div
+                        key={line.gameId}
+                        className="flex items-center justify-between rounded-xl bg-red-500/10 border border-red-400/30 px-3 py-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-base">💀</span>
+                          <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
+                          <span className="truncate text-red-200 font-bold">Cooked</span>
+                        </div>
+                        <span className="text-red-200 font-semibold text-xs sm:text-sm">
+                          (Earned 0 • {line.picks} picks)
+                        </span>
                       </div>
                     );
                   }
@@ -1496,7 +1503,11 @@ export default function PicksClient() {
                       <div className="col-span-9 md:col-span-2">
                         <div className="text-sm leading-snug font-medium">{row.question}</div>
                         <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                          <button type="button" onClick={() => openComments(row)} className="text-[11px] text-sky-300 underline">
+                          <button
+                            type="button"
+                            onClick={() => openComments(row)}
+                            className="text-[11px] text-sky-300 underline"
+                          >
                             Comments ({row.commentCount ?? 0})
                           </button>
 
