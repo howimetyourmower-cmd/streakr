@@ -19,17 +19,13 @@ import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 import SportBadge from "@/components/SportBadge";
 
+// eslint-disable-next-line @next/next/no-img-element
 type MemberRow = {
   id: string;
   uid: string;
   displayName: string;
   role: "manager" | "member";
   joinedAt?: any;
-  // Ladder stats (optional / future-friendly)
-  bestStreak?: number;
-  currentStreak?: number;
-  correctPicks?: number;
-  totalPicks?: number;
 };
 
 type League = {
@@ -41,8 +37,52 @@ type League = {
   memberCount?: number;
 };
 
+type UserProfile = {
+  uid: string;
+  displayName?: string;
+  username?: string; // @handle
+  photoURL?: string; // firebase auth-style
+  avatarUrl?: string; // common custom field
+
+  // If you already store these on user doc (recommended)
+  currentStreak?: number;
+  bestStreak?: number;
+  correctPicks?: number;
+  totalPicks?: number;
+};
+
+type LadderRow = {
+  rank: number;
+  uid: string;
+  role: "manager" | "member";
+
+  // display
+  name: string;
+  username?: string;
+  avatar?: string;
+
+  // stats
+  bestStreak: number;
+  currentStreak: number;
+  correctPicks: number;
+  totalPicks: number;
+};
+
 function safeNum(v: any, fallback = 0) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+function initials(name: string) {
+  const parts = (name || "P").trim().split(/\s+/).slice(0, 2);
+  const a = parts[0]?.[0] ?? "P";
+  const b = parts[1]?.[0] ?? "";
+  return (a + b).toUpperCase();
+}
+
+function formatRatio(correct: number, total: number) {
+  if (!total) return "—";
+  const pct = Math.round((correct / total) * 100);
+  return `${correct}/${total} (${pct}%)`;
 }
 
 export default function LeagueLadderPage() {
@@ -52,10 +92,10 @@ export default function LeagueLadderPage() {
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
+  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
   const [loading, setLoading] = useState(true);
+  const [profilesLoading, setProfilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isManager = !!user && !!league && user.uid === league.managerId;
 
   // --- Load league doc ---
   useEffect(() => {
@@ -114,16 +154,13 @@ export default function LeagueLadderPage() {
       (snap) => {
         const list: MemberRow[] = snap.docs.map((d) => {
           const m = d.data() as any;
+          const uid = (m.uid ?? d.id) as string;
           return {
             id: d.id,
-            uid: m.uid ?? d.id,
+            uid,
             displayName: m.displayName ?? "Player",
             role: (m.role as "manager" | "member") ?? "member",
             joinedAt: m.joinedAt,
-            bestStreak: safeNum(m.bestStreak, 0),
-            currentStreak: safeNum(m.currentStreak, 0),
-            correctPicks: safeNum(m.correctPicks, 0),
-            totalPicks: safeNum(m.totalPicks, 0),
           };
         });
 
@@ -138,7 +175,7 @@ export default function LeagueLadderPage() {
     return () => unsub();
   }, [leagueId]);
 
-  // --- Membership gate (ladder should only be visible to members) ---
+  // --- Membership gate ---
   const isMemberUser = useMemo(() => {
     if (!user) return false;
     if (!league) return false;
@@ -146,43 +183,114 @@ export default function LeagueLadderPage() {
     return members.some((m) => m.uid === user.uid);
   }, [user, league, members]);
 
-  // --- Build ladder ranking ---
-  const ladder = useMemo(() => {
-    // For MVP: rank by bestStreak, then currentStreak, then correctPicks
-    const sorted = [...members].sort((a, b) => {
-      const aBest = safeNum(a.bestStreak, 0);
-      const bBest = safeNum(b.bestStreak, 0);
-      if (bBest !== aBest) return bBest - aBest;
+  // --- Load user profiles for members (avatar + username + streak stats) ---
+  useEffect(() => {
+    const loadProfiles = async () => {
+      if (!leagueId) return;
+      if (!members.length) {
+        setProfiles({});
+        return;
+      }
 
-      const aCur = safeNum(a.currentStreak, 0);
-      const bCur = safeNum(b.currentStreak, 0);
-      if (bCur !== aCur) return bCur - aCur;
+      setProfilesLoading(true);
+      try {
+        const uids = Array.from(new Set(members.map((m) => m.uid))).filter(Boolean);
 
-      const aCorrect = safeNum(a.correctPicks, 0);
-      const bCorrect = safeNum(b.correctPicks, 0);
-      if (bCorrect !== aCorrect) return bCorrect - aCorrect;
+        // simple + reliable for small leagues: fetch each user doc
+        const docs = await Promise.all(
+          uids.map(async (uid) => {
+            try {
+              const uRef = doc(db, "users", uid);
+              const uSnap = await getDoc(uRef);
+              if (!uSnap.exists()) return null;
+              const d = uSnap.data() as any;
 
-      return (a.displayName || "").localeCompare(b.displayName || "");
+              const profile: UserProfile = {
+                uid,
+                displayName: d.displayName ?? d.name ?? d.fullName ?? undefined,
+                username: d.username ?? d.handle ?? d.userName ?? undefined,
+                photoURL: d.photoURL ?? d.photoUrl ?? undefined,
+                avatarUrl: d.avatarUrl ?? d.avatarURL ?? d.avatar ?? undefined,
+
+                // stats (optional fields)
+                currentStreak: safeNum(d.currentStreak, 0),
+                bestStreak: safeNum(d.bestStreak, 0),
+                correctPicks: safeNum(d.correctPicks, 0),
+                totalPicks: safeNum(d.totalPicks, 0),
+              };
+
+              return profile;
+            } catch {
+              return null;
+            }
+          })
+        );
+
+        const map: Record<string, UserProfile> = {};
+        for (const p of docs) {
+          if (p?.uid) map[p.uid] = p;
+        }
+        setProfiles(map);
+      } finally {
+        setProfilesLoading(false);
+      }
+    };
+
+    loadProfiles();
+  }, [leagueId, members]);
+
+  // --- Build ladder rows using user profile stats first (fallback to member displayName) ---
+  const ladder: LadderRow[] = useMemo(() => {
+    const rows: LadderRow[] = members.map((m) => {
+      const p = profiles[m.uid];
+
+      const name =
+        (p?.displayName && String(p.displayName).trim()) ||
+        (m.displayName && String(m.displayName).trim()) ||
+        "Player";
+
+      const usernameRaw = p?.username ? String(p.username).trim() : "";
+      const username = usernameRaw
+        ? usernameRaw.startsWith("@")
+          ? usernameRaw
+          : `@${usernameRaw}`
+        : undefined;
+
+      const avatar = p?.avatarUrl || p?.photoURL || undefined;
+
+      return {
+        rank: 9999,
+        uid: m.uid,
+        role: m.role,
+        name,
+        username,
+        avatar,
+        bestStreak: safeNum(p?.bestStreak, 0),
+        currentStreak: safeNum(p?.currentStreak, 0),
+        correctPicks: safeNum(p?.correctPicks, 0),
+        totalPicks: safeNum(p?.totalPicks, 0),
+      };
     });
 
-    return sorted.map((m, idx) => ({
-      ...m,
-      rank: idx + 1,
-    }));
-  }, [members]);
+    // rank by current streak (match your main leaderboard vibe), then best, then accuracy
+    rows.sort((a, b) => {
+      if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
+      if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
+
+      const aPct = a.totalPicks ? a.correctPicks / a.totalPicks : 0;
+      const bPct = b.totalPicks ? b.correctPicks / b.totalPicks : 0;
+      if (bPct !== aPct) return bPct - aPct;
+
+      return a.name.localeCompare(b.name);
+    });
+
+    return rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
+  }, [members, profiles]);
 
   const myRow = useMemo(() => {
     if (!user) return null;
-    return ladder.find((m) => m.uid === user.uid) ?? null;
+    return ladder.find((r) => r.uid === user.uid) ?? null;
   }, [ladder, user]);
-
-  const formatRatio = (correct?: number, total?: number) => {
-    const c = safeNum(correct, 0);
-    const t = safeNum(total, 0);
-    if (t <= 0) return "—";
-    const pct = Math.round((c / t) * 100);
-    return `${c}/${t} (${pct}%)`;
-  };
 
   if (loading) {
     return (
@@ -216,10 +324,7 @@ export default function LeagueLadderPage() {
           <Link href={`/leagues/${leagueId}`} className="text-sm text-sky-400 hover:text-sky-300">
             ← Back to league
           </Link>
-
-          <div className="flex items-center gap-2">
-            <SportBadge sport="afl" />
-          </div>
+          <SportBadge sport="afl" />
         </div>
 
         {/* Header */}
@@ -232,10 +337,10 @@ export default function LeagueLadderPage() {
             </p>
           </div>
 
-          {/* Compact invite code (reduced width) */}
+          {/* compact code */}
           <div className="flex flex-col items-start md:items-end gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-white/60">Invite code</span>
+              <span className="text-[11px] text-white/60">Invite</span>
               <span className="font-mono text-[12px] bg-white/5 border border-white/10 rounded-md px-2 py-1 max-w-[120px] truncate">
                 {league.inviteCode || "—"}
               </span>
@@ -248,15 +353,14 @@ export default function LeagueLadderPage() {
                 Copy
               </button>
             </div>
-
             <span className="text-xs text-white/60">
               Members: {league.memberCount ?? members.length}
-              {isManager ? " • You’re manager" : ""}
+              {profilesLoading ? " • updating…" : ""}
             </span>
           </div>
         </div>
 
-        {/* Access gate */}
+        {/* Gates */}
         {!user && (
           <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
             Log in to view this ladder.
@@ -288,29 +392,50 @@ export default function LeagueLadderPage() {
 
         {user && isMemberUser && (
           <>
-            {/* My row */}
+            {/* My position */}
             {myRow && (
               <div className="rounded-2xl border border-orange-500/35 bg-orange-500/10 p-4">
                 <p className="text-xs uppercase tracking-wide text-orange-200/80">
                   Your position
                 </p>
+
                 <div className="mt-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div>
-                    <p className="text-lg font-bold">
-                      #{myRow.rank}{" "}
-                      <span className="text-white/80 font-semibold">{myRow.displayName}</span>
-                    </p>
-                    <p className="text-xs text-white/60">
-                      Best streak:{" "}
-                      <span className="text-white font-semibold">{safeNum(myRow.bestStreak, 0)}</span>{" "}
-                      • Current:{" "}
-                      <span className="text-white font-semibold">{safeNum(myRow.currentStreak, 0)}</span>{" "}
-                      • Accuracy:{" "}
-                      <span className="text-white font-semibold">
-                        {formatRatio(myRow.correctPicks, myRow.totalPicks)}
-                      </span>
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
+                      {myRow.avatar ? (
+                        <img
+                          src={myRow.avatar}
+                          alt={myRow.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-white/80">
+                          {initials(myRow.name)}
+                        </span>
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-lg font-bold">
+                        #{myRow.rank}{" "}
+                        <span className="text-white/90">{myRow.name}</span>
+                        {myRow.username && (
+                          <span className="ml-2 text-sm font-semibold text-white/50">
+                            {myRow.username}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-white/60">
+                        Best: <span className="text-white font-semibold">{myRow.bestStreak}</span> •
+                        Current: <span className="text-white font-semibold">{myRow.currentStreak}</span> •
+                        Accuracy:{" "}
+                        <span className="text-white font-semibold">
+                          {formatRatio(myRow.correctPicks, myRow.totalPicks)}
+                        </span>
+                      </p>
+                    </div>
                   </div>
+
                   <Link
                     href="/picks"
                     className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2"
@@ -326,7 +451,7 @@ export default function LeagueLadderPage() {
               <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
                 <h2 className="text-sm font-semibold">League ladder</h2>
                 <p className="text-[11px] text-white/50">
-                  Ranking: Best streak → Current streak → Correct picks
+                  Ranking: Current → Best → Accuracy
                 </p>
               </div>
 
@@ -350,51 +475,80 @@ export default function LeagueLadderPage() {
                     <thead className="bg-black/20 text-white/60">
                       <tr className="text-left">
                         <th className="px-4 py-2 w-[64px]">Rank</th>
-                        <th className="px-4 py-2 min-w-[220px]">Player</th>
+                        <th className="px-4 py-2 min-w-[280px]">Player</th>
                         <th className="px-4 py-2 w-[110px]">Best</th>
                         <th className="px-4 py-2 w-[110px]">Current</th>
                         <th className="px-4 py-2 w-[160px]">Accuracy</th>
                         <th className="px-4 py-2 w-[110px]">Role</th>
                       </tr>
                     </thead>
+
                     <tbody>
-                      {ladder.map((m) => {
-                        const isOwn = !!user && m.uid === user.uid;
+                      {ladder.map((r) => {
+                        const isOwn = !!user && r.uid === user.uid;
+
                         return (
                           <tr
-                            key={m.id}
+                            key={r.uid}
                             className={`border-t border-white/10 ${
                               isOwn ? "bg-orange-500/10" : "hover:bg-white/5"
                             }`}
                           >
-                            <td className="px-4 py-3 font-semibold">
-                              #{m.rank}
-                            </td>
+                            <td className="px-4 py-3 font-semibold">#{r.rank}</td>
+
                             <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold">{m.displayName}</span>
-                                {isOwn && (
-                                  <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border border-orange-500/40 text-orange-200 bg-orange-500/10">
-                                    You
-                                  </span>
-                                )}
+                              <div className="flex items-center gap-3">
+                                <div className="h-9 w-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                                  {r.avatar ? (
+                                    <img
+                                      src={r.avatar}
+                                      alt={r.name}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <span className="text-xs font-bold text-white/80">
+                                      {initials(r.name)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-semibold truncate">{r.name}</span>
+                                    {r.username && (
+                                      <span className="text-xs text-white/45 font-semibold truncate">
+                                        {r.username}
+                                      </span>
+                                    )}
+                                    {isOwn && (
+                                      <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border border-orange-500/40 text-orange-200 bg-orange-500/10">
+                                        You
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <p className="text-[11px] text-white/35 truncate max-w-[460px]">
+                                    {r.uid}
+                                  </p>
+                                </div>
                               </div>
-                              <p className="text-[11px] text-white/45 truncate max-w-[360px]">
-                                {m.uid}
-                              </p>
                             </td>
+
                             <td className="px-4 py-3 font-bold text-orange-200">
-                              {safeNum(m.bestStreak, 0)}
+                              {r.bestStreak}
                             </td>
+
                             <td className="px-4 py-3 font-semibold text-white/80">
-                              {safeNum(m.currentStreak, 0)}
+                              {r.currentStreak}
                             </td>
+
                             <td className="px-4 py-3 text-white/70">
-                              {formatRatio(m.correctPicks, m.totalPicks)}
+                              {formatRatio(r.correctPicks, r.totalPicks)}
                             </td>
+
                             <td className="px-4 py-3">
                               <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
-                                {m.role === "manager" ? "Manager" : "Member"}
+                                {r.role === "manager" ? "Manager" : "Member"}
                               </span>
                             </td>
                           </tr>
@@ -406,25 +560,10 @@ export default function LeagueLadderPage() {
               )}
 
               <div className="px-4 py-3 border-t border-white/10 text-[11px] text-white/50">
-                Ladder stats are ready for your next step: write each player’s best/current streak +
-                accuracy into <span className="font-mono text-white/70">leagues/{leagueId}/members/{`{uid}`}</span>.
+                This ladder reads streak + profile from{" "}
+                <span className="font-mono text-white/70">users/{`{uid}`}</span>.
+                If a user doc doesn’t have streak fields yet, it’ll show 0 until you start writing them.
               </div>
-            </div>
-
-            {/* Footer links */}
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href={`/leagues/${leagueId}`}
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2"
-              >
-                Back to league →
-              </Link>
-              <Link
-                href="/leagues"
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2"
-              >
-                All leagues
-              </Link>
             </div>
           </>
         )}
