@@ -53,7 +53,12 @@ type UserProfile = {
 type LadderRow = {
   rank: number;
   uid: string;
-  role: "manager" | "member";
+
+  // stored role from members collection (may be wrong / stale)
+  storedRole: "manager" | "member";
+
+  // derived role for UI (managerId always wins)
+  uiRole: "admin" | "member";
 
   name: string;
   username?: string;
@@ -235,6 +240,8 @@ export default function LeagueLadderPage() {
   }, [leagueId, members]);
 
   const ladder: LadderRow[] = useMemo(() => {
+    const managerId = league?.managerId || "";
+
     const rows: LadderRow[] = members.map((m) => {
       const p = profiles[m.uid];
 
@@ -252,10 +259,14 @@ export default function LeagueLadderPage() {
 
       const avatar = p?.avatarUrl || p?.photoURL || undefined;
 
+      // ✅ UI role: managerId always wins
+      const uiRole: "admin" | "member" = m.uid === managerId ? "admin" : "member";
+
       return {
         rank: 9999,
         uid: m.uid,
-        role: m.role,
+m        storedRole: m.role,
+        uiRole,
         name,
         username,
         avatar,
@@ -278,12 +289,14 @@ export default function LeagueLadderPage() {
     });
 
     return rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
-  }, [members, profiles]);
+  }, [members, profiles, league?.managerId]);
 
   const myRow = useMemo(() => {
     if (!user) return null;
     return ladder.find((r) => r.uid === user.uid) ?? null;
   }, [ladder, user]);
+
+  const title = `${league?.name || "Group"} Ladder`;
 
   if (loading) {
     return (
@@ -325,10 +338,9 @@ export default function LeagueLadderPage() {
 
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">Ladder</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">{title}</h1>
             <p className="mt-1 text-sm text-white/70">
-              <span className="font-semibold text-white">{league.name}</span> — bragging rights only.
-              (Your global streak still counts on the main leaderboard.)
+              Bragging rights only. (Your global streak still counts on the main leaderboard.)
             </p>
           </div>
 
@@ -535,7 +547,7 @@ export default function LeagueLadderPage() {
 
                             <td className="px-4 py-3">
                               <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
-                                {r.role === "manager" ? "Manager" : "Member"}
+                                {r.uiRole === "admin" ? "Admin" : "Member"}
                               </span>
                             </td>
                           </tr>
