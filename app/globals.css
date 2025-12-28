@@ -5,32 +5,94 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ---- Your global styles ---- */
+/* ─────────────────────────────────────────────
+   STREAKr — Dark Neon Cyberpunk Theme
+   Palette + UI primitives + motion tokens
+   ───────────────────────────────────────────── */
 
+/* Exact palette */
 :root {
-  --bg: #0b0f13;
-  --text: #ffffff;
-  --muted: #9aa3af;
-  --card: #10151c;
-  --card-border: rgba(255,255,255,0.07);
-  --brand: #fe6f27; /* orange */
-  --brand-600: #e65f1f;
-  --chip-open-bg: rgba(16,185,129,0.14);
-  --chip-open-text: #10b981;
+  /* Backgrounds */
+  --bg-void: #000000;
+  --bg-primary: #0D1117;
+  --bg-elevated: #161B22;
+  --bg-card: #21262D;
+
+  /* Brand Orange (enhanced) */
+  --orange-900: #BF360C;
+  --orange-600: #FF3D00;
+  --orange-500: #FF5722;
+  --orange-400: #FF6F4D;
+
+  /* Accent Neons */
+  --cyan-glow: #00E5FF;
+  --acid-green: #76FF03;
+  --hot-pink: #F50057;
+  --laser-purple: #D500F9;
+  --warning-yellow: #FFEA00;
+
+  /* Success States */
+  --success: #76FF03;
+  --error: #FF073A;
+  --warning: #FFEA00;
+  --info: #00E5FF;
+
+  /* Text */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.5);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-default: rgba(255, 255, 255, 0.15);
+  --border-strong: rgba(255, 255, 255, 0.3);
+
+  /* Legacy aliases (so existing pages don’t break immediately) */
+  --bg: var(--bg-primary);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --card: var(--bg-elevated);
+  --card-border: var(--border-subtle);
+  --brand: var(--orange-600);
+  --brand-600: var(--orange-500);
+  --chip-open-bg: color-mix(in srgb, var(--success) 16%, transparent);
+  --chip-open-text: var(--success);
+
+  /* Glow presets (used by utilities below) */
+  --glow-cyan: 0 0 16px color-mix(in srgb, var(--cyan-glow) 55%, transparent);
+  --glow-pink: 0 0 18px color-mix(in srgb, var(--hot-pink) 55%, transparent);
+  --glow-orange: 0 0 18px color-mix(in srgb, var(--orange-600) 55%, transparent);
+  --glow-green: 0 0 18px color-mix(in srgb, var(--success) 55%, transparent);
+  --glow-red: 0 0 18px color-mix(in srgb, var(--error) 55%, transparent);
 }
 
-html, body {
+html,
+body {
   height: 100%;
 }
 
 body {
-  background: radial-gradient(1200px 800px at 50% -10%, #162033 0%, var(--bg) 45%, var(--bg) 100%);
-  color: var(--text);
+  background:
+    radial-gradient(1100px 700px at 50% -12%,
+      color-mix(in srgb, var(--cyan-glow) 14%, transparent) 0%,
+      transparent 40%),
+    radial-gradient(900px 550px at 14% 18%,
+      color-mix(in srgb, var(--laser-purple) 12%, transparent) 0%,
+      transparent 45%),
+    radial-gradient(900px 550px at 86% 20%,
+      color-mix(in srgb, var(--hot-pink) 10%, transparent) 0%,
+      transparent 45%),
+    linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-primary) 65%, var(--bg-void) 120%);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-a { color: inherit; text-decoration: none; }
+/* Base element defaults */
+a {
+  color: inherit;
+  text-decoration: none;
+}
 
 .container {
   max-width: 1200px;
@@ -39,50 +101,291 @@ a { color: inherit; text-decoration: none; }
   padding-right: 1rem;
 }
 
-/* Buttons */
+/* Typography helpers */
+.text-muted {
+  color: var(--text-secondary);
+}
+
+.text-tertiary {
+  color: var(--text-tertiary);
+}
+
+.heading-glow {
+  text-shadow: 0 0 14px color-mix(in srgb, var(--cyan-glow) 35%, transparent);
+}
+
+/* ─────────────────────────────────────────────
+   Motion tokens
+   ───────────────────────────────────────────── */
+@keyframes streakGradientShift {
+  0% { filter: hue-rotate(0deg); }
+  50% { filter: hue-rotate(18deg); }
+  100% { filter: hue-rotate(0deg); }
+}
+
+@keyframes pulseGlowGreen {
+  0%, 100% { box-shadow: 0 0 0 transparent; }
+  50% { box-shadow: var(--glow-green); }
+}
+
+@keyframes pulseGlowRed {
+  0%, 100% { box-shadow: 0 0 0 transparent; transform: translateX(0); }
+  20% { transform: translateX(-1px); }
+  40% { transform: translateX(1px); }
+  60% { transform: translateX(-1px); }
+  80% { transform: translateX(1px); }
+  50% { box-shadow: var(--glow-red); }
+}
+
+@keyframes blinkWarning {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes hoverGlowPink {
+  0% { box-shadow: 0 0 0 transparent; }
+  100% { box-shadow: var(--glow-pink); }
+}
+
+@keyframes hoverGlowCyan {
+  0% { box-shadow: 0 0 0 transparent; }
+  100% { box-shadow: var(--glow-cyan); }
+}
+
+/* Utility classes for motion */
+.animate-streak {
+  animation: streakGradientShift 2.8s ease-in-out infinite;
+}
+
+.pulse-success {
+  animation: pulseGlowGreen 1.2s ease-in-out infinite;
+}
+
+.shake-error {
+  animation: pulseGlowRed 0.6s ease-in-out 1;
+}
+
+.blink-warning {
+  animation: blinkWarning 1s linear infinite;
+}
+
+/* ─────────────────────────────────────────────
+   Buttons (Visual Rules)
+   - Primary CTA: solid orange-600 w/ hot-pink glow on hover
+   - Secondary: cyan outline, transparent fill
+   - Danger: solid error w/ pulse
+   ───────────────────────────────────────────── */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   height: 36px;
   padding: 0 14px;
-  border-radius: 10px;
-  font-weight: 600;
+  border-radius: 12px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
   border: 1px solid transparent;
+  transition: transform 120ms ease, box-shadow 160ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
+  user-select: none;
 }
 
-.btn-primary { background: var(--brand); }
-.btn-primary:hover { background: var(--brand-600); }
+.btn:active {
+  transform: translateY(1px);
+}
 
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none !important;
+}
+
+/* Primary CTA */
+.btn-primary {
+  background: var(--orange-600);
+  color: #000;
+  border-color: color-mix(in srgb, var(--orange-600) 60%, transparent);
+  box-shadow: var(--glow-orange);
+}
+
+.btn-primary:hover {
+  background: var(--orange-500);
+  animation: hoverGlowPink 180ms ease forwards;
+}
+
+/* Secondary */
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--cyan-glow) 70%, transparent);
+}
+
+.btn-secondary:hover {
+  animation: hoverGlowCyan 180ms ease forwards;
+}
+
+/* Ghost / neutral */
 .btn-ghost {
-  background: rgba(255,255,255,0.06);
-  border-color: rgba(255,255,255,0.12);
+  background: color-mix(in srgb, #ffffff 6%, transparent);
+  border-color: var(--border-default);
+  color: var(--text-primary);
 }
 
-/* Cards / tables */
-.card {
-  background: var(--card);
-  border: 1px solid var(--card-border);
-  border-radius: 16px;
+.btn-ghost:hover {
+  background: color-mix(in srgb, #ffffff 10%, transparent);
+  border-color: var(--border-strong);
 }
 
-/* Status chip (OPEN) */
-.chip-open {
-  background: var(--chip-open-bg);
-  color: var(--chip-open-text);
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 10px;
+/* Danger */
+.btn-danger {
+  background: var(--error);
+  color: #000;
+  border-color: color-mix(in srgb, var(--error) 60%, transparent);
+  animation: pulseGlowRed 1.1s ease-in-out infinite;
+}
+
+/* Small button helper */
+.btn-sm {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
   font-size: 12px;
 }
 
-/* Sponsor banner placeholder */
+/* ─────────────────────────────────────────────
+   Cards / panels
+   - Background elevated
+   - Subtle border, orange on hover
+   - Subtle glow
+   ───────────────────────────────────────────── */
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  box-shadow: 0 0 0 transparent;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.card:hover {
+  border-color: color-mix(in srgb, var(--orange-600) 55%, transparent);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--orange-600) 14%, transparent);
+  transform: translateY(-1px);
+}
+
+/* Elevated surface helper */
+.surface {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+}
+
+/* ─────────────────────────────────────────────
+   Status indicators
+   Correct: acid green pulse
+   Wrong: error + shake
+   Pending: warning yellow blink
+   Streak: cyan glow (animated)
+   ───────────────────────────────────────────── */
+
+/* Generic chip */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  border: 1px solid var(--border-subtle);
+}
+
+/* OPEN */
+.chip-open {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 34%, transparent);
+}
+
+/* PENDING */
+.chip-pending {
+  background: color-mix(in srgb, var(--warning-yellow) 14%, transparent);
+  color: var(--warning-yellow);
+  border-color: color-mix(in srgb, var(--warning-yellow) 34%, transparent);
+}
+.chip-pending.blink-warning {
+  animation: blinkWarning 1s linear infinite;
+}
+
+/* FINAL */
+.chip-final {
+  background: color-mix(in srgb, var(--cyan-glow) 12%, transparent);
+  color: var(--cyan-glow);
+  border-color: color-mix(in srgb, var(--cyan-glow) 30%, transparent);
+}
+
+/* VOID */
+.chip-void {
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+/* Outcome chips */
+.chip-yes {
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 34%, transparent);
+}
+.chip-yes.pulse-success {
+  animation: pulseGlowGreen 1.2s ease-in-out infinite;
+}
+
+.chip-no {
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 34%, transparent);
+}
+
+.chip-voided {
+  background: color-mix(in srgb, #ffffff 7%, transparent);
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+/* Streak highlight */
+.streak-glow {
+  color: var(--cyan-glow);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--cyan-glow) 40%, transparent);
+}
+.streak-glow.animate-streak {
+  animation: streakGradientShift 2.8s ease-in-out infinite;
+}
+
+/* ─────────────────────────────────────────────
+   Sponsor banner placeholder
+   ───────────────────────────────────────────── */
 .sponsor-banner {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 14px;
+  background: color-mix(in srgb, #ffffff 6%, transparent);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
   height: 90px;
 }
 
-/* Utility tweaks */
-.text-muted { color: var(--muted); }
+/* ─────────────────────────────────────────────
+   Optional helper utilities (safe)
+   ───────────────────────────────────────────── */
+.neon-cyan {
+  box-shadow: var(--glow-cyan);
+}
+
+.neon-orange {
+  box-shadow: var(--glow-orange);
+}
+
+.neon-pink {
+  box-shadow: var(--glow-pink);
+}
+
+.neon-green {
+  box-shadow: var(--glow-green);
+}
