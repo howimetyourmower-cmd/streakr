@@ -10,7 +10,6 @@ import {
   ChangeEvent,
 } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
@@ -157,9 +156,6 @@ function formatAedt(iso: string) {
 export default function PicksClient() {
   const { user } = useAuth();
 
-  // ─────────────────────────────────────────────────────────────
-  // Core data
-  // ─────────────────────────────────────────────────────────────
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
@@ -168,15 +164,12 @@ export default function PicksClient() {
 
   const [pickHistory, setPickHistory] = useState<PickHistory>({});
 
-  // Game locks (AFL)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
-  // UI
   const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">("all");
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showHowToModal, setShowHowToModal] = useState(false);
 
-  // Comments drawer
   const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -184,24 +177,20 @@ export default function PicksClient() {
   const [commentText, setCommentText] = useState("");
   const [submittingComment, setSubmittingComment] = useState(false);
 
-  // Streak tracker
   const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
   const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
-  // Cyber fun
   const [showConfetti, setShowConfetti] = useState(false);
   const [shareStatus, setShareStatus] = useState<string>("");
 
-  // Countdown tick (global)
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  // Confetti sizing
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -211,7 +200,6 @@ export default function PicksClient() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // Load pick history local
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -224,7 +212,6 @@ export default function PicksClient() {
     }
   }, []);
 
-  // First-time how-to
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
@@ -243,7 +230,7 @@ export default function PicksClient() {
   const isGameUnlocked = useCallback(
     (gameId: string) => {
       const v = gameLocks[gameId];
-      return typeof v === "boolean" ? v : true; // default open
+      return typeof v === "boolean" ? v : true;
     },
     [gameLocks]
   );
@@ -254,9 +241,6 @@ export default function PicksClient() {
     } catch {}
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // Fetch picks
-  // ─────────────────────────────────────────────────────────────
   const flattenApi = useCallback((data: PicksApiResponse, history: PickHistory): QuestionRow[] => {
     return (data.games || []).flatMap((g) =>
       (g.questions || []).map((q) => {
@@ -314,7 +298,6 @@ export default function PicksClient() {
     [flattenApi, pickHistory]
   );
 
-  // Initial fetch
   useEffect(() => {
     setLoading(true);
     fetchPicks()
@@ -323,13 +306,11 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-refresh (cheap) every 15s
   useEffect(() => {
     const id = setInterval(() => fetchPicks({ silent: true }), 15000);
     return () => clearInterval(id);
   }, [fetchPicks]);
 
-  // Game locks for current round
   useEffect(() => {
     if (roundNumber === null) return;
     const loadLocks = async () => {
@@ -345,7 +326,6 @@ export default function PicksClient() {
     loadLocks();
   }, [roundNumber]);
 
-  // Load server picks (best-effort) and merge into local
   useEffect(() => {
     const loadServerPicks = async () => {
       if (!user) return;
@@ -384,9 +364,6 @@ export default function PicksClient() {
     loadServerPicks();
   }, [user, persistPickHistory]);
 
-  // ─────────────────────────────────────────────────────────────
-  // 🔥 Fix: stable comment-count subscriptions (no 0.1s resub loop)
-  // ─────────────────────────────────────────────────────────────
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
   const questionIdsKey = useMemo(() => questionIds.join("|"), [questionIds]);
 
@@ -417,7 +394,6 @@ export default function PicksClient() {
     const unsubs = chunks.map((ids) => {
       const qRef = query(collection(db, "comments"), where("questionId", "in", ids));
       return onSnapshot(qRef, (snap) => {
-        // init all ids to 0 so missing docs doesn't leave stale counts
         const counts: Record<string, number> = {};
         ids.forEach((id) => (counts[id] = 0));
         snap.forEach((d) => {
@@ -439,9 +415,6 @@ export default function PicksClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [questionIdsKey]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Streak tracking (leader + user)
-  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     setStreakLoading(true);
     setStreakError("");
@@ -493,7 +466,6 @@ export default function PicksClient() {
     return () => unsub();
   }, [user]);
 
-  // Confetti on streak milestones (fun, optional)
   const lastMilestoneRef = useRef<number>(0);
   useEffect(() => {
     const s = userCurrentStreak ?? null;
@@ -508,9 +480,6 @@ export default function PicksClient() {
     }
   }, [userCurrentStreak]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Derived: filters, grouping, stats, countdowns, sentiment, etc.
-  // ─────────────────────────────────────────────────────────────
   const filteredRows = useMemo(() => {
     if (activeFilter === "all") return rows;
     return rows.filter((r) => r.status === activeFilter);
@@ -553,12 +522,10 @@ export default function PicksClient() {
       return a.gameId.localeCompare(b.gameId);
     });
 
-    // stable question order
     out.forEach((g) => g.rows.sort((a, b) => a.quarter - b.quarter));
     return out;
   }, [filteredRows]);
 
-  // Picks made overall
   const picksMade = useMemo(() => {
     let n = 0;
     for (const r of rows) {
@@ -570,7 +537,6 @@ export default function PicksClient() {
 
   const totalQuestions = rows.length;
 
-  // Accuracy overall (settled only, excluding void)
   const accuracy = useMemo(() => {
     let wins = 0;
     let losses = 0;
@@ -593,7 +559,6 @@ export default function PicksClient() {
     return (wins / total) * 100;
   }, [rows, pickHistory]);
 
-  // Per-game picks & clean sweep indicator
   const perGameMeta = useMemo(() => {
     type Meta = {
       total: number;
@@ -601,18 +566,12 @@ export default function PicksClient() {
       locked: boolean;
       startMs: number | null;
       state: "pre" | "live" | "locked";
-      countdownLabel: string; // "4:32" or "LOCKED" or "LIVE"
+      countdownLabel: string;
       countdownMs: number | null;
-      cleanSweep:
-        | { kind: "none" }
-        | { kind: "pending"; picked: number }
-        | { kind: "cooked"; picked: number }
-        | { kind: "clean"; add: number };
     };
 
     const byGame: Record<string, Meta> = {};
 
-    // Group all rows (not filtered) for correct totals
     const groupAll: Record<string, QuestionRow[]> = {};
     for (const r of rows) {
       if (!groupAll[r.gameId]) groupAll[r.gameId] = [];
@@ -623,27 +582,9 @@ export default function PicksClient() {
       const total = gameRows.length;
       let picked = 0;
 
-      // scoring: only on settled picks; void ignored; if any wrong -> cooked
-      let pendingPicked = 0;
-      let wins = 0;
-      let losses = 0;
-
       for (const r of gameRows) {
         const pick = pickHistory[r.id] ?? r.userPick;
-        const hasPicked = pick === "yes" || pick === "no";
-        if (!hasPicked) continue;
-        picked++;
-
-        const out = normaliseOutcome(r.correctOutcome);
-        if (r.status === "void" || out === "void") continue;
-
-        if (r.status !== "final" || !out) {
-          pendingPicked++;
-          continue;
-        }
-
-        if (pick === out) wins++;
-        else losses++;
+        if (pick === "yes" || pick === "no") picked++;
       }
 
       const locked = !isGameUnlocked(gameId);
@@ -661,30 +602,20 @@ export default function PicksClient() {
         countdownMs = startMs - nowMs;
         countdownLabel = formatCountdown(countdownMs);
       } else {
-        // past start time, but might still show as open depending on locks – treat as LIVE
         state = "live";
         countdownLabel = "LIVE";
       }
 
-      let cleanSweep: Meta["cleanSweep"] = { kind: "none" };
-
-      const isFinal = gameRows.every((r) => r.status === "final" || r.status === "void");
-      if (picked === 0) cleanSweep = { kind: "none" };
-      else if (!isFinal) cleanSweep = { kind: "pending", picked };
-      else if (losses > 0) cleanSweep = { kind: "cooked", picked };
-      else cleanSweep = { kind: "clean", add: wins };
-
-      byGame[gameId] = { total, picked, locked, startMs, state, countdownLabel, countdownMs, cleanSweep };
+      byGame[gameId] = { total, picked, locked, startMs, state, countdownLabel, countdownMs };
     }
 
     return byGame;
   }, [rows, pickHistory, isGameUnlocked, nowMs]);
 
-  // Next lock countdown (soonest unlocked game in future)
   const nextLock = useMemo(() => {
     let best: number | null = null;
-
     const seen = new Set<string>();
+
     for (const r of rows) {
       if (seen.has(r.gameId)) continue;
       seen.add(r.gameId);
@@ -700,16 +631,11 @@ export default function PicksClient() {
       if (best === null || delta < best) best = delta;
     }
 
-    if (best === null) return null;
     return best;
   }, [rows, isGameUnlocked, nowMs]);
 
-  // Hot comments
   const hotCommentCount = useMemo(() => rows.filter((r) => (r.commentCount ?? 0) >= 100).length, [rows]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Actions: pick / clear / share / comments
-  // ─────────────────────────────────────────────────────────────
   const handlePick = useCallback(
     async (row: QuestionRow, pick: "yes" | "no") => {
       if (!user) {
@@ -717,11 +643,9 @@ export default function PicksClient() {
         return;
       }
 
-      // If game locked or question not open => ignore
       if (!isGameUnlocked(row.gameId)) return;
       if (row.status !== "open") return;
 
-      // optimistic UI
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
 
       setPickHistory((prev) => {
@@ -771,7 +695,6 @@ export default function PicksClient() {
         return next;
       });
 
-      // Optional: if your API supports clear, keep it. If not, harmless warning.
       if (!user) return;
       try {
         const token = await user.getIdToken();
@@ -788,11 +711,10 @@ export default function PicksClient() {
           }),
         });
         if (!res.ok) {
-          // don’t crash the UI if server doesn’t support “clear”
           console.warn("Pick clear not supported or failed:", await res.text());
         }
       } catch (err) {
-        console.error("Pick clear error:", err);
+        console.error("Pick clear error", err);
       }
     },
     [isGameUnlocked, persistPickHistory, user, roundNumber]
@@ -884,9 +806,6 @@ export default function PicksClient() {
     }
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // UI helpers
-  // ─────────────────────────────────────────────────────────────
   const statusBadge = (s: QuestionStatus) => {
     if (s === "open") return { label: "OPEN", bg: "rgba(0,229,255,0.12)", br: "rgba(0,229,255,0.45)", tx: COLORS.cyan };
     if (s === "pending") return { label: "PENDING", bg: "rgba(255,61,0,0.10)", br: "rgba(255,61,0,0.40)", tx: COLORS.orange };
@@ -905,9 +824,6 @@ export default function PicksClient() {
     return { yes, no, majority, hasPick, withCrowd };
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
   const current = userCurrentStreak ?? 0;
   const leader = leaderCurrentStreak ?? 0;
 
@@ -917,16 +833,10 @@ export default function PicksClient() {
 
   const picksLine = `${picksMade}/${totalQuestions || 0}`;
   const accuracyLine = accuracy === null ? "-" : formatPct(accuracy);
-
-  const nextLockLine =
-    nextLock === null ? "-" : formatCountdown(nextLock);
+  const nextLockLine = nextLock === null ? "-" : formatCountdown(nextLock);
 
   const roundLabel =
-    roundNumber === null
-      ? ""
-      : roundNumber === 0
-      ? "Opening Round"
-      : `Round ${roundNumber}`;
+    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   const sponsorExists = rows.some((r) => !!r.isSponsorQuestion);
 
@@ -951,13 +861,8 @@ export default function PicksClient() {
         <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={260} recycle={false} />
       )}
 
-      <div
-        className="min-h-screen"
-        style={{ background: COLORS.bg, color: "white" }}
-      >
-        {/* ─────────────────────────────────────────────────────────────
-            Sticky Top Bar: Persistent Streak Widget + Quick Stats + Share
-           ───────────────────────────────────────────────────────────── */}
+      <div className="min-h-screen" style={{ background: COLORS.bg, color: "white" }}>
+        {/* Sticky Top Bar */}
         <div
           className="sticky top-0 z-40 border-b"
           style={{
@@ -1078,12 +983,9 @@ export default function PicksClient() {
                     )}
                   </div>
 
-                  {/* Dashboard Stats Cards */}
+                  {/* Stats Cards */}
                   <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div
-                      className="rounded-2xl border p-3"
-                      style={{ background: COLORS.panel2, borderColor: COLORS.border }}
-                    >
+                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
                       <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
                         Picks made
                       </div>
@@ -1095,7 +997,7 @@ export default function PicksClient() {
                           {hotCommentCount > 0 ? (
                             <span className="inline-flex items-center gap-1">
                               <span className="pulse-hot inline-flex h-2 w-2 rounded-full" style={{ background: COLORS.orange }} />
-                              {hotCommentCount} hot thread{hotCommentCount === 1 ? "" : "s"}
+                              {hotCommentCount} hot
                             </span>
                           ) : (
                             "Keep picking"
@@ -1113,10 +1015,7 @@ export default function PicksClient() {
                       </div>
                     </div>
 
-                    <div
-                      className="rounded-2xl border p-3"
-                      style={{ background: COLORS.panel2, borderColor: COLORS.border }}
-                    >
+                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
                       <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
                         Accuracy
                       </div>
@@ -1125,7 +1024,7 @@ export default function PicksClient() {
                           {accuracyLine}
                         </div>
                         <div className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                          Settled picks only
+                          Settled only
                         </div>
                       </div>
                       <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
@@ -1139,10 +1038,7 @@ export default function PicksClient() {
                       </div>
                     </div>
 
-                    <div
-                      className="rounded-2xl border p-3"
-                      style={{ background: COLORS.panel2, borderColor: COLORS.border }}
-                    >
+                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
                       <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
                         Next lock
                       </div>
@@ -1151,16 +1047,23 @@ export default function PicksClient() {
                           {nextLockLine}
                         </div>
                         <div className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                          Until next game locks
+                          Countdown
                         </div>
                       </div>
                       <div className="mt-2 text-[11px]" style={{ color: COLORS.textDim }}>
                         {sponsorExists ? (
                           <span className="inline-flex items-center gap-2">
-                            <span className="inline-flex px-2 py-0.5 rounded-full font-extrabold" style={{ background: "rgba(255,61,0,0.15)", border: `1px solid rgba(255,61,0,0.45)`, color: COLORS.orange }}>
+                            <span
+                              className="inline-flex px-2 py-0.5 rounded-full font-extrabold"
+                              style={{
+                                background: "rgba(255,61,0,0.15)",
+                                border: `1px solid rgba(255,61,0,0.45)`,
+                                color: COLORS.orange,
+                              }}
+                            >
                               Sponsor Q live
                             </span>
-                            Nail it for bragging rights.
+                            Nail it.
                           </span>
                         ) : (
                           "Don’t get caught napping."
@@ -1200,21 +1103,15 @@ export default function PicksClient() {
             })}
           </div>
 
-          {/* Loading */}
           {loading && (
             <div className="rounded-2xl border p-6" style={{ borderColor: COLORS.border, background: COLORS.panel }}>
-              <div className="text-sm" style={{ color: COLORS.textDim }}>
-                Loading games…
-              </div>
+              <div className="text-sm" style={{ color: COLORS.textDim }}>Loading games…</div>
             </div>
           )}
 
-          {/* Game-grouped cards */}
           {!loading && games.length === 0 && (
             <div className="rounded-2xl border p-6" style={{ borderColor: COLORS.border, background: COLORS.panel }}>
-              <div className="text-sm" style={{ color: COLORS.textDim }}>
-                No questions in this view yet.
-              </div>
+              <div className="text-sm" style={{ color: COLORS.textDim }}>No questions in this view yet.</div>
             </div>
           )}
 
@@ -1231,44 +1128,6 @@ export default function PicksClient() {
                 const isLive = meta?.state === "live" && !locked;
                 const countdownLabel = meta?.countdownLabel ?? "--";
 
-                const clean = meta?.cleanSweep;
-                const cleanChip =
-                  !clean || clean.kind === "none" ? null :
-                  clean.kind === "pending" ? (
-                    <span
-                      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                      style={{
-                        background: "rgba(0,229,255,0.08)",
-                        borderColor: "rgba(0,229,255,0.35)",
-                        color: COLORS.cyan,
-                      }}
-                    >
-                      Clean sweep pending • {clean.picked} pick{clean.picked === 1 ? "" : "s"}
-                    </span>
-                  ) : clean.kind === "cooked" ? (
-                    <span
-                      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                      style={{
-                        background: "rgba(255,7,58,0.10)",
-                        borderColor: "rgba(255,7,58,0.50)",
-                        color: COLORS.red,
-                      }}
-                    >
-                      Cooked • Earned 0
-                    </span>
-                  ) : (
-                    <span
-                      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                      style={{
-                        background: "rgba(118,255,3,0.10)",
-                        borderColor: "rgba(118,255,3,0.50)",
-                        color: COLORS.green,
-                      }}
-                    >
-                      Clean sweep ✅ +{clean.add}
-                    </span>
-                  );
-
                 return (
                   <div
                     key={g.gameId}
@@ -1284,7 +1143,13 @@ export default function PicksClient() {
                       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                         <div className="min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <div className="text-lg sm:text-xl font-extrabold truncate">{g.match}</div>
+                            {/* ✅ CHANGE 1: make game title orange */}
+                            <div
+                              className="text-lg sm:text-xl font-extrabold truncate"
+                              style={{ color: COLORS.orange }}
+                            >
+                              {g.match}
+                            </div>
 
                             {isLive && (
                               <span
@@ -1340,11 +1205,8 @@ export default function PicksClient() {
                             >
                               {locked ? "Locked" : isLive ? "In play" : `Locks in ${countdownLabel}`}
                             </span>
-
-                            {cleanChip}
                           </div>
 
-                          {/* Progress bar */}
                           <div className="mt-3">
                             <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
                               <div
@@ -1358,7 +1220,6 @@ export default function PicksClient() {
                           </div>
                         </div>
 
-                        {/* Small right stack */}
                         <div className="flex sm:flex-col items-start sm:items-end gap-2">
                           <span
                             className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
@@ -1405,196 +1266,199 @@ export default function PicksClient() {
                         return (
                           <div
                             key={r.id}
-                            className="rounded-2xl border p-4"
+                            className="rounded-2xl border"
                             style={{
                               borderColor: COLORS.border,
                               background: "rgba(0,0,0,0.18)",
                             }}
                           >
-                            {/* Top row */}
-                            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span
-                                    className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-extrabold border"
-                                    style={{
-                                      background: badge.bg,
-                                      borderColor: badge.br,
-                                      color: badge.tx,
-                                    }}
-                                  >
-                                    {badge.label}
-                                  </span>
-
-                                  <span className="text-[11px] font-extrabold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.70)" }}>
-                                    {r.quarter === 0 ? "Match" : `Q${r.quarter}`}
-                                  </span>
-
-                                  {r.isSponsorQuestion && (
+                            {/* ✅ CHANGE 2: reduce height of each pick block (tighten padding) */}
+                            <div className="p-3 sm:p-3">
+                              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <span
-                                      className="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-extrabold border"
+                                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold border"
                                       style={{
-                                        background: "rgba(255,61,0,0.12)",
-                                        borderColor: "rgba(255,61,0,0.55)",
-                                        color: COLORS.orange,
+                                        background: badge.bg,
+                                        borderColor: badge.br,
+                                        color: badge.tx,
                                       }}
                                     >
-                                      Sponsor
+                                      {badge.label}
                                     </span>
-                                  )}
-                                </div>
 
-                                <div className="mt-2 text-sm sm:text-[15px] font-semibold leading-snug">
-                                  {r.question}
-                                </div>
+                                    <span className="text-[11px] font-extrabold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.70)" }}>
+                                      {r.quarter === 0 ? "Match" : `Q${r.quarter}`}
+                                    </span>
 
-                                {/* Crowd sentiment bars */}
-                                <div className="mt-3">
-                                  <div className="flex items-center justify-between text-[11px] font-semibold">
-                                    <span style={{ color: COLORS.textDim }}>Crowd sentiment</span>
-                                    <span style={{ color: crowdColor }}>{crowdLine}</span>
+                                    {r.isSponsorQuestion && (
+                                      <span
+                                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold border"
+                                        style={{
+                                          background: "rgba(255,61,0,0.12)",
+                                          borderColor: "rgba(255,61,0,0.55)",
+                                          color: COLORS.orange,
+                                        }}
+                                      >
+                                        Sponsor
+                                      </span>
+                                    )}
                                   </div>
 
-                                  <div className="mt-1.5 h-3 rounded-full overflow-hidden border"
-                                    style={{ background: "rgba(255,255,255,0.06)", borderColor: "rgba(255,255,255,0.10)" }}
-                                  >
-                                    <div className="h-full flex">
-                                      <div
-                                        style={{
-                                          width: `${senti.yes}%`,
-                                          background: `linear-gradient(90deg, ${COLORS.green} 0%, rgba(118,255,3,0.25) 100%)`,
-                                        }}
-                                      />
-                                      <div
-                                        style={{
-                                          width: `${senti.no}%`,
-                                          background: `linear-gradient(90deg, ${COLORS.red} 0%, rgba(255,7,58,0.20) 100%)`,
-                                        }}
-                                      />
+                                  <div className="mt-1.5 text-sm sm:text-[14px] font-semibold leading-snug">
+                                    {r.question}
+                                  </div>
+
+                                  {/* Crowd sentiment bars (tight) */}
+                                  <div className="mt-2.5">
+                                    <div className="flex items-center justify-between text-[11px] font-semibold">
+                                      <span style={{ color: COLORS.textDim }}>Crowd</span>
+                                      <span style={{ color: crowdColor }}>{crowdLine}</span>
+                                    </div>
+
+                                    <div
+                                      className="mt-1 h-2.5 rounded-full overflow-hidden border"
+                                      style={{
+                                        background: "rgba(255,255,255,0.06)",
+                                        borderColor: "rgba(255,255,255,0.10)",
+                                      }}
+                                    >
+                                      <div className="h-full flex">
+                                        <div
+                                          style={{
+                                            width: `${senti.yes}%`,
+                                            background: `linear-gradient(90deg, ${COLORS.green} 0%, rgba(118,255,3,0.25) 100%)`,
+                                          }}
+                                        />
+                                        <div
+                                          style={{
+                                            width: `${senti.no}%`,
+                                            background: `linear-gradient(90deg, ${COLORS.red} 0%, rgba(255,7,58,0.20) 100%)`,
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-0.5 flex items-center justify-between text-[10px]" style={{ color: COLORS.textDim2 }}>
+                                      <span>YES {Math.round(senti.yes)}%</span>
+                                      <span>NO {Math.round(senti.no)}%</span>
                                     </div>
                                   </div>
 
-                                  <div className="mt-1 flex items-center justify-between text-[11px]" style={{ color: COLORS.textDim2 }}>
-                                    <span>YES {Math.round(senti.yes)}%</span>
-                                    <span>NO {Math.round(senti.no)}%</span>
+                                  <div className="mt-2 flex items-center gap-3 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => openComments(r)}
+                                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold border transition ${
+                                        hot ? "pulse-hot" : ""
+                                      }`}
+                                      style={{
+                                        borderColor: hot ? "rgba(255,61,0,0.55)" : "rgba(0,229,255,0.25)",
+                                        background: hot ? "rgba(255,61,0,0.10)" : "rgba(0,229,255,0.06)",
+                                        color: hot ? COLORS.orange : COLORS.cyan,
+                                      }}
+                                    >
+                                      💬 {r.commentCount ?? 0}
+                                      {hot && <span className="ml-1">🔥</span>}
+                                    </button>
+
+                                    {!selectable && (
+                                      <span
+                                        className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
+                                        style={{
+                                          borderColor: "rgba(255,255,255,0.12)",
+                                          background: "rgba(255,255,255,0.04)",
+                                          color: "rgba(255,255,255,0.65)",
+                                        }}
+                                      >
+                                        {unlocked ? "Not open" : "Picks locked"}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
-                                {/* Comments */}
-                                <div className="mt-3 flex items-center gap-3 flex-wrap">
-                                  <button
-                                    type="button"
-                                    onClick={() => openComments(r)}
-                                    className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold border transition ${
-                                      hot ? "pulse-hot" : ""
-                                    }`}
-                                    style={{
-                                      borderColor: hot ? "rgba(255,61,0,0.55)" : "rgba(0,229,255,0.25)",
-                                      background: hot ? "rgba(255,61,0,0.10)" : "rgba(0,229,255,0.06)",
-                                      color: hot ? COLORS.orange : COLORS.cyan,
-                                    }}
-                                  >
-                                    💬 {r.commentCount ?? 0}
-                                    {hot && <span className="ml-1">🔥</span>}
-                                  </button>
-
-                                  {!selectable && (
-                                    <span
-                                      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                                      style={{
-                                        borderColor: "rgba(255,255,255,0.12)",
-                                        background: "rgba(255,255,255,0.04)",
-                                        color: "rgba(255,255,255,0.65)",
-                                      }}
-                                    >
-                                      {unlocked ? "Not open" : "Picks locked"}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Buttons */}
-                              <div className="flex flex-col items-stretch md:items-end gap-2">
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePick(r, "yes")}
-                                    disabled={!selectable}
-                                    className={[
-                                      "rounded-2xl px-5 py-3 text-sm font-extrabold border transition transform",
-                                      "active:scale-[0.98]",
-                                      pick === "yes" ? "scale-[1.03]" : "",
-                                    ].join(" ")}
-                                    style={{
-                                      minWidth: 110,
-                                      borderColor: pick === "yes" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
-                                      background: pick === "yes"
-                                        ? `linear-gradient(135deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.35) 100%)`
-                                        : selectable
-                                        ? "rgba(255,255,255,0.04)"
-                                        : "rgba(255,255,255,0.02)",
-                                      color: pick === "yes" ? "#001015" : selectable ? "white" : "rgba(255,255,255,0.35)",
-                                      boxShadow: pick === "yes" ? "0 0 20px rgba(0,229,255,0.35)" : "none",
-                                      cursor: selectable ? "pointer" : "not-allowed",
-                                    }}
-                                  >
-                                    YES
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handlePick(r, "no")}
-                                    disabled={!selectable}
-                                    className={[
-                                      "rounded-2xl px-5 py-3 text-sm font-extrabold border transition transform",
-                                      "active:scale-[0.98]",
-                                      pick === "no" ? "scale-[1.03]" : "",
-                                    ].join(" ")}
-                                    style={{
-                                      minWidth: 110,
-                                      borderColor: pick === "no" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
-                                      background: pick === "no"
-                                        ? `linear-gradient(135deg, ${COLORS.orange} 0%, rgba(255,61,0,0.30) 100%)`
-                                        : selectable
-                                        ? "rgba(255,255,255,0.04)"
-                                        : "rgba(255,255,255,0.02)",
-                                      color: pick === "no" ? "#120500" : selectable ? "white" : "rgba(255,255,255,0.35)",
-                                      boxShadow: pick === "no" ? "0 0 20px rgba(255,61,0,0.30)" : "none",
-                                      cursor: selectable ? "pointer" : "not-allowed",
-                                    }}
-                                  >
-                                    NO
-                                  </button>
-
-                                  {hasPicked && selectable && (
+                                <div className="flex flex-col items-stretch md:items-end gap-1.5">
+                                  <div className="flex items-center gap-2">
                                     <button
                                       type="button"
-                                      onClick={() => handleClearPick(r)}
-                                      className="rounded-2xl px-3 py-3 text-sm font-extrabold border transition active:scale-[0.98]"
+                                      onClick={() => handlePick(r, "yes")}
+                                      disabled={!selectable}
+                                      className={[
+                                        "rounded-2xl px-4 py-2.5 text-sm font-extrabold border transition transform",
+                                        "active:scale-[0.98]",
+                                        pick === "yes" ? "scale-[1.03]" : "",
+                                      ].join(" ")}
                                       style={{
-                                        borderColor: "rgba(255,255,255,0.12)",
-                                        background: "rgba(255,255,255,0.04)",
-                                        color: "rgba(255,255,255,0.78)",
+                                        minWidth: 100,
+                                        borderColor: pick === "yes" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
+                                        background: pick === "yes"
+                                          ? `linear-gradient(135deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.35) 100%)`
+                                          : selectable
+                                          ? "rgba(255,255,255,0.04)"
+                                          : "rgba(255,255,255,0.02)",
+                                        color: pick === "yes" ? "#001015" : selectable ? "white" : "rgba(255,255,255,0.35)",
+                                        boxShadow: pick === "yes" ? "0 0 20px rgba(0,229,255,0.35)" : "none",
+                                        cursor: selectable ? "pointer" : "not-allowed",
                                       }}
-                                      title="Clear pick"
-                                      aria-label="Clear pick"
                                     >
-                                      ✕
+                                      YES
                                     </button>
-                                  )}
-                                </div>
 
-                                {/* FOMO line */}
-                                <div className="text-[11px] text-right" style={{ color: COLORS.textDim2 }}>
-                                  {senti.hasPick ? (
-                                    senti.withCrowd ? (
-                                      <span style={{ color: COLORS.green }}>You’re riding the majority 🟢</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePick(r, "no")}
+                                      disabled={!selectable}
+                                      className={[
+                                        "rounded-2xl px-4 py-2.5 text-sm font-extrabold border transition transform",
+                                        "active:scale-[0.98]",
+                                        pick === "no" ? "scale-[1.03]" : "",
+                                      ].join(" ")}
+                                      style={{
+                                        minWidth: 100,
+                                        borderColor: pick === "no" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
+                                        background: pick === "no"
+                                          ? `linear-gradient(135deg, ${COLORS.orange} 0%, rgba(255,61,0,0.30) 100%)`
+                                          : selectable
+                                          ? "rgba(255,255,255,0.04)"
+                                          : "rgba(255,255,255,0.02)",
+                                        color: pick === "no" ? "#120500" : selectable ? "white" : "rgba(255,255,255,0.35)",
+                                        boxShadow: pick === "no" ? "0 0 20px rgba(255,61,0,0.30)" : "none",
+                                        cursor: selectable ? "pointer" : "not-allowed",
+                                      }}
+                                    >
+                                      NO
+                                    </button>
+
+                                    {hasPicked && selectable && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleClearPick(r)}
+                                        className="rounded-2xl px-3 py-2.5 text-sm font-extrabold border transition active:scale-[0.98]"
+                                        style={{
+                                          borderColor: "rgba(255,255,255,0.12)",
+                                          background: "rgba(255,255,255,0.04)",
+                                          color: "rgba(255,255,255,0.78)",
+                                        }}
+                                        title="Clear pick"
+                                        aria-label="Clear pick"
+                                      >
+                                        ✕
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="text-[10px] text-right" style={{ color: COLORS.textDim2 }}>
+                                    {senti.hasPick ? (
+                                      senti.withCrowd ? (
+                                        <span style={{ color: COLORS.green }}>WITH crowd 🟢</span>
+                                      ) : (
+                                        <span style={{ color: COLORS.red }}>AGAINST crowd 🔴</span>
+                                      )
                                     ) : (
-                                      <span style={{ color: COLORS.red }}>You’re going rogue 🔴</span>
-                                    )
-                                  ) : (
-                                    <span>Pick now or watch your mates climb.</span>
-                                  )}
+                                      <span>Pick now.</span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1609,7 +1473,7 @@ export default function PicksClient() {
           )}
         </div>
 
-        {/* AUTH MODAL */}
+        {/* Auth modal */}
         {showAuthModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
             <div
@@ -1622,12 +1486,7 @@ export default function PicksClient() {
             >
               <div className="flex items-start justify-between mb-3">
                 <h2 className="text-lg font-extrabold">Log in to play</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowAuthModal(false)}
-                  className="text-sm font-extrabold"
-                  style={{ color: COLORS.textDim }}
-                >
+                <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
                   ✕
                 </button>
               </div>
@@ -1639,11 +1498,7 @@ export default function PicksClient() {
                 <Link
                   href="/auth?mode=login&returnTo=/picks"
                   className="flex-1 inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold"
-                  style={{
-                    background: COLORS.orange,
-                    color: "black",
-                    boxShadow: "0 0 24px rgba(255,61,0,0.18)",
-                  }}
+                  style={{ background: COLORS.orange, color: "black", boxShadow: "0 0 24px rgba(255,61,0,0.18)" }}
                   onClick={() => setShowAuthModal(false)}
                 >
                   Login
@@ -1651,11 +1506,7 @@ export default function PicksClient() {
                 <Link
                   href="/auth?mode=signup&returnTo=/picks"
                   className="flex-1 inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold border"
-                  style={{
-                    borderColor: "rgba(0,229,255,0.35)",
-                    color: COLORS.cyan,
-                    background: "rgba(0,229,255,0.06)",
-                  }}
+                  style={{ borderColor: "rgba(0,229,255,0.35)", color: COLORS.cyan, background: "rgba(0,229,255,0.06)" }}
                   onClick={() => setShowAuthModal(false)}
                 >
                   Sign up
@@ -1665,13 +1516,10 @@ export default function PicksClient() {
           </div>
         )}
 
-        {/* COMMENTS DRAWER */}
+        {/* Comments drawer */}
         {commentsOpenFor && (
           <div className="fixed inset-0 z-40 bg-black/70 flex justify-end">
-            <div
-              className="w-full max-w-md h-full p-6 flex flex-col border-l"
-              style={{ background: COLORS.panel2, borderColor: COLORS.border }}
-            >
+            <div className="w-full max-w-md h-full p-6 flex flex-col border-l" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
               <div className="flex items-start justify-between mb-4">
                 <div className="min-w-0">
                   <div className="text-lg font-extrabold truncate" style={{ color: "white" }}>
@@ -1681,12 +1529,7 @@ export default function PicksClient() {
                     {commentsOpenFor.question}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeComments}
-                  className="text-sm font-extrabold"
-                  style={{ color: COLORS.textDim }}
-                >
+                <button type="button" onClick={closeComments} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
                   ✕
                 </button>
               </div>
@@ -1697,18 +1540,10 @@ export default function PicksClient() {
                   onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setCommentText(e.target.value)}
                   rows={3}
                   className="w-full rounded-2xl px-3 py-2 text-sm border focus:outline-none"
-                  style={{
-                    background: COLORS.panel,
-                    borderColor: "rgba(0,229,255,0.18)",
-                    color: "white",
-                  }}
+                  style={{ background: COLORS.panel, borderColor: "rgba(0,229,255,0.18)", color: "white" }}
                   placeholder="Talk your talk…"
                 />
-                {commentsError && (
-                  <p className="text-xs mt-2" style={{ color: COLORS.red }}>
-                    {commentsError}
-                  </p>
-                )}
+                {commentsError && <p className="text-xs mt-2" style={{ color: COLORS.red }}>{commentsError}</p>}
                 <div className="flex justify-end mt-2">
                   <button
                     type="button"
@@ -1729,30 +1564,18 @@ export default function PicksClient() {
 
               <div className="flex-1 overflow-y-auto">
                 {commentsLoading ? (
-                  <div className="text-sm" style={{ color: COLORS.textDim }}>
-                    Loading…
-                  </div>
+                  <div className="text-sm" style={{ color: COLORS.textDim }}>Loading…</div>
                 ) : comments.length === 0 ? (
-                  <div className="text-sm" style={{ color: COLORS.textDim }}>
-                    No comments yet. Be the first villain.
-                  </div>
+                  <div className="text-sm" style={{ color: COLORS.textDim }}>No comments yet. Be the first villain.</div>
                 ) : (
                   <ul className="space-y-3">
                     {comments.map((c) => (
-                      <li
-                        key={c.id}
-                        className="rounded-2xl border p-3"
-                        style={{ borderColor: COLORS.border, background: "rgba(255,255,255,0.03)" }}
-                      >
+                      <li key={c.id} className="rounded-2xl border p-3" style={{ borderColor: COLORS.border, background: "rgba(255,255,255,0.03)" }}>
                         <div className="flex items-center justify-between gap-2 mb-1">
                           <span className="text-sm font-extrabold" style={{ color: COLORS.cyan }}>
                             {c.displayName || "User"}
                           </span>
-                          {c.createdAt && (
-                            <span className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                              {c.createdAt}
-                            </span>
-                          )}
+                          {c.createdAt && <span className="text-[11px]" style={{ color: COLORS.textDim2 }}>{c.createdAt}</span>}
                         </div>
                         <div className="text-sm" style={{ color: "rgba(255,255,255,0.86)" }}>
                           {c.body}
@@ -1766,7 +1589,7 @@ export default function PicksClient() {
           </div>
         )}
 
-        {/* HOW TO PLAY MODAL */}
+        {/* How to play modal */}
         {showHowToModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
             <div
@@ -1784,12 +1607,7 @@ export default function PicksClient() {
                   </div>
                   <h2 className="text-xl font-extrabold">How to play Picks</h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeHowTo}
-                  className="text-sm font-extrabold"
-                  style={{ color: COLORS.textDim }}
-                >
+                <button type="button" onClick={closeHowTo} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
                   ✕
                 </button>
               </div>
@@ -1802,12 +1620,7 @@ export default function PicksClient() {
               </ul>
 
               <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  onClick={closeHowTo}
-                  className="rounded-full px-5 py-2 text-sm font-extrabold"
-                  style={{ background: COLORS.orange, color: "black" }}
-                >
+                <button type="button" onClick={closeHowTo} className="rounded-full px-5 py-2 text-sm font-extrabold" style={{ background: COLORS.orange, color: "black" }}>
                   Got it
                 </button>
               </div>
