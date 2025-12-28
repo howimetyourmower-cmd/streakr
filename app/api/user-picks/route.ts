@@ -94,6 +94,81 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 }
 
+/**
+ * ✅ DELETE handler
+ * - Deletes a specific pick doc for the current user + questionId
+ * - Clears users/{uid}.activeQuestionId / activePick only if it matches that questionId
+ *
+ * Usage:
+ * DELETE /api/user-picks?questionId=abc123
+ * Headers: Authorization: Bearer <token>
+ */
+export async function DELETE(req: NextRequest): Promise<NextResponse> {
+  try {
+    const uid = await getUserIdFromRequest(req);
+    if (!uid) {
+      return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const questionId = url.searchParams.get("questionId");
+
+    if (!questionId || !questionId.trim()) {
+      return NextResponse.json({ error: "Missing questionId" }, { status: 400 });
+    }
+
+    const qid = questionId.trim();
+    const now = Timestamp.now();
+
+    const userRef = db.collection("users").doc(uid);
+    const pickId = `${uid}_${qid}`;
+    const pickRef = db.collection("picks").doc(pickId);
+
+    // Do it transactionally so activePick is consistent.
+    await db.runTransaction(async (tx) => {
+      const userSnap = await tx.get(userRef);
+
+      if (userSnap.exists) {
+        const data = userSnap.data() as any;
+        const activeQuestionId =
+          typeof data?.activeQuestionId === "string" ? data.activeQuestionId : null;
+
+        // Only clear active fields if the deleted pick is the active one.
+        if (activeQuestionId === qid) {
+          tx.set(
+            userRef,
+            {
+              activeQuestionId: FieldValue.delete(),
+              activePick: FieldValue.delete(),
+              lastPickAt: now,
+            },
+            { merge: true }
+          );
+        } else {
+          // still stamp activity time if you want (optional)
+          tx.set(
+            userRef,
+            {
+              lastPickAt: now,
+            },
+            { merge: true }
+          );
+        }
+      } else {
+        // user doc missing - nothing to clear, but also not an error
+      }
+
+      // Delete pick doc (no-op if missing)
+      tx.delete(pickRef);
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    console.error("[/api/user-picks] DELETE error", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const uid = await getUserIdFromRequest(req);
@@ -118,7 +193,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const userRef = db.collection("users").doc(uid);
 
-    // ✅ CLEAR PICK
+    // ✅ CLEAR PICK (kept for backward compatibility with your current client flow)
     if (action === "clear") {
       if (!questionId) {
         return NextResponse.json({ error: "Missing questionId for clear" }, { status: 400 });
