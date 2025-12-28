@@ -23,6 +23,7 @@ import {
   orderBy,
   limit,
 } from "firebase/firestore";
+import { useSearchParams } from "next/navigation";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -30,7 +31,7 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: QuestionStatus;
+  status: any; // API may send "Open"/"Final" etc
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
@@ -92,6 +93,25 @@ type GameLocksResponse = {
 
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
+
+// ✅ from /app/play/afl/page.tsx
+type PreviewFocusPayload = {
+  sport: "AFL";
+  questionId: string;
+  intendedPick: "yes" | "no";
+  createdAt: number;
+};
+const PREVIEW_FOCUS_KEY = "streakr_preview_focus_v1";
+
+// ----- status normaliser -----
+function normaliseStatus(val: any): QuestionStatus {
+  const s = String(val ?? "").toLowerCase().trim();
+  if (s === "open") return "open";
+  if (s === "final") return "final";
+  if (s === "pending") return "pending";
+  if (s === "void") return "void";
+  return "open";
+}
 
 // ----- outcome normaliser -----
 const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
@@ -171,13 +191,15 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("gws") || s.includes("giants")) return "gws";
   if (s.includes("hawthorn") || s.includes("hawks")) return "hawthorn";
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
-  if (s.includes("north melbourne") || s.includes("kangaroos")) return "north-melbourne";
+  if (s.includes("north melbourne") || s.includes("kangaroos"))
+    return "north-melbourne";
   if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
   if (s.includes("west coast") || s.includes("eagles")) return "west-coast";
-  if (s.includes("western bulldogs") || s.includes("bulldogs")) return "western-bulldogs";
+  if (s.includes("western bulldogs") || s.includes("bulldogs"))
+    return "western-bulldogs";
   return null;
 }
 
@@ -191,11 +213,21 @@ function parseAflMatchTeams(match: string) {
   const awaySeg = (parts[1] ?? "").trim();
   const homeKey = getAflTeamKeyFromSegment(homeSeg);
   const awayKey = getAflTeamKeyFromSegment(awaySeg);
-  return { homeKey, awayKey, homeLabel: homeSeg || null, awayLabel: awaySeg || null };
+  return {
+    homeKey,
+    awayKey,
+    homeLabel: homeSeg || null,
+    awayLabel: awaySeg || null,
+  };
 }
 
 export default function PicksClient() {
   const { user } = useAuth();
+  const searchParams = useSearchParams();
+
+  // Keep it flexible, but default to AFL
+  const sportParamRaw = searchParams?.get("sport") || "AFL";
+  const sportParam = String(sportParamRaw || "AFL").toUpperCase();
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
@@ -235,10 +267,24 @@ export default function PicksClient() {
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
 
+  // ✅ Preview focus + highlight
+  const [previewFocus, setPreviewFocus] = useState<PreviewFocusPayload | null>(null);
+  const [highlightQuestionId, setHighlightQuestionId] = useState<string | null>(null);
+  const previewAppliedRef = useRef(false);
+
+  // row refs for scroll
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const setRowRef = useCallback((id: string) => {
+    return (el: HTMLDivElement | null) => {
+      rowRefs.current[id] = el;
+    };
+  }, []);
+
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    const handleResize = () =>
+      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -266,13 +312,15 @@ export default function PicksClient() {
 
   const flattenApi = useCallback(
     (data: PicksApiResponse, history: PickHistory): QuestionRow[] =>
-      data.games.flatMap((g: ApiGame) =>
-        g.questions.map((q: ApiQuestion) => {
+      (data.games || []).flatMap((g: ApiGame) =>
+        (g.questions || []).map((q: ApiQuestion) => {
           const historyPick = history[q.id];
+
+          const status = normaliseStatus(q.status);
 
           const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
           const correctOutcome: QuestionRow["correctOutcome"] =
-            q.status === "final" || q.status === "void" ? rawOutcome : null;
+            status === "final" || status === "void" ? rawOutcome : null;
 
           return {
             id: q.id,
@@ -282,19 +330,46 @@ export default function PicksClient() {
             startTime: g.startTime ?? q.startTime ?? "",
             quarter: q.quarter,
             question: q.question,
-            status: q.status,
+            status,
             userPick: q.userPick ?? historyPick,
             yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
             noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
-            sport: (q.sport ?? g.sport ?? "AFL").toString(),
+            sport: (q.sport ?? g.sport ?? sportParam ?? "AFL").toString(),
             commentCount: q.commentCount ?? 0,
             isSponsorQuestion: !!q.isSponsorQuestion,
             correctOutcome,
           };
         })
       ),
-    []
+    [sportParam]
   );
+
+  // Load preview focus payload from localStorage (set by AFL hub)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const raw = window.localStorage.getItem(PREVIEW_FOCUS_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as PreviewFocusPayload;
+      if (!parsed?.questionId || !parsed?.intendedPick || !parsed?.createdAt) return;
+
+      // only accept recent (10 mins)
+      const ageMs = Date.now() - Number(parsed.createdAt);
+      if (ageMs < 0 || ageMs > 10 * 60 * 1000) {
+        window.localStorage.removeItem(PREVIEW_FOCUS_KEY);
+        return;
+      }
+
+      // sport gate (this page defaults AFL anyway)
+      if (String(parsed.sport || "").toUpperCase() !== "AFL") return;
+
+      setPreviewFocus(parsed);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const fetchPicks = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -303,7 +378,8 @@ export default function PicksClient() {
         setError("");
       }
       try {
-        const res = await fetch("/api/picks", { cache: "no-store" });
+        const qs = sportParam ? `?sport=${encodeURIComponent(sportParam)}` : "";
+        const res = await fetch(`/api/picks${qs}`, { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
         const data: PicksApiResponse = await res.json();
 
@@ -319,7 +395,7 @@ export default function PicksClient() {
         if (!opts?.silent) setLoading(false);
       }
     },
-    [pickHistory, activeFilter, flattenApi]
+    [pickHistory, activeFilter, flattenApi, sportParam]
   );
 
   // Load pick history from localStorage
@@ -417,7 +493,8 @@ export default function PicksClient() {
       if (!user) return;
       try {
         const idToken = await user.getIdToken();
-        const res = await fetch("/api/user-picks", {
+        const qs = sportParam ? `?sport=${encodeURIComponent(sportParam)}` : "";
+        const res = await fetch(`/api/user-picks${qs}`, {
           method: "GET",
           headers: { Authorization: `Bearer ${idToken}` },
         });
@@ -460,11 +537,13 @@ export default function PicksClient() {
     };
 
     loadServerPicks();
-  }, [user]);
+  }, [user, sportParam]);
 
   // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
     if (roundNumber === null) return;
+    if (sportParam !== "AFL") return;
+
     const loadLocks = async () => {
       try {
         const res = await fetch(`/api/admin/game-lock?round=${roundNumber}`);
@@ -476,7 +555,7 @@ export default function PicksClient() {
       }
     };
     loadLocks();
-  }, [roundNumber]);
+  }, [roundNumber, sportParam]);
 
   // IMPORTANT:
   // If a gameId isn't present in gameLocks, default TRUE (open)
@@ -621,9 +700,9 @@ export default function PicksClient() {
   }, []);
 
   const handlePick = useCallback(
-    async (row: QuestionRow, pick: "yes" | "no") => {
+    async (row: QuestionRow, pick: "yes" | "no", opts?: { silentAuthModal?: boolean }) => {
       if (!user) {
-        setShowAuthModal(true);
+        if (!opts?.silentAuthModal) setShowAuthModal(true);
         return;
       }
 
@@ -651,14 +730,14 @@ export default function PicksClient() {
             questionId: row.id,
             outcome: pick,
             roundNumber,
-            sport: "AFL",
+            sport: sportParam,
           }),
         });
       } catch (e) {
         console.error("Pick save error:", e);
       }
     },
-    [user, roundNumber, persistPickHistory, isGameUnlocked]
+    [user, roundNumber, persistPickHistory, isGameUnlocked, sportParam]
   );
 
   const handleClearPick = useCallback(
@@ -667,7 +746,9 @@ export default function PicksClient() {
       if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
-      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
+      setFilteredRows((prev) =>
+        prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
+      );
 
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev };
@@ -690,15 +771,57 @@ export default function PicksClient() {
             action: "clear",
             outcome: null,
             roundNumber,
-            sport: "AFL",
+            sport: sportParam,
           }),
         });
       } catch (e) {
         console.error("Pick clear error:", e);
       }
     },
-    [user, roundNumber, persistPickHistory, isGameUnlocked]
+    [user, roundNumber, persistPickHistory, isGameUnlocked, sportParam]
   );
+
+  // ✅ Apply preview focus once rows exist:
+  // - scroll to the question
+  // - flash highlight
+  // - attempt to set intended pick (only if open + unlocked + user exists)
+  useEffect(() => {
+    if (!previewFocus) return;
+    if (previewAppliedRef.current) return;
+
+    const targetId = previewFocus.questionId;
+    if (!targetId) return;
+
+    const targetRow = rows.find((r) => r.id === targetId);
+    if (!targetRow) return;
+
+    previewAppliedRef.current = true;
+
+    // clear the key immediately so refresh doesn't re-run it forever
+    try {
+      if (typeof window !== "undefined") window.localStorage.removeItem(PREVIEW_FOCUS_KEY);
+    } catch {}
+
+    // scroll + highlight
+    setHighlightQuestionId(targetId);
+    window.setTimeout(() => {
+      const el = rowRefs.current[targetId];
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, 50);
+
+    // auto-pick (if possible)
+    const unlocked = isGameUnlocked(targetRow.gameId);
+    if (targetRow.status === "open" && unlocked && user) {
+      handlePick(targetRow, previewFocus.intendedPick, { silentAuthModal: true }).catch?.(() => {});
+    }
+
+    // remove highlight after a bit
+    window.setTimeout(() => {
+      setHighlightQuestionId((cur) => (cur === targetId ? null : cur));
+    }, 3500);
+  }, [previewFocus, rows, isGameUnlocked, user, handlePick]);
 
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
@@ -930,9 +1053,6 @@ export default function PicksClient() {
     return out;
   }, [rows, pickHistory]);
 
-  // ✅ THIS is the variable your JSX was referencing (streakJourney)
-  // It’s built from journeyByGame + locks + score so the UI can show:
-  // ✅ Clean Sweep (+X) | ⏳ In Progress (N picks) | 🔒 Locked | 📝 Not picked | 💀 Cooked (0)
   const streakJourney = useMemo(() => {
     type Line =
       | { kind: "clean"; gameId: string; plus: number }
@@ -948,36 +1068,34 @@ export default function PicksClient() {
       const unlocked = isGameUnlocked(g.gameId);
       const scoreInfo = gameScoreByGame[g.gameId];
 
-      // If game is explicitly locked AND user hasn't picked yet -> show LOCKED
       if (!unlocked && picked === 0) {
         lines.push({ kind: "locked", gameId: g.gameId });
         continue;
       }
 
-      // Finalised games: show clean/cooked (if they made picks)
       if (g.isFinal) {
         if (picked === 0) {
           lines.push({ kind: "not-picked", gameId: g.gameId });
         } else if (g.earned > 0) {
           lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
         } else {
-          // final + picked + earned 0
           lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
         }
         continue;
       }
 
-      // Not final:
       if (picked === 0) {
-        // if locked mid-game, show locked, otherwise not picked
         if (!unlocked) lines.push({ kind: "locked", gameId: g.gameId });
         else lines.push({ kind: "not-picked", gameId: g.gameId });
         continue;
       }
 
-      // Picked something and not final => in progress
-      // If your scoreInfo says pending, still in progress
-      if (!scoreInfo || scoreInfo.kind === "pending" || scoreInfo.kind === "scored" || scoreInfo.kind === "zero") {
+      if (
+        !scoreInfo ||
+        scoreInfo.kind === "pending" ||
+        scoreInfo.kind === "scored" ||
+        scoreInfo.kind === "zero"
+      ) {
         lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
       } else {
         lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
@@ -1103,6 +1221,23 @@ export default function PicksClient() {
           }
           .streakr-reset-fx {
             animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
+          }
+
+          @keyframes streakrPulseRing {
+            0% {
+              box-shadow: 0 0 0 0 rgba(255, 122, 0, 0.55);
+            }
+            65% {
+              box-shadow: 0 0 0 10px rgba(255, 122, 0, 0);
+            }
+            100% {
+              box-shadow: 0 0 0 0 rgba(255, 122, 0, 0);
+            }
+          }
+          .streakr-preview-focus {
+            border-color: rgba(255, 122, 0, 0.85) !important;
+            box-shadow: 0 0 0 1px rgba(255, 122, 0, 0.25), 0 0 22px rgba(255, 122, 0, 0.35) !important;
+            animation: streakrPulseRing 1.6s ease-out 0s 2;
           }
         `}</style>
 
@@ -1265,9 +1400,7 @@ export default function PicksClient() {
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
                           <span className="truncate text-amber-200 font-bold">In Progress</span>
                         </div>
-                        <span className="text-amber-200 font-semibold text-xs sm:text-sm">
-                          ({line.picks} picks)
-                        </span>
+                        <span className="text-amber-200 font-semibold text-xs sm:text-sm">({line.picks} picks)</span>
                       </div>
                     );
                   }
@@ -1395,8 +1528,10 @@ export default function PicksClient() {
                   </span>
                 );
 
+              const isHighlighted = highlightQuestionId === row.id;
+
               return (
-                <div key={row.id}>
+                <div key={row.id} ref={setRowRef(row.id)}>
                   {shouldRenderHeader && (
                     <div className="mb-2 rounded-xl bg-[#0b1220] border border-slate-700 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1417,7 +1552,12 @@ export default function PicksClient() {
                     </div>
                   )}
 
-                  <div className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
+                  <div
+                    className={[
+                      "rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]",
+                      isHighlighted ? "streakr-preview-focus" : "",
+                    ].join(" ")}
+                  >
                     <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
                       <div className="col-span-12 md:col-span-2">
                         <div className="text-sm font-semibold">{date}</div>
@@ -1643,14 +1783,14 @@ export default function PicksClient() {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
-                  href="/auth?mode=login&returnTo=/picks"
+                  href={`/auth?mode=login&returnTo=/picks?sport=${encodeURIComponent(sportParam)}`}
                   className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
                   Login
                 </Link>
                 <Link
-                  href="/auth?mode=signup&returnTo=/picks"
+                  href={`/auth?mode=signup&returnTo=/picks?sport=${encodeURIComponent(sportParam)}`}
                   className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
