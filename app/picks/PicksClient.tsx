@@ -103,6 +103,16 @@ const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   return null;
 };
 
+// ✅ streak safety – prevents insane negative/NaN UI
+function safeStreak(val: any): number {
+  const n = typeof val === "number" ? val : Number(val);
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  // optional: cap to something sane so UI never explodes
+  if (n > 1000000) return 1000000;
+  return Math.floor(n);
+}
+
 // ---------- AFL team logo helpers ----------
 type AflTeamKey =
   | "adelaide"
@@ -173,8 +183,7 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
   if (s.includes("north melbourne") || s.includes("kangaroos"))
     return "north-melbourne";
-  if (s.includes("port adelaide") || s.includes("power"))
-    return "port-adelaide";
+  if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
@@ -207,9 +216,7 @@ export default function PicksClient() {
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
-  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
-    "all"
-  );
+  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
@@ -219,9 +226,7 @@ export default function PicksClient() {
   // game locks: which matches are open for picks (AFL only)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
-  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(
-    null
-  );
+  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState("");
@@ -231,48 +236,21 @@ export default function PicksClient() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showHowToModal, setShowHowToModal] = useState(false);
 
-  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
-    null
-  );
-  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(
-    null
-  );
+  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
+  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
   const [shareStatus, setShareStatus] = useState<string>("");
 
   const [showConfetti, setShowConfetti] = useState(false);
-  const [streakLevelModal, setStreakLevelModal] = useState<
-    (3 | 5 | 10 | 15 | 20) | null
-  >(null);
+  const [streakLevelModal, setStreakLevelModal] = useState<(3 | 5 | 10 | 15 | 20) | null>(null);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
-  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>(
-    {}
-  );
+  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>({});
   const [animatedCurrentStreak, setAnimatedCurrentStreak] = useState<number>(0);
   const [streakResetFx, setStreakResetFx] = useState(false);
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
-
-  // -----------------------------------------------------------------------------
-  // VISUAL SYSTEM (prep for settlement animations / leaderboard glow / insurance UI)
-  // -----------------------------------------------------------------------------
-  const neonYesBase =
-    "bg-[rgba(118,255,3,0.15)] border border-[rgba(118,255,3,0.6)] text-[#76FF03] shadow-[0_0_16px_rgba(118,255,3,0.85)] hover:bg-[rgba(118,255,3,0.25)] hover:shadow-[0_0_26px_rgba(118,255,3,1)] transition-all";
-  const neonNoBase =
-    "bg-[rgba(255,7,58,0.15)] border border-[rgba(255,7,58,0.65)] text-[#FF073A] shadow-[0_0_18px_rgba(255,7,58,0.9)] hover:bg-[rgba(255,7,58,0.25)] hover:shadow-[0_0_30px_rgba(255,7,58,1)] transition-all";
-  const neonSelected =
-    "bg-[#00E5FF] text-black border-2 border-white shadow-[0_0_28px_rgba(0,229,255,1)] scale-105";
-
-  const chipWin =
-    "bg-[rgba(118,255,3,0.15)] border border-[rgba(118,255,3,0.6)] text-[#76FF03] shadow-[0_0_18px_rgba(118,255,3,0.9)] streakr-neon-pulse";
-  const chipLoss =
-    "bg-[rgba(255,7,58,0.18)] border border-[rgba(255,7,58,0.75)] text-[#FF073A] shadow-[0_0_22px_rgba(255,7,58,1)]";
-  const chipVoid =
-    "bg-[rgba(255,234,0,0.12)] border border-[rgba(255,234,0,0.5)] text-[#FFEA00]";
-  const chipNeutral =
-    "bg-slate-800/60 border-slate-500/60 text-slate-100";
 
   // window size for Confetti
   useEffect(() => {
@@ -443,14 +421,10 @@ export default function PicksClient() {
         });
 
         setRows((prev) =>
-          prev.map((r) =>
-            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
-          )
+          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
         );
         setFilteredRows((prev) =>
-          prev.map((r) =>
-            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
-          )
+          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
         );
       });
     });
@@ -473,6 +447,7 @@ export default function PicksClient() {
         const json = await res.json();
         let historyFromApi: PickHistory = {};
 
+        // supports legacy bulk shape OR single pick shape
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -547,8 +522,7 @@ export default function PicksClient() {
         let leaderVal: number | null = null;
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
-          const val = typeof data.currentStreak === "number" ? data.currentStreak : 0;
-          leaderVal = val;
+          leaderVal = safeStreak(data?.currentStreak);
         });
         setLeaderCurrentStreak(leaderVal);
         setStreakLoading(false);
@@ -577,9 +551,9 @@ export default function PicksClient() {
       (userSnap) => {
         if (userSnap.exists()) {
           const data = userSnap.data() as any;
-          const current = typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          const current = safeStreak(data?.currentStreak);
           const badges =
-            data.streakBadges && typeof data.streakBadges === "object"
+            data?.streakBadges && typeof data.streakBadges === "object"
               ? (data.streakBadges as Record<string, boolean>)
               : {};
           setUserCurrentStreak(current);
@@ -678,9 +652,7 @@ export default function PicksClient() {
       if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
-      setFilteredRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
-      );
+      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
 
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev, [row.id]: pick };
@@ -700,7 +672,7 @@ export default function PicksClient() {
             questionId: row.id,
             outcome: pick,
             roundNumber,
-            sport: "AFL",
+            gameId: row.gameId, // ✅ IMPORTANT
           }),
         });
       } catch (e) {
@@ -716,9 +688,7 @@ export default function PicksClient() {
       if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
-      setFilteredRows((prev) =>
-        prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r))
-      );
+      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
 
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev };
@@ -737,11 +707,11 @@ export default function PicksClient() {
             Authorization: `Bearer ${idToken}`,
           },
           body: JSON.stringify({
-            questionId: row.id,
             action: "clear",
+            questionId: row.id,
             outcome: null,
             roundNumber,
-            sport: "AFL",
+            gameId: row.gameId, // ✅ keep consistent
           }),
         });
       } catch (e) {
@@ -754,15 +724,15 @@ export default function PicksClient() {
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
-        return "bg-[rgba(118,255,3,0.18)] text-[#76FF03] shadow-[0_0_12px_rgba(118,255,3,0.6)]";
+        return "bg-green-600";
       case "pending":
-        return "bg-[rgba(255,234,0,0.18)] text-[#FFEA00] streakr-pulse-soft";
+        return "bg-yellow-500";
       case "final":
-        return "bg-[rgba(0,229,255,0.18)] text-[#00E5FF]";
+        return "bg-gray-600";
       case "void":
-        return "bg-[rgba(245,0,87,0.18)] text-[#F50057]";
+        return "bg-red-600";
       default:
-        return "bg-slate-700";
+        return "bg-gray-600";
     }
   };
 
@@ -831,10 +801,15 @@ export default function PicksClient() {
     }
   };
 
-  // Bars compare CURRENT vs CURRENT leader
-  const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
-  const barWidth = (val: number | null) =>
-    `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
+  // Bars compare CURRENT vs CURRENT leader (safe)
+  const safeUserStreak = user ? safeStreak(animatedCurrentStreak) : 0;
+  const safeLeaderStreak = safeStreak(leaderCurrentStreak ?? 0);
+  const maxBarValue = Math.max(safeUserStreak, safeLeaderStreak, 1);
+
+  const barWidth = (val: number | null) => {
+    const v = safeStreak(val ?? 0);
+    return `${Math.max(0, Math.min(1, v / maxBarValue)) * 100}%`;
+  };
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
@@ -981,7 +956,7 @@ export default function PicksClient() {
     return out;
   }, [rows, pickHistory]);
 
-  // ✅ STREAK JOURNEY THIS ROUND (under progress bars)
+  // ✅ UI-friendly journey lines
   const streakJourney = useMemo(() => {
     type Line =
       | { kind: "clean"; gameId: string; plus: number }
@@ -1003,13 +978,9 @@ export default function PicksClient() {
       }
 
       if (g.isFinal) {
-        if (picked === 0) {
-          lines.push({ kind: "not-picked", gameId: g.gameId });
-        } else if (g.earned > 0) {
-          lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
-        } else {
-          lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
-        }
+        if (picked === 0) lines.push({ kind: "not-picked", gameId: g.gameId });
+        else if (g.earned > 0) lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
+        else lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
         continue;
       }
 
@@ -1019,12 +990,7 @@ export default function PicksClient() {
         continue;
       }
 
-      if (
-        !scoreInfo ||
-        scoreInfo.kind === "pending" ||
-        scoreInfo.kind === "scored" ||
-        scoreInfo.kind === "zero"
-      ) {
+      if (!scoreInfo || scoreInfo.kind === "pending" || scoreInfo.kind === "scored" || scoreInfo.kind === "zero") {
         lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
       } else {
         lines.push({ kind: "in-progress", gameId: g.gameId, picks: picked });
@@ -1036,8 +1002,7 @@ export default function PicksClient() {
 
   const handleShare = async () => {
     try {
-      const shareUrl =
-        typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
+      const shareUrl = typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({
           title: "STREAKr – How long can you last?",
@@ -1100,89 +1065,26 @@ export default function PicksClient() {
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
-        <Confetti
-          width={windowSize.width}
-          height={windowSize.height}
-          numberOfPieces={350}
-          recycle={false}
-        />
+        <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={350} recycle={false} />
       )}
 
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
         <style jsx>{`
           @keyframes streakrShake {
-            0% {
-              transform: translateX(0);
-            }
-            18% {
-              transform: translateX(-3px);
-            }
-            36% {
-              transform: translateX(3px);
-            }
-            54% {
-              transform: translateX(-2px);
-            }
-            72% {
-              transform: translateX(2px);
-            }
-            100% {
-              transform: translateX(0);
-            }
+            0% { transform: translateX(0); }
+            18% { transform: translateX(-3px); }
+            36% { transform: translateX(3px); }
+            54% { transform: translateX(-2px); }
+            72% { transform: translateX(2px); }
+            100% { transform: translateX(0); }
           }
           @keyframes streakrGlowRed {
-            0% {
-              filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0));
-              transform: translateX(0);
-            }
-            35% {
-              filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.9));
-              transform: translateX(-2px);
-            }
-            70% {
-              filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.95));
-              transform: translateX(2px);
-            }
-            100% {
-              filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0));
-              transform: translateX(0);
-            }
+            0% { filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0)); transform: translateX(0); }
+            35% { filter: drop-shadow(0 0 14px rgba(239, 68, 68, 0.9)); transform: translateX(-2px); }
+            70% { filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.95)); transform: translateX(2px); }
+            100% { filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0)); transform: translateX(0); }
           }
-          @keyframes streakrNeonPulse {
-            0% {
-              filter: drop-shadow(0 0 0 rgba(118, 255, 3, 0));
-              transform: translateZ(0);
-            }
-            55% {
-              filter: drop-shadow(0 0 18px rgba(118, 255, 3, 0.95));
-              transform: translateZ(0);
-            }
-            100% {
-              filter: drop-shadow(0 0 0 rgba(118, 255, 3, 0));
-              transform: translateZ(0);
-            }
-          }
-          @keyframes streakrPulseSoft {
-            0% {
-              opacity: 0.75;
-            }
-            50% {
-              opacity: 1;
-            }
-            100% {
-              opacity: 0.75;
-            }
-          }
-
-          .streakr-reset-fx {
-            animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
-          }
-          .streakr-neon-pulse {
-            animation: streakrNeonPulse 1.05s ease-in-out infinite;
-          }
-          .streakr-pulse-soft {
-            animation: streakrPulseSoft 1.1s ease-in-out infinite;
-          }
+          .streakr-reset-fx { animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out; }
         `}</style>
 
         <div className="flex flex-col gap-3 mb-4">
@@ -1218,21 +1120,6 @@ export default function PicksClient() {
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
                 Your streak uses the <span className="font-semibold">Clean sweep rule</span> per match.
               </p>
-
-              {/* Prep for Free Kick Insurance (Job #4) */}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] text-white/70">
-                  <span className="text-base">🛡️</span>
-                  Free Kick Insurance{" "}
-                  <span className="text-white/40">(coming soon)</span>
-                </span>
-
-                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] text-white/70">
-                  <span className="text-base">⚡</span>
-                  Settlement FX{" "}
-                  <span className="text-white/40">(coming next)</span>
-                </span>
-              </div>
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
@@ -1241,18 +1128,18 @@ export default function PicksClient() {
                   <p className="text-[11px] text-white/60">Current</p>
                   <p
                     className={[
-                      "text-2xl sm:text-3xl font-extrabold text-[#00E5FF] drop-shadow-[0_0_26px_rgba(0,229,255,1)]",
+                      "text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.85)]",
                       streakResetFx ? "streakr-reset-fx" : "",
                     ].join(" ")}
                   >
-                    {user ? animatedCurrentStreak : "-"}
+                    {user ? safeUserStreak : "-"}
                   </p>
                 </div>
                 <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Leader</p>
                   <p className="text-lg sm:text-xl font-bold text-sky-300">
-                    {leaderCurrentStreak ?? "-"}
+                    {leaderCurrentStreak === null ? "-" : safeLeaderStreak}
                   </p>
                 </div>
               </div>
@@ -1271,13 +1158,11 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Current streak</span>
-                <span className="font-semibold text-[#00E5FF]">
-                  {user ? animatedCurrentStreak ?? 0 : 0}
-                </span>
+                <span className="font-semibold text-orange-300">{user ? safeUserStreak : 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-[#00E5FF] via-sky-400 to-sky-500"
+                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
                   style={{ width: barWidth(userCurrentStreak) }}
                 />
               </div>
@@ -1286,7 +1171,7 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Leader</span>
-                <span className="font-semibold text-sky-300">{leaderCurrentStreak ?? 0}</span>
+                <span className="font-semibold text-sky-300">{safeLeaderStreak}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
@@ -1297,7 +1182,7 @@ export default function PicksClient() {
             </div>
           </div>
 
-          {/* ✅ STREAK JOURNEY THIS ROUND (under progress bars) */}
+          {/* ✅ STREAK JOURNEY THIS ROUND */}
           <div className="mt-5 rounded-2xl bg-black/40 border border-white/10 p-4">
             <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-2">
@@ -1322,14 +1207,14 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-[rgba(118,255,3,0.08)] border border-[rgba(118,255,3,0.35)] px-3 py-2 shadow-[0_0_18px_rgba(118,255,3,0.35)]"
+                        className="flex items-center justify-between rounded-xl bg-emerald-500/10 border border-emerald-400/30 px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">✅</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-[#76FF03] font-bold">Clean Sweep!</span>
+                          <span className="truncate text-emerald-200 font-bold">Clean Sweep!</span>
                         </div>
-                        <span className="text-[#76FF03] font-extrabold">(+{line.plus})</span>
+                        <span className="text-emerald-200 font-extrabold">(+{line.plus})</span>
                       </div>
                     );
                   }
@@ -1338,14 +1223,14 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-[rgba(255,7,58,0.08)] border border-[rgba(255,7,58,0.35)] px-3 py-2 shadow-[0_0_20px_rgba(255,7,58,0.38)]"
+                        className="flex items-center justify-between rounded-xl bg-red-500/10 border border-red-400/30 px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">💀</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-[#FF073A] font-bold">Cooked</span>
+                          <span className="truncate text-red-200 font-bold">Cooked</span>
                         </div>
-                        <span className="text-[#FF073A] font-semibold text-xs sm:text-sm">
+                        <span className="text-red-200 font-semibold text-xs sm:text-sm">
                           (Earned 0 • {line.picks} picks)
                         </span>
                       </div>
@@ -1356,14 +1241,14 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-[rgba(255,234,0,0.06)] border border-[rgba(255,234,0,0.25)] px-3 py-2"
+                        className="flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-400/30 px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">⏳</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-[#FFEA00] font-bold">In Progress</span>
+                          <span className="truncate text-amber-200 font-bold">In Progress</span>
                         </div>
-                        <span className="text-[#FFEA00] font-semibold text-xs sm:text-sm">
+                        <span className="text-amber-200 font-semibold text-xs sm:text-sm">
                           ({line.picks} picks)
                         </span>
                       </div>
@@ -1428,9 +1313,7 @@ export default function PicksClient() {
               key={f}
               onClick={() => applyFilter(f === "all" ? "all" : f)}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-                activeFilter === f
-                  ? "bg-[#00E5FF] text-black shadow-[0_0_22px_rgba(0,229,255,0.85)]"
-                  : "bg-gray-800 hover:bg-gray-700 text-white border border-white/10"
+                activeFilter === f ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"
               }`}
             >
               {f.toUpperCase()}
@@ -1462,10 +1345,7 @@ export default function PicksClient() {
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-              const effectivePick = (pickHistory[row.id] ?? row.userPick) as
-                | "yes"
-                | "no"
-                | undefined;
+              const effectivePick = (pickHistory[row.id] ?? row.userPick) as "yes" | "no" | undefined;
               const hasPicked = effectivePick === "yes" || effectivePick === "no";
 
               const yesPct = row.yesPercent ?? 0;
@@ -1481,19 +1361,19 @@ export default function PicksClient() {
 
               const gameScoreChip =
                 !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
-                  <span className="inline-flex items-center rounded-full bg-slate-900/60 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
+                  <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
                     No picks
                   </span>
                 ) : gameScoreInfo.kind === "pending" ? (
-                  <span className="inline-flex items-center rounded-full bg-[rgba(255,234,0,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#FFEA00] border border-[rgba(255,234,0,0.45)] shadow-[0_0_14px_rgba(255,234,0,0.35)] streakr-pulse-soft">
+                  <span className="inline-flex items-center rounded-full bg-amber-500/20 px-4 py-1.5 text-xs font-extrabold text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]">
                     Game pending
                   </span>
                 ) : gameScoreInfo.kind === "zero" ? (
-                  <span className="inline-flex items-center rounded-full bg-[rgba(255,7,58,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#FF073A] border border-[rgba(255,7,58,0.55)] shadow-[0_0_18px_rgba(255,7,58,0.55)]">
+                  <span className="inline-flex items-center rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-extrabold text-red-300 border border-red-400/60 shadow-[0_0_14px_rgba(239,68,68,0.6)]">
                     Clean sweep failed (0)
                   </span>
                 ) : (
-                  <span className="inline-flex items-center rounded-full bg-[rgba(118,255,3,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#76FF03] border border-[rgba(118,255,3,0.55)] shadow-[0_0_20px_rgba(118,255,3,0.65)]">
+                  <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-extrabold text-emerald-300 border border-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.75)]">
                     Clean sweep! +{gameScoreInfo.score}
                   </span>
                 );
@@ -1531,16 +1411,14 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-6 md:col-span-1 flex items-center">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide border border-white/10">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
                           {row.sport}
                         </span>
                       </div>
 
                       <div className="col-span-6 md:col-span-1">
                         <span
-                          className={`${statusClasses(
-                            row.status
-                          )} text-[10px] px-2 py-0.5 rounded-full font-bold border border-white/10`}
+                          className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}
                         >
                           {row.status.toUpperCase()}
                         </span>
@@ -1626,13 +1504,13 @@ export default function PicksClient() {
                           <button
                             type="button"
                             onClick={() => openComments(row)}
-                            className="text-[11px] text-[#00E5FF] underline hover:text-sky-200 transition"
+                            className="text-[11px] text-sky-300 underline"
                           >
                             Comments ({row.commentCount ?? 0})
                           </button>
 
                           {!isSelectable && (
-                            <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70 border border-white/10">
+                            <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
                               Locked
                             </span>
                           )}
@@ -1653,9 +1531,12 @@ export default function PicksClient() {
                               onClick={() => handlePick(row, "yes")}
                               disabled={!isSelectable}
                               className={[
-                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all",
-                                isSelectable ? "" : "opacity-60 cursor-not-allowed",
-                                effectivePick === "yes" ? neonSelected : neonYesBase,
+                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+                                effectivePick === "yes"
+                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                                  : !isSelectable
+                                  ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
+                                  : "bg-green-600 hover:bg-green-700 text-white border-transparent",
                               ].join(" ")}
                             >
                               Yes
@@ -1666,9 +1547,12 @@ export default function PicksClient() {
                               onClick={() => handlePick(row, "no")}
                               disabled={!isSelectable}
                               className={[
-                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all",
-                                isSelectable ? "" : "opacity-60 cursor-not-allowed",
-                                effectivePick === "no" ? neonSelected : neonNoBase,
+                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
+                                effectivePick === "no"
+                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
+                                  : !isSelectable
+                                  ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
+                                  : "bg-red-600 hover:bg-red-700 text-white border-transparent",
                               ].join(" ")}
                             >
                               No
@@ -1692,15 +1576,8 @@ export default function PicksClient() {
 
                         {(() => {
                           let outcomeLabel: string | null = null;
-                          const outcome = normaliseOutcome(
-                            (row.correctOutcome as any) ?? (row as any).outcome
-                          );
-                          let outcomeKind:
-                            | "win"
-                            | "loss"
-                            | "void"
-                            | "settled-no-result"
-                            | null = null;
+                          const outcome = normaliseOutcome((row.correctOutcome as any) ?? (row as any).outcome);
+                          let outcomeKind: "win" | "loss" | "void" | "settled-no-result" | null = null;
 
                           if (row.status === "void" || outcome === "void") outcomeKind = "void";
                           else if (row.status === "final") {
@@ -1716,12 +1593,12 @@ export default function PicksClient() {
 
                           const outcomeClasses =
                             outcomeKind === "void"
-                              ? chipVoid
+                              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
                               : outcomeKind === "win"
-                              ? chipWin
+                              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
                               : outcomeKind === "loss"
-                              ? chipLoss
-                              : chipNeutral;
+                              ? "bg-red-500/15 border-red-400/60 text-red-300"
+                              : "bg-slate-700/60 border-slate-500/60 text-slate-100";
 
                           return outcomeLabel ? (
                             <div className="mt-2">
@@ -1898,9 +1775,7 @@ export default function PicksClient() {
             <div className="w-full max-w-lg rounded-2xl bg-[#050816] border border-white/15 shadow-[0_20px_70px_rgba(0,0,0,0.9)] p-6 sm:p-7">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">
-                    New to STREAKr?
-                  </p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">New to STREAKr?</p>
                   <h2 className="text-xl sm:text-2xl font-bold">How to play Picks</h2>
                 </div>
                 <button
@@ -1913,9 +1788,7 @@ export default function PicksClient() {
                 </button>
               </div>
 
-              <p className="text-sm text-white/75 mb-4">
-                Quick rundown so you don&apos;t stitch yourself up early:
-              </p>
+              <p className="text-sm text-white/75 mb-4">Quick rundown so you don&apos;t stitch yourself up early:</p>
 
               <ul className="space-y-2.5 text-sm text-white/80 mb-5">
                 <li className="flex gap-2">
