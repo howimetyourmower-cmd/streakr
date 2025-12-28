@@ -1146,7 +1146,7 @@ export default function PicksClient() {
                             {/* ✅ CHANGE 1: make game title orange */}
                             <div
                               className="text-lg sm:text-xl font-extrabold truncate"
-                              style={{ color: COLORS.orange }}
+                              style={{ color: "#FFFFFF" }}
                             >
                               {g.match}
                             </div>
