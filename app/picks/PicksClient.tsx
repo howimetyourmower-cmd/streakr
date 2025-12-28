@@ -3,7 +3,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
@@ -16,12 +15,11 @@ type PickOutcome = "yes" | "no";
 
 type ApiQuestion = {
   id: string;
-  gameId?: string; // important for clean-sweep scoring + settlement
+  gameId?: string;
   quarter: number;
   question: string;
   status: QuestionStatus;
 
-  // optional server enrichments
   userPick?: PickOutcome;
   yesPercent?: number;
   noPercent?: number;
@@ -29,13 +27,11 @@ type ApiQuestion = {
   isSponsorQuestion?: boolean;
   venue?: string;
   startTime?: string;
-
-  // optional settlement enrichment
-  correctPick?: boolean; // true if user's pick is correct (when settled)
+  correctPick?: boolean;
 };
 
 type ApiGame = {
-  id: string; // e.g. "OR-G1"
+  id: string;
   match: string;
   venue: string;
   startTime: string;
@@ -66,9 +62,7 @@ const COLORS = {
   bg: "#0D1117",
   panel: "#0F1623",
   panel2: "#0A0F18",
-  line: "rgba(255,255,255,0.10)",
 
-  // Cyberpunk palette
   orange: "#FF3D00",
   green: "#76FF03",
   red: "#FF073A",
@@ -84,7 +78,6 @@ function clampPct(n: number | undefined): number {
 function formatAedt(dateIso: string): string {
   try {
     const d = new Date(dateIso);
-    // You’re in AU; keep it simple and consistent.
     return d.toLocaleString("en-AU", {
       weekday: "short",
       day: "2-digit",
@@ -111,13 +104,6 @@ function msToCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-function getLockMs(startTimeIso: string): number {
-  // Lock at start time. If you later want “lock 5 mins before”, subtract 5*60*1000 here.
-  const t = new Date(startTimeIso).getTime();
-  if (!Number.isFinite(t)) return 0;
-  return t - Date.now();
-}
-
 function majorityLabel(yes: number, no: number): { label: string; color: string } {
   if (yes === no) return { label: "Split crowd", color: "rgba(255,255,255,0.70)" };
   if (yes > no) return { label: "Majority is YES", color: "rgba(118,255,3,0.85)" };
@@ -133,43 +119,30 @@ type LocalPickMap = Record<string, PickOutcome>;
 export default function PicksPage() {
   const { user, loading: authLoading } = useAuth();
 
-  // Data
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [games, setGames] = useState<ApiGame[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string>("");
 
-  // Local selection (instant UI, prevents “missing on refresh”)
   const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
 
-  // Streak widget
   const [myCurrentStreak, setMyCurrentStreak] = useState<number>(0);
   const [leaderStreak, setLeaderStreak] = useState<number>(0);
 
-  // Live “clock” tick (one per second) — IMPORTANT: prevents runaway timers
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
-  // Confetti on streak milestones
   const [confettiOn, setConfettiOn] = useState(false);
   const confettiTimeoutRef = useRef<any>(null);
   const lastMilestoneRef = useRef<number>(0);
 
-  // Guards to avoid repeated loads
   const hasHydratedLocalRef = useRef(false);
 
-  // ─────────────────────────────────────────────────────────────
-  // Stable 1s timer (NO runaway, NO 0.1s spam)
-  // ─────────────────────────────────────────────────────────────
+  // Stable 1s timer (prevents runaway)
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  // ─────────────────────────────────────────────────────────────
-  // Load picks payload
-  // ─────────────────────────────────────────────────────────────
   const loadPicks = useCallback(async () => {
     try {
       setLoading(true);
@@ -186,9 +159,7 @@ export default function PicksPage() {
       }
 
       const res = await fetch(`/api/picks`, {
-        headers: {
-          ...authHeader,
-        },
+        headers: { ...authHeader },
         cache: "no-store",
       });
 
@@ -199,9 +170,7 @@ export default function PicksPage() {
       }
 
       const data = (await res.json()) as PicksApiResponse;
-
-      const nextRound =
-        typeof data.roundNumber === "number" ? data.roundNumber : null;
+      const nextRound = typeof data.roundNumber === "number" ? data.roundNumber : null;
 
       setRoundNumber(nextRound);
       setGames(Array.isArray(data.games) ? data.games : []);
@@ -217,9 +186,7 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Hydrate local picks from localStorage AFTER roundNumber known
-  // ─────────────────────────────────────────────────────────────
+  // Hydrate local picks after roundNumber known
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -229,9 +196,7 @@ export default function PicksPage() {
       const raw = localStorage.getItem(key);
       if (raw) {
         const parsed = JSON.parse(raw) as LocalPickMap;
-        if (parsed && typeof parsed === "object") {
-          setLocalPicks(parsed);
-        }
+        if (parsed && typeof parsed === "object") setLocalPicks(parsed);
       }
     } catch (e) {
       console.warn("Failed to hydrate local picks", e);
@@ -240,7 +205,6 @@ export default function PicksPage() {
     }
   }, [user?.uid, roundNumber]);
 
-  // Persist local picks
   useEffect(() => {
     if (roundNumber === null) return;
     try {
@@ -249,9 +213,7 @@ export default function PicksPage() {
     } catch {}
   }, [localPicks, user?.uid, roundNumber]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Live streak from user doc (client Firestore)
-  // ─────────────────────────────────────────────────────────────
+  // Live streak from users/{uid}
   useEffect(() => {
     if (!user) {
       setMyCurrentStreak(0);
@@ -266,17 +228,13 @@ export default function PicksPage() {
         const s = typeof d?.currentStreak === "number" ? d.currentStreak : 0;
         setMyCurrentStreak(s);
       },
-      (e) => {
-        console.warn("users/{uid} snapshot error", e);
-      }
+      (e) => console.warn("users/{uid} snapshot error", e)
     );
 
     return () => unsub();
   }, [user]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Leader streak from leaderboard API (silent refresh)
-  // ─────────────────────────────────────────────────────────────
+  // Leader streak from leaderboard API
   const loadLeader = useCallback(
     async (silent?: boolean) => {
       try {
@@ -314,9 +272,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // ─────────────────────────────────────────────────────────────
   // Confetti milestones (5, 10, 15...)
-  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -329,9 +285,6 @@ export default function PicksPage() {
     }
   }, [myCurrentStreak]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Derived stats
-  // ─────────────────────────────────────────────────────────────
   const allQuestions = useMemo(() => {
     const out: ApiQuestion[] = [];
     games.forEach((g) => g.questions.forEach((q) => out.push(q)));
@@ -350,7 +303,6 @@ export default function PicksPage() {
   const totalPickable = useMemo(() => allQuestions.length, [allQuestions]);
 
   const accuracyPct = useMemo(() => {
-    // Only count questions that are settled + have a user pick
     let settledPicked = 0;
     let correct = 0;
 
@@ -361,8 +313,6 @@ export default function PicksPage() {
       const settled = q.status === "final" || q.status === "void";
       if (!settled) return;
 
-      // void questions don’t hurt accuracy
-      // If your backend sets correctPick, we use it.
       if (q.status === "void") return;
 
       settledPicked += 1;
@@ -374,7 +324,6 @@ export default function PicksPage() {
   }, [allQuestions, localPicks]);
 
   const nextLockMs = useMemo(() => {
-    // soonest future start among games
     const future = games
       .map((g) => new Date(g.startTime).getTime())
       .filter((t) => Number.isFinite(t) && t > nowMs)
@@ -383,26 +332,20 @@ export default function PicksPage() {
     return future[0] - nowMs;
   }, [games, nowMs]);
 
-  // ─────────────────────────────────────────────────────────────
-  // Actions
-  // ─────────────────────────────────────────────────────────────
   const setPick = useCallback(
     async (q: ApiQuestion, outcome: PickOutcome) => {
-      // Optimistic UI
       setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
 
-      // If not logged in, keep it local only
       if (!user) return;
 
       try {
         const token = await user.getIdToken();
 
-        const gameId = q.gameId || undefined;
         const body = {
           questionId: q.id,
           outcome,
           roundNumber: typeof roundNumber === "number" ? roundNumber : null,
-          gameId: gameId ?? null,
+          gameId: q.gameId ?? null,
         };
 
         const res = await fetch("/api/user-picks", {
@@ -414,9 +357,7 @@ export default function PicksPage() {
           body: JSON.stringify(body),
         });
 
-        if (!res.ok) {
-          console.error("Failed to save pick:", await res.text());
-        }
+        if (!res.ok) console.error("Failed to save pick:", await res.text());
       } catch (e) {
         console.error("Pick save error", e);
       }
@@ -440,16 +381,27 @@ export default function PicksPage() {
     }
   }, [myCurrentStreak]);
 
-  // ─────────────────────────────────────────────────────────────
-  // UI helpers
-  // ─────────────────────────────────────────────────────────────
-  const renderStatusPill = (q: ApiQuestion) => {
-    const status = q.status;
+  const myVsLeaderPct = useMemo(() => {
+    const denom = Math.max(1, Math.max(myCurrentStreak, leaderStreak));
+    const mine = (myCurrentStreak / denom) * 100;
+    const lead = (leaderStreak / denom) * 100;
+    return { mine, lead };
+  }, [myCurrentStreak, leaderStreak]);
 
+  const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
+
+  // Smaller pick-card sizing (≈75% height): tighten vertical padding + margins + bar heights
+  const PICK_CARD_PAD_Y = "py-1.5"; // down from ~py-2
+  const PICK_CARD_PAD_X = "px-3"; // keep
+  const PICK_BUTTON_PAD_Y = "py-1.5"; // down from py-2
+  const SENTIMENT_BAR_H = "h-[6px]"; // down from h-2
+
+  // Render helpers
+  const renderStatusPill = (q: ApiQuestion) => {
     const base =
       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border";
 
-    if (status === "open") {
+    if (q.status === "open") {
       return (
         <span
           className={base}
@@ -477,7 +429,7 @@ export default function PicksPage() {
       );
     }
 
-    if (status === "pending") {
+    if (q.status === "pending") {
       return (
         <span
           className={base}
@@ -492,7 +444,7 @@ export default function PicksPage() {
       );
     }
 
-    if (status === "void") {
+    if (q.status === "void") {
       return (
         <span
           className={base}
@@ -507,7 +459,6 @@ export default function PicksPage() {
       );
     }
 
-    // final
     const pick = localPicks[q.id] ?? q.userPick;
     const isPicked = pick === "yes" || pick === "no";
     const isCorrect = q.correctPick === true;
@@ -551,26 +502,24 @@ export default function PicksPage() {
 
     const majority = majorityLabel(yes, no);
 
-    // User alignment
     const pick = localPicks[q.id] ?? q.userPick;
-    const aligned =
-      pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
+    const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
-      <div className="mt-1.5">
+      <div className="mt-1">
         <div className="flex items-center justify-between text-[11px] text-white/65">
           <span className="uppercase tracking-wide">Crowd</span>
           <span style={{ color: majority.color }} className="font-semibold">
             {majority.label}
-            {q.commentCount && q.commentCount >= 100 ? (
-              <span className="ml-2">🔥</span>
-            ) : null}
           </span>
         </div>
 
         <div
-          className="mt-1 h-2 rounded-full overflow-hidden border"
-          style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.06)" }}
+          className={`mt-1 ${SENTIMENT_BAR_H} rounded-full overflow-hidden border`}
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.06)",
+          }}
         >
           <div className="h-full flex">
             <div
@@ -601,11 +550,11 @@ export default function PicksPage() {
             <span className="text-white/45">Pick to see if you’re with the crowd</span>
           ) : aligned ? (
             <span style={{ color: COLORS.green }} className="font-semibold">
-              You’re with the majority
+              With majority
             </span>
           ) : (
             <span style={{ color: COLORS.orange }} className="font-semibold">
-              You’re against the crowd
+              Against majority
             </span>
           )}
 
@@ -619,25 +568,19 @@ export default function PicksPage() {
 
   const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
     const pick = localPicks[q.id] ?? q.userPick;
-
     const yesActive = pick === "yes";
     const noActive = pick === "no";
 
     const baseBtn =
       "flex-1 rounded-xl border font-extrabold tracking-wide transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed";
 
-    const yesClass = yesActive
-      ? ""
-      : "";
-    const noClass = noActive ? "" : "";
-
     return (
-      <div className="mt-2 flex gap-2">
+      <div className="mt-1.5 flex gap-2">
         <button
           type="button"
           disabled={isLocked || q.status === "void"}
           onClick={() => setPick(q, "yes")}
-          className={`${baseBtn} px-4 py-2 text-[12px]`}
+          className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
           style={{
             borderColor: yesActive ? "rgba(118,255,3,0.70)" : "rgba(255,255,255,0.12)",
             background: yesActive
@@ -655,7 +598,7 @@ export default function PicksPage() {
           type="button"
           disabled={isLocked || q.status === "void"}
           onClick={() => setPick(q, "no")}
-          className={`${baseBtn} px-4 py-2 text-[12px]`}
+          className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
           style={{
             borderColor: noActive ? "rgba(255,7,58,0.70)" : "rgba(255,255,255,0.12)",
             background: noActive
@@ -672,45 +615,13 @@ export default function PicksPage() {
     );
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────
   const pageTitle = `Picks`;
   const roundLabel =
-    roundNumber === null
-      ? ""
-      : roundNumber === 0
-      ? "Opening Round"
-      : `Round ${roundNumber}`;
-
-  const topLockText =
-    nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
-
-  const myVsLeaderPct = useMemo(() => {
-    const denom = Math.max(1, Math.max(myCurrentStreak, leaderStreak));
-    const mine = (myCurrentStreak / denom) * 100;
-    const lead = (leaderStreak / denom) * 100;
-    return { mine, lead };
-  }, [myCurrentStreak, leaderStreak]);
-
-  const showLockedBanner = useMemo(() => {
-    // If all games are in the past
-    const anyFuture = games.some((g) => new Date(g.startTime).getTime() > nowMs);
-    return !anyFuture && games.length > 0;
-  }, [games, nowMs]);
+    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   return (
-    <div
-      className="min-h-screen text-white"
-      style={{ backgroundColor: COLORS.bg }}
-    >
-      {confettiOn && (
-        <Confetti
-          recycle={false}
-          numberOfPieces={220}
-          gravity={0.22}
-        />
-      )}
+    <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
+      {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {/* Header */}
@@ -752,7 +663,6 @@ export default function PicksPage() {
 
         {/* Persistent Streak Widget */}
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
-          {/* Streak vs leader */}
           <div
             className="rounded-2xl border p-4"
             style={{
@@ -763,21 +673,14 @@ export default function PicksPage() {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-[11px] uppercase tracking-widest text-white/55">
-                  Your streak
-                </p>
-                <p
-                  className="text-4xl font-black mt-1"
-                  style={{ color: COLORS.orange }}
-                >
+                <p className="text-[11px] uppercase tracking-widest text-white/55">Your streak</p>
+                <p className="text-4xl font-black mt-1" style={{ color: COLORS.orange }}>
                   {myCurrentStreak}
                 </p>
               </div>
 
               <div className="text-right">
-                <p className="text-[11px] uppercase tracking-widest text-white/55">
-                  Leader
-                </p>
+                <p className="text-[11px] uppercase tracking-widest text-white/55">Leader</p>
                 <p className="text-3xl font-black mt-1" style={{ color: COLORS.cyan }}>
                   {leaderStreak}
                 </p>
@@ -785,10 +688,7 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 space-y-2">
-              <div
-                className="h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                 <div
                   className="h-full"
                   style={{
@@ -798,10 +698,7 @@ export default function PicksPage() {
                 />
               </div>
 
-              <div
-                className="h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                 <div
                   className="h-full"
                   style={{
@@ -838,7 +735,6 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Dashboard stats */}
           <div
             className="rounded-2xl border p-4"
             style={{
@@ -847,29 +743,33 @@ export default function PicksPage() {
               boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
             }}
           >
-            <p className="text-[11px] uppercase tracking-widest text-white/55">
-              Dashboard
-            </p>
+            <p className="text-[11px] uppercase tracking-widest text-white/55">Dashboard</p>
 
             <div className="mt-3 grid grid-cols-3 gap-3">
-              <div className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
                 <p className="text-xl font-black mt-1 text-white">
                   {picksMade}/{totalPickable}
                 </p>
               </div>
 
-              <div className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
                 <p className="text-xl font-black mt-1" style={{ color: COLORS.green }}>
                   {accuracyPct}%
                 </p>
               </div>
 
-              <div className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
                 <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
                   {topLockText}
@@ -878,19 +778,10 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 text-[11px] text-white/55">
-              {user ? (
-                <span>
-                  You’re live. Keep stacking clean sweeps.
-                </span>
-              ) : (
-                <span>
-                  Log in to save picks + appear on leaderboards.
-                </span>
-              )}
+              {user ? "You’re live. Keep stacking clean sweeps." : "Log in to save picks + appear on leaderboards."}
             </div>
           </div>
 
-          {/* Quick links / info */}
           <div
             className="rounded-2xl border p-4"
             style={{
@@ -899,9 +790,7 @@ export default function PicksPage() {
               boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
             }}
           >
-            <p className="text-[11px] uppercase tracking-widest text-white/55">
-              Quick
-            </p>
+            <p className="text-[11px] uppercase tracking-widest text-white/55">Quick</p>
 
             <div className="mt-3 flex flex-col gap-2">
               <Link
@@ -944,18 +833,6 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {showLockedBanner && (
-          <div
-            className="mt-4 rounded-2xl border px-4 py-3 text-sm"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(255,255,255,0.03)",
-            }}
-          >
-            All games have started — picks are locked.
-          </div>
-        )}
-
         {err ? (
           <div className="mt-4 text-sm" style={{ color: COLORS.red }}>
             {err} Try refreshing.
@@ -965,15 +842,19 @@ export default function PicksPage() {
         {/* Games */}
         <div className="mt-5 flex flex-col gap-4">
           {loading ? (
-            <div className="rounded-2xl border p-4 animate-pulse"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+            <div
+              className="rounded-2xl border p-4 animate-pulse"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+            >
               <div className="h-4 w-44 rounded bg-white/10" />
               <div className="mt-3 h-3 w-80 rounded bg-white/10" />
               <div className="mt-5 h-24 rounded bg-white/5" />
             </div>
           ) : games.length === 0 ? (
-            <div className="rounded-2xl border p-4 text-sm text-white/70"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+            <div
+              className="rounded-2xl border p-4 text-sm text-white/70"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+            >
               No games found.
             </div>
           ) : (
@@ -981,48 +862,38 @@ export default function PicksPage() {
               const lockMs = new Date(g.startTime).getTime() - nowMs;
               const isLocked = lockMs <= 0;
 
-              // picks for this game
               const gamePicked = g.questions.reduce((acc, q) => {
                 const p = localPicks[q.id] ?? q.userPick;
                 return acc + (p === "yes" || p === "no" ? 1 : 0);
               }, 0);
 
               const gameTotal = g.questions.length;
-
               const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
 
               return (
                 <div
                   key={g.id}
                   className="rounded-2xl border overflow-hidden"
-                  // ✅ per your request: game name WHITE, block background ORANGE energy
                   style={{
-                    borderColor: "rgba(255,61,0,0.45)",
-                    background: `
-                      linear-gradient(
-                        135deg,
-                        rgba(255,61,0,0.22) 0%,
-                        rgba(255,61,0,0.14) 40%,
-                        rgba(13,17,23,0.85) 100%
-                      )
-                    `,
-                    boxShadow: `
-                      0 0 35px rgba(255,61,0,0.25),
-                      inset 0 0 0 1px rgba(255,61,0,0.35)
-                    `,
+                    borderColor: "rgba(255,61,0,0.70)",
+                    background: `linear-gradient(180deg, rgba(255,61,0,0.28) 0%, rgba(255,61,0,0.18) 42%, rgba(13,17,23,0.88) 100%)`,
+                    boxShadow: "0 0 40px rgba(255,61,0,0.22), inset 0 0 0 1px rgba(255,61,0,0.40)",
                   }}
                 >
-                  {/* Game header */}
-                  <div className="px-4 py-3">
+                  {/* ✅ Game info block now ORANGE (stronger + clearer) */}
+                  <div
+                    className="px-4 py-3"
+                    style={{
+                      background: `linear-gradient(180deg, rgba(255,61,0,0.45) 0%, rgba(255,61,0,0.22) 100%)`,
+                      borderBottom: "1px solid rgba(255,255,255,0.10)",
+                    }}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div
-                          className="text-lg sm:text-xl font-extrabold truncate"
-                          style={{ color: COLORS.white }}
-                        >
+                        <div className="text-lg sm:text-xl font-extrabold truncate" style={{ color: COLORS.white }}>
                           {g.match}
                         </div>
-                        <div className="mt-0.5 text-[12px] text-white/70 truncate">
+                        <div className="mt-0.5 text-[12px] text-white/85 truncate">
                           {g.venue} • {formatAedt(g.startTime)}
                         </div>
                       </div>
@@ -1032,9 +903,9 @@ export default function PicksPage() {
                           <span
                             className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                             style={{
-                              borderColor: "rgba(255,255,255,0.12)",
-                              background: "rgba(255,255,255,0.05)",
-                              color: "rgba(255,255,255,0.88)",
+                              borderColor: "rgba(255,255,255,0.22)",
+                              background: "rgba(13,17,23,0.35)",
+                              color: "rgba(255,255,255,0.92)",
                             }}
                           >
                             Picks: {gamePicked}/{gameTotal}
@@ -1043,13 +914,9 @@ export default function PicksPage() {
                           <span
                             className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                             style={{
-                              borderColor: isLocked
-                                ? "rgba(255,255,255,0.14)"
-                                : "rgba(255,61,0,0.35)",
-                              background: isLocked
-                                ? "rgba(255,255,255,0.05)"
-                                : "rgba(255,61,0,0.10)",
-                              color: isLocked ? "rgba(255,255,255,0.75)" : "rgba(255,61,0,0.95)",
+                              borderColor: isLocked ? "rgba(255,255,255,0.22)" : "rgba(13,17,23,0.55)",
+                              background: isLocked ? "rgba(13,17,23,0.35)" : "rgba(13,17,23,0.30)",
+                              color: isLocked ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.92)",
                             }}
                           >
                             {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
@@ -1058,40 +925,32 @@ export default function PicksPage() {
                       </div>
                     </div>
 
-                    {/* Progress bar */}
+                    {/* progress */}
                     <div className="mt-3">
-                      <div
-                        className="h-2 rounded-full overflow-hidden"
-                        style={{ background: "rgba(255,255,255,0.08)" }}
-                      >
+                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(13,17,23,0.35)" }}>
                         <div
                           className="h-full"
                           style={{
                             width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(255,61,0,0.85), rgba(0,229,255,0.55))`,
+                            background: `linear-gradient(90deg, rgba(13,17,23,0.10), rgba(0,229,255,0.55))`,
                           }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Questions */}
+                  {/* Questions (reduced size ~75%) */}
                   <div className="px-3 pb-3">
                     <div className="flex flex-col gap-2">
                       {g.questions.map((q) => {
                         const pick = localPicks[q.id] ?? q.userPick;
-                        const picked = pick === "yes" || pick === "no";
-
-                        // Small “clean sweep indicator” per question:
-                        // If a question is FINAL and user is wrong, we show red edge.
-                        const finalWrong = (q.status === "final" && q.correctPick === false);
-                        const finalCorrect = (q.status === "final" && q.correctPick === true);
+                        const finalWrong = q.status === "final" && q.correctPick === false;
+                        const finalCorrect = q.status === "final" && q.correctPick === true;
 
                         return (
                           <div
                             key={q.id}
                             className="rounded-2xl border"
-                            // ✅ reduce height: tighter padding & spacing
                             style={{
                               borderColor: finalWrong
                                 ? "rgba(255,7,58,0.55)"
@@ -1106,13 +965,16 @@ export default function PicksPage() {
                                 : "none",
                             }}
                           >
-                            <div className="px-3 py-2 sm:px-3 sm:py-2">
+                            <div className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y}`}>
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   {renderStatusPill(q)}
-                                  <span className="text-[11px] font-black text-white/70 uppercase tracking-wide">
-                                    Q{q.quarter}
+
+                                  {/* ✅ "Q1" -> "Quarter 1" */}
+                                  <span className="text-[11px] font-black text-white/75 uppercase tracking-wide">
+                                    Quarter {q.quarter}
                                   </span>
+
                                   {q.isSponsorQuestion ? (
                                     <span
                                       className="text-[10px] font-black rounded-full px-2 py-0.5 border"
@@ -1127,13 +989,31 @@ export default function PicksPage() {
                                   ) : null}
                                 </div>
 
-                                {q.commentCount ? (
-                                  <span className="text-[11px] text-white/60 font-semibold">
-                                    💬 {q.commentCount}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] text-white/40"> </span>
-                                )}
+                                {/* ✅ comment button bigger + stands out */}
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-[12px] font-black border transition active:scale-[0.99]"
+                                  style={{
+                                    borderColor: q.commentCount && q.commentCount >= 100 ? "rgba(255,61,0,0.55)" : "rgba(0,229,255,0.35)",
+                                    background:
+                                      q.commentCount && q.commentCount >= 100
+                                        ? "rgba(255,61,0,0.14)"
+                                        : "rgba(0,229,255,0.10)",
+                                    color: "rgba(255,255,255,0.92)",
+                                    boxShadow:
+                                      q.commentCount && q.commentCount >= 100
+                                        ? "0 0 18px rgba(255,61,0,0.20)"
+                                        : "0 0 18px rgba(0,229,255,0.12)",
+                                  }}
+                                  onClick={() => {
+                                    // Placeholder for your comments UX (modal/page)
+                                    // If you already have a route, swap this to router.push(...)
+                                    alert("Comments coming next — wire this to your comments UI.");
+                                  }}
+                                >
+                                  💬 {q.commentCount ?? 0}
+                                  {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
+                                </button>
                               </div>
 
                               <div className="mt-1 text-[13px] font-semibold leading-tight text-white/90">
@@ -1155,7 +1035,6 @@ export default function PicksPage() {
           )}
         </div>
 
-        {/* Footer note */}
         <div className="mt-8 pb-8 text-center text-[11px] text-white/45">
           <span className="font-bold" style={{ color: COLORS.orange }}>
             STREAKr
