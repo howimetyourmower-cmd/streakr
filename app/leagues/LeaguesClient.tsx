@@ -1,342 +1,501 @@
-// /app/leagues/create/CreateLeagueClient.tsx
+// /app/leagues/LeaguesClient.tsx
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+export const dynamic = "force-dynamic";
+
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  addDoc,
-  arrayUnion,
   collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  onSnapshot,
   doc,
-  serverTimestamp,
-  setDoc,
+  getDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
-import SportBadge from "@/components/SportBadge";
 
-function generateLeagueCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return code;
+type TopLeague = {
+  id: string;
+  name: string;
+  tagLine?: string;
+  avgStreak: number;
+  players: number;
+};
+
+type ActivityItem = {
+  id: string;
+  timeAgo: string;
+  message: string;
+};
+
+type HallOfFameItem = {
+  label: string;
+  value: string;
+  note?: string;
+};
+
+type MyLeague = {
+  id: string;
+  name: string;
+  inviteCode: string;
+  isManager: boolean;
+};
+
+function formatTimeAgo(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMinutes = Math.floor(diffMs / 60000);
+
+  if (diffMinutes < 1) return "Just now";
+  if (diffMinutes < 60) return `${diffMinutes} min ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hr${diffHours === 1 ? "" : "s"} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
 }
 
-function normalizeCode(raw: string): string {
-  return (raw || "").trim().toUpperCase().replace(/\s+/g, "");
-}
-
-export default function CreateLeagueClient() {
+export default function LeaguesClient() {
   const { user } = useAuth();
+  const router = useRouter();
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [leagueId, setLeagueId] = useState<string | null>(null);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [topLeagues, setTopLeagues] = useState<TopLeague[]>([]);
+  const [activityFeed, setActivityFeed] = useState<ActivityItem[]>([]);
+  const [hallOfFame, setHallOfFame] = useState<HallOfFameItem[]>([
+    { label: "Longest streak", value: "-", note: "Global all-time" },
+    { label: "Best round", value: "-", note: "Perfect picks" },
+    { label: "Leagues this season", value: "-", note: "And counting" },
+    { label: "Biggest league", value: "-", note: "Players in one crew" },
+  ]);
 
-  const joinPath = useMemo(() => {
-    if (!inviteCode) return "";
-    return `/leagues/join?code=${encodeURIComponent(normalizeCode(inviteCode))}`;
-  }, [inviteCode]);
+  const [myLeagues, setMyLeagues] = useState<MyLeague[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
 
-  const inviteText = useMemo(() => {
-    const code = normalizeCode(inviteCode || "");
-    const leagueName = name.trim() || "my league";
-    if (!code) return "";
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const link = origin ? `${origin}${joinPath}` : joinPath;
-
-    return `Join my STREAKr league "${leagueName}" 🟧\n\nCode: ${code}\nLink: ${link}`;
-  }, [inviteCode, joinPath, name]);
-
-  const handleShare = async () => {
-    if (!inviteText) return;
-
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const link = origin ? `${origin}${joinPath}` : joinPath;
-
-    try {
-      if (typeof navigator !== "undefined" && (navigator as any).share) {
-        await (navigator as any).share({
-          title: "STREAKr League Invite",
-          text: inviteText,
-          url: link,
-        });
-        return;
-      }
-    } catch {
-      // ignore and fallback
-    }
-
-    try {
-      await navigator.clipboard.writeText(inviteText);
-      alert("Invite copied to clipboard ✅");
-    } catch {
-      alert("Couldn’t copy invite. You can still share the code shown.");
-    }
-  };
-
-  const smsHref = useMemo(() => {
-    if (!inviteText) return "#";
-    // iOS uses &body=, Android uses ?body=; this works “good enough” cross-device.
-    return `sms:?&body=${encodeURIComponent(inviteText)}`;
-  }, [inviteText]);
-
-  const mailHref = useMemo(() => {
-    if (!inviteText) return "#";
-    const subject = "STREAKr League Invite";
-    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(inviteText)}`;
-  }, [inviteText]);
-
-  const whatsappHref = useMemo(() => {
-    if (!inviteText) return "#";
-    return `https://wa.me/?text=${encodeURIComponent(inviteText)}`;
-  }, [inviteText]);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-
-    if (!user) {
-      setError("You need to be logged in to create a league.");
-      return;
-    }
-
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setError("Please give your league a name.");
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-
-    try {
-      const code = generateLeagueCode();
-
-      const leaguesRef = collection(db, "leagues");
-      const leagueDoc = await addDoc(leaguesRef, {
-        name: trimmedName,
-        tagLine: "",
-        description: description.trim(),
-        managerId: user.uid,
-        inviteCode: code,
-        memberIds: [user.uid],
-        memberCount: 1,
-        isPublic: false,
-        avgStreak: 0,
-        sport: "afl",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      const memberRef = doc(leagueDoc, "members", user.uid);
-      await setDoc(
-        memberRef,
-        {
-          uid: user.uid,
-          displayName: user.displayName || user.email || "Player",
-          role: "manager",
-          joinedAt: serverTimestamp(),
-        },
-        { merge: true }
-      );
-
-      const userRef = doc(db, "users", user.uid);
-      await setDoc(
-        userRef,
-        {
-          leagueIds: arrayUnion(leagueDoc.id),
-        },
-        { merge: true }
-      );
-
-      setInviteCode(code);
-      setLeagueId(leagueDoc.id);
-    } catch (err) {
-      console.error("Failed to create league", err);
-      setError("Failed to create league. Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (leagueId) {
-    return (
-      <div className="min-h-screen bg-[#050814] text-white">
-        <div className="mx-auto max-w-3xl px-4 py-6 md:py-10 space-y-5">
-          <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
-            ← Back to leagues
-          </Link>
-
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">League created</h1>
-              <SportBadge sport="afl" />
-            </div>
-
-            <p className="text-sm text-white/70">
-              Share this invite code with your mates:
-            </p>
-
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-orange-500/40 bg-orange-500/10 px-4 py-3">
-              <span className="text-xs text-white/70">Invite code</span>
-              <span className="font-mono text-xl font-bold tracking-[0.25em] text-orange-300">
-                {inviteCode ?? "—"}
-              </span>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={handleShare}
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                Share invite (SMS / WhatsApp / Email)
-              </button>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(inviteText);
-                    alert("Invite copied ✅");
-                  } catch {
-                    alert("Couldn’t copy invite.");
-                  }
-                }}
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                Copy invite text
-              </button>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-3">
-              <a
-                href={smsHref}
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                Text (SMS)
-              </a>
-              <a
-                href={whatsappHref}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                WhatsApp
-              </a>
-              <a
-                href={mailHref}
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                Email
-              </a>
-            </div>
-
-            {joinPath && (
-              <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-                <p className="text-xs text-white/60 mb-1">Join link</p>
-                <p className="text-xs text-orange-200 font-mono break-all">
-                  {typeof window !== "undefined" ? `${window.location.origin}${joinPath}` : joinPath}
-                </p>
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              <Link
-                href={`/leagues/${leagueId}`}
-                className="inline-flex flex-1 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                Open league →
-              </Link>
-              <Link
-                href={`/leagues/${leagueId}/ladder`}
-                className="inline-flex flex-1 items-center justify-center rounded-full bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-sm px-4 py-2 transition-colors"
-              >
-                View ladder →
-              </Link>
-            </div>
-
-            <Link
-              href="/picks"
-              className="inline-flex w-full items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-            >
-              Make a pick →
-            </Link>
-          </div>
-        </div>
-      </div>
+  useEffect(() => {
+    const leaguesRef = collection(db, "leagues");
+    const qRef = query(
+      leaguesRef,
+      where("isPublic", "==", true),
+      orderBy("avgStreak", "desc"),
+      limit(8)
     );
-  }
+
+    const unsub = onSnapshot(
+      qRef,
+      (snapshot) => {
+        const docs = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            name: data.name ?? "Untitled league",
+            tagLine: data.tagLine ?? "",
+            avgStreak: typeof data.avgStreak === "number" ? data.avgStreak : 0,
+            players: typeof data.memberCount === "number" ? data.memberCount : 0,
+          } satisfies TopLeague;
+        });
+        setTopLeagues(docs);
+      },
+      (error) => {
+        console.error("Error loading top leagues:", error);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      setMyLeagues([]);
+      setSelectedLeagueId("");
+      return;
+    }
+
+    const leaguesRef = collection(db, "leagues");
+    const qRef = query(leaguesRef, where("memberIds", "array-contains", user.uid));
+
+    const unsub = onSnapshot(
+      qRef,
+      (snapshot) => {
+        const docs = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const isManager = data.managerId === user.uid;
+
+          return {
+            id: docSnap.id,
+            name: data.name ?? "Untitled league",
+            inviteCode: data.inviteCode ?? "—",
+            isManager,
+          } satisfies MyLeague;
+        });
+
+        setMyLeagues(docs);
+        setSelectedLeagueId((prev) => {
+          if (prev) return prev;
+          return docs.length ? docs[0].id : "";
+        });
+      },
+      (error) => {
+        console.error("Error loading my leagues:", error);
+      }
+    );
+
+    return () => unsub();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    const activityRef = collection(db, "leagueActivity");
+    const qRef = query(activityRef, orderBy("createdAt", "desc"), limit(8));
+
+    const unsub = onSnapshot(
+      qRef,
+      (snapshot) => {
+        const items: ActivityItem[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          const createdAt =
+            data.createdAt?.toDate?.() ??
+            (data.createdAt instanceof Date ? data.createdAt : new Date());
+
+          return {
+            id: docSnap.id,
+            message: data.message ?? "",
+            timeAgo: formatTimeAgo(createdAt),
+          };
+        });
+
+        setActivityFeed(items);
+      },
+      (error) => {
+        console.error("Error loading activity:", error);
+      }
+    );
+
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const statsDocRef = doc(db, "stats", "global");
+        const statsSnap = await getDoc(statsDocRef);
+
+        if (!statsSnap.exists()) return;
+
+        const data = statsSnap.data() as any;
+
+        setHallOfFame([
+          {
+            label: "Longest streak",
+            value: String(data.longestStreak ?? "-"),
+            note: "Global all-time",
+          },
+          {
+            label: "Best round",
+            value: String(data.bestRound ?? "-"),
+            note: "Perfect picks",
+          },
+          {
+            label: "Leagues this season",
+            value: String(data.totalLeagues ?? "-"),
+            note: "And counting",
+          },
+          {
+            label: "Biggest league",
+            value: String(data.biggestLeagueSize ?? "-"),
+            note: "Players in one crew",
+          },
+        ]);
+      } catch (error) {
+        console.error("Error loading stats:", error);
+      }
+    };
+
+    loadStats();
+  }, []);
+
+  const selectedLeague =
+    myLeagues.find((l) => l.id === selectedLeagueId) ?? myLeagues[0];
+
+  const handleCreateLeague = () => router.push("/leagues/create");
+  const handleJoinLeague = () => router.push("/leagues/join");
+
+  // ✅ FIX: Manage should NOT go to /manage (you don’t have that route)
+  // We route to the league detail page where manager can edit + chat.
+  const handleManageLeague = () => {
+    if (!selectedLeague) return;
+    router.push(`/leagues/${selectedLeague.id}`);
+  };
+
+  const handleViewLadder = () => {
+    if (!selectedLeague) return;
+    router.push(`/leagues/${selectedLeague.id}/ladder`);
+  };
 
   return (
-    <div className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto max-w-3xl px-4 py-6 md:py-10 space-y-6">
-        <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
-          ← Back to leagues
-        </Link>
+    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-zinc-100">
+      <div className="mx-auto flex max-w-6xl flex-col gap-10 px-4 pb-20 pt-10">
+        <header className="space-y-3">
+          <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 px-3 py-1 text-xs font-medium text-orange-400">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-500 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-400" />
+            </span>
+            Private leagues are live
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Leagues</h1>
+          <p className="max-w-2xl text-sm text-zinc-300 md:text-base">
+            Play STREAKr with your mates, work crew or fantasy league. Create a
+            private league, invite your friends with a code, and battle it out
+            on your own ladder while still counting towards the global Streak
+            leaderboard.
+          </p>
+        </header>
 
-        <div className="max-w-xl rounded-2xl bg-white/5 border border-white/10 p-5 space-y-5">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold">Create a league</h1>
-              <SportBadge sport="afl" />
-            </div>
-            <p className="mt-1 text-sm text-white/70">
-              Name your league and we&apos;ll generate a unique invite code to share
-              with the crew.
+        <section className="grid gap-6 md:grid-cols-3">
+          <div className="rounded-2xl border border-orange-500/40 bg-gradient-to-br from-orange-500/20 via-zinc-900 to-zinc-900 p-5 shadow-lg shadow-orange-500/30">
+            <h2 className="mb-2 text-lg font-semibold">Create a league</h2>
+            <p className="mb-4 text-sm text-zinc-200">
+              You&apos;re the commish. Name your league, set how many mates can
+              join, and share a single invite code with your group.
             </p>
+            <ul className="mb-4 space-y-1 text-xs text-zinc-200/90">
+              <li>• Automatically become League Manager</li>
+              <li>• Share one code to invite players</li>
+              <li>• Everyone&apos;s streak still counts globally</li>
+            </ul>
+            <button
+              onClick={handleCreateLeague}
+              className="mt-auto inline-flex w-full items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-orange-400"
+            >
+              Create league
+            </button>
           </div>
 
-          {error && (
-            <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-              {error}
+          <div className="rounded-2xl border border-sky-500/40 bg-gradient-to-br from-sky-500/20 via-zinc-900 to-zinc-900 p-5 shadow-lg shadow-sky-500/30">
+            <h2 className="mb-2 text-lg font-semibold">Join a league</h2>
+            <p className="mb-4 text-sm text-zinc-200">
+              Got a code from a mate? Drop it in and you&apos;ll appear on that
+              league&apos;s ladder as soon as you start making picks.
             </p>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                League name
-              </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. Thursday Night Punters"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Description (optional)
-              </label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                placeholder="E.g. Season-long office comp. Winner shouts the end-of-year pub session."
-              />
-            </div>
-
+            <ul className="mb-4 space-y-1 text-xs text-zinc-200/90">
+              <li>• League Manager controls who gets the code</li>
+              <li>• You can join multiple private leagues</li>
+              <li>• No extra cost – still 100% free</li>
+            </ul>
             <button
-              type="submit"
-              disabled={saving}
-              className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
+              onClick={handleJoinLeague}
+              className="mt-auto inline-flex w-full items-center justify-center rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-black transition hover:bg-sky-400"
             >
-              {saving ? "Creating league…" : "Create league"}
+              Join with a code
             </button>
-          </form>
-        </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-700 bg-zinc-900/80 p-5">
+            <h2 className="mb-2 text-lg font-semibold">My leagues</h2>
+
+            {!user && (
+              <p className="mb-4 text-sm text-zinc-300">
+                Log in to see and manage your leagues.
+              </p>
+            )}
+
+            {user && myLeagues.length === 0 && (
+              <p className="mb-4 text-sm text-zinc-300">
+                You&apos;re not in any leagues yet. Create one or join with a
+                code to get started.
+              </p>
+            )}
+
+            {user && myLeagues.length > 0 && (
+              <>
+                <p className="mb-4 text-sm text-zinc-200">
+                  Jump back into one of your existing leagues, manage invites or
+                  check your ladder position.
+                </p>
+
+                <div className="space-y-3">
+                  <label className="text-xs font-medium text-zinc-400">
+                    Select a league
+                  </label>
+                  <select
+                    value={selectedLeagueId}
+                    onChange={(e) => setSelectedLeagueId(e.target.value)}
+                    className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none ring-orange-500/50 focus:border-orange-500 focus:ring-2"
+                  >
+                    {myLeagues.map((league) => (
+                      <option key={league.id} value={league.id}>
+                        {league.name}
+                        {league.isManager ? " (Manager)" : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selectedLeague && (
+                    <div className="rounded-xl bg-zinc-950/80 px-3 py-3 text-xs text-zinc-200">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold">{selectedLeague.name}</span>
+                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-300">
+                          Invite code:{" "}
+                          <span className="font-mono">
+                            {selectedLeague.inviteCode || "—"}
+                          </span>
+                        </span>
+                      </div>
+                      <p className="mt-2 text-[11px] text-zinc-400">
+                        {selectedLeague.isManager
+                          ? "You’re the League Manager. Share the code, approve new players and keep the banter flowing."
+                          : "You’re a player in this league. Keep your streak alive and climb the ladder."}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        {selectedLeague.isManager && (
+                          <button
+                            onClick={handleManageLeague}
+                            className="flex-1 rounded-full border border-zinc-600 px-3 py-1.5 text-[11px] font-semibold text-zinc-100 hover:border-orange-500 hover:text-orange-300"
+                          >
+                            Manage
+                          </button>
+                        )}
+                        <button
+                          onClick={handleViewLadder}
+                          className="flex-1 rounded-full bg-zinc-800 px-3 py-1.5 text-[11px] font-semibold text-zinc-100 hover:bg-zinc-700"
+                        >
+                          View ladder
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold md:text-xl">
+              Top public leagues this week
+            </h2>
+            <span className="text-xs text-zinc-400">Based on average active streak</span>
+          </div>
+
+          {topLeagues.length === 0 ? (
+            <p className="text-xs text-zinc-500">
+              Public leagues will show here once there&apos;s enough data.
+            </p>
+          ) : (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {topLeagues.map((league) => (
+                <div
+                  key={league.id}
+                  className="min-w-[240px] flex-1 rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 shadow-md hover:border-orange-500/60 hover:shadow-orange-500/20"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">{league.name}</p>
+                      {league.tagLine && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-zinc-400">
+                          {league.tagLine}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right text-xs">
+                      <p className="text-zinc-400">Avg streak</p>
+                      <p className="text-lg font-bold text-orange-400">
+                        {league.avgStreak.toFixed(1)}
+                      </p>
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        {league.players} players
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="grid gap-6 md:grid-cols-[1.4fr,1fr]">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Live league activity</h2>
+              <span className="inline-flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-300">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+                Updating in real time
+              </span>
+            </div>
+            <p className="mb-4 text-xs text-zinc-400">
+              A quick snapshot of what&apos;s happening across private leagues.
+            </p>
+
+            {activityFeed.length === 0 ? (
+              <p className="text-xs text-zinc-500">
+                League activity will show here once players start joining and
+                making picks.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {activityFeed.map((item) => (
+                  <li
+                    key={item.id}
+                    className="flex gap-3 rounded-xl bg-zinc-950/80 px-3 py-2.5 text-xs"
+                  >
+                    <div className="mt-1 h-1.5 w-1.5 rounded-full bg-orange-400" />
+                    <div className="flex-1">
+                      <p className="text-zinc-100">{item.message}</p>
+                      <p className="mt-1 text-[10px] text-zinc-500">{item.timeAgo}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-4 text-[11px] text-zinc-500">
+              Want your league here?{" "}
+              <Link
+                href="/picks"
+                className="font-semibold text-orange-400 hover:text-orange-300"
+              >
+                Start making picks tonight.
+              </Link>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="rounded-2xl border border-orange-500/40 bg-gradient-to-br from-orange-500/20 via-zinc-900 to-zinc-900 p-4">
+              <h2 className="mb-2 text-sm font-semibold">Hall of fame snapshot</h2>
+              <p className="mb-3 text-xs text-zinc-100/80">
+                A taste of what the best Streakrs and leagues are doing right now.
+              </p>
+              <dl className="grid grid-cols-2 gap-3 text-xs">
+                {hallOfFame.map((item) => (
+                  <div key={item.label} className="rounded-xl bg-zinc-950/70 px-3 py-2">
+                    <dt className="text-[10px] uppercase tracking-wide text-zinc-400">
+                      {item.label}
+                    </dt>
+                    <dd className="mt-1 text-lg font-bold text-orange-300">{item.value}</dd>
+                    {item.note && (
+                      <p className="mt-0.5 text-[10px] text-zinc-400">{item.note}</p>
+                    )}
+                  </div>
+                ))}
+              </dl>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4 text-xs text-zinc-200">
+              <p className="mb-1 text-sm font-semibold">
+                Win bragging rights (and actual rewards)
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Coming soon: bonus prizes for leagues that finish in the top tier
+                of the global ladder — merch drops, badges and more. Make sure your
+                league is ready.
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
