@@ -6,15 +6,23 @@ import Link from "next/link";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
-import { doc, onSnapshot } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  where,
+} from "firebase/firestore";
 
 export const dynamic = "force-dynamic";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
-
-// ✅ local override can explicitly clear the API pick
-type LocalPick = PickOutcome | "none";
+type LocalPick = PickOutcome | "none"; // ✅ sentinel for “cleared” so UI won’t fall back to API pick
 
 type ApiQuestion = {
   id: string;
@@ -61,31 +69,36 @@ type LeaderboardApiResponse = {
   userLifetime?: any;
 };
 
+type CommentRow = {
+  id: string;
+  questionId: string;
+  gameId?: string | null;
+  roundNumber?: number | null;
+  userId?: string | null;
+  displayName?: string | null;
+  username?: string | null;
+  text: string;
+  createdAt?: any;
+};
+
 /**
- * ✅ Updates in this version:
- * - Fix X clear button properly (does NOT fall back to q.userPick). Uses local "none" sentinel.
- * - Calls /api/user-picks DELETE (and falls back to POST {action:"clear"}).
+ * ✅ This version:
+ * - Fix comments: real modal + Firestore-backed list + add comment (no alerts).
+ * - FIX: X clear works (no “fallback to q.userPick”) using LocalPick="none" sentinel + effectivePick() helper.
+ * - Clear persists server-side (tries DELETE, falls back to POST {action:"clear"}).
+ * - Selected pick becomes BLUE when selected.
  * - Haptic-style micro animation (press + select pop) using CSS keyframes (no libs).
- * - Selected pick becomes BLUE (both YES/NO turn blue when selected).
- * - YES button is solid green, NO button is solid red (when not selected).
- * - Sponsored question stands out (yellow-tinted card background + stronger border/glow).
- * - More compact pick blocks (reduced padding/spacing ~ 75% height).
- * - Comment button slightly bigger to stand out more.
- * - Quarter label uses "Quarter 1".
  */
 const COLORS = {
   bg: "#0D1117",
   panel: "#0F1623",
   panel2: "#0A0F18",
 
-  // 🟧 Your orange vibe
   orange: "#F4B247",
 
-  // Solid base buttons (unselected)
   yesFill: "#19C37D",
   noFill: "#FF2E4D",
 
-  // Selected state (blue)
   selectedBlue: "#2F7CFF",
   selectedBlueDeep: "#1D4ED8",
 
@@ -137,11 +150,29 @@ function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `streakr:picks:v5:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-// ✅ local wins; "none" explicitly clears API pick in the UI
 function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
+}
+
+function formatCommentTime(createdAt: any): string {
+  try {
+    // Firestore Timestamp has toDate()
+    if (createdAt?.toDate) {
+      const d = createdAt.toDate() as Date;
+      return d.toLocaleString("en-AU", {
+        day: "2-digit",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 type LocalPickMap = Record<string, LocalPick>;
@@ -171,6 +202,19 @@ export default function PicksPage() {
   // Haptic pop trigger per question
   const [selectPulse, setSelectPulse] = useState<SelectPulseMap>({});
   const pulseTimerRef = useRef<Record<string, any>>({});
+
+  // ✅ Comments modal state
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
+  const [commentsGame, setCommentsGame] = useState<ApiGame | null>(null);
+  const [commentsList, setCommentsList] = useState<CommentRow[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [commentErr, setCommentErr] = useState("");
+  const [commentPosting, setCommentPosting] = useState(false);
+
+  // Keep snapshot unsubscribe for comments
+  const commentsUnsubRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -218,7 +262,7 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // Hydrate local picks (sanitize)
+  // Hydrate local picks
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -227,14 +271,8 @@ export default function PicksPage() {
       const key = safeLocalKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
       if (raw) {
-        const parsed = JSON.parse(raw) as any;
-        if (parsed && typeof parsed === "object") {
-          const cleaned: LocalPickMap = {};
-          Object.entries(parsed).forEach(([qid, val]) => {
-            if (val === "yes" || val === "no" || val === "none") cleaned[qid] = val;
-          });
-          setLocalPicks(cleaned);
-        }
+        const parsed = JSON.parse(raw) as LocalPickMap;
+        if (parsed && typeof parsed === "object") setLocalPicks(parsed);
       }
     } catch (e) {
       console.warn("Failed to hydrate local picks", e);
@@ -379,9 +417,9 @@ export default function PicksPage() {
     }, 260);
   }, []);
 
+  // ✅ Robust clear: UI clears instantly + persists server-side
   const clearPick = useCallback(
     async (q: ApiQuestion) => {
-      // ✅ instant UI override (won't fall back to q.userPick)
       setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
       triggerSelectPop(q.id);
 
@@ -390,7 +428,7 @@ export default function PicksPage() {
       try {
         const token = await user.getIdToken();
 
-        // ✅ preferred: DELETE handler
+        // 1) Try DELETE
         const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
@@ -398,7 +436,7 @@ export default function PicksPage() {
 
         if (delRes.ok) return;
 
-        // ✅ fallback: old POST clear (if you haven't deployed DELETE yet)
+        // 2) Fallback: POST clear
         const postRes = await fetch("/api/user-picks", {
           method: "POST",
           headers: {
@@ -408,30 +446,25 @@ export default function PicksPage() {
           body: JSON.stringify({ action: "clear", questionId: q.id }),
         });
 
-        if (!postRes.ok) console.error("Failed to clear pick:", await postRes.text());
+        if (!postRes.ok) {
+          console.error("Failed to clear pick:", await postRes.text());
+        }
       } catch (e) {
         console.error("Clear pick error", e);
       }
     },
-    [triggerSelectPop, user]
+    [user, triggerSelectPop]
   );
 
-  /**
-   * ✅ Toggle behaviour + blue selected state:
-   * - Click same outcome again => clears pick.
-   * - Also provide explicit X clear button.
-   */
   const togglePick = useCallback(
     async (q: ApiQuestion, outcome: PickOutcome) => {
       const current = effectivePick(localPicks[q.id], q.userPick);
 
-      // If clicking same outcome -> clear
       if (current === outcome) {
         await clearPick(q);
         return;
       }
 
-      // else set new
       setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
       triggerSelectPop(q.id);
 
@@ -493,6 +526,152 @@ export default function PicksPage() {
   const PICK_CARD_PAD_X = "px-3";
   const PICK_BUTTON_PAD_Y = "py-2";
   const SENTIMENT_BAR_H = "h-[6px]";
+
+  // ✅ Comments: open modal + subscribe to Firestore
+  const openComments = useCallback(
+    (g: ApiGame, q: ApiQuestion) => {
+      setCommentsGame(g);
+      setCommentsQuestion(q);
+      setCommentsOpen(true);
+      setCommentText("");
+      setCommentErr("");
+      setCommentsList([]);
+    },
+    []
+  );
+
+  const closeComments = useCallback(() => {
+    setCommentsOpen(false);
+    setCommentsQuestion(null);
+    setCommentsGame(null);
+    setCommentsList([]);
+    setCommentText("");
+    setCommentErr("");
+    setCommentsLoading(false);
+    setCommentPosting(false);
+    if (commentsUnsubRef.current) {
+      try {
+        commentsUnsubRef.current();
+      } catch {}
+      commentsUnsubRef.current = null;
+    }
+  }, []);
+
+  // ESC closes modal
+  useEffect(() => {
+    if (!commentsOpen) return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeComments();
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [commentsOpen, closeComments]);
+
+  useEffect(() => {
+    if (!commentsOpen || !commentsQuestion) return;
+
+    setCommentsLoading(true);
+    setCommentErr("");
+
+    if (commentsUnsubRef.current) {
+      try {
+        commentsUnsubRef.current();
+      } catch {}
+      commentsUnsubRef.current = null;
+    }
+
+    const qRef = query(
+      collection(db, "comments"),
+      where("questionId", "==", commentsQuestion.id),
+      orderBy("createdAt", "desc"),
+      limit(50)
+    );
+
+    commentsUnsubRef.current = onSnapshot(
+      qRef,
+      (snap) => {
+        const rows: CommentRow[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            questionId: data?.questionId ?? commentsQuestion.id,
+            gameId: data?.gameId ?? null,
+            roundNumber: typeof data?.roundNumber === "number" ? data.roundNumber : null,
+            userId: data?.userId ?? null,
+            displayName: data?.displayName ?? null,
+            username: data?.username ?? null,
+            text: typeof data?.text === "string" ? data.text : "",
+            createdAt: data?.createdAt,
+          };
+        });
+
+        setCommentsList(rows);
+        setCommentsLoading(false);
+      },
+      (e) => {
+        console.warn("comments snapshot error", e);
+        setCommentErr("Could not load comments.");
+        setCommentsLoading(false);
+      }
+    );
+
+    return () => {
+      if (commentsUnsubRef.current) {
+        try {
+          commentsUnsubRef.current();
+        } catch {}
+        commentsUnsubRef.current = null;
+      }
+    };
+  }, [commentsOpen, commentsQuestion]);
+
+  const postComment = useCallback(async () => {
+    setCommentErr("");
+
+    const q = commentsQuestion;
+    if (!q) return;
+
+    const txt = commentText.trim();
+    if (!txt) {
+      setCommentErr("Write something first.");
+      return;
+    }
+
+    if (!user) {
+      setCommentErr("Log in to comment.");
+      return;
+    }
+
+    // super basic spam guard
+    if (txt.length > 240) {
+      setCommentErr("Keep it under 240 characters.");
+      return;
+    }
+
+    setCommentPosting(true);
+    try {
+      const payload: any = {
+        questionId: q.id,
+        gameId: q.gameId ?? commentsGame?.id ?? null,
+        roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+        userId: user.uid,
+        displayName: user.displayName ?? null,
+        text: txt,
+        createdAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, "comments"), payload);
+
+      setCommentText("");
+    } catch (e) {
+      console.error("postComment error", e);
+      setCommentErr("Could not post comment.");
+    } finally {
+      setCommentPosting(false);
+    }
+  }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
   const renderStatusPill = (q: ApiQuestion) => {
     const base =
@@ -661,12 +840,6 @@ export default function PicksPage() {
     );
   };
 
-  /**
-   * ✅ Buttons:
-   * - Unselected: YES solid green, NO solid red
-   * - Selected: BOTH become BLUE
-   * - Haptic micro: press feels + select pop
-   */
   const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const isYesSelected = pick === "yes";
@@ -674,6 +847,7 @@ export default function PicksPage() {
 
     const baseBtn =
       "flex-1 rounded-xl font-extrabold tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed";
+
     const pressClasses = "active:scale-[0.985]";
 
     const makeBtnStyle = (variant: "yes" | "no") => {
@@ -743,11 +917,11 @@ export default function PicksPage() {
   };
 
   const pageTitle = `Picks`;
-  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const roundLabel =
+    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      {/* Haptic micro animations (no libs) */}
       <style>{`
         .streakr-select-pop{
           animation: streakrPop 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
@@ -761,6 +935,155 @@ export default function PicksPage() {
       `}</style>
 
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
+
+      {/* ✅ Comments Modal */}
+      {commentsOpen && commentsQuestion ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          onMouseDown={(e) => {
+            // click outside closes
+            if (e.target === e.currentTarget) closeComments();
+          }}
+          style={{
+            background: "rgba(0,0,0,0.62)",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border overflow-hidden"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
+              boxShadow: "0 24px 80px rgba(0,0,0,0.72)",
+            }}
+          >
+            <div
+              className="px-5 py-4 border-b"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-widest text-white/55">Comments</div>
+                  <div className="mt-1 text-[14px] font-extrabold text-white truncate">
+                    {commentsGame?.match ?? "Game"} • Quarter {commentsQuestion.quarter}
+                  </div>
+                  <div className="mt-1 text-[13px] text-white/80">{commentsQuestion.question}</div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeComments}
+                  className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.16)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.90)",
+                  }}
+                  aria-label="Close comments"
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="px-5 py-4">
+              {!user ? (
+                <div
+                  className="rounded-xl border p-3 text-[12px] text-white/80"
+                  style={{ borderColor: "rgba(244,178,71,0.35)", background: "rgba(244,178,71,0.10)" }}
+                >
+                  Log in to post comments. You can still read the chat.
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder={user ? "Say something (max 240 chars)..." : "Log in to comment..."}
+                  disabled={!user || commentPosting}
+                  className="flex-1 rounded-xl border px-4 py-3 text-[13px] outline-none"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      postComment();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={postComment}
+                  disabled={!user || commentPosting}
+                  className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{
+                    borderColor: "rgba(0,229,255,0.30)",
+                    background: "rgba(0,229,255,0.10)",
+                    color: "rgba(0,229,255,0.95)",
+                  }}
+                >
+                  {commentPosting ? "Posting…" : "Post"}
+                </button>
+              </div>
+
+              {commentErr ? <div className="mt-2 text-[12px]" style={{ color: COLORS.noFill }}>{commentErr}</div> : null}
+
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-[11px] text-white/55">
+                  <div className="uppercase tracking-widest">
+                    Latest {commentsList.length ? `(${commentsList.length})` : ""}
+                  </div>
+                  <div className="text-white/45">ESC to close</div>
+                </div>
+
+                <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
+                  {commentsLoading ? (
+                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                      Loading comments…
+                    </div>
+                  ) : commentsList.length === 0 ? (
+                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                      No comments yet. Be the first to chirp.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {commentsList.map((c) => (
+                        <div
+                          key={c.id}
+                          className="rounded-xl border p-3"
+                          style={{
+                            borderColor: "rgba(255,255,255,0.10)",
+                            background: "rgba(255,255,255,0.03)",
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-[12px] font-black text-white/90 truncate">
+                              {c.displayName || c.username || "Anonymous"}
+                            </div>
+                            <div className="text-[11px] text-white/45 shrink-0">{formatCommentTime(c.createdAt)}</div>
+                          </div>
+                          <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">
+                            {c.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 text-[11px] text-white/45">
+                  Keep it civil. Banter is good — abuse gets binned.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
         {/* Header */}
@@ -1156,7 +1479,7 @@ export default function PicksPage() {
                                     ✕
                                   </button>
 
-                                  {/* Comments (slightly bigger) */}
+                                  {/* ✅ Comments */}
                                   <button
                                     type="button"
                                     className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
@@ -1175,7 +1498,12 @@ export default function PicksPage() {
                                           ? "0 0 18px rgba(244,178,71,0.14)"
                                           : "0 0 18px rgba(0,229,255,0.10)",
                                     }}
-                                    onClick={() => alert("Comments coming next — wire this to your comments UI.")}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      openComments(g, q);
+                                    }}
+                                    title="Open comments"
                                   >
                                     💬 {q.commentCount ?? 0}
                                     {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
