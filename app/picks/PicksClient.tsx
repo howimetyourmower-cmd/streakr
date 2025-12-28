@@ -1,45 +1,44 @@
-// /app/picks/PicksClient.tsx
+// /app/picks/page.tsx
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useCallback,
-  ChangeEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
-import { collection, onSnapshot, query, where, orderBy, limit, doc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
+
+export const dynamic = "force-dynamic";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type PickOutcome = "yes" | "no";
 
 type ApiQuestion = {
   id: string;
+  gameId?: string; // important for clean-sweep scoring + settlement
   quarter: number;
   question: string;
   status: QuestionStatus;
-  userPick?: "yes" | "no";
+
+  // optional server enrichments
+  userPick?: PickOutcome;
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
   isSponsorQuestion?: boolean;
-  sport?: string;
   venue?: string;
   startTime?: string;
-  correctOutcome?: "yes" | "no" | "void" | null;
-  outcome?: "yes" | "no" | "void" | "lock" | null;
+
+  // optional settlement enrichment
+  correctPick?: boolean; // true if user's pick is correct (when settled)
 };
 
 type ApiGame = {
-  id: string;
+  id: string; // e.g. "OR-G1"
   match: string;
   venue: string;
   startTime: string;
-  sport?: string;
   questions: ApiQuestion[];
 };
 
@@ -48,1586 +47,1122 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-type QuestionRow = {
-  id: string;
-  gameId: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-  userPick?: "yes" | "no";
-  yesPercent: number;
-  noPercent: number;
-  sport: string;
-  commentCount: number;
-  isSponsorQuestion?: boolean;
-  correctOutcome?: "yes" | "no" | "void" | null;
+type LeaderboardEntry = {
+  uid: string;
+  displayName: string;
+  username?: string;
+  avatarUrl?: string;
+  rank: number;
+  currentStreak: number;
 };
 
-type Comment = {
-  id: string;
-  body: string;
-  displayName?: string;
-  createdAt?: string;
+type LeaderboardApiResponse = {
+  entries: LeaderboardEntry[];
+  userEntry: LeaderboardEntry | null;
+  userLifetime?: any;
 };
-
-type PickHistory = Record<string, "yes" | "no">;
-
-type GameLocksResponse = {
-  roundNumber: number;
-  locks: Record<string, boolean>;
-};
-
-const PICK_HISTORY_KEY = "streakr_pick_history_v3";
-const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v2";
 
 const COLORS = {
   bg: "#0D1117",
-  panel: "#0B1220",
-  panel2: "#070B12",
-  border: "rgba(255,255,255,0.10)",
+  panel: "#0F1623",
+  panel2: "#0A0F18",
+  line: "rgba(255,255,255,0.10)",
+
+  // Cyberpunk palette
   orange: "#FF3D00",
   green: "#76FF03",
   red: "#FF073A",
   cyan: "#00E5FF",
-  textDim: "rgba(255,255,255,0.72)",
-  textDim2: "rgba(255,255,255,0.55)",
+  white: "#FFFFFF",
 };
 
-const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
-  if (val == null) return null;
-  const s = String(val).trim().toLowerCase();
-  if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
-  if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
-  if (["void", "cancelled", "canceled"].includes(s)) return "void";
-  return null;
-};
-
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+function clampPct(n: number | undefined): number {
+  if (typeof n !== "number" || Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(100, n));
 }
 
-function formatPct(n: number): string {
-  if (!Number.isFinite(n)) return "-";
-  return `${Math.round(clamp(n, 0, 100))}%`;
-}
-
-function msToParts(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const hrs = Math.floor(s / 3600);
-  const mins = Math.floor((s % 3600) / 60);
-  const secs = s % 60;
-  return { s, hrs, mins, secs };
-}
-
-function formatCountdown(ms: number): string {
-  const { hrs, mins, secs } = msToParts(ms);
-  if (hrs > 0) return `${hrs}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
-  return `${mins}:${String(secs).padStart(2, "0")}`;
-}
-
-function safeDateMs(iso: string | undefined): number | null {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  return Number.isFinite(t) ? t : null;
-}
-
-function formatAedt(iso: string) {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return { date: "", time: "" };
-  return {
-    date: d.toLocaleDateString("en-AU", {
+function formatAedt(dateIso: string): string {
+  try {
+    const d = new Date(dateIso);
+    // You’re in AU; keep it simple and consistent.
+    return d.toLocaleString("en-AU", {
       weekday: "short",
       day: "2-digit",
       month: "short",
-      timeZone: "Australia/Melbourne",
-    }),
-    time: d.toLocaleTimeString("en-AU", {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
-      timeZone: "Australia/Melbourne",
-    }),
-  };
+      timeZoneName: "short",
+    });
+  } catch {
+    return dateIso;
+  }
 }
 
-export default function PicksClient() {
-  const { user } = useAuth();
+function msToCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
 
-  const [rows, setRows] = useState<QuestionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>("");
+  const pad = (x: number) => String(x).padStart(2, "0");
+  if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
 
+function getLockMs(startTimeIso: string): number {
+  // Lock at start time. If you later want “lock 5 mins before”, subtract 5*60*1000 here.
+  const t = new Date(startTimeIso).getTime();
+  if (!Number.isFinite(t)) return 0;
+  return t - Date.now();
+}
+
+function majorityLabel(yes: number, no: number): { label: string; color: string } {
+  if (yes === no) return { label: "Split crowd", color: "rgba(255,255,255,0.70)" };
+  if (yes > no) return { label: "Majority is YES", color: "rgba(118,255,3,0.85)" };
+  return { label: "Majority is NO", color: "rgba(255,7,58,0.85)" };
+}
+
+function safeLocalKey(uid: string | null, roundNumber: number | null) {
+  return `streakr:picks:v3:${uid || "anon"}:${roundNumber ?? "na"}`;
+}
+
+type LocalPickMap = Record<string, PickOutcome>;
+
+export default function PicksPage() {
+  const { user, loading: authLoading } = useAuth();
+
+  // Data
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
+  const [games, setGames] = useState<ApiGame[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [err, setErr] = useState<string>("");
 
-  const [pickHistory, setPickHistory] = useState<PickHistory>({});
+  // Local selection (instant UI, prevents “missing on refresh”)
+  const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
 
-  const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
+  // Streak widget
+  const [myCurrentStreak, setMyCurrentStreak] = useState<number>(0);
+  const [leaderStreak, setLeaderStreak] = useState<number>(0);
 
-  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">("all");
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showHowToModal, setShowHowToModal] = useState(false);
-
-  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
-  const [comments, setComments] = useState<Comment[]>([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsError, setCommentsError] = useState("");
-  const [commentText, setCommentText] = useState("");
-  const [submittingComment, setSubmittingComment] = useState(false);
-
-  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
-  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
-  const [streakLoading, setStreakLoading] = useState(false);
-  const [streakError, setStreakError] = useState("");
-
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [shareStatus, setShareStatus] = useState<string>("");
-
+  // Live “clock” tick (one per second) — IMPORTANT: prevents runaway timers
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  // Confetti on streak milestones
+  const [confettiOn, setConfettiOn] = useState(false);
+  const confettiTimeoutRef = useRef<any>(null);
+  const lastMilestoneRef = useRef<number>(0);
+
+  // Guards to avoid repeated loads
+  const hasHydratedLocalRef = useRef(false);
+
+  // ─────────────────────────────────────────────────────────────
+  // Stable 1s timer (NO runaway, NO 0.1s spam)
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(id);
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
   }, []);
 
-  const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
-    onResize();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  // ─────────────────────────────────────────────────────────────
+  // Load picks payload
+  // ─────────────────────────────────────────────────────────────
+  const loadPicks = useCallback(async () => {
     try {
-      const raw = window.localStorage.getItem(PICK_HISTORY_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") setPickHistory(parsed);
-    } catch (err) {
-      console.error("Failed to load pick history", err);
+      setLoading(true);
+      setErr("");
+
+      let authHeader: Record<string, string> = {};
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          authHeader = { Authorization: `Bearer ${token}` };
+        } catch (e) {
+          console.error("Failed to get token for picks", e);
+        }
+      }
+
+      const res = await fetch(`/api/picks`, {
+        headers: {
+          ...authHeader,
+        },
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        console.error("Picks API error:", t);
+        throw new Error("Failed to load picks");
+      }
+
+      const data = (await res.json()) as PicksApiResponse;
+
+      const nextRound =
+        typeof data.roundNumber === "number" ? data.roundNumber : null;
+
+      setRoundNumber(nextRound);
+      setGames(Array.isArray(data.games) ? data.games : []);
+    } catch (e) {
+      console.error(e);
+      setErr("Could not load picks right now.");
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    loadPicks();
+  }, [loadPicks]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Hydrate local picks from localStorage AFTER roundNumber known
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (hasHydratedLocalRef.current) return;
+    if (roundNumber === null) return;
+
     try {
-      const seen = window.localStorage.getItem(HOW_TO_PLAY_KEY);
-      if (!seen) setShowHowToModal(true);
-    } catch {}
-  }, []);
-
-  const closeHowTo = useCallback(() => {
-    try {
-      if (typeof window !== "undefined") window.localStorage.setItem(HOW_TO_PLAY_KEY, "true");
-    } catch {}
-    setShowHowToModal(false);
-  }, []);
-
-  const isGameUnlocked = useCallback(
-    (gameId: string) => {
-      const v = gameLocks[gameId];
-      return typeof v === "boolean" ? v : true;
-    },
-    [gameLocks]
-  );
-
-  const persistPickHistory = useCallback((next: PickHistory) => {
-    try {
-      if (typeof window !== "undefined") window.localStorage.setItem(PICK_HISTORY_KEY, JSON.stringify(next));
-    } catch {}
-  }, []);
-
-  const flattenApi = useCallback((data: PicksApiResponse, history: PickHistory): QuestionRow[] => {
-    return (data.games || []).flatMap((g) =>
-      (g.questions || []).map((q) => {
-        const histPick = history[q.id];
-        const yesPercent = typeof q.yesPercent === "number" ? q.yesPercent : 0;
-        const noPercent = typeof q.noPercent === "number" ? q.noPercent : 0;
-
-        const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
-        const correctOutcome: QuestionRow["correctOutcome"] =
-          q.status === "final" || q.status === "void" ? rawOutcome : null;
-
-        return {
-          id: q.id,
-          gameId: g.id,
-          match: g.match,
-          venue: q.venue ?? g.venue ?? "",
-          startTime: q.startTime ?? g.startTime ?? "",
-          quarter: q.quarter,
-          question: q.question,
-          status: q.status,
-          userPick: q.userPick ?? histPick,
-          yesPercent,
-          noPercent,
-          sport: String(q.sport ?? g.sport ?? "AFL"),
-          commentCount: typeof q.commentCount === "number" ? q.commentCount : 0,
-          isSponsorQuestion: !!q.isSponsorQuestion,
-          correctOutcome,
-        };
-      })
-    );
-  }, []);
-
-  const fetchPicks = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      const silent = opts?.silent ?? false;
-      if (!silent) {
-        setLoading(true);
-        setError("");
+      const key = safeLocalKey(user?.uid ?? null, roundNumber);
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as LocalPickMap;
+        if (parsed && typeof parsed === "object") {
+          setLocalPicks(parsed);
+        }
       }
-      try {
-        const res = await fetch("/api/picks", { cache: "no-store" });
-        if (!res.ok) throw new Error(await res.text());
-        const data: PicksApiResponse = await res.json();
-        if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
+    } catch (e) {
+      console.warn("Failed to hydrate local picks", e);
+    } finally {
+      hasHydratedLocalRef.current = true;
+    }
+  }, [user?.uid, roundNumber]);
 
-        const flat = flattenApi(data, pickHistory);
-        setRows(flat);
-      } catch (err) {
-        console.error(err);
-        if (!silent) setError("Failed to load picks.");
-      } finally {
-        if (!silent) setLoading(false);
-      }
-    },
-    [flattenApi, pickHistory]
-  );
-
-  useEffect(() => {
-    setLoading(true);
-    fetchPicks()
-      .catch(() => {})
-      .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const id = setInterval(() => fetchPicks({ silent: true }), 15000);
-    return () => clearInterval(id);
-  }, [fetchPicks]);
-
+  // Persist local picks
   useEffect(() => {
     if (roundNumber === null) return;
-    const loadLocks = async () => {
-      try {
-        const res = await fetch(`/api/admin/game-lock?round=${roundNumber}`);
-        if (!res.ok) return;
-        const json: GameLocksResponse = await res.json();
-        setGameLocks(json.locks || {});
-      } catch (err) {
-        console.error("Failed to load game locks", err);
-      }
-    };
-    loadLocks();
-  }, [roundNumber]);
+    try {
+      const key = safeLocalKey(user?.uid ?? null, roundNumber);
+      localStorage.setItem(key, JSON.stringify(localPicks));
+    } catch {}
+  }, [localPicks, user?.uid, roundNumber]);
 
-  useEffect(() => {
-    const loadServerPicks = async () => {
-      if (!user) return;
-      try {
-        const token = await user.getIdToken();
-        const res = await fetch("/api/user-picks", { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) return;
-
-        const json = await res.json();
-        const next: PickHistory = {};
-
-        if (Array.isArray(json?.picks)) {
-          for (const p of json.picks) {
-            const qid = p?.questionId;
-            const raw = typeof p?.outcome === "string" ? p.outcome.toLowerCase() : "";
-            if (!qid) continue;
-            if (raw === "yes" || raw === "no") next[qid] = raw;
-          }
-        } else if (json?.questionId && json?.outcome) {
-          const qid = String(json.questionId);
-          const raw = String(json.outcome).toLowerCase();
-          if (raw === "yes" || raw === "no") next[qid] = raw;
-        }
-
-        if (Object.keys(next).length) {
-          setPickHistory((prev) => {
-            const merged = { ...prev, ...next };
-            persistPickHistory(merged);
-            return merged;
-          });
-        }
-      } catch (err) {
-        console.error("Failed to load server picks", err);
-      }
-    };
-    loadServerPicks();
-  }, [user, persistPickHistory]);
-
-  const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
-  const questionIdsKey = useMemo(() => questionIds.join("|"), [questionIds]);
-
-  useEffect(() => {
-    if (!questionIds.length) return;
-
-    const chunk = (arr: string[], size: number) => {
-      const out: string[][] = [];
-      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-      return out;
-    };
-
-    const chunks = chunk(questionIds, 10);
-
-    let pendingTimer: any = null;
-    const pendingCounts: Record<string, number> = {};
-
-    const flush = () => {
-      pendingTimer = null;
-      const apply = { ...pendingCounts };
-      for (const k of Object.keys(pendingCounts)) delete pendingCounts[k];
-
-      setRows((prev) =>
-        prev.map((r) => (apply[r.id] !== undefined ? { ...r, commentCount: apply[r.id] } : r))
-      );
-    };
-
-    const unsubs = chunks.map((ids) => {
-      const qRef = query(collection(db, "comments"), where("questionId", "in", ids));
-      return onSnapshot(qRef, (snap) => {
-        const counts: Record<string, number> = {};
-        ids.forEach((id) => (counts[id] = 0));
-        snap.forEach((d) => {
-          const data = d.data() as any;
-          const qid = data?.questionId;
-          if (!qid) return;
-          counts[qid] = (counts[qid] ?? 0) + 1;
-        });
-
-        for (const [qid, c] of Object.entries(counts)) pendingCounts[qid] = c;
-        if (!pendingTimer) pendingTimer = setTimeout(flush, 250);
-      });
-    });
-
-    return () => {
-      if (pendingTimer) clearTimeout(pendingTimer);
-      unsubs.forEach((u) => u());
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [questionIdsKey]);
-
-  useEffect(() => {
-    setStreakLoading(true);
-    setStreakError("");
-
-    const topQ = query(collection(db, "users"), orderBy("currentStreak", "desc"), limit(1));
-    const unsub = onSnapshot(
-      topQ,
-      (snap) => {
-        let leader = 0;
-        snap.forEach((docSnap) => {
-          const d = docSnap.data() as any;
-          leader = typeof d.currentStreak === "number" ? d.currentStreak : 0;
-        });
-        setLeaderCurrentStreak(leader);
-        setStreakLoading(false);
-      },
-      () => {
-        setStreakError("Could not load leader streak.");
-        setStreakLoading(false);
-      }
-    );
-
-    return () => unsub();
-  }, []);
-
+  // ─────────────────────────────────────────────────────────────
+  // Live streak from user doc (client Firestore)
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) {
-      setUserCurrentStreak(null);
+      setMyCurrentStreak(0);
       return;
     }
 
-    setStreakLoading(true);
-    setStreakError("");
-
+    const ref = doc(db, "users", user.uid);
     const unsub = onSnapshot(
-      doc(db, "users", user.uid),
+      ref,
       (snap) => {
-        const d = snap.exists() ? (snap.data() as any) : {};
-        const cur = typeof d.currentStreak === "number" ? d.currentStreak : 0;
-        setUserCurrentStreak(cur);
-        setStreakLoading(false);
+        const d = snap.data() as any;
+        const s = typeof d?.currentStreak === "number" ? d.currentStreak : 0;
+        setMyCurrentStreak(s);
       },
-      () => {
-        setStreakError("Could not load your streak.");
-        setStreakLoading(false);
+      (e) => {
+        console.warn("users/{uid} snapshot error", e);
       }
     );
 
     return () => unsub();
   }, [user]);
 
-  const lastMilestoneRef = useRef<number>(0);
-  useEffect(() => {
-    const s = userCurrentStreak ?? null;
-    if (typeof s !== "number") return;
+  // ─────────────────────────────────────────────────────────────
+  // Leader streak from leaderboard API (silent refresh)
+  // ─────────────────────────────────────────────────────────────
+  const loadLeader = useCallback(
+    async (silent?: boolean) => {
+      try {
+        let authHeader: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch {}
+        }
 
-    const milestones = [3, 5, 10, 15, 20];
-    const hit = milestones.find((m) => s === m);
-    if (hit && lastMilestoneRef.current !== hit) {
-      lastMilestoneRef.current = hit;
-      setShowConfetti(true);
-      setTimeout(() => setShowConfetti(false), 1800);
-    }
-  }, [userCurrentStreak]);
-
-  const filteredRows = useMemo(() => {
-    if (activeFilter === "all") return rows;
-    return rows.filter((r) => r.status === activeFilter);
-  }, [rows, activeFilter]);
-
-  const games = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        gameId: string;
-        match: string;
-        venue: string;
-        startTime: string;
-        sport: string;
-        rows: QuestionRow[];
-      }
-    >();
-
-    for (const r of filteredRows) {
-      const existing = map.get(r.gameId);
-      if (!existing) {
-        map.set(r.gameId, {
-          gameId: r.gameId,
-          match: r.match,
-          venue: r.venue,
-          startTime: r.startTime,
-          sport: r.sport,
-          rows: [r],
+        const res = await fetch(`/api/leaderboard?scope=overall`, {
+          headers: { ...authHeader },
+          cache: "no-store",
         });
-      } else {
-        existing.rows.push(r);
+
+        if (!res.ok) return;
+
+        const data = (await res.json()) as LeaderboardApiResponse;
+        const top = Array.isArray(data.entries) ? data.entries[0] : null;
+        setLeaderStreak(typeof top?.currentStreak === "number" ? top.currentStreak : 0);
+      } catch (e) {
+        if (!silent) console.warn("Leader load failed", e);
       }
+    },
+    [user]
+  );
+
+  useEffect(() => {
+    loadLeader();
+  }, [loadLeader]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => loadLeader(true), 15000);
+    return () => window.clearInterval(id);
+  }, [loadLeader]);
+
+  // ─────────────────────────────────────────────────────────────
+  // Confetti milestones (5, 10, 15...)
+  // ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const s = myCurrentStreak || 0;
+    const milestone = Math.floor(s / 5) * 5;
+
+    if (milestone >= 5 && milestone !== lastMilestoneRef.current) {
+      lastMilestoneRef.current = milestone;
+      setConfettiOn(true);
+      if (confettiTimeoutRef.current) clearTimeout(confettiTimeoutRef.current);
+      confettiTimeoutRef.current = setTimeout(() => setConfettiOn(false), 1400);
     }
+  }, [myCurrentStreak]);
 
-    const out = Array.from(map.values());
-    out.sort((a, b) => {
-      const ta = safeDateMs(a.startTime) ?? 0;
-      const tb = safeDateMs(b.startTime) ?? 0;
-      if (ta !== tb) return ta - tb;
-      return a.gameId.localeCompare(b.gameId);
-    });
-
-    out.forEach((g) => g.rows.sort((a, b) => a.quarter - b.quarter));
+  // ─────────────────────────────────────────────────────────────
+  // Derived stats
+  // ─────────────────────────────────────────────────────────────
+  const allQuestions = useMemo(() => {
+    const out: ApiQuestion[] = [];
+    games.forEach((g) => g.questions.forEach((q) => out.push(q)));
     return out;
-  }, [filteredRows]);
+  }, [games]);
 
   const picksMade = useMemo(() => {
-    let n = 0;
-    for (const r of rows) {
-      const p = pickHistory[r.id] ?? r.userPick;
-      if (p === "yes" || p === "no") n++;
-    }
-    return n;
-  }, [rows, pickHistory]);
+    let c = 0;
+    allQuestions.forEach((q) => {
+      const pick = localPicks[q.id] ?? q.userPick;
+      if (pick === "yes" || pick === "no") c += 1;
+    });
+    return c;
+  }, [allQuestions, localPicks]);
 
-  const totalQuestions = rows.length;
+  const totalPickable = useMemo(() => allQuestions.length, [allQuestions]);
 
-  const accuracy = useMemo(() => {
-    let wins = 0;
-    let losses = 0;
+  const accuracyPct = useMemo(() => {
+    // Only count questions that are settled + have a user pick
+    let settledPicked = 0;
+    let correct = 0;
 
-    for (const r of rows) {
-      const pick = pickHistory[r.id] ?? r.userPick;
-      if (pick !== "yes" && pick !== "no") continue;
+    allQuestions.forEach((q) => {
+      const pick = localPicks[q.id] ?? q.userPick;
+      if (pick !== "yes" && pick !== "no") return;
 
-      const out = normaliseOutcome(r.correctOutcome);
-      if (r.status === "void" || out === "void") continue;
+      const settled = q.status === "final" || q.status === "void";
+      if (!settled) return;
 
-      if (r.status !== "final" || !out) continue;
+      // void questions don’t hurt accuracy
+      // If your backend sets correctPick, we use it.
+      if (q.status === "void") return;
 
-      if (pick === out) wins++;
-      else losses++;
-    }
+      settledPicked += 1;
+      if (q.correctPick === true) correct += 1;
+    });
 
-    const total = wins + losses;
-    if (!total) return null;
-    return (wins / total) * 100;
-  }, [rows, pickHistory]);
+    if (settledPicked <= 0) return 0;
+    return Math.round((correct / settledPicked) * 100);
+  }, [allQuestions, localPicks]);
 
-  const perGameMeta = useMemo(() => {
-    type Meta = {
-      total: number;
-      picked: number;
-      locked: boolean;
-      startMs: number | null;
-      state: "pre" | "live" | "locked";
-      countdownLabel: string;
-      countdownMs: number | null;
-    };
+  const nextLockMs = useMemo(() => {
+    // soonest future start among games
+    const future = games
+      .map((g) => new Date(g.startTime).getTime())
+      .filter((t) => Number.isFinite(t) && t > nowMs)
+      .sort((a, b) => a - b);
+    if (!future.length) return 0;
+    return future[0] - nowMs;
+  }, [games, nowMs]);
 
-    const byGame: Record<string, Meta> = {};
+  // ─────────────────────────────────────────────────────────────
+  // Actions
+  // ─────────────────────────────────────────────────────────────
+  const setPick = useCallback(
+    async (q: ApiQuestion, outcome: PickOutcome) => {
+      // Optimistic UI
+      setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
 
-    const groupAll: Record<string, QuestionRow[]> = {};
-    for (const r of rows) {
-      if (!groupAll[r.gameId]) groupAll[r.gameId] = [];
-      groupAll[r.gameId].push(r);
-    }
-
-    for (const [gameId, gameRows] of Object.entries(groupAll)) {
-      const total = gameRows.length;
-      let picked = 0;
-
-      for (const r of gameRows) {
-        const pick = pickHistory[r.id] ?? r.userPick;
-        if (pick === "yes" || pick === "no") picked++;
-      }
-
-      const locked = !isGameUnlocked(gameId);
-      const startMs = safeDateMs(gameRows[0]?.startTime ?? "") ?? null;
-
-      let state: Meta["state"] = "pre";
-      let countdownLabel = "--";
-      let countdownMs: number | null = null;
-
-      if (locked) {
-        state = "locked";
-        countdownLabel = "LOCKED";
-      } else if (startMs && nowMs < startMs) {
-        state = "pre";
-        countdownMs = startMs - nowMs;
-        countdownLabel = formatCountdown(countdownMs);
-      } else {
-        state = "live";
-        countdownLabel = "LIVE";
-      }
-
-      byGame[gameId] = { total, picked, locked, startMs, state, countdownLabel, countdownMs };
-    }
-
-    return byGame;
-  }, [rows, pickHistory, isGameUnlocked, nowMs]);
-
-  const nextLock = useMemo(() => {
-    let best: number | null = null;
-    const seen = new Set<string>();
-
-    for (const r of rows) {
-      if (seen.has(r.gameId)) continue;
-      seen.add(r.gameId);
-
-      const locked = !isGameUnlocked(r.gameId);
-      if (locked) continue;
-
-      const start = safeDateMs(r.startTime);
-      if (!start) continue;
-      if (start <= nowMs) continue;
-
-      const delta = start - nowMs;
-      if (best === null || delta < best) best = delta;
-    }
-
-    return best;
-  }, [rows, isGameUnlocked, nowMs]);
-
-  const hotCommentCount = useMemo(() => rows.filter((r) => (r.commentCount ?? 0) >= 100).length, [rows]);
-
-  const handlePick = useCallback(
-    async (row: QuestionRow, pick: "yes" | "no") => {
-      if (!user) {
-        setShowAuthModal(true);
-        return;
-      }
-
-      if (!isGameUnlocked(row.gameId)) return;
-      if (row.status !== "open") return;
-
-      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
-
-      setPickHistory((prev) => {
-        const next = { ...prev, [row.id]: pick };
-        persistPickHistory(next);
-        return next;
-      });
+      // If not logged in, keep it local only
+      if (!user) return;
 
       try {
         const token = await user.getIdToken();
+
+        const gameId = q.gameId || undefined;
+        const body = {
+          questionId: q.id,
+          outcome,
+          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+          gameId: gameId ?? null,
+        };
+
         const res = await fetch("/api/user-picks", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({
-            questionId: row.id,
-            outcome: pick,
-            roundNumber,
-            sport: "AFL",
-            gameId: row.gameId,
-          }),
+          body: JSON.stringify(body),
         });
 
         if (!res.ok) {
-          console.error("Pick save failed:", await res.text());
+          console.error("Failed to save pick:", await res.text());
         }
-      } catch (err) {
-        console.error("Pick save error:", err);
+      } catch (e) {
+        console.error("Pick save error", e);
       }
     },
-    [user, isGameUnlocked, persistPickHistory, roundNumber]
+    [user, roundNumber]
   );
 
-  const handleClearPick = useCallback(
-    async (row: QuestionRow) => {
-      if (!isGameUnlocked(row.gameId)) return;
-      if (row.status !== "open") return;
-
-      setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: undefined } : r)));
-
-      setPickHistory((prev) => {
-        const next = { ...prev };
-        delete next[row.id];
-        persistPickHistory(next);
-        return next;
-      });
-
-      if (!user) return;
-      try {
-        const token = await user.getIdToken();
-        const res = await fetch("/api/user-picks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            questionId: row.id,
-            action: "clear",
-            outcome: null,
-            roundNumber,
-            sport: "AFL",
-            gameId: row.gameId,
-          }),
-        });
-        if (!res.ok) {
-          console.warn("Pick clear not supported or failed:", await res.text());
-        }
-      } catch (err) {
-        console.error("Pick clear error", err);
-      }
-    },
-    [isGameUnlocked, persistPickHistory, user, roundNumber]
-  );
-
-  const handleShare = async () => {
+  const shareStreak = useCallback(async () => {
+    const txt = `STREAKr — I’m on a streak of ${myCurrentStreak}. How long can you last?`;
     try {
-      const url = typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
-      const text = `I’m on a STREAKr streak of ${userCurrentStreak ?? 0}. Back yourself — how long can you last?`;
-
-      if (typeof navigator !== "undefined" && (navigator as any).share) {
-        await (navigator as any).share({ title: "STREAKr", text, url });
-        setShareStatus("Shared!");
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-        setShareStatus("Link copied.");
-      } else {
-        setShareStatus("Share not supported here.");
+      if (navigator.share) {
+        await navigator.share({ text: txt });
+        return;
       }
+    } catch {}
+    try {
+      await navigator.clipboard.writeText(txt);
+      alert("Copied to clipboard ✅");
     } catch {
-      setShareStatus("Could not share right now.");
+      alert(txt);
     }
-    setTimeout(() => setShareStatus(""), 2500);
-  };
+  }, [myCurrentStreak]);
 
-  const openComments = async (row: QuestionRow) => {
-    setCommentsOpenFor(row);
-    setComments([]);
-    setCommentText("");
-    setCommentsError("");
-    setCommentsLoading(true);
+  // ─────────────────────────────────────────────────────────────
+  // UI helpers
+  // ─────────────────────────────────────────────────────────────
+  const renderStatusPill = (q: ApiQuestion) => {
+    const status = q.status;
 
-    try {
-      const res = await fetch(`/api/comments/${row.id}`);
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      const src = data.items || data.comments || [];
-      const list: Comment[] = src.map((c: any) => ({
-        id: c.id,
-        body: c.body,
-        displayName: c.displayName,
-        createdAt: c.createdAt,
-      }));
-      setComments(list);
-    } catch (err) {
-      console.error(err);
-      setCommentsError("Failed to load comments.");
-    } finally {
-      setCommentsLoading(false);
-    }
-  };
+    const base =
+      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border";
 
-  const closeComments = () => {
-    setCommentsOpenFor(null);
-    setComments([]);
-    setCommentText("");
-    setCommentsError("");
-  };
-
-  const submitComment = async () => {
-    if (!commentsOpenFor || !commentText.trim()) return;
-
-    setSubmittingComment(true);
-    setCommentsError("");
-
-    try {
-      const res = await fetch(`/api/comments/${commentsOpenFor.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: commentText.trim() }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const created = await res.json();
-
-      const newComment: Comment = {
-        id: created.id || Math.random().toString(36),
-        body: created.body ?? commentText.trim(),
-        displayName: created.displayName,
-        createdAt: created.createdAt,
-      };
-
-      setComments((prev) => [newComment, ...prev]);
-      setCommentText("");
-    } catch (err) {
-      console.error(err);
-      setCommentsError("Failed to post comment.");
-    } finally {
-      setSubmittingComment(false);
-    }
-  };
-
-  const statusBadge = (s: QuestionStatus) => {
-    if (s === "open") return { label: "OPEN", bg: "rgba(0,229,255,0.12)", br: "rgba(0,229,255,0.45)", tx: COLORS.cyan };
-    if (s === "pending") return { label: "PENDING", bg: "rgba(255,61,0,0.10)", br: "rgba(255,61,0,0.40)", tx: COLORS.orange };
-    if (s === "final") return { label: "FINAL", bg: "rgba(255,255,255,0.06)", br: "rgba(255,255,255,0.16)", tx: "rgba(255,255,255,0.75)" };
-    return { label: "VOID", bg: "rgba(255,7,58,0.10)", br: "rgba(255,7,58,0.45)", tx: COLORS.red };
-  };
-
-  const sentimentFor = (r: QuestionRow) => {
-    const yes = clamp(r.yesPercent ?? 0, 0, 100);
-    const no = clamp(r.noPercent ?? 0, 0, 100);
-    const majority: "yes" | "no" = yes >= no ? "yes" : "no";
-    const pick = (pickHistory[r.id] ?? r.userPick) as any;
-    const hasPick = pick === "yes" || pick === "no";
-    const withCrowd = hasPick ? pick === majority : null;
-
-    return { yes, no, majority, hasPick, withCrowd };
-  };
-
-  const current = userCurrentStreak ?? 0;
-  const leader = leaderCurrentStreak ?? 0;
-
-  const maxBar = Math.max(current, leader, 1);
-  const curW = `${(current / maxBar) * 100}%`;
-  const leadW = `${(leader / maxBar) * 100}%`;
-
-  const picksLine = `${picksMade}/${totalQuestions || 0}`;
-  const accuracyLine = accuracy === null ? "-" : formatPct(accuracy);
-  const nextLockLine = nextLock === null ? "-" : formatCountdown(nextLock);
-
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
-
-  const sponsorExists = rows.some((r) => !!r.isSponsorQuestion);
-
-  return (
-    <>
-      <style jsx>{`
-        @keyframes pulseCyan {
-          0% { box-shadow: 0 0 0 rgba(0,229,255,0); }
-          50% { box-shadow: 0 0 22px rgba(0,229,255,0.55); }
-          100% { box-shadow: 0 0 0 rgba(0,229,255,0); }
-        }
-        @keyframes pulseOrange {
-          0% { box-shadow: 0 0 0 rgba(255,61,0,0); }
-          50% { box-shadow: 0 0 22px rgba(255,61,0,0.50); }
-          100% { box-shadow: 0 0 0 rgba(255,61,0,0); }
-        }
-        .pulse-live { animation: pulseCyan 1.3s ease-in-out infinite; }
-        .pulse-hot { animation: pulseOrange 1.5s ease-in-out infinite; }
-      `}</style>
-
-      {showConfetti && windowSize.width > 0 && (
-        <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={260} recycle={false} />
-      )}
-
-      <div className="min-h-screen" style={{ background: COLORS.bg, color: "white" }}>
-        {/* Sticky Top Bar */}
-        <div
-          className="sticky top-0 z-40 border-b"
+    if (status === "open") {
+      return (
+        <span
+          className={base}
           style={{
-            background: "linear-gradient(180deg, rgba(13,17,23,0.96) 0%, rgba(13,17,23,0.88) 100%)",
-            borderColor: COLORS.border,
-            backdropFilter: "blur(10px)",
+            borderColor: "rgba(0,229,255,0.35)",
+            background: "rgba(0,229,255,0.10)",
+            color: "rgba(0,229,255,0.95)",
           }}
         >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div>
-                    <div className="text-xl sm:text-2xl font-extrabold tracking-tight">
-                      Picks{" "}
-                      <span style={{ color: COLORS.cyan }} className="text-sm font-semibold align-middle">
-                        {roundLabel ? `• ${roundLabel}` : ""}
-                      </span>
-                    </div>
-                    <div style={{ color: COLORS.textDim2 }} className="text-xs">
-                      Clean sweep per match. One wrong in a match = streak nuked.
-                    </div>
-                  </div>
-                </div>
+          <span className="relative flex h-1.5 w-1.5">
+            <span
+              className="absolute inline-flex h-full w-full rounded-full opacity-60"
+              style={{
+                background: "rgba(0,229,255,0.9)",
+                animation: "ping 1.6s cubic-bezier(0,0,0.2,1) infinite",
+              }}
+            />
+            <span
+              className="relative inline-flex h-1.5 w-1.5 rounded-full"
+              style={{ background: "rgba(0,229,255,0.95)" }}
+            />
+          </span>
+          LIVE
+        </span>
+      );
+    }
 
-                <div className="flex items-center gap-2 flex-wrap justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setShowHowToModal(true)}
-                    className="rounded-full px-3 py-1.5 text-[11px] font-semibold border transition"
-                    style={{
-                      borderColor: "rgba(0,229,255,0.55)",
-                      color: COLORS.cyan,
-                      background: "rgba(0,229,255,0.06)",
-                    }}
-                  >
-                    How to play
-                  </button>
+    if (status === "pending") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            color: "rgba(255,255,255,0.75)",
+          }}
+        >
+          Locked
+        </span>
+      );
+    }
 
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    className="rounded-full px-3 py-1.5 text-[11px] font-extrabold border transition"
-                    style={{
-                      borderColor: "rgba(255,61,0,0.65)",
-                      color: "black",
-                      background: COLORS.orange,
-                      boxShadow: "0 0 20px rgba(255,61,0,0.20)",
-                    }}
-                  >
-                    Share
-                  </button>
-                </div>
+    if (status === "void") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.05)",
+            color: "rgba(255,255,255,0.55)",
+          }}
+        >
+          Void
+        </span>
+      );
+    }
+
+    // final
+    const pick = localPicks[q.id] ?? q.userPick;
+    const isPicked = pick === "yes" || pick === "no";
+    const isCorrect = q.correctPick === true;
+
+    if (!isPicked) {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            color: "rgba(255,255,255,0.75)",
+          }}
+        >
+          Final
+        </span>
+      );
+    }
+
+    return (
+      <span
+        className={base}
+        style={{
+          borderColor: isCorrect ? "rgba(118,255,3,0.55)" : "rgba(255,7,58,0.55)",
+          background: isCorrect ? "rgba(118,255,3,0.12)" : "rgba(255,7,58,0.12)",
+          color: isCorrect ? "rgba(118,255,3,0.95)" : "rgba(255,7,58,0.95)",
+        }}
+      >
+        {isCorrect ? "Correct" : "Wrong"}
+      </span>
+    );
+  };
+
+  const renderSentiment = (q: ApiQuestion) => {
+    const yes = clampPct(q.yesPercent);
+    const no = clampPct(q.noPercent);
+
+    const total = yes + no;
+    const yesW = total <= 0 ? 50 : (yes / total) * 100;
+    const noW = 100 - yesW;
+
+    const majority = majorityLabel(yes, no);
+
+    // User alignment
+    const pick = localPicks[q.id] ?? q.userPick;
+    const aligned =
+      pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
+
+    return (
+      <div className="mt-1.5">
+        <div className="flex items-center justify-between text-[11px] text-white/65">
+          <span className="uppercase tracking-wide">Crowd</span>
+          <span style={{ color: majority.color }} className="font-semibold">
+            {majority.label}
+            {q.commentCount && q.commentCount >= 100 ? (
+              <span className="ml-2">🔥</span>
+            ) : null}
+          </span>
+        </div>
+
+        <div
+          className="mt-1 h-2 rounded-full overflow-hidden border"
+          style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.06)" }}
+        >
+          <div className="h-full flex">
+            <div
+              className="h-full"
+              style={{
+                width: `${yesW}%`,
+                background:
+                  "linear-gradient(90deg, rgba(118,255,3,0.85), rgba(0,229,255,0.65))",
+              }}
+            />
+            <div
+              className="h-full"
+              style={{
+                width: `${noW}%`,
+                background:
+                  "linear-gradient(90deg, rgba(255,61,0,0.55), rgba(255,7,58,0.75))",
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-1 flex items-center justify-between text-[10px] text-white/55">
+          <span>
+            YES <span className="font-semibold text-white/80">{Math.round(yes)}%</span>
+          </span>
+
+          {aligned === null ? (
+            <span className="text-white/45">Pick to see if you’re with the crowd</span>
+          ) : aligned ? (
+            <span style={{ color: COLORS.green }} className="font-semibold">
+              You’re with the majority
+            </span>
+          ) : (
+            <span style={{ color: COLORS.orange }} className="font-semibold">
+              You’re against the crowd
+            </span>
+          )}
+
+          <span>
+            NO <span className="font-semibold text-white/80">{Math.round(no)}%</span>
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
+    const pick = localPicks[q.id] ?? q.userPick;
+
+    const yesActive = pick === "yes";
+    const noActive = pick === "no";
+
+    const baseBtn =
+      "flex-1 rounded-xl border font-extrabold tracking-wide transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed";
+
+    const yesClass = yesActive
+      ? ""
+      : "";
+    const noClass = noActive ? "" : "";
+
+    return (
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          disabled={isLocked || q.status === "void"}
+          onClick={() => setPick(q, "yes")}
+          className={`${baseBtn} px-4 py-2 text-[12px]`}
+          style={{
+            borderColor: yesActive ? "rgba(118,255,3,0.70)" : "rgba(255,255,255,0.12)",
+            background: yesActive
+              ? "linear-gradient(180deg, rgba(118,255,3,0.22), rgba(118,255,3,0.12))"
+              : "rgba(255,255,255,0.04)",
+            color: yesActive ? "rgba(118,255,3,0.95)" : "rgba(255,255,255,0.86)",
+            boxShadow: yesActive ? "0 0 24px rgba(118,255,3,0.18)" : "none",
+            transform: yesActive ? "translateY(-1px)" : "none",
+          }}
+        >
+          YES
+        </button>
+
+        <button
+          type="button"
+          disabled={isLocked || q.status === "void"}
+          onClick={() => setPick(q, "no")}
+          className={`${baseBtn} px-4 py-2 text-[12px]`}
+          style={{
+            borderColor: noActive ? "rgba(255,7,58,0.70)" : "rgba(255,255,255,0.12)",
+            background: noActive
+              ? "linear-gradient(180deg, rgba(255,7,58,0.22), rgba(255,7,58,0.12))"
+              : "rgba(255,255,255,0.04)",
+            color: noActive ? "rgba(255,7,58,0.95)" : "rgba(255,255,255,0.86)",
+            boxShadow: noActive ? "0 0 24px rgba(255,7,58,0.18)" : "none",
+            transform: noActive ? "translateY(-1px)" : "none",
+          }}
+        >
+          NO
+        </button>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────────
+  const pageTitle = `Picks`;
+  const roundLabel =
+    roundNumber === null
+      ? ""
+      : roundNumber === 0
+      ? "Opening Round"
+      : `Round ${roundNumber}`;
+
+  const topLockText =
+    nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
+
+  const myVsLeaderPct = useMemo(() => {
+    const denom = Math.max(1, Math.max(myCurrentStreak, leaderStreak));
+    const mine = (myCurrentStreak / denom) * 100;
+    const lead = (leaderStreak / denom) * 100;
+    return { mine, lead };
+  }, [myCurrentStreak, leaderStreak]);
+
+  const showLockedBanner = useMemo(() => {
+    // If all games are in the past
+    const anyFuture = games.some((g) => new Date(g.startTime).getTime() > nowMs);
+    return !anyFuture && games.length > 0;
+  }, [games, nowMs]);
+
+  return (
+    <div
+      className="min-h-screen text-white"
+      style={{ backgroundColor: COLORS.bg }}
+    >
+      {confettiOn && (
+        <Confetti
+          recycle={false}
+          numberOfPieces={220}
+          gravity={0.22}
+        />
+      )}
+
+      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl sm:text-4xl font-black">{pageTitle}</h1>
+              {roundLabel ? (
+                <span
+                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold border"
+                  style={{
+                    borderColor: "rgba(0,229,255,0.35)",
+                    background: "rgba(0,229,255,0.10)",
+                    color: "rgba(0,229,255,0.95)",
+                  }}
+                >
+                  {roundLabel}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-1 text-sm text-white/65">
+              Clean sweep per match. One wrong in a match = streak nuked.
+            </p>
+          </div>
+
+          <div className="hidden sm:flex items-center gap-2">
+            <Link
+              href="/how-to-play"
+              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-[12px] font-bold border"
+              style={{
+                borderColor: "rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.04)",
+              }}
+            >
+              How to play STREAKr
+            </Link>
+          </div>
+        </div>
+
+        {/* Persistent Streak Widget */}
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
+          {/* Streak vs leader */}
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
+              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[11px] uppercase tracking-widest text-white/55">
+                  Your streak
+                </p>
+                <p
+                  className="text-4xl font-black mt-1"
+                  style={{ color: COLORS.orange }}
+                >
+                  {myCurrentStreak}
+                </p>
               </div>
 
-              {/* Streak vs Leader + bars */}
+              <div className="text-right">
+                <p className="text-[11px] uppercase tracking-widest text-white/55">
+                  Leader
+                </p>
+                <p className="text-3xl font-black mt-1" style={{ color: COLORS.cyan }}>
+                  {leaderStreak}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
               <div
-                className="rounded-2xl border p-3"
+                className="h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${myVsLeaderPct.mine}%`,
+                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,61,0,0.30))`,
+                  }}
+                />
+              </div>
+
+              <div
+                className="h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${myVsLeaderPct.lead}%`,
+                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.25))`,
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={shareStreak}
+                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
                 style={{
-                  borderColor: "rgba(0,229,255,0.22)",
-                  background: `linear-gradient(135deg, rgba(0,229,255,0.08) 0%, rgba(255,61,0,0.06) 55%, rgba(118,255,3,0.05) 100%)`,
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.05)",
                 }}
               >
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                  <div className="md:col-span-4">
-                    <div className="flex items-end justify-between">
-                      <div>
-                        <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                          Your streak
-                        </div>
-                        <div className="text-3xl font-extrabold" style={{ color: COLORS.orange }}>
-                          {user ? current : "—"}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                          Leader
-                        </div>
-                        <div className="text-2xl font-extrabold" style={{ color: COLORS.cyan }}>
-                          {leader}
-                        </div>
-                      </div>
-                    </div>
+                Share my streak
+              </button>
 
-                    <div className="mt-2 space-y-2">
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                        <div
-                          className="h-full"
-                          style={{
-                            width: curW,
-                            background: `linear-gradient(90deg, ${COLORS.orange} 0%, rgba(255,61,0,0.55) 100%)`,
-                            boxShadow: "0 0 18px rgba(255,61,0,0.45)",
-                          }}
-                        />
-                      </div>
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                        <div
-                          className="h-full"
-                          style={{
-                            width: leadW,
-                            background: `linear-gradient(90deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.45) 100%)`,
-                            boxShadow: "0 0 18px rgba(0,229,255,0.35)",
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    {(streakLoading || streakError) && (
-                      <div className="mt-2 text-[11px]" style={{ color: streakError ? COLORS.red : COLORS.textDim2 }}>
-                        {streakError ? streakError : "Loading streak…"}
-                      </div>
-                    )}
-
-                    {shareStatus && (
-                      <div className="mt-2 text-[11px]" style={{ color: COLORS.cyan }}>
-                        {shareStatus}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Stats Cards */}
-                  <div className="md:col-span-8 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
-                      <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                        Picks made
-                      </div>
-                      <div className="mt-1 flex items-end justify-between">
-                        <div className="text-2xl font-extrabold" style={{ color: "white" }}>
-                          {picksLine}
-                        </div>
-                        <div className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                          {hotCommentCount > 0 ? (
-                            <span className="inline-flex items-center gap-1">
-                              <span className="pulse-hot inline-flex h-2 w-2 rounded-full" style={{ background: COLORS.orange }} />
-                              {hotCommentCount} hot
-                            </span>
-                          ) : (
-                            "Keep picking"
-                          )}
-                        </div>
-                      </div>
-                      <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${totalQuestions ? (picksMade / totalQuestions) * 100 : 0}%`,
-                            background: `linear-gradient(90deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.25) 100%)`,
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
-                      <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                        Accuracy
-                      </div>
-                      <div className="mt-1 flex items-end justify-between">
-                        <div className="text-2xl font-extrabold" style={{ color: accuracy !== null && accuracy >= 60 ? COLORS.green : "white" }}>
-                          {accuracyLine}
-                        </div>
-                        <div className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                          Settled only
-                        </div>
-                      </div>
-                      <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${accuracy === null ? 0 : clamp(accuracy, 0, 100)}%`,
-                            background: `linear-gradient(90deg, ${COLORS.green} 0%, rgba(118,255,3,0.20) 100%)`,
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border p-3" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
-                      <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                        Next lock
-                      </div>
-                      <div className="mt-1 flex items-end justify-between">
-                        <div className="text-2xl font-extrabold" style={{ color: nextLock !== null ? COLORS.orange : "white" }}>
-                          {nextLockLine}
-                        </div>
-                        <div className="text-[11px]" style={{ color: COLORS.textDim2 }}>
-                          Countdown
-                        </div>
-                      </div>
-                      <div className="mt-2 text-[11px]" style={{ color: COLORS.textDim }}>
-                        {sponsorExists ? (
-                          <span className="inline-flex items-center gap-2">
-                            <span
-                              className="inline-flex px-2 py-0.5 rounded-full font-extrabold"
-                              style={{
-                                background: "rgba(255,61,0,0.15)",
-                                border: `1px solid rgba(255,61,0,0.45)`,
-                                color: COLORS.orange,
-                              }}
-                            >
-                              Sponsor Q live
-                            </span>
-                            Nail it.
-                          </span>
-                        ) : (
-                          "Don’t get caught napping."
-                        )}
-                      </div>
-                    </div>
-                  </div>
+              <div className="text-right text-[11px] text-white/55">
+                <div>Current</div>
+                <div className="font-bold text-white/80">
+                  {myCurrentStreak > leaderStreak
+                    ? "You’re leading"
+                    : myCurrentStreak === leaderStreak
+                    ? "Tied"
+                    : `Need ${leaderStreak - myCurrentStreak} to catch`}
                 </div>
               </div>
+            </div>
+          </div>
 
-              {error && <div className="text-sm" style={{ color: COLORS.red }}>{error}</div>}
+          {/* Dashboard stats */}
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
+              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+            }}
+          >
+            <p className="text-[11px] uppercase tracking-widest text-white/55">
+              Dashboard
+            </p>
+
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              <div className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
+                <p className="text-xl font-black mt-1 text-white">
+                  {picksMade}/{totalPickable}
+                </p>
+              </div>
+
+              <div className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
+                <p className="text-xl font-black mt-1" style={{ color: COLORS.green }}>
+                  {accuracyPct}%
+                </p>
+              </div>
+
+              <div className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
+                <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
+                  {topLockText}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 text-[11px] text-white/55">
+              {user ? (
+                <span>
+                  You’re live. Keep stacking clean sweeps.
+                </span>
+              ) : (
+                <span>
+                  Log in to save picks + appear on leaderboards.
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Quick links / info */}
+          <div
+            className="rounded-2xl border p-4"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
+              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+            }}
+          >
+            <p className="text-[11px] uppercase tracking-widest text-white/55">
+              Quick
+            </p>
+
+            <div className="mt-3 flex flex-col gap-2">
+              <Link
+                href="/leaderboards"
+                className="rounded-xl border px-4 py-3 text-[12px] font-black transition hover:translate-y-[-1px] active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(0,229,255,0.28)",
+                  background: "rgba(0,229,255,0.08)",
+                  color: "rgba(0,229,255,0.95)",
+                }}
+              >
+                View Leaderboards →
+              </Link>
+
+              <Link
+                href="/how-to-play"
+                className="rounded-xl border px-4 py-3 text-[12px] font-black transition hover:translate-y-[-1px] active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.88)",
+                }}
+              >
+                How it works →
+              </Link>
+
+              <div
+                className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
+                style={{
+                  borderColor: "rgba(255,61,0,0.30)",
+                  background: "rgba(255,61,0,0.08)",
+                }}
+              >
+                <span className="font-bold" style={{ color: COLORS.orange }}>
+                  Ties at the top?
+                </span>{" "}
+                Prizes are split between all leaders.
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-          {/* Filters */}
-          <div className="flex flex-wrap gap-2 mb-5">
-            {(["all", "open", "pending", "final", "void"] as const).map((f) => {
-              const active = activeFilter === f;
+        {showLockedBanner && (
+          <div
+            className="mt-4 rounded-2xl border px-4 py-3 text-sm"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            All games have started — picks are locked.
+          </div>
+        )}
+
+        {err ? (
+          <div className="mt-4 text-sm" style={{ color: COLORS.red }}>
+            {err} Try refreshing.
+          </div>
+        ) : null}
+
+        {/* Games */}
+        <div className="mt-5 flex flex-col gap-4">
+          {loading ? (
+            <div className="rounded-2xl border p-4 animate-pulse"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div className="h-4 w-44 rounded bg-white/10" />
+              <div className="mt-3 h-3 w-80 rounded bg-white/10" />
+              <div className="mt-5 h-24 rounded bg-white/5" />
+            </div>
+          ) : games.length === 0 ? (
+            <div className="rounded-2xl border p-4 text-sm text-white/70"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              No games found.
+            </div>
+          ) : (
+            games.map((g) => {
+              const lockMs = new Date(g.startTime).getTime() - nowMs;
+              const isLocked = lockMs <= 0;
+
+              // picks for this game
+              const gamePicked = g.questions.reduce((acc, q) => {
+                const p = localPicks[q.id] ?? q.userPick;
+                return acc + (p === "yes" || p === "no" ? 1 : 0);
+              }, 0);
+
+              const gameTotal = g.questions.length;
+
+              const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
+
               return (
-                <button
-                  key={f}
-                  onClick={() => setActiveFilter(f === "all" ? "all" : f)}
-                  className="rounded-full px-4 py-2 text-xs font-extrabold tracking-wide border transition"
+                <div
+                  key={g.id}
+                  className="rounded-2xl border overflow-hidden"
+                  // ✅ per your request: game name WHITE, block background ORANGE energy
                   style={{
-                    borderColor: active ? "rgba(0,229,255,0.55)" : COLORS.border,
-                    background: active ? "rgba(0,229,255,0.10)" : "rgba(255,255,255,0.03)",
-                    color: active ? COLORS.cyan : "rgba(255,255,255,0.78)",
-                    boxShadow: active ? "0 0 18px rgba(0,229,255,0.15)" : "none",
+                    borderColor: "rgba(255,61,0,0.45)",
+                    background: `
+                      linear-gradient(
+                        135deg,
+                        rgba(255,61,0,0.22) 0%,
+                        rgba(255,61,0,0.14) 40%,
+                        rgba(13,17,23,0.85) 100%
+                      )
+                    `,
+                    boxShadow: `
+                      0 0 35px rgba(255,61,0,0.25),
+                      inset 0 0 0 1px rgba(255,61,0,0.35)
+                    `,
                   }}
                 >
-                  {f.toUpperCase()}
-                </button>
-              );
-            })}
-          </div>
-
-          {loading && (
-            <div className="rounded-2xl border p-6" style={{ borderColor: COLORS.border, background: COLORS.panel }}>
-              <div className="text-sm" style={{ color: COLORS.textDim }}>Loading games…</div>
-            </div>
-          )}
-
-          {!loading && games.length === 0 && (
-            <div className="rounded-2xl border p-6" style={{ borderColor: COLORS.border, background: COLORS.panel }}>
-              <div className="text-sm" style={{ color: COLORS.textDim }}>No questions in this view yet.</div>
-            </div>
-          )}
-
-          {!loading && games.length > 0 && (
-            <div className="space-y-4">
-              {games.map((g) => {
-                const meta = perGameMeta[g.gameId];
-                const { date, time } = formatAedt(g.startTime);
-                const locked = meta?.locked ?? false;
-                const picked = meta?.picked ?? 0;
-                const total = meta?.total ?? g.rows.length;
-                const progress = total ? (picked / total) * 100 : 0;
-
-                const isLive = meta?.state === "live" && !locked;
-                const countdownLabel = meta?.countdownLabel ?? "--";
-
-                return (
-                  <div
-                    key={g.gameId}
-                    className="rounded-3xl border overflow-hidden"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.10)",
-                      background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-                      boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
-                    }}
-                  >
-                    {/* Game header */}
-                    <div className="p-4 sm:p-5 border-b" style={{ borderColor: COLORS.border }}>
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            {/* ✅ CHANGE 1: make game title orange */}
-                            <div
-                              className="text-lg sm:text-xl font-extrabold truncate"
-                              style={{ color: "#FFFFFF" }}
-                            >
-                              {g.match}
-                            </div>
-
-                            {isLive && (
-                              <span
-                                className="pulse-live inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                                style={{
-                                  background: "rgba(0,229,255,0.10)",
-                                  borderColor: "rgba(0,229,255,0.55)",
-                                  color: COLORS.cyan,
-                                }}
-                              >
-                                <span className="inline-flex h-2 w-2 rounded-full" style={{ background: COLORS.cyan }} />
-                                LIVE
-                              </span>
-                            )}
-
-                            {locked && (
-                              <span
-                                className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                                style={{
-                                  background: "rgba(255,7,58,0.08)",
-                                  borderColor: "rgba(255,7,58,0.45)",
-                                  color: COLORS.red,
-                                }}
-                              >
-                                🔒 LOCKED
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-1 text-[12px]" style={{ color: COLORS.textDim }}>
-                            {g.venue} • {date} {time} AEDT
-                          </div>
-
-                          <div className="mt-3 flex items-center gap-2 flex-wrap">
-                            <span
-                              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                              style={{
-                                background: "rgba(255,255,255,0.04)",
-                                borderColor: COLORS.border,
-                                color: "rgba(255,255,255,0.85)",
-                              }}
-                            >
-                              Picks: {picked}/{total}
-                            </span>
-
-                            <span
-                              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                              style={{
-                                background: isLive ? "rgba(0,229,255,0.08)" : "rgba(255,61,0,0.08)",
-                                borderColor: isLive ? "rgba(0,229,255,0.30)" : "rgba(255,61,0,0.30)",
-                                color: isLive ? COLORS.cyan : COLORS.orange,
-                              }}
-                            >
-                              {locked ? "Locked" : isLive ? "In play" : `Locks in ${countdownLabel}`}
-                            </span>
-                          </div>
-
-                          <div className="mt-3">
-                            <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                              <div
-                                className="h-full"
-                                style={{
-                                  width: `${progress}%`,
-                                  background: `linear-gradient(90deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.12) 100%)`,
-                                }}
-                              />
-                            </div>
-                          </div>
+                  {/* Game header */}
+                  <div className="px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div
+                          className="text-lg sm:text-xl font-extrabold truncate"
+                          style={{ color: COLORS.white }}
+                        >
+                          {g.match}
                         </div>
+                        <div className="mt-0.5 text-[12px] text-white/70 truncate">
+                          {g.venue} • {formatAedt(g.startTime)}
+                        </div>
+                      </div>
 
-                        <div className="flex sm:flex-col items-start sm:items-end gap-2">
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex items-center gap-2">
                           <span
-                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
+                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                             style={{
-                              background: "rgba(255,61,0,0.10)",
-                              borderColor: "rgba(255,61,0,0.35)",
-                              color: COLORS.orange,
+                              borderColor: "rgba(255,255,255,0.12)",
+                              background: "rgba(255,255,255,0.05)",
+                              color: "rgba(255,255,255,0.88)",
                             }}
                           >
-                            {g.sport}
+                            Picks: {gamePicked}/{gameTotal}
+                          </span>
+
+                          <span
+                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                            style={{
+                              borderColor: isLocked
+                                ? "rgba(255,255,255,0.14)"
+                                : "rgba(255,61,0,0.35)",
+                              background: isLocked
+                                ? "rgba(255,255,255,0.05)"
+                                : "rgba(255,61,0,0.10)",
+                              color: isLocked ? "rgba(255,255,255,0.75)" : "rgba(255,61,0,0.95)",
+                            }}
+                          >
+                            {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Questions list */}
-                    <div className="p-3 sm:p-4 space-y-3">
-                      {g.rows.map((r) => {
-                        const unlocked = isGameUnlocked(r.gameId);
-                        const open = r.status === "open";
-                        const selectable = unlocked && open;
+                    {/* Progress bar */}
+                    <div className="mt-3">
+                      <div
+                        className="h-2 rounded-full overflow-hidden"
+                        style={{ background: "rgba(255,255,255,0.08)" }}
+                      >
+                        <div
+                          className="h-full"
+                          style={{
+                            width: `${progressPct}%`,
+                            background: `linear-gradient(90deg, rgba(255,61,0,0.85), rgba(0,229,255,0.55))`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
 
-                        const pick = (pickHistory[r.id] ?? r.userPick) as any;
-                        const hasPicked = pick === "yes" || pick === "no";
+                  {/* Questions */}
+                  <div className="px-3 pb-3">
+                    <div className="flex flex-col gap-2">
+                      {g.questions.map((q) => {
+                        const pick = localPicks[q.id] ?? q.userPick;
+                        const picked = pick === "yes" || pick === "no";
 
-                        const badge = statusBadge(r.status);
-                        const senti = sentimentFor(r);
-
-                        const majorityLabel = senti.majority === "yes" ? "YES" : "NO";
-                        const crowdLine =
-                          !senti.hasPick
-                            ? `Majority is ${majorityLabel}`
-                            : senti.withCrowd
-                            ? "You’re WITH the crowd"
-                            : "You’re AGAINST the crowd";
-
-                        const crowdColor =
-                          !senti.hasPick ? "rgba(255,255,255,0.70)"
-                          : senti.withCrowd ? COLORS.green
-                          : COLORS.red;
-
-                        const hot = (r.commentCount ?? 0) >= 100;
+                        // Small “clean sweep indicator” per question:
+                        // If a question is FINAL and user is wrong, we show red edge.
+                        const finalWrong = (q.status === "final" && q.correctPick === false);
+                        const finalCorrect = (q.status === "final" && q.correctPick === true);
 
                         return (
                           <div
-                            key={r.id}
+                            key={q.id}
                             className="rounded-2xl border"
+                            // ✅ reduce height: tighter padding & spacing
                             style={{
-                              borderColor: COLORS.border,
-                              background: "rgba(0,0,0,0.18)",
+                              borderColor: finalWrong
+                                ? "rgba(255,7,58,0.55)"
+                                : finalCorrect
+                                ? "rgba(118,255,3,0.45)"
+                                : "rgba(255,255,255,0.10)",
+                              background: "rgba(13,17,23,0.78)",
+                              boxShadow: finalWrong
+                                ? "0 0 24px rgba(255,7,58,0.10)"
+                                : finalCorrect
+                                ? "0 0 24px rgba(118,255,3,0.08)"
+                                : "none",
                             }}
                           >
-                            {/* ✅ CHANGE 2: reduce height of each pick block (tighten padding) */}
-                            <div className="p-3 sm:p-3">
-                              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
+                            <div className="px-3 py-2 sm:px-3 sm:py-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  {renderStatusPill(q)}
+                                  <span className="text-[11px] font-black text-white/70 uppercase tracking-wide">
+                                    Q{q.quarter}
+                                  </span>
+                                  {q.isSponsorQuestion ? (
                                     <span
-                                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold border"
+                                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
                                       style={{
-                                        background: badge.bg,
-                                        borderColor: badge.br,
-                                        color: badge.tx,
+                                        borderColor: "rgba(255,61,0,0.35)",
+                                        background: "rgba(255,61,0,0.10)",
+                                        color: "rgba(255,61,0,0.95)",
                                       }}
                                     >
-                                      {badge.label}
+                                      Sponsored
                                     </span>
-
-                                    <span className="text-[11px] font-extrabold uppercase tracking-wide" style={{ color: "rgba(255,255,255,0.70)" }}>
-                                      {r.quarter === 0 ? "Match" : `Q${r.quarter}`}
-                                    </span>
-
-                                    {r.isSponsorQuestion && (
-                                      <span
-                                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-extrabold border"
-                                        style={{
-                                          background: "rgba(255,61,0,0.12)",
-                                          borderColor: "rgba(255,61,0,0.55)",
-                                          color: COLORS.orange,
-                                        }}
-                                      >
-                                        Sponsor
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="mt-1.5 text-sm sm:text-[14px] font-semibold leading-snug">
-                                    {r.question}
-                                  </div>
-
-                                  {/* Crowd sentiment bars (tight) */}
-                                  <div className="mt-2.5">
-                                    <div className="flex items-center justify-between text-[11px] font-semibold">
-                                      <span style={{ color: COLORS.textDim }}>Crowd</span>
-                                      <span style={{ color: crowdColor }}>{crowdLine}</span>
-                                    </div>
-
-                                    <div
-                                      className="mt-1 h-2.5 rounded-full overflow-hidden border"
-                                      style={{
-                                        background: "rgba(255,255,255,0.06)",
-                                        borderColor: "rgba(255,255,255,0.10)",
-                                      }}
-                                    >
-                                      <div className="h-full flex">
-                                        <div
-                                          style={{
-                                            width: `${senti.yes}%`,
-                                            background: `linear-gradient(90deg, ${COLORS.green} 0%, rgba(118,255,3,0.25) 100%)`,
-                                          }}
-                                        />
-                                        <div
-                                          style={{
-                                            width: `${senti.no}%`,
-                                            background: `linear-gradient(90deg, ${COLORS.red} 0%, rgba(255,7,58,0.20) 100%)`,
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-
-                                    <div className="mt-0.5 flex items-center justify-between text-[10px]" style={{ color: COLORS.textDim2 }}>
-                                      <span>YES {Math.round(senti.yes)}%</span>
-                                      <span>NO {Math.round(senti.no)}%</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-2 flex items-center gap-3 flex-wrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => openComments(r)}
-                                      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-extrabold border transition ${
-                                        hot ? "pulse-hot" : ""
-                                      }`}
-                                      style={{
-                                        borderColor: hot ? "rgba(255,61,0,0.55)" : "rgba(0,229,255,0.25)",
-                                        background: hot ? "rgba(255,61,0,0.10)" : "rgba(0,229,255,0.06)",
-                                        color: hot ? COLORS.orange : COLORS.cyan,
-                                      }}
-                                    >
-                                      💬 {r.commentCount ?? 0}
-                                      {hot && <span className="ml-1">🔥</span>}
-                                    </button>
-
-                                    {!selectable && (
-                                      <span
-                                        className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-extrabold border"
-                                        style={{
-                                          borderColor: "rgba(255,255,255,0.12)",
-                                          background: "rgba(255,255,255,0.04)",
-                                          color: "rgba(255,255,255,0.65)",
-                                        }}
-                                      >
-                                        {unlocked ? "Not open" : "Picks locked"}
-                                      </span>
-                                    )}
-                                  </div>
+                                  ) : null}
                                 </div>
 
-                                <div className="flex flex-col items-stretch md:items-end gap-1.5">
-                                  <div className="flex items-center gap-2">
-                                    <button
-                                      type="button"
-                                      onClick={() => handlePick(r, "yes")}
-                                      disabled={!selectable}
-                                      className={[
-                                        "rounded-2xl px-4 py-2.5 text-sm font-extrabold border transition transform",
-                                        "active:scale-[0.98]",
-                                        pick === "yes" ? "scale-[1.03]" : "",
-                                      ].join(" ")}
-                                      style={{
-                                        minWidth: 100,
-                                        borderColor: pick === "yes" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
-                                        background: pick === "yes"
-                                          ? `linear-gradient(135deg, ${COLORS.cyan} 0%, rgba(0,229,255,0.35) 100%)`
-                                          : selectable
-                                          ? "rgba(255,255,255,0.04)"
-                                          : "rgba(255,255,255,0.02)",
-                                        color: pick === "yes" ? "#001015" : selectable ? "white" : "rgba(255,255,255,0.35)",
-                                        boxShadow: pick === "yes" ? "0 0 20px rgba(0,229,255,0.35)" : "none",
-                                        cursor: selectable ? "pointer" : "not-allowed",
-                                      }}
-                                    >
-                                      YES
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => handlePick(r, "no")}
-                                      disabled={!selectable}
-                                      className={[
-                                        "rounded-2xl px-4 py-2.5 text-sm font-extrabold border transition transform",
-                                        "active:scale-[0.98]",
-                                        pick === "no" ? "scale-[1.03]" : "",
-                                      ].join(" ")}
-                                      style={{
-                                        minWidth: 100,
-                                        borderColor: pick === "no" ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.10)",
-                                        background: pick === "no"
-                                          ? `linear-gradient(135deg, ${COLORS.orange} 0%, rgba(255,61,0,0.30) 100%)`
-                                          : selectable
-                                          ? "rgba(255,255,255,0.04)"
-                                          : "rgba(255,255,255,0.02)",
-                                        color: pick === "no" ? "#120500" : selectable ? "white" : "rgba(255,255,255,0.35)",
-                                        boxShadow: pick === "no" ? "0 0 20px rgba(255,61,0,0.30)" : "none",
-                                        cursor: selectable ? "pointer" : "not-allowed",
-                                      }}
-                                    >
-                                      NO
-                                    </button>
-
-                                    {hasPicked && selectable && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleClearPick(r)}
-                                        className="rounded-2xl px-3 py-2.5 text-sm font-extrabold border transition active:scale-[0.98]"
-                                        style={{
-                                          borderColor: "rgba(255,255,255,0.12)",
-                                          background: "rgba(255,255,255,0.04)",
-                                          color: "rgba(255,255,255,0.78)",
-                                        }}
-                                        title="Clear pick"
-                                        aria-label="Clear pick"
-                                      >
-                                        ✕
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  <div className="text-[10px] text-right" style={{ color: COLORS.textDim2 }}>
-                                    {senti.hasPick ? (
-                                      senti.withCrowd ? (
-                                        <span style={{ color: COLORS.green }}>WITH crowd 🟢</span>
-                                      ) : (
-                                        <span style={{ color: COLORS.red }}>AGAINST crowd 🔴</span>
-                                      )
-                                    ) : (
-                                      <span>Pick now.</span>
-                                    )}
-                                  </div>
-                                </div>
+                                {q.commentCount ? (
+                                  <span className="text-[11px] text-white/60 font-semibold">
+                                    💬 {q.commentCount}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-white/40"> </span>
+                                )}
                               </div>
+
+                              <div className="mt-1 text-[13px] font-semibold leading-tight text-white/90">
+                                {q.question}
+                              </div>
+
+                              {renderSentiment(q)}
+
+                              {renderPickButtons(q, isLocked || q.status === "pending")}
                             </div>
                           </div>
                         );
                       })}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* Auth modal */}
-        {showAuthModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
-            <div
-              className="w-full max-w-sm rounded-3xl border p-6"
-              style={{
-                background: COLORS.panel2,
-                borderColor: "rgba(0,229,255,0.22)",
-                boxShadow: "0 0 40px rgba(0,229,255,0.12)",
-              }}
-            >
-              <div className="flex items-start justify-between mb-3">
-                <h2 className="text-lg font-extrabold">Log in to play</h2>
-                <button type="button" onClick={() => setShowAuthModal(false)} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
-                  ✕
-                </button>
-              </div>
-              <p className="text-sm mb-4" style={{ color: COLORS.textDim }}>
-                You need a free STREAKr account to make picks, build your streak and hit the leaderboard.
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-3">
-                <Link
-                  href="/auth?mode=login&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold"
-                  style={{ background: COLORS.orange, color: "black", boxShadow: "0 0 24px rgba(255,61,0,0.18)" }}
-                  onClick={() => setShowAuthModal(false)}
-                >
-                  Login
-                </Link>
-                <Link
-                  href="/auth?mode=signup&returnTo=/picks"
-                  className="flex-1 inline-flex items-center justify-center rounded-full px-4 py-2 text-sm font-extrabold border"
-                  style={{ borderColor: "rgba(0,229,255,0.35)", color: COLORS.cyan, background: "rgba(0,229,255,0.06)" }}
-                  onClick={() => setShowAuthModal(false)}
-                >
-                  Sign up
-                </Link>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Comments drawer */}
-        {commentsOpenFor && (
-          <div className="fixed inset-0 z-40 bg-black/70 flex justify-end">
-            <div className="w-full max-w-md h-full p-6 flex flex-col border-l" style={{ background: COLORS.panel2, borderColor: COLORS.border }}>
-              <div className="flex items-start justify-between mb-4">
-                <div className="min-w-0">
-                  <div className="text-lg font-extrabold truncate" style={{ color: "white" }}>
-                    Comments
-                  </div>
-                  <div className="text-sm mt-1" style={{ color: COLORS.textDim }}>
-                    {commentsOpenFor.question}
-                  </div>
-                </div>
-                <button type="button" onClick={closeComments} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
-                  ✕
-                </button>
-              </div>
-
-              <div className="mb-4">
-                <textarea
-                  value={commentText}
-                  onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setCommentText(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-2xl px-3 py-2 text-sm border focus:outline-none"
-                  style={{ background: COLORS.panel, borderColor: "rgba(0,229,255,0.18)", color: "white" }}
-                  placeholder="Talk your talk…"
-                />
-                {commentsError && <p className="text-xs mt-2" style={{ color: COLORS.red }}>{commentsError}</p>}
-                <div className="flex justify-end mt-2">
-                  <button
-                    type="button"
-                    onClick={submitComment}
-                    disabled={submittingComment || !commentText.trim()}
-                    className="rounded-full px-4 py-2 text-sm font-extrabold border transition"
-                    style={{
-                      background: !commentText.trim() || submittingComment ? "rgba(255,255,255,0.06)" : COLORS.cyan,
-                      borderColor: !commentText.trim() || submittingComment ? COLORS.border : "rgba(0,229,255,0.55)",
-                      color: !commentText.trim() || submittingComment ? "rgba(255,255,255,0.45)" : "#001015",
-                      cursor: !commentText.trim() || submittingComment ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {submittingComment ? "Posting…" : "Post"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto">
-                {commentsLoading ? (
-                  <div className="text-sm" style={{ color: COLORS.textDim }}>Loading…</div>
-                ) : comments.length === 0 ? (
-                  <div className="text-sm" style={{ color: COLORS.textDim }}>No comments yet. Be the first villain.</div>
-                ) : (
-                  <ul className="space-y-3">
-                    {comments.map((c) => (
-                      <li key={c.id} className="rounded-2xl border p-3" style={{ borderColor: COLORS.border, background: "rgba(255,255,255,0.03)" }}>
-                        <div className="flex items-center justify-between gap-2 mb-1">
-                          <span className="text-sm font-extrabold" style={{ color: COLORS.cyan }}>
-                            {c.displayName || "User"}
-                          </span>
-                          {c.createdAt && <span className="text-[11px]" style={{ color: COLORS.textDim2 }}>{c.createdAt}</span>}
-                        </div>
-                        <div className="text-sm" style={{ color: "rgba(255,255,255,0.86)" }}>
-                          {c.body}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* How to play modal */}
-        {showHowToModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4">
-            <div
-              className="w-full max-w-xl rounded-3xl border p-6"
-              style={{
-                background: COLORS.panel2,
-                borderColor: "rgba(0,229,255,0.22)",
-                boxShadow: "0 0 44px rgba(0,229,255,0.12)",
-              }}
-            >
-              <div className="flex items-start justify-between gap-3 mb-4">
-                <div>
-                  <div className="text-[10px] uppercase tracking-[0.22em]" style={{ color: COLORS.textDim2 }}>
-                    Quick rules
-                  </div>
-                  <h2 className="text-xl font-extrabold">How to play Picks</h2>
-                </div>
-                <button type="button" onClick={closeHowTo} className="text-sm font-extrabold" style={{ color: COLORS.textDim }}>
-                  ✕
-                </button>
-              </div>
-
-              <ul className="space-y-2 text-sm" style={{ color: COLORS.textDim }}>
-                <li><span style={{ color: COLORS.cyan, fontWeight: 800 }}>•</span> Pick YES/NO on any questions you like.</li>
-                <li><span style={{ color: COLORS.cyan, fontWeight: 800 }}>•</span> Your streak is <span style={{ color: "white", fontWeight: 800 }}>per match clean sweep</span>: one wrong in that match resets to 0 at match end.</li>
-                <li><span style={{ color: COLORS.cyan, fontWeight: 800 }}>•</span> Void questions don’t count.</li>
-                <li><span style={{ color: COLORS.cyan, fontWeight: 800 }}>•</span> Matches lock when they start (or when admin locks them).</li>
-              </ul>
-
-              <div className="mt-5 flex justify-end">
-                <button type="button" onClick={closeHowTo} className="rounded-full px-5 py-2 text-sm font-extrabold" style={{ background: COLORS.orange, color: "black" }}>
-                  Got it
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Footer note */}
+        <div className="mt-8 pb-8 text-center text-[11px] text-white/45">
+          <span className="font-bold" style={{ color: COLORS.orange }}>
+            STREAKr
+          </span>{" "}
+          — Back yourself. One slip and it’s back to zero.
+        </div>
       </div>
-    </>
+    </div>
   );
 }
