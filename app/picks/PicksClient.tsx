@@ -23,7 +23,6 @@ import {
   orderBy,
   limit,
 } from "firebase/firestore";
-import { useSearchParams } from "next/navigation";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -31,7 +30,7 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: any; // API may send "Open"/"Final" etc
+  status: QuestionStatus;
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
@@ -93,25 +92,6 @@ type GameLocksResponse = {
 
 const PICK_HISTORY_KEY = "streakr_pick_history_v2";
 const HOW_TO_PLAY_KEY = "streakr_picks_seenHowTo_v1";
-
-// ✅ from /app/play/afl/page.tsx
-type PreviewFocusPayload = {
-  sport: "AFL";
-  questionId: string;
-  intendedPick: "yes" | "no";
-  createdAt: number;
-};
-const PREVIEW_FOCUS_KEY = "streakr_preview_focus_v1";
-
-// ----- status normaliser -----
-function normaliseStatus(val: any): QuestionStatus {
-  const s = String(val ?? "").toLowerCase().trim();
-  if (s === "open") return "open";
-  if (s === "final") return "final";
-  if (s === "pending") return "pending";
-  if (s === "void") return "void";
-  return "open";
-}
 
 // ----- outcome normaliser -----
 const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
@@ -193,7 +173,8 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
   if (s.includes("north melbourne") || s.includes("kangaroos"))
     return "north-melbourne";
-  if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
+  if (s.includes("port adelaide") || s.includes("power"))
+    return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
@@ -223,15 +204,12 @@ function parseAflMatchTeams(match: string) {
 
 export default function PicksClient() {
   const { user } = useAuth();
-  const searchParams = useSearchParams();
-
-  // Keep it flexible, but default to AFL
-  const sportParamRaw = searchParams?.get("sport") || "AFL";
-  const sportParam = String(sportParamRaw || "AFL").toUpperCase();
 
   const [rows, setRows] = useState<QuestionRow[]>([]);
   const [filteredRows, setFilteredRows] = useState<QuestionRow[]>([]);
-  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">("all");
+  const [activeFilter, setActiveFilter] = useState<QuestionStatus | "all">(
+    "all"
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
@@ -241,7 +219,9 @@ export default function PicksClient() {
   // game locks: which matches are open for picks (AFL only)
   const [gameLocks, setGameLocks] = useState<Record<string, boolean>>({});
 
-  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(null);
+  const [commentsOpenFor, setCommentsOpenFor] = useState<QuestionRow | null>(
+    null
+  );
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState("");
@@ -251,34 +231,48 @@ export default function PicksClient() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showHowToModal, setShowHowToModal] = useState(false);
 
-  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(null);
-  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(null);
+  const [userCurrentStreak, setUserCurrentStreak] = useState<number | null>(
+    null
+  );
+  const [leaderCurrentStreak, setLeaderCurrentStreak] = useState<number | null>(
+    null
+  );
   const [streakLoading, setStreakLoading] = useState(false);
   const [streakError, setStreakError] = useState("");
 
   const [shareStatus, setShareStatus] = useState<string>("");
 
   const [showConfetti, setShowConfetti] = useState(false);
-  const [streakLevelModal, setStreakLevelModal] = useState<(3 | 5 | 10 | 15 | 20) | null>(null);
+  const [streakLevelModal, setStreakLevelModal] = useState<
+    (3 | 5 | 10 | 15 | 20) | null
+  >(null);
   const [windowSize, setWindowSize] = useState({ width: 0, height: 0 });
-  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>({});
+  const [unlockedBadges, setUnlockedBadges] = useState<Record<string, boolean>>(
+    {}
+  );
   const [animatedCurrentStreak, setAnimatedCurrentStreak] = useState<number>(0);
   const [streakResetFx, setStreakResetFx] = useState(false);
   const prevStreakRef = useRef<number>(0);
   const streakAnimRef = useRef<number | null>(null);
 
-  // ✅ Preview focus + highlight
-  const [previewFocus, setPreviewFocus] = useState<PreviewFocusPayload | null>(null);
-  const [highlightQuestionId, setHighlightQuestionId] = useState<string | null>(null);
-  const previewAppliedRef = useRef(false);
+  // -----------------------------------------------------------------------------
+  // VISUAL SYSTEM (prep for settlement animations / leaderboard glow / insurance UI)
+  // -----------------------------------------------------------------------------
+  const neonYesBase =
+    "bg-[rgba(118,255,3,0.15)] border border-[rgba(118,255,3,0.6)] text-[#76FF03] shadow-[0_0_16px_rgba(118,255,3,0.85)] hover:bg-[rgba(118,255,3,0.25)] hover:shadow-[0_0_26px_rgba(118,255,3,1)] transition-all";
+  const neonNoBase =
+    "bg-[rgba(255,7,58,0.15)] border border-[rgba(255,7,58,0.65)] text-[#FF073A] shadow-[0_0_18px_rgba(255,7,58,0.9)] hover:bg-[rgba(255,7,58,0.25)] hover:shadow-[0_0_30px_rgba(255,7,58,1)] transition-all";
+  const neonSelected =
+    "bg-[#00E5FF] text-black border-2 border-white shadow-[0_0_28px_rgba(0,229,255,1)] scale-105";
 
-  // row refs for scroll
-  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const setRowRef = useCallback((id: string) => {
-    return (el: HTMLDivElement | null) => {
-      rowRefs.current[id] = el;
-    };
-  }, []);
+  const chipWin =
+    "bg-[rgba(118,255,3,0.15)] border border-[rgba(118,255,3,0.6)] text-[#76FF03] shadow-[0_0_18px_rgba(118,255,3,0.9)] streakr-neon-pulse";
+  const chipLoss =
+    "bg-[rgba(255,7,58,0.18)] border border-[rgba(255,7,58,0.75)] text-[#FF073A] shadow-[0_0_22px_rgba(255,7,58,1)]";
+  const chipVoid =
+    "bg-[rgba(255,234,0,0.12)] border border-[rgba(255,234,0,0.5)] text-[#FFEA00]";
+  const chipNeutral =
+    "bg-slate-800/60 border-slate-500/60 text-slate-100";
 
   // window size for Confetti
   useEffect(() => {
@@ -312,15 +306,14 @@ export default function PicksClient() {
 
   const flattenApi = useCallback(
     (data: PicksApiResponse, history: PickHistory): QuestionRow[] =>
-      (data.games || []).flatMap((g: ApiGame) =>
-        (g.questions || []).map((q: ApiQuestion) => {
+      data.games.flatMap((g: ApiGame) =>
+        g.questions.map((q: ApiQuestion) => {
           const historyPick = history[q.id];
 
-          const status = normaliseStatus(q.status);
-
-          const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
+          const rawOutcome =
+            normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
           const correctOutcome: QuestionRow["correctOutcome"] =
-            status === "final" || status === "void" ? rawOutcome : null;
+            q.status === "final" || q.status === "void" ? rawOutcome : null;
 
           return {
             id: q.id,
@@ -330,46 +323,19 @@ export default function PicksClient() {
             startTime: g.startTime ?? q.startTime ?? "",
             quarter: q.quarter,
             question: q.question,
-            status,
+            status: q.status,
             userPick: q.userPick ?? historyPick,
             yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
             noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
-            sport: (q.sport ?? g.sport ?? sportParam ?? "AFL").toString(),
+            sport: (q.sport ?? g.sport ?? "AFL").toString(),
             commentCount: q.commentCount ?? 0,
             isSponsorQuestion: !!q.isSponsorQuestion,
             correctOutcome,
           };
         })
       ),
-    [sportParam]
+    []
   );
-
-  // Load preview focus payload from localStorage (set by AFL hub)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    try {
-      const raw = window.localStorage.getItem(PREVIEW_FOCUS_KEY);
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as PreviewFocusPayload;
-      if (!parsed?.questionId || !parsed?.intendedPick || !parsed?.createdAt) return;
-
-      // only accept recent (10 mins)
-      const ageMs = Date.now() - Number(parsed.createdAt);
-      if (ageMs < 0 || ageMs > 10 * 60 * 1000) {
-        window.localStorage.removeItem(PREVIEW_FOCUS_KEY);
-        return;
-      }
-
-      // sport gate (this page defaults AFL anyway)
-      if (String(parsed.sport || "").toUpperCase() !== "AFL") return;
-
-      setPreviewFocus(parsed);
-    } catch {
-      // ignore
-    }
-  }, []);
 
   const fetchPicks = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -378,8 +344,7 @@ export default function PicksClient() {
         setError("");
       }
       try {
-        const qs = sportParam ? `?sport=${encodeURIComponent(sportParam)}` : "";
-        const res = await fetch(`/api/picks${qs}`, { cache: "no-store" });
+        const res = await fetch("/api/picks", { cache: "no-store" });
         if (!res.ok) throw new Error("API error");
         const data: PicksApiResponse = await res.json();
 
@@ -387,7 +352,9 @@ export default function PicksClient() {
 
         const flat = flattenApi(data, pickHistory);
         setRows(flat);
-        setFilteredRows(activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter));
+        setFilteredRows(
+          activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter)
+        );
       } catch (e) {
         console.error(e);
         if (!opts?.silent) setError("Failed to load picks");
@@ -395,7 +362,7 @@ export default function PicksClient() {
         if (!opts?.silent) setLoading(false);
       }
     },
-    [pickHistory, activeFilter, flattenApi, sportParam]
+    [pickHistory, activeFilter, flattenApi]
   );
 
   // Load pick history from localStorage
@@ -476,10 +443,14 @@ export default function PicksClient() {
         });
 
         setRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
+          prev.map((r) =>
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
+          )
         );
         setFilteredRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
+          prev.map((r) =>
+            counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r
+          )
         );
       });
     });
@@ -493,8 +464,7 @@ export default function PicksClient() {
       if (!user) return;
       try {
         const idToken = await user.getIdToken();
-        const qs = sportParam ? `?sport=${encodeURIComponent(sportParam)}` : "";
-        const res = await fetch(`/api/user-picks${qs}`, {
+        const res = await fetch("/api/user-picks", {
           method: "GET",
           headers: { Authorization: `Bearer ${idToken}` },
         });
@@ -537,13 +507,11 @@ export default function PicksClient() {
     };
 
     loadServerPicks();
-  }, [user, sportParam]);
+  }, [user]);
 
   // Load game lock state for this round (AFL ONLY)
   useEffect(() => {
     if (roundNumber === null) return;
-    if (sportParam !== "AFL") return;
-
     const loadLocks = async () => {
       try {
         const res = await fetch(`/api/admin/game-lock?round=${roundNumber}`);
@@ -555,7 +523,7 @@ export default function PicksClient() {
       }
     };
     loadLocks();
-  }, [roundNumber, sportParam]);
+  }, [roundNumber]);
 
   // IMPORTANT:
   // If a gameId isn't present in gameLocks, default TRUE (open)
@@ -700,9 +668,9 @@ export default function PicksClient() {
   }, []);
 
   const handlePick = useCallback(
-    async (row: QuestionRow, pick: "yes" | "no", opts?: { silentAuthModal?: boolean }) => {
+    async (row: QuestionRow, pick: "yes" | "no") => {
       if (!user) {
-        if (!opts?.silentAuthModal) setShowAuthModal(true);
+        setShowAuthModal(true);
         return;
       }
 
@@ -710,7 +678,9 @@ export default function PicksClient() {
       if (row.status !== "open" || !isMatchUnlocked) return;
 
       setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
-      setFilteredRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r)));
+      setFilteredRows((prev) =>
+        prev.map((r) => (r.id === row.id ? { ...r, userPick: pick } : r))
+      );
 
       setPickHistory((prev) => {
         const next: PickHistory = { ...prev, [row.id]: pick };
@@ -730,14 +700,14 @@ export default function PicksClient() {
             questionId: row.id,
             outcome: pick,
             roundNumber,
-            sport: sportParam,
+            sport: "AFL",
           }),
         });
       } catch (e) {
         console.error("Pick save error:", e);
       }
     },
-    [user, roundNumber, persistPickHistory, isGameUnlocked, sportParam]
+    [user, roundNumber, persistPickHistory, isGameUnlocked]
   );
 
   const handleClearPick = useCallback(
@@ -771,70 +741,28 @@ export default function PicksClient() {
             action: "clear",
             outcome: null,
             roundNumber,
-            sport: sportParam,
+            sport: "AFL",
           }),
         });
       } catch (e) {
         console.error("Pick clear error:", e);
       }
     },
-    [user, roundNumber, persistPickHistory, isGameUnlocked, sportParam]
+    [user, roundNumber, persistPickHistory, isGameUnlocked]
   );
-
-  // ✅ Apply preview focus once rows exist:
-  // - scroll to the question
-  // - flash highlight
-  // - attempt to set intended pick (only if open + unlocked + user exists)
-  useEffect(() => {
-    if (!previewFocus) return;
-    if (previewAppliedRef.current) return;
-
-    const targetId = previewFocus.questionId;
-    if (!targetId) return;
-
-    const targetRow = rows.find((r) => r.id === targetId);
-    if (!targetRow) return;
-
-    previewAppliedRef.current = true;
-
-    // clear the key immediately so refresh doesn't re-run it forever
-    try {
-      if (typeof window !== "undefined") window.localStorage.removeItem(PREVIEW_FOCUS_KEY);
-    } catch {}
-
-    // scroll + highlight
-    setHighlightQuestionId(targetId);
-    window.setTimeout(() => {
-      const el = rowRefs.current[targetId];
-      if (el && typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }, 50);
-
-    // auto-pick (if possible)
-    const unlocked = isGameUnlocked(targetRow.gameId);
-    if (targetRow.status === "open" && unlocked && user) {
-      handlePick(targetRow, previewFocus.intendedPick, { silentAuthModal: true }).catch?.(() => {});
-    }
-
-    // remove highlight after a bit
-    window.setTimeout(() => {
-      setHighlightQuestionId((cur) => (cur === targetId ? null : cur));
-    }, 3500);
-  }, [previewFocus, rows, isGameUnlocked, user, handlePick]);
 
   const statusClasses = (status: QuestionStatus) => {
     switch (status) {
       case "open":
-        return "bg-green-600";
+        return "bg-[rgba(118,255,3,0.18)] text-[#76FF03] shadow-[0_0_12px_rgba(118,255,3,0.6)]";
       case "pending":
-        return "bg-yellow-500";
+        return "bg-[rgba(255,234,0,0.18)] text-[#FFEA00] streakr-pulse-soft";
       case "final":
-        return "bg-gray-600";
+        return "bg-[rgba(0,229,255,0.18)] text-[#00E5FF]";
       case "void":
-        return "bg-red-600";
+        return "bg-[rgba(245,0,87,0.18)] text-[#F50057]";
       default:
-        return "bg-gray-600";
+        return "bg-slate-700";
     }
   };
 
@@ -1053,6 +981,7 @@ export default function PicksClient() {
     return out;
   }, [rows, pickHistory]);
 
+  // ✅ STREAK JOURNEY THIS ROUND (under progress bars)
   const streakJourney = useMemo(() => {
     type Line =
       | { kind: "clean"; gameId: string; plus: number }
@@ -1219,25 +1148,40 @@ export default function PicksClient() {
               transform: translateX(0);
             }
           }
+          @keyframes streakrNeonPulse {
+            0% {
+              filter: drop-shadow(0 0 0 rgba(118, 255, 3, 0));
+              transform: translateZ(0);
+            }
+            55% {
+              filter: drop-shadow(0 0 18px rgba(118, 255, 3, 0.95));
+              transform: translateZ(0);
+            }
+            100% {
+              filter: drop-shadow(0 0 0 rgba(118, 255, 3, 0));
+              transform: translateZ(0);
+            }
+          }
+          @keyframes streakrPulseSoft {
+            0% {
+              opacity: 0.75;
+            }
+            50% {
+              opacity: 1;
+            }
+            100% {
+              opacity: 0.75;
+            }
+          }
+
           .streakr-reset-fx {
             animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
           }
-
-          @keyframes streakrPulseRing {
-            0% {
-              box-shadow: 0 0 0 0 rgba(255, 122, 0, 0.55);
-            }
-            65% {
-              box-shadow: 0 0 0 10px rgba(255, 122, 0, 0);
-            }
-            100% {
-              box-shadow: 0 0 0 0 rgba(255, 122, 0, 0);
-            }
+          .streakr-neon-pulse {
+            animation: streakrNeonPulse 1.05s ease-in-out infinite;
           }
-          .streakr-preview-focus {
-            border-color: rgba(255, 122, 0, 0.85) !important;
-            box-shadow: 0 0 0 1px rgba(255, 122, 0, 0.25), 0 0 22px rgba(255, 122, 0, 0.35) !important;
-            animation: streakrPulseRing 1.6s ease-out 0s 2;
+          .streakr-pulse-soft {
+            animation: streakrPulseSoft 1.1s ease-in-out infinite;
           }
         `}</style>
 
@@ -1274,6 +1218,21 @@ export default function PicksClient() {
               <p className="text-xs sm:text-sm text-white/80 max-w-md">
                 Your streak uses the <span className="font-semibold">Clean sweep rule</span> per match.
               </p>
+
+              {/* Prep for Free Kick Insurance (Job #4) */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] text-white/70">
+                  <span className="text-base">🛡️</span>
+                  Free Kick Insurance{" "}
+                  <span className="text-white/40">(coming soon)</span>
+                </span>
+
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-3 py-1 text-[11px] text-white/70">
+                  <span className="text-base">⚡</span>
+                  Settlement FX{" "}
+                  <span className="text-white/40">(coming next)</span>
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col items-end gap-2 text-xs sm:text-sm">
@@ -1282,7 +1241,7 @@ export default function PicksClient() {
                   <p className="text-[11px] text-white/60">Current</p>
                   <p
                     className={[
-                      "text-2xl sm:text-3xl font-extrabold text-orange-400 drop-shadow-[0_0_18px_rgba(248,113,22,0.85)]",
+                      "text-2xl sm:text-3xl font-extrabold text-[#00E5FF] drop-shadow-[0_0_26px_rgba(0,229,255,1)]",
                       streakResetFx ? "streakr-reset-fx" : "",
                     ].join(" ")}
                   >
@@ -1292,7 +1251,9 @@ export default function PicksClient() {
                 <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Leader</p>
-                  <p className="text-lg sm:text-xl font-bold text-sky-300">{leaderCurrentStreak ?? "-"}</p>
+                  <p className="text-lg sm:text-xl font-bold text-sky-300">
+                    {leaderCurrentStreak ?? "-"}
+                  </p>
                 </div>
               </div>
 
@@ -1310,11 +1271,13 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Current streak</span>
-                <span className="font-semibold text-orange-300">{user ? animatedCurrentStreak ?? 0 : 0}</span>
+                <span className="font-semibold text-[#00E5FF]">
+                  {user ? animatedCurrentStreak ?? 0 : 0}
+                </span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-orange-600"
+                  className="h-full bg-gradient-to-r from-[#00E5FF] via-sky-400 to-sky-500"
                   style={{ width: barWidth(userCurrentStreak) }}
                 />
               </div>
@@ -1359,14 +1322,14 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-emerald-500/10 border border-emerald-400/30 px-3 py-2"
+                        className="flex items-center justify-between rounded-xl bg-[rgba(118,255,3,0.08)] border border-[rgba(118,255,3,0.35)] px-3 py-2 shadow-[0_0_18px_rgba(118,255,3,0.35)]"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">✅</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-emerald-200 font-bold">Clean Sweep!</span>
+                          <span className="truncate text-[#76FF03] font-bold">Clean Sweep!</span>
                         </div>
-                        <span className="text-emerald-200 font-extrabold">(+{line.plus})</span>
+                        <span className="text-[#76FF03] font-extrabold">(+{line.plus})</span>
                       </div>
                     );
                   }
@@ -1375,14 +1338,14 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-red-500/10 border border-red-400/30 px-3 py-2"
+                        className="flex items-center justify-between rounded-xl bg-[rgba(255,7,58,0.08)] border border-[rgba(255,7,58,0.35)] px-3 py-2 shadow-[0_0_20px_rgba(255,7,58,0.38)]"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">💀</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-red-200 font-bold">Cooked</span>
+                          <span className="truncate text-[#FF073A] font-bold">Cooked</span>
                         </div>
-                        <span className="text-red-200 font-semibold text-xs sm:text-sm">
+                        <span className="text-[#FF073A] font-semibold text-xs sm:text-sm">
                           (Earned 0 • {line.picks} picks)
                         </span>
                       </div>
@@ -1393,14 +1356,16 @@ export default function PicksClient() {
                     return (
                       <div
                         key={line.gameId}
-                        className="flex items-center justify-between rounded-xl bg-amber-500/10 border border-amber-400/30 px-3 py-2"
+                        className="flex items-center justify-between rounded-xl bg-[rgba(255,234,0,0.06)] border border-[rgba(255,234,0,0.25)] px-3 py-2"
                       >
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="text-base">⏳</span>
                           <span className="font-semibold whitespace-nowrap">Game {gameNum}:</span>
-                          <span className="truncate text-amber-200 font-bold">In Progress</span>
+                          <span className="truncate text-[#FFEA00] font-bold">In Progress</span>
                         </div>
-                        <span className="text-amber-200 font-semibold text-xs sm:text-sm">({line.picks} picks)</span>
+                        <span className="text-[#FFEA00] font-semibold text-xs sm:text-sm">
+                          ({line.picks} picks)
+                        </span>
                       </div>
                     );
                   }
@@ -1463,7 +1428,9 @@ export default function PicksClient() {
               key={f}
               onClick={() => applyFilter(f === "all" ? "all" : f)}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${
-                activeFilter === f ? "bg-orange-500" : "bg-gray-700 hover:bg-gray-600"
+                activeFilter === f
+                  ? "bg-[#00E5FF] text-black shadow-[0_0_22px_rgba(0,229,255,0.85)]"
+                  : "bg-gray-800 hover:bg-gray-700 text-white border border-white/10"
               }`}
             >
               {f.toUpperCase()}
@@ -1495,7 +1462,10 @@ export default function PicksClient() {
               const isQuestionOpen = row.status === "open";
               const isSelectable = isMatchUnlocked && isQuestionOpen;
 
-              const effectivePick = (pickHistory[row.id] ?? row.userPick) as "yes" | "no" | undefined;
+              const effectivePick = (pickHistory[row.id] ?? row.userPick) as
+                | "yes"
+                | "no"
+                | undefined;
               const hasPicked = effectivePick === "yes" || effectivePick === "no";
 
               const yesPct = row.yesPercent ?? 0;
@@ -1511,34 +1481,35 @@ export default function PicksClient() {
 
               const gameScoreChip =
                 !gameScoreInfo || gameScoreInfo.kind === "no-picks" ? (
-                  <span className="inline-flex items-center rounded-full bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
+                  <span className="inline-flex items-center rounded-full bg-slate-900/60 px-4 py-1.5 text-xs font-semibold text-white/70 border border-white/10">
                     No picks
                   </span>
                 ) : gameScoreInfo.kind === "pending" ? (
-                  <span className="inline-flex items-center rounded-full bg-amber-500/20 px-4 py-1.5 text-xs font-extrabold text-amber-300 border border-amber-400/50 shadow-[0_0_12px_rgba(251,191,36,0.45)]">
+                  <span className="inline-flex items-center rounded-full bg-[rgba(255,234,0,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#FFEA00] border border-[rgba(255,234,0,0.45)] shadow-[0_0_14px_rgba(255,234,0,0.35)] streakr-pulse-soft">
                     Game pending
                   </span>
                 ) : gameScoreInfo.kind === "zero" ? (
-                  <span className="inline-flex items-center rounded-full bg-red-500/20 px-4 py-1.5 text-xs font-extrabold text-red-300 border border-red-400/60 shadow-[0_0_14px_rgba(239,68,68,0.6)]">
+                  <span className="inline-flex items-center rounded-full bg-[rgba(255,7,58,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#FF073A] border border-[rgba(255,7,58,0.55)] shadow-[0_0_18px_rgba(255,7,58,0.55)]">
                     Clean sweep failed (0)
                   </span>
                 ) : (
-                  <span className="inline-flex items-center rounded-full bg-emerald-500/20 px-4 py-1.5 text-xs font-extrabold text-emerald-300 border border-emerald-400/60 shadow-[0_0_16px_rgba(16,185,129,0.75)]">
+                  <span className="inline-flex items-center rounded-full bg-[rgba(118,255,3,0.14)] px-4 py-1.5 text-xs font-extrabold text-[#76FF03] border border-[rgba(118,255,3,0.55)] shadow-[0_0_20px_rgba(118,255,3,0.65)]">
                     Clean sweep! +{gameScoreInfo.score}
                   </span>
                 );
 
-              const isHighlighted = highlightQuestionId === row.id;
-
               return (
-                <div key={row.id} ref={setRowRef(row.id)}>
+                <div key={row.id}>
                   {shouldRenderHeader && (
                     <div className="mb-2 rounded-xl bg-[#0b1220] border border-slate-700 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-sm sm:text-base font-extrabold text-white truncate">{row.match}</div>
+                          <div className="text-sm sm:text-base font-extrabold text-white truncate">
+                            {row.match}
+                          </div>
                           <div className="text-[11px] sm:text-xs text-white/70">
-                            {row.venue} • {formatStartDate(row.startTime).date} {formatStartDate(row.startTime).time} AEDT
+                            {row.venue} • {formatStartDate(row.startTime).date}{" "}
+                            {formatStartDate(row.startTime).time} AEDT
                           </div>
                         </div>
 
@@ -1552,12 +1523,7 @@ export default function PicksClient() {
                     </div>
                   )}
 
-                  <div
-                    className={[
-                      "rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]",
-                      isHighlighted ? "streakr-preview-focus" : "",
-                    ].join(" ")}
-                  >
+                  <div className="rounded-lg bg-gradient-to-r from-[#1E293B] via-[#111827] to-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)]">
                     <div className="grid grid-cols-12 items-center px-4 py-1.5 gap-y-2 md:gap-y-0 text-white">
                       <div className="col-span-12 md:col-span-2">
                         <div className="text-sm font-semibold">{date}</div>
@@ -1565,13 +1531,17 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-6 md:col-span-1 flex items-center">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-black/40 text-[11px] font-semibold uppercase tracking-wide border border-white/10">
                           {row.sport}
                         </span>
                       </div>
 
                       <div className="col-span-6 md:col-span-1">
-                        <span className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}>
+                        <span
+                          className={`${statusClasses(
+                            row.status
+                          )} text-[10px] px-2 py-0.5 rounded-full font-bold border border-white/10`}
+                        >
                           {row.status.toUpperCase()}
                         </span>
                       </div>
@@ -1581,9 +1551,13 @@ export default function PicksClient() {
                           (() => {
                             const parsed = parseAflMatchTeams(row.match);
                             const homeTeam =
-                              parsed.homeKey && AFL_TEAM_LOGOS[parsed.homeKey] ? AFL_TEAM_LOGOS[parsed.homeKey] : null;
+                              parsed.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
+                                ? AFL_TEAM_LOGOS[parsed.homeKey]
+                                : null;
                             const awayTeam =
-                              parsed.awayKey && AFL_TEAM_LOGOS[parsed.awayKey] ? AFL_TEAM_LOGOS[parsed.awayKey] : null;
+                              parsed.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
+                                ? AFL_TEAM_LOGOS[parsed.awayKey]
+                                : null;
                             const useAflLayout = homeTeam || awayTeam ? true : false;
 
                             return useAflLayout ? (
@@ -1603,7 +1577,9 @@ export default function PicksClient() {
                                       {parsed.homeLabel || homeTeam?.name || ""}
                                     </span>
                                   </div>
-                                  <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
+                                  <span className="text-xs uppercase tracking-wide text-white/70">
+                                    vs
+                                  </span>
                                   <div className="flex items-center gap-1 min-w-0">
                                     <span className="text-sm font-semibold truncate">
                                       {parsed.awayLabel || awayTeam?.name || ""}
@@ -1619,7 +1595,9 @@ export default function PicksClient() {
                                     )}
                                   </div>
                                 </div>
-                                <div className="text-[11px] text-white/80 mt-0.5">{row.venue}</div>
+                                <div className="text-[11px] text-white/80 mt-0.5">
+                                  {row.venue}
+                                </div>
                               </>
                             ) : (
                               <>
@@ -1637,7 +1615,9 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                        <span className="block">{row.quarter === 0 ? "Match" : `Quarter ${row.quarter}`}</span>
+                        <span className="block">
+                          {row.quarter === 0 ? "Match" : `Quarter ${row.quarter}`}
+                        </span>
                       </div>
 
                       <div className="col-span-9 md:col-span-2">
@@ -1646,13 +1626,13 @@ export default function PicksClient() {
                           <button
                             type="button"
                             onClick={() => openComments(row)}
-                            className="text-[11px] text-sky-300 underline"
+                            className="text-[11px] text-[#00E5FF] underline hover:text-sky-200 transition"
                           >
                             Comments ({row.commentCount ?? 0})
                           </button>
 
                           {!isSelectable && (
-                            <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70">
+                            <span className="inline-flex items-center rounded-full bg-black/40 px-2 py-0.5 text-[10px] font-semibold text-white/70 border border-white/10">
                               Locked
                             </span>
                           )}
@@ -1673,12 +1653,9 @@ export default function PicksClient() {
                               onClick={() => handlePick(row, "yes")}
                               disabled={!isSelectable}
                               className={[
-                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                                effectivePick === "yes"
-                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
-                                  : !isSelectable
-                                  ? "bg-green-700/60 text-white/50 cursor-not-allowed border-transparent"
-                                  : "bg-green-600 hover:bg-green-700 text-white border-transparent",
+                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all",
+                                isSelectable ? "" : "opacity-60 cursor-not-allowed",
+                                effectivePick === "yes" ? neonSelected : neonYesBase,
                               ].join(" ")}
                             >
                               Yes
@@ -1689,12 +1666,9 @@ export default function PicksClient() {
                               onClick={() => handlePick(row, "no")}
                               disabled={!isSelectable}
                               className={[
-                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all border",
-                                effectivePick === "no"
-                                  ? "bg-sky-500 text-black border-2 border-white shadow-[0_0_14px_rgba(255,255,255,0.9)]"
-                                  : !isSelectable
-                                  ? "bg-red-700/60 text-white/50 cursor-not-allowed border-transparent"
-                                  : "bg-red-600 hover:bg-red-700 text-white border-transparent",
+                                "px-4 py-1.5 rounded-full text-xs font-bold w-16 transition-all",
+                                isSelectable ? "" : "opacity-60 cursor-not-allowed",
+                                effectivePick === "no" ? neonSelected : neonNoBase,
                               ].join(" ")}
                             >
                               No
@@ -1709,15 +1683,24 @@ export default function PicksClient() {
                               aria-label="Clear selection"
                               className="group inline-flex items-center justify-center h-7 w-7 rounded-full border border-white/15 bg-black/40 hover:bg-white/10 transition"
                             >
-                              <span className="text-white/70 group-hover:text-white text-sm leading-none">✕</span>
+                              <span className="text-white/70 group-hover:text-white text-sm leading-none">
+                                ✕
+                              </span>
                             </button>
                           )}
                         </div>
 
                         {(() => {
                           let outcomeLabel: string | null = null;
-                          const outcome = normaliseOutcome((row.correctOutcome as any) ?? (row as any).outcome);
-                          let outcomeKind: "win" | "loss" | "void" | "settled-no-result" | null = null;
+                          const outcome = normaliseOutcome(
+                            (row.correctOutcome as any) ?? (row as any).outcome
+                          );
+                          let outcomeKind:
+                            | "win"
+                            | "loss"
+                            | "void"
+                            | "settled-no-result"
+                            | null = null;
 
                           if (row.status === "void" || outcome === "void") outcomeKind = "void";
                           else if (row.status === "final") {
@@ -1733,12 +1716,12 @@ export default function PicksClient() {
 
                           const outcomeClasses =
                             outcomeKind === "void"
-                              ? "bg-slate-700/60 border-slate-400/40 text-slate-100"
+                              ? chipVoid
                               : outcomeKind === "win"
-                              ? "bg-emerald-500/15 border-emerald-400/60 text-emerald-300"
+                              ? chipWin
                               : outcomeKind === "loss"
-                              ? "bg-red-500/15 border-red-400/60 text-red-300"
-                              : "bg-slate-700/60 border-slate-500/60 text-slate-100";
+                              ? chipLoss
+                              : chipNeutral;
 
                           return outcomeLabel ? (
                             <div className="mt-2">
@@ -1783,14 +1766,14 @@ export default function PicksClient() {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
-                  href={`/auth?mode=login&returnTo=/picks?sport=${encodeURIComponent(sportParam)}`}
+                  href="/auth?mode=login&returnTo=/picks"
                   className="flex-1 inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
                   Login
                 </Link>
                 <Link
-                  href={`/auth?mode=signup&returnTo=/picks?sport=${encodeURIComponent(sportParam)}`}
+                  href="/auth?mode=signup&returnTo=/picks"
                   className="flex-1 inline-flex items-center justify-center rounded-full border border-white/20 hover:border-orange-400 hover:text-orange-400 text-sm px-4 py-2 transition-colors"
                   onClick={() => setShowAuthModal(false)}
                 >
@@ -1812,7 +1795,11 @@ export default function PicksClient() {
                   </h2>
                   <p className="text-sm text-gray-300">{commentsOpenFor.question}</p>
                 </div>
-                <button type="button" onClick={closeComments} className="text-sm text-gray-400 hover:text-white">
+                <button
+                  type="button"
+                  onClick={closeComments}
+                  className="text-sm text-gray-400 hover:text-white"
+                >
                   ✕
                 </button>
               </div>
@@ -1911,7 +1898,9 @@ export default function PicksClient() {
             <div className="w-full max-w-lg rounded-2xl bg-[#050816] border border-white/15 shadow-[0_20px_70px_rgba(0,0,0,0.9)] p-6 sm:p-7">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">New to STREAKr?</p>
+                  <p className="text-xs uppercase tracking-[0.16em] text-orange-300 mb-1">
+                    New to STREAKr?
+                  </p>
                   <h2 className="text-xl sm:text-2xl font-bold">How to play Picks</h2>
                 </div>
                 <button
@@ -1924,7 +1913,9 @@ export default function PicksClient() {
                 </button>
               </div>
 
-              <p className="text-sm text-white/75 mb-4">Quick rundown so you don&apos;t stitch yourself up early:</p>
+              <p className="text-sm text-white/75 mb-4">
+                Quick rundown so you don&apos;t stitch yourself up early:
+              </p>
 
               <ul className="space-y-2.5 text-sm text-white/80 mb-5">
                 <li className="flex gap-2">
