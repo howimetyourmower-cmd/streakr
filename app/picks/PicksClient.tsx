@@ -13,6 +13,9 @@ export const dynamic = "force-dynamic";
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
 
+// ✅ local override can explicitly clear the API pick
+type LocalPick = PickOutcome | "none";
+
 type ApiQuestion = {
   id: string;
   gameId?: string;
@@ -60,26 +63,27 @@ type LeaderboardApiResponse = {
 
 /**
  * ✅ Updates in this version:
+ * - Fix X clear button properly (does NOT fall back to q.userPick). Uses local "none" sentinel.
+ * - Calls /api/user-picks DELETE (and falls back to POST {action:"clear"}).
  * - Haptic-style micro animation (press + select pop) using CSS keyframes (no libs).
  * - Selected pick becomes BLUE (both YES/NO turn blue when selected).
  * - YES button is solid green, NO button is solid red (when not selected).
- * - Add an "X" clear button per question to unselect instantly (and still supports click-again-to-unselect).
  * - Sponsored question stands out (yellow-tinted card background + stronger border/glow).
  * - More compact pick blocks (reduced padding/spacing ~ 75% height).
  * - Comment button slightly bigger to stand out more.
- * - Quarter label uses "Quarter 1" (already).
+ * - Quarter label uses "Quarter 1".
  */
 const COLORS = {
   bg: "#0D1117",
   panel: "#0F1623",
   panel2: "#0A0F18",
 
-  // 🟧 Your orange vibe (from your 2nd image)
+  // 🟧 Your orange vibe
   orange: "#F4B247",
 
   // Solid base buttons (unselected)
-  yesFill: "#19C37D", // green
-  noFill: "#FF2E4D", // red
+  yesFill: "#19C37D",
+  noFill: "#FF2E4D",
 
   // Selected state (blue)
   selectedBlue: "#2F7CFF",
@@ -133,7 +137,14 @@ function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `streakr:picks:v5:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-type LocalPickMap = Record<string, PickOutcome>;
+// ✅ local wins; "none" explicitly clears API pick in the UI
+function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
+  if (local === "none") return undefined;
+  if (local === "yes" || local === "no") return local;
+  return api;
+}
+
+type LocalPickMap = Record<string, LocalPick>;
 type SelectPulseMap = Record<string, number>;
 
 export default function PicksPage() {
@@ -207,7 +218,7 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // Hydrate local picks
+  // Hydrate local picks (sanitize)
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -216,8 +227,14 @@ export default function PicksPage() {
       const key = safeLocalKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
       if (raw) {
-        const parsed = JSON.parse(raw) as LocalPickMap;
-        if (parsed && typeof parsed === "object") setLocalPicks(parsed);
+        const parsed = JSON.parse(raw) as any;
+        if (parsed && typeof parsed === "object") {
+          const cleaned: LocalPickMap = {};
+          Object.entries(parsed).forEach(([qid, val]) => {
+            if (val === "yes" || val === "no" || val === "none") cleaned[qid] = val;
+          });
+          setLocalPicks(cleaned);
+        }
       }
     } catch (e) {
       console.warn("Failed to hydrate local picks", e);
@@ -313,7 +330,7 @@ export default function PicksPage() {
   const picksMade = useMemo(() => {
     let c = 0;
     allQuestions.forEach((q) => {
-      const pick = localPicks[q.id] ?? q.userPick;
+      const pick = effectivePick(localPicks[q.id], q.userPick);
       if (pick === "yes" || pick === "no") c += 1;
     });
     return c;
@@ -326,7 +343,7 @@ export default function PicksPage() {
     let correct = 0;
 
     allQuestions.forEach((q) => {
-      const pick = localPicks[q.id] ?? q.userPick;
+      const pick = effectivePick(localPicks[q.id], q.userPick);
       if (pick !== "yes" && pick !== "no") return;
 
       const settled = q.status === "final" || q.status === "void";
@@ -364,17 +381,39 @@ export default function PicksPage() {
 
   const clearPick = useCallback(
     async (q: ApiQuestion) => {
-      setLocalPicks((prev) => {
-        const next = { ...prev };
-        delete next[q.id];
-        return next;
-      });
-
-      // NOTE: We are NOT calling the API to clear (your endpoint likely expects yes/no only).
-      // This solves UX immediately + avoids stale writes.
+      // ✅ instant UI override (won't fall back to q.userPick)
+      setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
       triggerSelectPop(q.id);
+
+      if (!user) return;
+
+      try {
+        const token = await user.getIdToken();
+
+        // ✅ preferred: DELETE handler
+        const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (delRes.ok) return;
+
+        // ✅ fallback: old POST clear (if you haven't deployed DELETE yet)
+        const postRes = await fetch("/api/user-picks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ action: "clear", questionId: q.id }),
+        });
+
+        if (!postRes.ok) console.error("Failed to clear pick:", await postRes.text());
+      } catch (e) {
+        console.error("Clear pick error", e);
+      }
     },
-    [triggerSelectPop]
+    [triggerSelectPop, user]
   );
 
   /**
@@ -384,7 +423,7 @@ export default function PicksPage() {
    */
   const togglePick = useCallback(
     async (q: ApiQuestion, outcome: PickOutcome) => {
-      const current = localPicks[q.id] ?? q.userPick;
+      const current = effectivePick(localPicks[q.id], q.userPick);
 
       // If clicking same outcome -> clear
       if (current === outcome) {
@@ -452,7 +491,7 @@ export default function PicksPage() {
   // ✅ Compact cards (~75% height feel)
   const PICK_CARD_PAD_Y = "py-1";
   const PICK_CARD_PAD_X = "px-3";
-  const PICK_BUTTON_PAD_Y = "py-2"; // keep buttons usable even though cards are tighter
+  const PICK_BUTTON_PAD_Y = "py-2";
   const SENTIMENT_BAR_H = "h-[6px]";
 
   const renderStatusPill = (q: ApiQuestion) => {
@@ -517,7 +556,7 @@ export default function PicksPage() {
       );
     }
 
-    const pick = localPicks[q.id] ?? q.userPick;
+    const pick = effectivePick(localPicks[q.id], q.userPick);
     const isPicked = pick === "yes" || pick === "no";
     const isCorrect = q.correctPick === true;
 
@@ -560,7 +599,7 @@ export default function PicksPage() {
 
     const majority = majorityLabel(yes, no);
 
-    const pick = localPicks[q.id] ?? q.userPick;
+    const pick = effectivePick(localPicks[q.id], q.userPick);
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
@@ -625,18 +664,17 @@ export default function PicksPage() {
   /**
    * ✅ Buttons:
    * - Unselected: YES solid green, NO solid red
-   * - Selected: BOTH become BLUE (as requested)
+   * - Selected: BOTH become BLUE
    * - Haptic micro: press feels + select pop
    */
   const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
-    const pick = localPicks[q.id] ?? q.userPick;
+    const pick = effectivePick(localPicks[q.id], q.userPick);
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
 
     const baseBtn =
       "flex-1 rounded-xl font-extrabold tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed";
-
-    const pressClasses = "active:scale-[0.985]"; // haptic press feel
+    const pressClasses = "active:scale-[0.985]";
 
     const makeBtnStyle = (variant: "yes" | "no") => {
       const selected = variant === "yes" ? isYesSelected : isNoSelected;
@@ -705,8 +743,7 @@ export default function PicksPage() {
   };
 
   const pageTitle = `Picks`;
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
@@ -965,7 +1002,7 @@ export default function PicksPage() {
               const isLocked = lockMs <= 0;
 
               const gamePicked = g.questions.reduce((acc, q) => {
-                const p = localPicks[q.id] ?? q.userPick;
+                const p = effectivePick(localPicks[q.id], q.userPick);
                 return acc + (p === "yes" || p === "no" ? 1 : 0);
               }, 0);
 
@@ -1047,7 +1084,7 @@ export default function PicksPage() {
                         const finalWrong = q.status === "final" && q.correctPick === false;
                         const finalCorrect = q.status === "final" && q.correctPick === true;
 
-                        const pick = localPicks[q.id] ?? q.userPick;
+                        const pick = effectivePick(localPicks[q.id], q.userPick);
                         const hasPick = pick === "yes" || pick === "no";
 
                         const sponsor = q.isSponsorQuestion === true;
@@ -1107,7 +1144,11 @@ export default function PicksPage() {
                                       background: hasPick ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
                                       color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
                                     }}
-                                    onClick={() => clearPick(q)}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      clearPick(q);
+                                    }}
                                     disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
                                     title={hasPick ? "Clear selection" : "No selection to clear"}
                                     aria-label="Clear selection"
