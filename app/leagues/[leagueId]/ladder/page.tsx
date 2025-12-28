@@ -1,19 +1,22 @@
-// /app/leagues/[leagueId]/ladder/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
   limit,
+  onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
+  addDoc,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -24,6 +27,8 @@ type League = {
   name: string;
   inviteCode: string;
   managerId: string;
+  sport?: string;
+  memberCount?: number;
 };
 
 type MemberDoc = {
@@ -32,27 +37,32 @@ type MemberDoc = {
   role?: "manager" | "member";
 };
 
-type UserProfile = {
-  uid: string;
+type ProfileDoc = {
   displayName?: string;
   username?: string;
+  handle?: string;
   avatarUrl?: string;
   photoURL?: string;
-  photoUrl?: string;
-  bestStreak?: number;
   currentStreak?: number;
-  accuracy?: number; // 0..1 or 0..100 (we’ll handle both)
 };
 
 type LadderRow = {
   uid: string;
   name: string;
   username?: string;
-  avatar?: string | null;
-  uiRole: "admin" | "member";
-  bestStreak: number;
+  avatar?: string;
   currentStreak: number;
-  accuracy: number | null; // 0..1
+  uiRole: "admin" | "member";
+};
+
+type CommentRow = {
+  id: string;
+  uid: string;
+  name: string;
+  username?: string;
+  avatar?: string;
+  body: string;
+  createdAt?: Date | null;
 };
 
 function safeNum(v: any, fallback = 0): number {
@@ -60,46 +70,38 @@ function safeNum(v: any, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normalizeAccuracy(v: any): number | null {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  // support either 0..1 or 0..100
-  if (n > 1.0001) return Math.max(0, Math.min(1, n / 100));
-  return Math.max(0, Math.min(1, n));
-}
-
-function formatAccuracy(v: number | null): string {
-  if (v === null) return "—";
-  return `${Math.round(v * 100)}%`;
+function formatTime(d?: Date | null) {
+  if (!d) return "";
+  return d.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
 }
 
 export default function LeagueLadderPage() {
   const params = useParams();
   const leagueId = params?.leagueId as string;
-
+  const router = useRouter();
   const { user } = useAuth();
 
   const [league, setLeague] = useState<League | null>(null);
-  const [rows, setRows] = useState<LadderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<LadderRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const isLoggedIn = !!user;
+  // --- Comments ---
+  const [comments, setComments] = useState<CommentRow[]>([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [commentSending, setCommentSending] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const commentsEndRef = useRef<HTMLDivElement | null>(null);
 
-  const myRow = useMemo(() => {
-    if (!user) return null;
-    return rows.find((r) => r.uid === user.uid) ?? null;
-  }, [rows, user]);
-
+  // Load league + build ladder
   useEffect(() => {
-    const run = async () => {
+    const load = async () => {
       if (!leagueId) return;
 
       setLoading(true);
       setError(null);
 
       try {
-        // 1) Load league
         const leagueRef = doc(db, "leagues", leagueId);
         const leagueSnap = await getDoc(leagueRef);
 
@@ -111,177 +113,228 @@ export default function LeagueLadderPage() {
           return;
         }
 
-        const ld = leagueSnap.data() as any;
+        const data = leagueSnap.data() as any;
 
+        // Support old/new schema keys
         const managerId: string =
-          ld.managerId ?? ld.managerUid ?? ld.managerUID ?? "";
+          data.managerId ?? data.managerUid ?? data.managerUID ?? "";
         const inviteCode: string =
-          ld.inviteCode ?? ld.code ?? ld.leagueCode ?? "";
+          data.inviteCode ?? data.code ?? data.leagueCode ?? "";
 
-        const leagueObj: League = {
+        const leagueData: League = {
           id: leagueSnap.id,
-          name: ld.name ?? "Unnamed league",
+          name: data.name ?? "Unnamed league",
           inviteCode,
           managerId,
+          sport: (data.sport ?? "afl").toString().toLowerCase(),
+          memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
         };
-        setLeague(leagueObj);
 
-        // 2) Load members
+        setLeague(leagueData);
+
+        // Load members
         const membersRef = collection(leagueRef, "members");
-        const membersQ = query(membersRef, orderBy("joinedAt", "asc"), limit(500));
+        const membersQ = query(membersRef, orderBy("joinedAt", "asc"), limit(300));
         const membersSnap = await getDocs(membersQ);
 
         const members: MemberDoc[] = membersSnap.docs.map((d) => {
           const m = d.data() as any;
           return {
-            uid: m.uid ?? d.id,
+            uid: m.uid || d.id,
             displayName: m.displayName,
             role: m.role,
           };
         });
 
-        // 3) Load user profiles for those member uids (batched in chunks of 10 for Firestore)
-        const uids = Array.from(new Set(members.map((m) => m.uid).filter(Boolean)));
-
-        const profilesByUid = new Map<string, UserProfile>();
-
-        const chunkSize = 10;
-        for (let i = 0; i < uids.length; i += chunkSize) {
-          const chunk = uids.slice(i, i + chunkSize);
-
-          // Firestore “in” query (chunked)
-          const usersRef = collection(db, "users");
-          const qUsers = query(usersRef as any, (await import("firebase/firestore")).where("uid", "in", chunk));
-          const usersSnap = await getDocs(qUsers);
-
-          usersSnap.docs.forEach((ud) => {
-            const p = ud.data() as any;
-            const uid = (p.uid ?? ud.id) as string;
-            profilesByUid.set(uid, {
-              uid,
-              displayName: p.displayName ?? p.name,
-              username: p.username,
-              avatarUrl: p.avatarUrl,
-              photoURL: p.photoURL,
-              photoUrl: p.photoUrl,
-              bestStreak: p.bestStreak,
-              currentStreak: p.currentStreak,
-              accuracy: p.accuracy,
-            });
-          });
-
-          // Fallback: if your users collection doesn’t store uid field and uses docId = uid,
-          // make sure we still try to read direct doc ids for anything missing.
-          const missing = chunk.filter((uid) => !profilesByUid.has(uid));
-          for (const uid of missing) {
-            const uRef = doc(db, "users", uid);
-            const uSnap = await getDoc(uRef);
-            if (uSnap.exists()) {
-              const p = uSnap.data() as any;
-              profilesByUid.set(uid, {
-                uid,
-                displayName: p.displayName ?? p.name,
-                username: p.username,
-                avatarUrl: p.avatarUrl,
-                photoURL: p.photoURL,
-                photoUrl: p.photoUrl,
-                bestStreak: p.bestStreak,
-                currentStreak: p.currentStreak,
-                accuracy: p.accuracy,
-              });
+        // Fetch profiles for each member (users/{uid})
+        const built: LadderRow[] = await Promise.all(
+          members.map(async (m) => {
+            let p: ProfileDoc | null = null;
+            try {
+              const pSnap = await getDoc(doc(db, "users", m.uid));
+              if (pSnap.exists()) p = (pSnap.data() as any) as ProfileDoc;
+            } catch {
+              p = null;
             }
-          }
-        }
 
-        // 4) Build ladder rows
-        const built: LadderRow[] = members.map((m) => {
-          const p = profilesByUid.get(m.uid);
+            const name =
+              p?.displayName ||
+              m.displayName ||
+              (m.uid === user?.uid ? (user.displayName || user.email || "Player") : "Player");
 
-          const usernameRaw = (p?.username || "").trim();
-          const username =
-            usernameRaw.length > 0
-              ? usernameRaw.startsWith("@")
-                ? usernameRaw
-                : `@${usernameRaw}`
-              : undefined;
+            const usernameRaw =
+              p?.username || p?.handle || undefined;
 
-          const avatar =
-            p?.avatarUrl ||
-            p?.photoURL ||
-            p?.photoUrl ||
-            null;
+            const username =
+              usernameRaw
+                ? usernameRaw.startsWith("@")
+                  ? usernameRaw
+                  : `@${usernameRaw}`
+                : undefined;
 
-          // ✅ UI role: managerId always wins (don’t trust stored role for display)
-          const uiRole: "admin" | "member" =
-            m.uid === leagueObj.managerId ? "admin" : "member";
+            const avatar = p?.avatarUrl || p?.photoURL || (user?.uid === m.uid ? (user.photoURL || undefined) : undefined);
 
-          const name =
-            (p?.displayName || m.displayName || "Player").toString();
+            const currentStreak = safeNum(p?.currentStreak, 0);
 
-          const bestStreak = safeNum(p?.bestStreak, 0);
-          const currentStreak = safeNum(p?.currentStreak, 0);
-          const acc = normalizeAccuracy(p?.accuracy);
+            // UI role: league manager always Admin
+            const uiRole: "admin" | "member" = m.uid === leagueData.managerId ? "admin" : "member";
 
-          return {
-            uid: m.uid,
-            name,
-            username,
-            avatar,
-            uiRole,
-            bestStreak,
-            currentStreak,
-            accuracy: acc,
-          };
-        });
+            return {
+              uid: m.uid,
+              name,
+              username,
+              avatar,
+              currentStreak,
+              uiRole,
+            };
+          })
+        );
 
-        // 5) Sort by Current desc, then Best desc, then Accuracy desc, then name
+        // Sort: Current streak desc, then name
         built.sort((a, b) => {
           if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
-          if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
-
-          const aAcc = a.accuracy ?? -1;
-          const bAcc = b.accuracy ?? -1;
-          if (bAcc !== aAcc) return bAcc - aAcc;
-
           return a.name.localeCompare(b.name);
         });
 
         setRows(built);
       } catch (e) {
-        console.error("Failed to load league ladder", e);
+        console.error(e);
         setError("Failed to load ladder. Please try again.");
-        setLeague(null);
-        setRows([]);
       } finally {
         setLoading(false);
       }
     };
 
-    run();
-  }, [leagueId]);
+    load();
+  }, [leagueId, user?.uid, user?.displayName, user?.email, user?.photoURL]);
 
-  const renderAvatar = (row: LadderRow) => {
-    if (row.avatar) {
-      // eslint-disable-next-line @next/next/no-img-element
-      return (
-        <img
-          src={row.avatar}
-          alt={row.name}
-          className="h-10 w-10 rounded-full object-cover border border-white/10"
-        />
-      );
+  const isMemberUser = useMemo(() => {
+    if (!user) return false;
+    if (!league) return false;
+    return rows.some((r) => r.uid === user.uid) || user.uid === league.managerId;
+  }, [user, league, rows]);
+
+  const myRow = useMemo(() => {
+    if (!user) return null;
+    return rows.find((r) => r.uid === user.uid) || null;
+  }, [rows, user]);
+
+  // Live comments (members only)
+  useEffect(() => {
+    if (!leagueId) return;
+
+    if (!isMemberUser) {
+      setComments([]);
+      return;
     }
-    return (
-      <div className="h-10 w-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-xs text-white/70">
-        {row.name?.slice(0, 1)?.toUpperCase() ?? "P"}
-      </div>
+
+    setCommentError(null);
+
+    const ref = collection(db, "leagues", leagueId, "comments");
+    const qRef = query(ref, orderBy("createdAt", "asc"), limit(200));
+
+    const unsub = onSnapshot(
+      qRef,
+      async (snap) => {
+        const list: CommentRow[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          let created: Date | null = null;
+          try {
+            if (data.createdAt?.toDate) created = data.createdAt.toDate();
+          } catch {
+            created = null;
+          }
+
+          return {
+            id: d.id,
+            uid: data.uid,
+            name: data.name ?? "Player",
+            username: data.username ?? undefined,
+            avatar: data.avatar ?? undefined,
+            body: data.body ?? "",
+            createdAt: created,
+          };
+        });
+
+        setComments(list);
+      },
+      (err) => {
+        console.error("Comments error", err);
+        setCommentError("Failed to load comments.");
+      }
     );
+
+    return () => unsub();
+  }, [leagueId, isMemberUser]);
+
+  useEffect(() => {
+    if (!commentsEndRef.current) return;
+    commentsEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }, [comments.length]);
+
+  const handleSendComment = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!leagueId) return;
+
+    if (!user) {
+      setCommentError("Log in to comment.");
+      return;
+    }
+    if (!isMemberUser) {
+      setCommentError("Only league members can comment.");
+      return;
+    }
+
+    const trimmed = commentInput.trim();
+    if (!trimmed) return;
+
+    setCommentSending(true);
+    setCommentError(null);
+
+    try {
+      // Pull basic display from auth + users doc (optional)
+      let username: string | undefined = undefined;
+      let avatar: string | undefined = user.photoURL || undefined;
+
+      try {
+        const pSnap = await getDoc(doc(db, "users", user.uid));
+        if (pSnap.exists()) {
+          const p = pSnap.data() as any;
+          const raw = p.username || p.handle;
+          if (raw) username = raw.startsWith("@") ? raw : `@${raw}`;
+          avatar = p.avatarUrl || p.photoURL || avatar;
+        }
+      } catch {}
+
+      const name =
+        (user as any).displayName ||
+        (user as any).name ||
+        (user as any).email ||
+        "Player";
+
+      const ref = collection(db, "leagues", leagueId, "comments");
+      await addDoc(ref, {
+        uid: user.uid,
+        name,
+        username: username || null,
+        avatar: avatar || null,
+        body: trimmed,
+        createdAt: serverTimestamp(),
+      });
+
+      setCommentInput("");
+    } catch (err) {
+      console.error("Send comment failed", err);
+      setCommentError("Could not send comment. Try again.");
+    } finally {
+      setCommentSending(false);
+    }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#050814] text-white px-4 py-6">
-        <div className="mx-auto w-full max-w-5xl">
+      <div className="min-h-screen bg-[#050814] text-white">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8">
           <p className="text-sm text-white/70">Loading ladder…</p>
         </div>
       </div>
@@ -290,8 +343,8 @@ export default function LeagueLadderPage() {
 
   if (!league) {
     return (
-      <div className="min-h-screen bg-[#050814] text-white px-4 py-6">
-        <div className="mx-auto w-full max-w-5xl space-y-4">
+      <div className="min-h-screen bg-[#050814] text-white">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-4">
           <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
             ← Back to leagues
           </Link>
@@ -301,167 +354,181 @@ export default function LeagueLadderPage() {
     );
   }
 
+  const topRow = rows[0] || null;
+  const showCrown = !!topRow && topRow.currentStreak > 0; // ✅ crown only if leader has >0
+
   return (
-    <div className="min-h-screen bg-[#050814] text-white px-4 py-6 md:py-8">
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <Link href={`/leagues/${league.id}`} className="text-sm text-sky-400 hover:text-sky-300">
+    <div className="min-h-screen bg-[#050814] text-white">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-6">
+        <Link
+          href={`/leagues/${league.id}`}
+          className="text-sm text-sky-400 hover:text-sky-300"
+        >
           ← Back to league
         </Link>
 
         {/* Header */}
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <h1 className="text-4xl font-extrabold tracking-tight">
-              {league.name} Ladder
-            </h1>
-            <p className="text-sm text-white/70">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl md:text-4xl font-extrabold">
+                {league.name} Ladder
+              </h1>
+              <SportBadge sport="afl" />
+            </div>
+            <p className="mt-1 text-sm text-white/65 max-w-2xl">
               Bragging rights only. (Your global streak still counts on the main leaderboard.)
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <SportBadge sport="afl" />
-            <div className="flex flex-col items-end gap-1 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="text-white/60">Invite</span>
-                <span className="font-mono rounded-md bg-white/5 border border-white/10 px-2 py-1">
-                  {league.inviteCode || "—"}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => league.inviteCode && navigator.clipboard.writeText(league.inviteCode)}
-                  className="text-sky-400 hover:text-sky-300 disabled:opacity-60"
-                  disabled={!league.inviteCode}
-                >
-                  Copy
-                </button>
-              </div>
-              <Link
-                href="/picks"
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2"
+          <div className="flex flex-col items-start md:items-end gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-white/60">Invite</span>
+              <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-1">
+                {league.inviteCode || "—"}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  league.inviteCode && navigator.clipboard.writeText(league.inviteCode)
+                }
+                disabled={!league.inviteCode}
+                className="text-sky-400 hover:text-sky-300 disabled:opacity-60"
               >
-                Make picks →
-              </Link>
+                Copy
+              </button>
             </div>
+            <span className="text-white/60">Members: {league.memberCount ?? rows.length}</span>
           </div>
         </div>
 
         {/* Your position */}
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h2 className="text-sm font-semibold text-white/70 uppercase tracking-wide">
-              Your position
-            </h2>
-            {!isLoggedIn && (
-              <span className="text-xs text-white/50">Log in to see your rank.</span>
-            )}
-          </div>
+        {user && myRow && (
+          <div className="rounded-2xl border border-orange-500/25 bg-orange-500/10 p-4 md:p-5">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="text-[11px] uppercase tracking-wide text-white/60">
+                Your position
+              </div>
 
-          {user && myRow ? (
-            <div className="flex items-center gap-3 rounded-xl bg-black/25 border border-white/10 px-4 py-3">
-              {renderAvatar(myRow)}
-              <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => router.push("/picks")}
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors self-start md:self-auto"
+              >
+                Make picks →
+              </button>
+            </div>
+
+            <div className="mt-3 flex items-center gap-3">
+              <div className="relative h-10 w-10 rounded-full overflow-hidden bg-white/10 border border-white/10">
+                {myRow.avatar ? (
+                  <Image
+                    src={myRow.avatar}
+                    alt=""
+                    fill
+                    className="object-cover"
+                    sizes="40px"
+                  />
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center text-white/60 text-sm">
+                    {myRow.name?.slice(0, 1)?.toUpperCase() || "P"}
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg font-bold truncate">{myRow.name}</span>
+                  <p className="font-semibold truncate">{myRow.name}</p>
                   {myRow.username && (
-                    <span className="text-sm text-white/60 truncate">{myRow.username}</span>
+                    <span className="text-white/55 text-sm">{myRow.username}</span>
                   )}
-                  <span className="ml-auto text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-orange-500/40 text-orange-300 bg-white/5">
-                    YOU
+                  <span className="ml-1 text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
+                    {myRow.uiRole === "admin" ? "Admin" : "Member"}
                   </span>
                 </div>
-
-                <div className="mt-1 text-xs text-white/70 flex flex-wrap gap-x-3 gap-y-1">
-                  <span>Current: <span className="text-white font-semibold">{myRow.currentStreak}</span></span>
-                  <span>Best: <span className="text-white font-semibold">{myRow.bestStreak}</span></span>
-                  <span>Accuracy: <span className="text-white font-semibold">{formatAccuracy(myRow.accuracy)}</span></span>
-                  <span className="text-white/50">•</span>
-                  <span className="text-white/70">
-                    Role:{" "}
-                    <span className="text-white font-semibold">
-                      {myRow.uiRole === "admin" ? "Admin" : "Member"}
-                    </span>
-                  </span>
-                </div>
+                <p className="text-sm text-white/65">
+                  Current streak:{" "}
+                  <span className="text-white font-semibold">{myRow.currentStreak}</span>
+                </p>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-white/70">
-              {user ? "You’re not in this league." : "Log in to see your position."}
-            </p>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Ladder table */}
+        {/* Table */}
         <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
-          <div className="px-5 py-4 flex items-center justify-between">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
             <h2 className="text-lg font-semibold">League ladder</h2>
-            <span className="text-xs text-white/60">
-              Ranking: Current → Best → Accuracy
-            </span>
+            <span className="text-xs text-white/50">Ranking: Current streak</span>
           </div>
 
-          {error && (
-            <div className="px-5 pb-4">
-              <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                {error}
-              </p>
-            </div>
-          )}
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-black/20 border-t border-white/10">
-                <tr className="text-white/70">
-                  <th className="text-left px-5 py-3 w-[80px]">Rank</th>
-                  <th className="text-left px-5 py-3">Player</th>
-                  <th className="text-center px-5 py-3 w-[110px]">Best</th>
-                  <th className="text-center px-5 py-3 w-[120px]">Current</th>
-                  <th className="text-center px-5 py-3 w-[140px]">Accuracy</th>
-                  <th className="text-center px-5 py-3 w-[120px]">Role</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-5 py-6 text-white/60">
-                      No members yet.
-                    </td>
+          {rows.length === 0 ? (
+            <div className="p-5 text-sm text-white/70">No members yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px]">
+                <thead className="bg-white/5">
+                  <tr className="text-xs text-white/60">
+                    <th className="text-left px-5 py-3 w-[90px]">Rank</th>
+                    <th className="text-left px-5 py-3">Player</th>
+                    <th className="text-center px-5 py-3 w-[140px]">Current</th>
+                    <th className="text-right px-5 py-3 w-[140px]">Role</th>
                   </tr>
-                ) : (
-                  rows.map((r, idx) => {
-                    const isMe = !!user && r.uid === user.uid;
+                </thead>
+                <tbody>
+                  {rows.map((r, idx) => {
+                    const rank = idx + 1;
+                    const isOwn = !!user && user.uid === r.uid;
+                    const isLeader = rank === 1;
+                    const showLeaderCrown = isLeader && showCrown; // ✅ only if leader > 0
 
                     return (
                       <tr
                         key={r.uid}
                         className={`border-t border-white/10 ${
-                          isMe ? "bg-white/5" : "bg-transparent"
+                          isOwn ? "bg-white/5" : "bg-transparent"
                         }`}
                       >
-                        <td className="px-5 py-4 font-semibold">
-                          {idx === 0 ? (
-                            <span className="inline-flex items-center gap-2">
-                              <span>1</span>
-                              <span title="Top of the ladder" className="text-orange-300">👑</span>
-                            </span>
-                          ) : (
-                            idx + 1
-                          )}
+                        <td className="px-5 py-4 text-sm font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span>#{rank}</span>
+                            {showLeaderCrown && (
+                              <span title="Top of the ladder">👑</span>
+                            )}
+                            {isOwn && (
+                              <span className="text-[10px] ml-1 rounded-full px-2 py-1 border border-orange-500/40 text-orange-200 bg-orange-500/10">
+                                YOU
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="px-5 py-4">
-                          <div className="flex items-center gap-3 min-w-[260px]">
-                            {renderAvatar(r)}
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="relative h-10 w-10 rounded-full overflow-hidden bg-white/10 border border-white/10 flex-shrink-0">
+                              {r.avatar ? (
+                                <Image
+                                  src={r.avatar}
+                                  alt=""
+                                  fill
+                                  className="object-cover"
+                                  sizes="40px"
+                                />
+                              ) : (
+                                <div className="h-full w-full flex items-center justify-center text-white/60 text-sm">
+                                  {r.name?.slice(0, 1)?.toUpperCase() || "P"}
+                                </div>
+                              )}
+                            </div>
+
                             <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="font-semibold truncate">{r.name}</span>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-semibold truncate">
+                                  {r.name}
+                                </span>
                                 {r.username && (
-                                  <span className="text-white/60 truncate">{r.username}</span>
-                                )}
-                                {isMe && (
-                                  <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-orange-500/40 text-orange-300 bg-white/5">
-                                    YOU
+                                  <span className="text-white/55 text-sm truncate">
+                                    {r.username}
                                   </span>
                                 )}
                               </div>
@@ -469,41 +536,116 @@ export default function LeagueLadderPage() {
                           </div>
                         </td>
 
-                        <td className="px-5 py-4 text-center font-semibold">
-                          {r.bestStreak}
-                        </td>
-
-                        <td className="px-5 py-4 text-center font-semibold">
-                          {r.currentStreak}
-                        </td>
-
-                        <td className="px-5 py-4 text-center font-semibold">
-                          {formatAccuracy(r.accuracy)}
-                        </td>
-
                         <td className="px-5 py-4 text-center">
-                          <span
-                            className={`inline-flex items-center justify-center rounded-full px-3 py-1 text-[11px] font-semibold border ${
-                              r.uiRole === "admin"
-                                ? "border-orange-500/40 text-orange-300 bg-orange-500/10"
-                                : "border-white/15 text-white/70 bg-white/5"
-                            }`}
-                          >
-                            {r.uiRole === "admin" ? "ADMIN" : "MEMBER"}
+                          <span className="inline-flex items-center justify-center rounded-full border border-white/15 bg-black/20 px-3 py-1 text-sm font-semibold">
+                            {r.currentStreak}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4 text-right">
+                          <span className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-wide text-white/70">
+                            {r.uiRole === "admin" ? "Admin" : "Member"}
                           </span>
                         </td>
                       </tr>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Comments */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Comments</h2>
+            <span className="text-[11px] text-white/60">
+              Members only
+            </span>
           </div>
 
-          <div className="px-5 py-4 border-t border-white/10 text-xs text-white/50">
-            Tip: If streaks look wrong, make sure you are writing <span className="font-mono text-white/70">currentStreak</span> and{" "}
-            <span className="font-mono text-white/70">bestStreak</span> to <span className="font-mono text-white/70">users/{`{uid}`}</span>.
-          </div>
+          {!user && (
+            <p className="text-sm text-white/70">
+              Log in to view and post comments.
+            </p>
+          )}
+
+          {user && !isMemberUser && (
+            <p className="text-sm text-white/70">
+              You&apos;re not a member of this league.
+            </p>
+          )}
+
+          {user && isMemberUser && (
+            <>
+              <div className="h-56 max-h-72 overflow-y-auto rounded-xl bg-black/40 border border-white/10 px-3 py-2 space-y-2 text-sm">
+                {comments.length === 0 ? (
+                  <p className="text-xs text-white/60">No comments yet. Start the banter!</p>
+                ) : (
+                  comments.map((c) => {
+                    const isOwn = !!user && c.uid === user.uid;
+
+                    return (
+                      <div
+                        key={c.id}
+                        className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
+                      >
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3 py-2 border text-xs ${
+                            isOwn
+                              ? "bg-orange-500 text-black border-orange-300"
+                              : "bg-[#050816] text-white border-white/15"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <span className="font-semibold truncate">
+                              {c.name}
+                              {c.username ? (
+                                <span className={isOwn ? "opacity-80" : "text-white/60"}>
+                                  {" "}
+                                  {c.username}
+                                </span>
+                              ) : null}
+                            </span>
+                            {c.createdAt && (
+                              <span className="text-[10px] opacity-70">
+                                {formatTime(c.createdAt)}
+                              </span>
+                            )}
+                          </div>
+                          <p className="whitespace-pre-wrap break-words">{c.body}</p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={commentsEndRef} />
+              </div>
+
+              {commentError && <p className="text-xs text-red-400">{commentError}</p>}
+
+              <form
+                onSubmit={handleSendComment}
+                className="mt-2 flex flex-col sm:flex-row gap-2"
+              >
+                <textarea
+                  value={commentInput}
+                  onChange={(e) => setCommentInput(e.target.value)}
+                  rows={2}
+                  className="flex-1 rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                  placeholder="Say something to the group…"
+                />
+                <button
+                  type="submit"
+                  disabled={commentSending || !commentInput.trim()}
+                  className="sm:self-end inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
+                >
+                  {commentSending ? "Posting…" : "Post"}
+                </button>
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>
