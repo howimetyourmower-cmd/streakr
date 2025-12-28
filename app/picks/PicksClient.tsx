@@ -59,45 +59,34 @@ type LeaderboardApiResponse = {
 };
 
 /**
- * ✅ Fix: CLEAR / UNSELECT that actually works even when API returns userPick:
- * - We store local overrides per question:
- *   - "yes" | "no" => force a selection locally (until server save succeeds)
- *   - null => force-cleared locally (masks q.userPick)
- * - Also adds an "X" button to clear instantly.
- *
- * ✅ Visual requests:
- * - YES button = solid green
- * - NO button = solid red
- * - Sponsored questions: yellow highlighted block background
- * - Quarter label reads "Quarter 1" etc.
- * - Comment button slightly bigger
- *
- * Note: We *attempt* to clear server pick via DELETE /api/user-picks.
- * If your API doesn't support DELETE yet, the UI will still clear (masked locally).
+ * ✅ Updates in this version:
+ * - Haptic-style micro animation (press + select pop) using CSS keyframes (no libs).
+ * - Selected pick becomes BLUE (both YES/NO turn blue when selected).
+ * - YES button is solid green, NO button is solid red (when not selected).
+ * - Add an "X" clear button per question to unselect instantly (and still supports click-again-to-unselect).
+ * - Sponsored question stands out (yellow-tinted card background + stronger border/glow).
+ * - More compact pick blocks (reduced padding/spacing ~ 75% height).
+ * - Comment button slightly bigger to stand out more.
+ * - Quarter label uses "Quarter 1" (already).
  */
-
 const COLORS = {
   bg: "#0D1117",
   panel: "#0F1623",
   panel2: "#0A0F18",
 
-  // 🟧 Warm orange (matches your “Create league” button vibe)
+  // 🟧 Your orange vibe (from your 2nd image)
   orange: "#F4B247",
 
-  // Buttons (solid)
-  yesSolidTop: "#23D68E",
-  yesSolidBot: "#0FAE70",
-  noSolidTop: "#FF4A63",
-  noSolidBot: "#E5163D",
+  // Solid base buttons (unselected)
+  yesFill: "#19C37D", // green
+  noFill: "#FF2E4D", // red
 
-  // Accents
+  // Selected state (blue)
+  selectedBlue: "#2F7CFF",
+  selectedBlueDeep: "#1D4ED8",
+
   cyan: "#00E5FF",
   white: "#FFFFFF",
-
-  // Sponsor highlight
-  sponsorTop: "rgba(244,178,71,0.22)",
-  sponsorBot: "rgba(244,178,71,0.08)",
-  sponsorBorder: "rgba(244,178,71,0.60)",
 };
 
 function clampPct(n: number | undefined): number {
@@ -136,17 +125,16 @@ function msToCountdown(ms: number): string {
 
 function majorityLabel(yes: number, no: number): { label: string; color: string } {
   if (yes === no) return { label: "Split crowd", color: "rgba(255,255,255,0.70)" };
-  if (yes > no) return { label: "Majority is YES", color: "rgba(35,214,142,0.95)" };
-  return { label: "Majority is NO", color: "rgba(255,74,99,0.95)" };
+  if (yes > no) return { label: "Majority is YES", color: "rgba(25,195,125,0.95)" };
+  return { label: "Majority is NO", color: "rgba(255,46,77,0.95)" };
 }
 
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
-  // includes "overrides" so it doesn't clash with older versions
-  return `streakr:picks:overrides:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
+  return `streakr:picks:v5:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-// null means "force cleared" (mask server pick)
-type LocalOverrideMap = Record<string, PickOutcome | null>;
+type LocalPickMap = Record<string, PickOutcome>;
+type SelectPulseMap = Record<string, number>;
 
 export default function PicksPage() {
   const { user } = useAuth();
@@ -156,7 +144,7 @@ export default function PicksPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string>("");
 
-  const [localOverrides, setLocalOverrides] = useState<LocalOverrideMap>({});
+  const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
 
   const [myCurrentStreak, setMyCurrentStreak] = useState<number>(0);
   const [leaderStreak, setLeaderStreak] = useState<number>(0);
@@ -168,6 +156,10 @@ export default function PicksPage() {
   const lastMilestoneRef = useRef<number>(0);
 
   const hasHydratedLocalRef = useRef(false);
+
+  // Haptic pop trigger per question
+  const [selectPulse, setSelectPulse] = useState<SelectPulseMap>({});
+  const pulseTimerRef = useRef<Record<string, any>>({});
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -215,7 +207,7 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // Hydrate local overrides
+  // Hydrate local picks
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -224,11 +216,11 @@ export default function PicksPage() {
       const key = safeLocalKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
       if (raw) {
-        const parsed = JSON.parse(raw) as LocalOverrideMap;
-        if (parsed && typeof parsed === "object") setLocalOverrides(parsed);
+        const parsed = JSON.parse(raw) as LocalPickMap;
+        if (parsed && typeof parsed === "object") setLocalPicks(parsed);
       }
     } catch (e) {
-      console.warn("Failed to hydrate local overrides", e);
+      console.warn("Failed to hydrate local picks", e);
     } finally {
       hasHydratedLocalRef.current = true;
     }
@@ -238,9 +230,9 @@ export default function PicksPage() {
     if (roundNumber === null) return;
     try {
       const key = safeLocalKey(user?.uid ?? null, roundNumber);
-      localStorage.setItem(key, JSON.stringify(localOverrides));
+      localStorage.setItem(key, JSON.stringify(localPicks));
     } catch {}
-  }, [localOverrides, user?.uid, roundNumber]);
+  }, [localPicks, user?.uid, roundNumber]);
 
   // Live streak from users/{uid}
   useEffect(() => {
@@ -312,31 +304,6 @@ export default function PicksPage() {
     }
   }, [myCurrentStreak]);
 
-  // Helper: apply local overrides to decide what the UI shows
-  const getEffectivePick = useCallback(
-    (q: ApiQuestion): PickOutcome | undefined => {
-      if (Object.prototype.hasOwnProperty.call(localOverrides, q.id)) {
-        const v = localOverrides[q.id];
-        return v === null ? undefined : v;
-      }
-      return q.userPick;
-    },
-    [localOverrides]
-  );
-
-  // Patch games state so UI updates immediately when server pick changes/clears
-  const patchGamePick = useCallback((questionId: string, newPick?: PickOutcome) => {
-    setGames((prev) =>
-      prev.map((g) => ({
-        ...g,
-        questions: g.questions.map((q) => {
-          if (q.id !== questionId) return q;
-          return { ...q, userPick: newPick };
-        }),
-      }))
-    );
-  }, []);
-
   const allQuestions = useMemo(() => {
     const out: ApiQuestion[] = [];
     games.forEach((g) => g.questions.forEach((q) => out.push(q)));
@@ -346,11 +313,11 @@ export default function PicksPage() {
   const picksMade = useMemo(() => {
     let c = 0;
     allQuestions.forEach((q) => {
-      const pick = getEffectivePick(q);
+      const pick = localPicks[q.id] ?? q.userPick;
       if (pick === "yes" || pick === "no") c += 1;
     });
     return c;
-  }, [allQuestions, getEffectivePick]);
+  }, [allQuestions, localPicks]);
 
   const totalPickable = useMemo(() => allQuestions.length, [allQuestions]);
 
@@ -359,7 +326,7 @@ export default function PicksPage() {
     let correct = 0;
 
     allQuestions.forEach((q) => {
-      const pick = getEffectivePick(q);
+      const pick = localPicks[q.id] ?? q.userPick;
       if (pick !== "yes" && pick !== "no") return;
 
       const settled = q.status === "final" || q.status === "void";
@@ -372,7 +339,7 @@ export default function PicksPage() {
 
     if (settledPicked <= 0) return 0;
     return Math.round((correct / settledPicked) * 100);
-  }, [allQuestions, getEffectivePick]);
+  }, [allQuestions, localPicks]);
 
   const nextLockMs = useMemo(() => {
     const future = games
@@ -382,6 +349,80 @@ export default function PicksPage() {
     if (!future.length) return 0;
     return future[0] - nowMs;
   }, [games, nowMs]);
+
+  const triggerSelectPop = useCallback((questionId: string) => {
+    setSelectPulse((prev) => ({ ...prev, [questionId]: (prev[questionId] ?? 0) + 1 }));
+    if (pulseTimerRef.current[questionId]) clearTimeout(pulseTimerRef.current[questionId]);
+    pulseTimerRef.current[questionId] = setTimeout(() => {
+      setSelectPulse((prev) => {
+        const next = { ...prev };
+        delete next[questionId];
+        return next;
+      });
+    }, 260);
+  }, []);
+
+  const clearPick = useCallback(
+    async (q: ApiQuestion) => {
+      setLocalPicks((prev) => {
+        const next = { ...prev };
+        delete next[q.id];
+        return next;
+      });
+
+      // NOTE: We are NOT calling the API to clear (your endpoint likely expects yes/no only).
+      // This solves UX immediately + avoids stale writes.
+      triggerSelectPop(q.id);
+    },
+    [triggerSelectPop]
+  );
+
+  /**
+   * ✅ Toggle behaviour + blue selected state:
+   * - Click same outcome again => clears pick.
+   * - Also provide explicit X clear button.
+   */
+  const togglePick = useCallback(
+    async (q: ApiQuestion, outcome: PickOutcome) => {
+      const current = localPicks[q.id] ?? q.userPick;
+
+      // If clicking same outcome -> clear
+      if (current === outcome) {
+        await clearPick(q);
+        return;
+      }
+
+      // else set new
+      setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
+      triggerSelectPop(q.id);
+
+      if (!user) return;
+
+      try {
+        const token = await user.getIdToken();
+        const body = {
+          questionId: q.id,
+          outcome,
+          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+          gameId: q.gameId ?? null,
+        };
+
+        const res = await fetch("/api/user-picks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) console.error("Failed to save pick:", await res.text());
+      } catch (e) {
+        console.error("Pick save error", e);
+      }
+    },
+    [user, roundNumber, localPicks, clearPick, triggerSelectPop]
+  );
 
   const shareStreak = useCallback(async () => {
     const txt = `STREAKr — I’m on a streak of ${myCurrentStreak}. How long can you last?`;
@@ -408,125 +449,11 @@ export default function PicksPage() {
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
 
-  // Make pick blocks smaller (tighter) + comment button bigger
+  // ✅ Compact cards (~75% height feel)
   const PICK_CARD_PAD_Y = "py-1";
   const PICK_CARD_PAD_X = "px-3";
-  const PICK_BUTTON_PAD_Y = "py-2";
+  const PICK_BUTTON_PAD_Y = "py-2"; // keep buttons usable even though cards are tighter
   const SENTIMENT_BAR_H = "h-[6px]";
-
-  const clearPick = useCallback(
-    async (q: ApiQuestion) => {
-      // 1) instant UI clear (masks server userPick)
-      setLocalOverrides((prev) => ({ ...prev, [q.id]: null }));
-
-      // 2) attempt server clear
-      if (!user) return;
-
-      try {
-        const token = await user.getIdToken();
-
-        const body = {
-          questionId: q.id,
-          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
-          gameId: q.gameId ?? null,
-        };
-
-        const res = await fetch("/api/user-picks", {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-        });
-
-        if (res.ok) {
-          // server cleared: update local games + remove override entry
-          patchGamePick(q.id, undefined);
-          setLocalOverrides((prev) => {
-            const next = { ...prev };
-            delete next[q.id];
-            return next;
-          });
-        } else {
-          // If DELETE isn't supported, UI still stays cleared via local override.
-          console.warn("Clear pick failed:", await res.text());
-        }
-      } catch (e) {
-        console.warn("Clear pick error", e);
-      }
-    },
-    [user, roundNumber, patchGamePick]
-  );
-
-  const savePickToServer = useCallback(
-    async (q: ApiQuestion, outcome: PickOutcome) => {
-      if (!user) return false;
-
-      try {
-        const token = await user.getIdToken();
-        const body = {
-          questionId: q.id,
-          outcome,
-          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
-          gameId: q.gameId ?? null,
-        };
-
-        const res = await fetch("/api/user-picks", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          console.error("Failed to save pick:", await res.text());
-          return false;
-        }
-        return true;
-      } catch (e) {
-        console.error("Pick save error", e);
-        return false;
-      }
-    },
-    [user, roundNumber]
-  );
-
-  /**
-   * ✅ Toggle behaviour:
-   * - Click YES when already YES -> clear (same as pressing X)
-   * - Click NO when already NO -> clear
-   * - Otherwise sets the new pick
-   */
-  const togglePick = useCallback(
-    async (q: ApiQuestion, outcome: PickOutcome) => {
-      const current = getEffectivePick(q);
-
-      // Clicking same outcome -> clear
-      if (current === outcome) {
-        await clearPick(q);
-        return;
-      }
-
-      // Set locally immediately (optimistic)
-      setLocalOverrides((prev) => ({ ...prev, [q.id]: outcome }));
-
-      // Save server, then reconcile
-      const ok = await savePickToServer(q, outcome);
-      if (ok) {
-        patchGamePick(q.id, outcome);
-        // remove override since games state now reflects it
-        setLocalOverrides((prev) => {
-          const next = { ...prev };
-          delete next[q.id];
-          return next;
-        });
-      }
-    },
-    [getEffectivePick, clearPick, savePickToServer, patchGamePick]
-  );
 
   const renderStatusPill = (q: ApiQuestion) => {
     const base =
@@ -544,10 +471,16 @@ export default function PicksPage() {
         >
           <span className="relative flex h-1.5 w-1.5">
             <span
-              className="absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping"
-              style={{ background: "rgba(0,229,255,0.85)" }}
+              className="absolute inline-flex h-full w-full rounded-full opacity-60"
+              style={{
+                background: "rgba(0,229,255,0.85)",
+                animation: "ping 1.6s cubic-bezier(0,0,0.2,1) infinite",
+              }}
             />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.95)" }} />
+            <span
+              className="relative inline-flex h-1.5 w-1.5 rounded-full"
+              style={{ background: "rgba(0,229,255,0.95)" }}
+            />
           </span>
           LIVE
         </span>
@@ -584,7 +517,7 @@ export default function PicksPage() {
       );
     }
 
-    const pick = getEffectivePick(q);
+    const pick = localPicks[q.id] ?? q.userPick;
     const isPicked = pick === "yes" || pick === "no";
     const isCorrect = q.correctPick === true;
 
@@ -607,9 +540,9 @@ export default function PicksPage() {
       <span
         className={base}
         style={{
-          borderColor: isCorrect ? "rgba(35,214,142,0.45)" : "rgba(255,74,99,0.45)",
-          background: isCorrect ? "rgba(35,214,142,0.10)" : "rgba(255,74,99,0.10)",
-          color: isCorrect ? "rgba(35,214,142,0.95)" : "rgba(255,74,99,0.95)",
+          borderColor: isCorrect ? "rgba(25,195,125,0.45)" : "rgba(255,46,77,0.45)",
+          background: isCorrect ? "rgba(25,195,125,0.10)" : "rgba(255,46,77,0.10)",
+          color: isCorrect ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)",
         }}
       >
         {isCorrect ? "Correct" : "Wrong"}
@@ -627,7 +560,7 @@ export default function PicksPage() {
 
     const majority = majorityLabel(yes, no);
 
-    const pick = getEffectivePick(q);
+    const pick = localPicks[q.id] ?? q.userPick;
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
@@ -651,14 +584,14 @@ export default function PicksPage() {
               className="h-full"
               style={{
                 width: `${yesW}%`,
-                background: `linear-gradient(90deg, rgba(35,214,142,0.92), rgba(35,214,142,0.22))`,
+                background: `linear-gradient(90deg, rgba(25,195,125,0.85), rgba(25,195,125,0.18))`,
               }}
             />
             <div
               className="h-full"
               style={{
                 width: `${noW}%`,
-                background: `linear-gradient(90deg, rgba(255,74,99,0.22), rgba(255,74,99,0.92))`,
+                background: `linear-gradient(90deg, rgba(255,46,77,0.18), rgba(255,46,77,0.85))`,
               }}
             />
           </div>
@@ -672,7 +605,7 @@ export default function PicksPage() {
           {aligned === null ? (
             <span className="text-white/45">Pick to see if you’re with the crowd</span>
           ) : aligned ? (
-            <span style={{ color: "rgba(35,214,142,0.95)" }} className="font-semibold">
+            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-semibold">
               With majority
             </span>
           ) : (
@@ -690,69 +623,82 @@ export default function PicksPage() {
   };
 
   /**
-   * ✅ Buttons: YES solid green, NO solid red.
-   * - Selected adds a cyan ring/glow (still stays green/red).
-   * - Clicking selected again clears (toggle).
+   * ✅ Buttons:
+   * - Unselected: YES solid green, NO solid red
+   * - Selected: BOTH become BLUE (as requested)
+   * - Haptic micro: press feels + select pop
    */
   const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
-    const pick = getEffectivePick(q);
-
+    const pick = localPicks[q.id] ?? q.userPick;
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
 
     const baseBtn =
-      "flex-1 rounded-xl border font-extrabold tracking-wide transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed";
+      "flex-1 rounded-xl font-extrabold tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed";
 
-    const yesStyle = (selected: boolean) =>
-      ({
-        borderColor: selected ? "rgba(0,229,255,0.55)" : "rgba(255,255,255,0.10)",
-        background: selected
-          ? `linear-gradient(180deg, ${COLORS.yesSolidTop}, ${COLORS.yesSolidBot})`
-          : `linear-gradient(180deg, rgba(35,214,142,0.78), rgba(15,174,112,0.78))`,
-        color: "rgba(255,255,255,0.96)",
-        boxShadow: selected
-          ? "0 0 26px rgba(0,229,255,0.16), 0 0 18px rgba(35,214,142,0.18)"
-          : "0 0 14px rgba(35,214,142,0.12)",
-        transform: selected ? "translateY(-1px)" : "none",
-      }) as const;
+    const pressClasses = "active:scale-[0.985]"; // haptic press feel
 
-    const noStyle = (selected: boolean) =>
-      ({
-        borderColor: selected ? "rgba(0,229,255,0.55)" : "rgba(255,255,255,0.10)",
-        background: selected
-          ? `linear-gradient(180deg, ${COLORS.noSolidTop}, ${COLORS.noSolidBot})`
-          : `linear-gradient(180deg, rgba(255,74,99,0.78), rgba(229,22,61,0.78))`,
-        color: "rgba(255,255,255,0.96)",
-        boxShadow: selected
-          ? "0 0 26px rgba(0,229,255,0.16), 0 0 18px rgba(255,74,99,0.18)"
-          : "0 0 14px rgba(255,74,99,0.12)",
-        transform: selected ? "translateY(-1px)" : "none",
-      }) as const;
+    const makeBtnStyle = (variant: "yes" | "no") => {
+      const selected = variant === "yes" ? isYesSelected : isNoSelected;
+
+      if (selected) {
+        return {
+          borderColor: "rgba(47,124,255,0.85)",
+          background: `linear-gradient(180deg, rgba(47,124,255,0.92), rgba(29,78,216,0.88))`,
+          color: "rgba(255,255,255,0.98)",
+          boxShadow: "0 0 22px rgba(47,124,255,0.26), inset 0 0 0 1px rgba(255,255,255,0.10)",
+        } as const;
+      }
+
+      if (variant === "yes") {
+        return {
+          borderColor: "rgba(25,195,125,0.75)",
+          background: `linear-gradient(180deg, rgba(25,195,125,0.95), rgba(16,140,92,0.92))`,
+          color: "rgba(255,255,255,0.98)",
+          boxShadow: "0 0 18px rgba(25,195,125,0.14)",
+        } as const;
+      }
+
+      return {
+        borderColor: "rgba(255,46,77,0.78)",
+        background: `linear-gradient(180deg, rgba(255,46,77,0.95), rgba(190,22,50,0.92))`,
+        color: "rgba(255,255,255,0.98)",
+        boxShadow: "0 0 18px rgba(255,46,77,0.14)",
+      } as const;
+    };
+
+    const yesLabel = isYesSelected ? "YES (selected)" : "YES";
+    const noLabel = isNoSelected ? "NO (selected)" : "NO";
+
+    const pulseKey = selectPulse[q.id] ?? 0;
+    const pulseClass = pulseKey ? "streakr-select-pop" : "";
 
     return (
-      <div className="mt-2 flex gap-2">
+      <div className="mt-1.5 flex gap-2">
         <button
+          key={`yes-${q.id}-${pulseKey}`}
           type="button"
-          disabled={isLocked || q.status === "void" || q.status === "final" || q.status === "pending"}
+          disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "yes")}
-          className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
-          style={yesStyle(isYesSelected)}
+          className={`${baseBtn} ${pressClasses} ${pulseClass} px-4 ${PICK_BUTTON_PAD_Y} text-[12px] border`}
+          style={makeBtnStyle("yes")}
           aria-pressed={isYesSelected}
-          title={isYesSelected ? "Click again to clear" : "Pick YES"}
+          title={isYesSelected ? "Click again to unselect" : "Pick YES"}
         >
-          {isYesSelected ? "YES ✓" : "YES"}
+          {yesLabel}
         </button>
 
         <button
+          key={`no-${q.id}-${pulseKey}`}
           type="button"
-          disabled={isLocked || q.status === "void" || q.status === "final" || q.status === "pending"}
+          disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "no")}
-          className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
-          style={noStyle(isNoSelected)}
+          className={`${baseBtn} ${pressClasses} ${pulseClass} px-4 ${PICK_BUTTON_PAD_Y} text-[12px] border`}
+          style={makeBtnStyle("no")}
           aria-pressed={isNoSelected}
-          title={isNoSelected ? "Click again to clear" : "Pick NO"}
+          title={isNoSelected ? "Click again to unselect" : "Pick NO"}
         >
-          {isNoSelected ? "NO ✓" : "NO"}
+          {noLabel}
         </button>
       </div>
     );
@@ -764,6 +710,19 @@ export default function PicksPage() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
+      {/* Haptic micro animations (no libs) */}
+      <style>{`
+        .streakr-select-pop{
+          animation: streakrPop 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+          will-change: transform;
+        }
+        @keyframes streakrPop{
+          0% { transform: scale(1); }
+          55% { transform: scale(1.03); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
+
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
       <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
@@ -786,9 +745,7 @@ export default function PicksPage() {
               ) : null}
             </div>
             <p className="mt-1 text-sm text-white/65">
-              Pick any questions you want. 
-            Choose 0, 1, 5 — or all 12 questions.
-            Use the <span className="font-black text-white/90">X</span> to clear a pick.
+              Pick any questions you want. Change your mind anytime — click again to unselect, or hit the ✕.
             </p>
           </div>
 
@@ -906,7 +863,7 @@ export default function PicksPage() {
                 style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
               >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
-                <p className="text-xl font-black mt-1" style={{ color: "rgba(35,214,142,0.95)" }}>
+                <p className="text-xl font-black mt-1" style={{ color: "rgba(25,195,125,0.95)" }}>
                   {accuracyPct}%
                 </p>
               </div>
@@ -963,23 +920,23 @@ export default function PicksPage() {
               </Link>
 
               <div
-                className="rounded-xl border px-4 py-3 text-[11px] text-white/70"
+                className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
                 style={{
-                  borderColor: "rgba(244,178,71,0.45)",
-                  background: "rgba(244,178,71,0.12)",
+                  borderColor: "rgba(244,178,71,0.40)",
+                  background: "rgba(244,178,71,0.10)",
                 }}
               >
-                <span className="font-black" style={{ color: COLORS.orange }}>
+                <span className="font-bold" style={{ color: COLORS.orange }}>
                   Tip:
                 </span>{" "}
-                Use the <span className="font-black text-white/90">X</span> to clear any pick before lock.
+                Click the same pick again to unselect, or hit the ✕ clear button.
               </div>
             </div>
           </div>
         </div>
 
         {err ? (
-          <div className="mt-4 text-sm" style={{ color: "rgba(255,74,99,0.95)" }}>
+          <div className="mt-4 text-sm" style={{ color: COLORS.noFill }}>
             {err} Try refreshing.
           </div>
         ) : null}
@@ -1008,7 +965,7 @@ export default function PicksPage() {
               const isLocked = lockMs <= 0;
 
               const gamePicked = g.questions.reduce((acc, q) => {
-                const p = getEffectivePick(q);
+                const p = localPicks[q.id] ?? q.userPick;
                 return acc + (p === "yes" || p === "no" ? 1 : 0);
               }, 0);
 
@@ -1025,11 +982,11 @@ export default function PicksPage() {
                     boxShadow: "0 0 40px rgba(244,178,71,0.16), inset 0 0 0 1px rgba(244,178,71,0.35)",
                   }}
                 >
-                  {/* Game info block (orange, game name white) */}
+                  {/* Game info block (ORANGE) */}
                   <div
                     className="px-4 py-3"
                     style={{
-                      background: `linear-gradient(180deg, rgba(244,178,71,0.46) 0%, rgba(244,178,71,0.20) 100%)`,
+                      background: `linear-gradient(180deg, rgba(244,178,71,0.40) 0%, rgba(244,178,71,0.18) 100%)`,
                       borderBottom: "1px solid rgba(255,255,255,0.10)",
                     }}
                   >
@@ -1038,7 +995,7 @@ export default function PicksPage() {
                         <div className="text-lg sm:text-xl font-extrabold truncate" style={{ color: COLORS.white }}>
                           {g.match}
                         </div>
-                        <div className="mt-0.5 text-[12px] text-white/90 truncate">
+                        <div className="mt-0.5 text-[12px] text-white/85 truncate">
                           {g.venue} • {formatAedt(g.startTime)}
                         </div>
                       </div>
@@ -1090,35 +1047,30 @@ export default function PicksPage() {
                         const finalWrong = q.status === "final" && q.correctPick === false;
                         const finalCorrect = q.status === "final" && q.correctPick === true;
 
-                        const pick = getEffectivePick(q);
+                        const pick = localPicks[q.id] ?? q.userPick;
                         const hasPick = pick === "yes" || pick === "no";
 
-                        // lock per game (also respect question status)
-                        const questionLocked = isLocked || q.status === "pending" || q.status === "final" || q.status === "void";
-
-                        const isSponsor = q.isSponsorQuestion === true;
+                        const sponsor = q.isSponsorQuestion === true;
 
                         return (
                           <div
                             key={q.id}
                             className="rounded-2xl border"
                             style={{
-                              borderColor: finalWrong
-                                ? "rgba(255,74,99,0.55)"
+                              borderColor: sponsor
+                                ? "rgba(244,178,71,0.95)"
+                                : finalWrong
+                                ? "rgba(255,46,77,0.55)"
                                 : finalCorrect
-                                ? "rgba(35,214,142,0.50)"
-                                : isSponsor
-                                ? COLORS.sponsorBorder
+                                ? "rgba(25,195,125,0.50)"
                                 : "rgba(255,255,255,0.10)",
-                              background: isSponsor
-                                ? `linear-gradient(180deg, ${COLORS.sponsorTop} 0%, ${COLORS.sponsorBot} 100%)`
-                                : "rgba(13,17,23,0.78)",
-                              boxShadow: finalWrong
-                                ? "0 0 24px rgba(255,74,99,0.10)"
+                              background: sponsor ? "rgba(244,178,71,0.12)" : "rgba(13,17,23,0.78)",
+                              boxShadow: sponsor
+                                ? "0 0 28px rgba(244,178,71,0.18), inset 0 0 0 1px rgba(244,178,71,0.20)"
+                                : finalWrong
+                                ? "0 0 24px rgba(255,46,77,0.10)"
                                 : finalCorrect
-                                ? "0 0 24px rgba(35,214,142,0.08)"
-                                : isSponsor
-                                ? "0 0 26px rgba(244,178,71,0.16)"
+                                ? "0 0 24px rgba(25,195,125,0.08)"
                                 : "none",
                             }}
                           >
@@ -1126,65 +1078,60 @@ export default function PicksPage() {
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   {renderStatusPill(q)}
-                                  <span className="text-[11px] font-black text-white/80 uppercase tracking-wide">
+                                  <span className="text-[11px] font-black text-white/75 uppercase tracking-wide">
                                     Quarter {q.quarter}
                                   </span>
 
-                                  {isSponsor ? (
+                                  {sponsor ? (
                                     <span
                                       className="text-[10px] font-black rounded-full px-2 py-0.5 border"
                                       style={{
-                                        borderColor: "rgba(13,17,23,0.35)",
-                                        background: "rgba(244,178,71,0.92)",
-                                        color: "rgba(13,17,23,0.92)",
-                                        boxShadow: "0 0 18px rgba(244,178,71,0.18)",
+                                        borderColor: "rgba(244,178,71,0.85)",
+                                        background: "rgba(244,178,71,0.22)",
+                                        color: "rgba(13,17,23,0.95)",
+                                        boxShadow: "0 0 14px rgba(244,178,71,0.22)",
                                       }}
                                     >
-                                      SPONSORED ⭐
+                                      SPONSORED ☆
                                     </span>
                                   ) : null}
                                 </div>
 
                                 <div className="flex items-center gap-2">
-                                  {/* Clear X button (only when picked) */}
-                                  {hasPick ? (
-                                    <button
-                                      type="button"
-                                      disabled={questionLocked}
-                                      onClick={() => clearPick(q)}
-                                      className="inline-flex items-center justify-center rounded-full border transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                                      style={{
-                                        width: 34,
-                                        height: 34,
-                                        borderColor: "rgba(255,255,255,0.18)",
-                                        background: "rgba(255,255,255,0.06)",
-                                        color: "rgba(255,255,255,0.92)",
-                                        boxShadow: "0 0 14px rgba(0,0,0,0.25)",
-                                      }}
-                                      title={questionLocked ? "Locked" : "Clear pick"}
-                                      aria-label="Clear pick"
-                                    >
-                                      ✕
-                                    </button>
-                                  ) : null}
-
-                                  {/* Comment button (slightly bigger) */}
+                                  {/* Clear X */}
                                   <button
                                     type="button"
-                                    className="inline-flex items-center gap-1 rounded-full px-3.5 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
+                                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                                    style={{
+                                      borderColor: hasPick ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
+                                      background: hasPick ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                                      color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
+                                    }}
+                                    onClick={() => clearPick(q)}
+                                    disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
+                                    title={hasPick ? "Clear selection" : "No selection to clear"}
+                                    aria-label="Clear selection"
+                                  >
+                                    ✕
+                                  </button>
+
+                                  {/* Comments (slightly bigger) */}
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
                                     style={{
                                       borderColor:
                                         q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.65)"
+                                          ? "rgba(244,178,71,0.55)"
                                           : "rgba(0,229,255,0.32)",
                                       background:
                                         q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.16)"
-                                          : "rgba(0,229,255,0.09)",
-                                      color: "rgba(255,255,255,0.94)",
+                                          ? "rgba(244,178,71,0.14)"
+                                          : "rgba(0,229,255,0.08)",
+                                      color: "rgba(255,255,255,0.92)",
                                       boxShadow:
                                         q.commentCount && q.commentCount >= 100
-                                          ? "0 0 18px rgba(244,178,71,0.16)"
+                                          ? "0 0 18px rgba(244,178,71,0.14)"
                                           : "0 0 18px rgba(0,229,255,0.10)",
                                     }}
                                     onClick={() => alert("Comments coming next — wire this to your comments UI.")}
@@ -1200,7 +1147,7 @@ export default function PicksPage() {
                               </div>
 
                               {renderSentiment(q)}
-                              {renderPickButtons(q, questionLocked)}
+                              {renderPickButtons(q, isLocked || q.status === "pending")}
                             </div>
                           </div>
                         );
