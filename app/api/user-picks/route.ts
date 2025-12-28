@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
@@ -21,10 +21,6 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   }
 }
 
-/**
- * Helper: if the user doc doesn't have an activeQuestionId/activePick,
- * fall back to their most recent pick in the `picks` collection.
- */
 async function getLatestPickForUser(uid: string): Promise<{
   questionId: string | null;
   outcome: "yes" | "no" | null;
@@ -42,23 +38,17 @@ async function getLatestPickForUser(uid: string): Promise<{
     const docSnap = snap.docs[0];
     const data = docSnap.data() as any;
 
-    const questionId =
-      typeof data.questionId === "string" ? data.questionId : null;
-    const outcome =
-      data.pick === "yes" || data.pick === "no" ? data.pick : null;
+    const questionId = typeof data.questionId === "string" ? data.questionId : null;
+    const outcome = data.pick === "yes" || data.pick === "no" ? data.pick : null;
 
     if (!questionId || !outcome) return null;
 
-    // Best effort: write back into the user document so future GETs are cheap.
     const userRef = db.collection("users").doc(uid);
     await userRef.set(
       {
         activeQuestionId: questionId,
         activePick: outcome,
-        lastPickAt:
-          data.updatedAt instanceof Timestamp
-            ? data.updatedAt
-            : Timestamp.now(),
+        lastPickAt: data.updatedAt instanceof Timestamp ? data.updatedAt : Timestamp.now(),
       },
       { merge: true }
     );
@@ -70,10 +60,6 @@ async function getLatestPickForUser(uid: string): Promise<{
   }
 }
 
-/**
- * GET – return the user's current active streak pick
- * Shape: { questionId: string | null, outcome: "yes" | "no" | null }
- */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const uid = await getUserIdFromRequest(req);
@@ -89,20 +75,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     if (userSnap.exists) {
       const data = userSnap.data() as any;
-      const qid =
-        typeof data.activeQuestionId === "string"
-          ? data.activeQuestionId
-          : null;
-      const pick =
-        data.activePick === "yes" || data.activePick === "no"
-          ? data.activePick
-          : null;
-
-      questionId = qid;
-      outcome = pick;
+      questionId = typeof data.activeQuestionId === "string" ? data.activeQuestionId : null;
+      outcome = data.activePick === "yes" || data.activePick === "no" ? data.activePick : null;
     }
 
-    // If either field is missing, fall back to latest pick in `picks`.
     if (!questionId || !outcome) {
       const fallback = await getLatestPickForUser(uid);
       if (fallback) {
@@ -114,23 +90,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ questionId, outcome });
   } catch (error) {
     console.error("[/api/user-picks] GET error", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
-/**
- * POST – set/update the user's active streak pick
- * Body:
- * {
- *   questionId: string,
- *   outcome: "yes" | "no",
- *   roundNumber?: number | null,
- *   gameId?: string | null   ✅ IMPORTANT for game scoring mechanics
- * }
- */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const uid = await getUserIdFromRequest(req);
@@ -140,17 +103,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const body = await req.json();
 
+    const action: string | null =
+      typeof body?.action === "string" ? body.action.trim().toLowerCase() : null;
+
     const questionId: string | undefined = body?.questionId;
-    const outcome: "yes" | "no" | undefined = body?.outcome;
 
     const roundNumber: number | null =
       typeof body?.roundNumber === "number" ? body.roundNumber : null;
 
     const gameId: string | null =
-      typeof body?.gameId === "string" && body.gameId.trim()
-        ? body.gameId.trim()
-        : null;
+      typeof body?.gameId === "string" && body.gameId.trim() ? body.gameId.trim() : null;
 
+    const now = Timestamp.now();
+
+    const userRef = db.collection("users").doc(uid);
+
+    // ✅ CLEAR PICK
+    if (action === "clear") {
+      if (!questionId) {
+        return NextResponse.json({ error: "Missing questionId for clear" }, { status: 400 });
+      }
+
+      // remove active fields (don’t touch streak stats here)
+      await userRef.set(
+        {
+          activeQuestionId: FieldValue.delete(),
+          activePick: FieldValue.delete(),
+          lastPickAt: now,
+        },
+        { merge: true }
+      );
+
+      // delete the pick doc for that question
+      const pickId = `${uid}_${questionId}`;
+      await db.collection("picks").doc(pickId).delete().catch(() => {});
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // ✅ NORMAL PICK SET
+    const outcome: "yes" | "no" | undefined = body?.outcome;
     if (!questionId || (outcome !== "yes" && outcome !== "no")) {
       return NextResponse.json(
         { error: "Missing or invalid questionId/outcome" },
@@ -158,10 +150,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const now = Timestamp.now();
-
-    // 1) Update the user's active pick fields (keep your existing behaviour)
-    const userRef = db.collection("users").doc(uid);
+    // 1) Update user's active pick fields
     await userRef.set(
       {
         activeQuestionId: questionId,
@@ -171,30 +160,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { merge: true }
     );
 
-    // 2) Upsert a pick document for this user & question
-    // IMPORTANT: include gameId so settlement can compute gameScore correctly.
+    // 2) Upsert pick doc; ensure createdAt only set once
     const pickId = `${uid}_${questionId}`;
     const pickRef = db.collection("picks").doc(pickId);
 
-    const payload: any = {
-      userId: uid,
-      questionId,
-      roundNumber,
-      pick: outcome,
-      createdAt: now,
-      updatedAt: now,
-    };
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(pickRef);
+      const base: any = {
+        userId: uid,
+        questionId,
+        roundNumber,
+        pick: outcome,
+        updatedAt: now,
+      };
+      if (gameId) base.gameId = gameId;
 
-    if (gameId) payload.gameId = gameId;
+      if (!snap.exists) {
+        base.createdAt = now;
+      }
 
-    await pickRef.set(payload, { merge: true });
+      tx.set(pickRef, base, { merge: true });
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[/api/user-picks] POST error", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
