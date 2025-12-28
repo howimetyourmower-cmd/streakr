@@ -12,7 +12,6 @@ import {
   doc,
   limit,
   onSnapshot,
-  orderBy,
   query,
   serverTimestamp,
   where,
@@ -77,13 +76,15 @@ type CommentRow = {
   userId?: string | null;
   displayName?: string | null;
   username?: string | null;
-  text: string;
+  body: string; // ✅ matches Firestore screenshot (field is "body")
   createdAt?: any;
 };
 
 /**
  * ✅ This version:
- * - Fix comments: real modal + Firestore-backed list + add comment (no alerts).
+ * - Fix comments: real modal + Firestore-backed list + add comment.
+ * - FIX: comment field mismatch (body vs text) — now uses "body" and falls back to "text".
+ * - FIX: Firestore query index issue — removed orderBy; sort in JS.
  * - FIX: X clear works (no “fallback to q.userPick”) using LocalPick="none" sentinel + effectivePick() helper.
  * - Clear persists server-side (tries DELETE, falls back to POST {action:"clear"}).
  * - Selected pick becomes BLUE when selected.
@@ -158,7 +159,6 @@ function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefine
 
 function formatCommentTime(createdAt: any): string {
   try {
-    // Firestore Timestamp has toDate()
     if (createdAt?.toDate) {
       const d = createdAt.toDate() as Date;
       return d.toLocaleString("en-AU", {
@@ -213,7 +213,6 @@ export default function PicksPage() {
   const [commentErr, setCommentErr] = useState("");
   const [commentPosting, setCommentPosting] = useState(false);
 
-  // Keep snapshot unsubscribe for comments
   const commentsUnsubRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
@@ -528,17 +527,14 @@ export default function PicksPage() {
   const SENTIMENT_BAR_H = "h-[6px]";
 
   // ✅ Comments: open modal + subscribe to Firestore
-  const openComments = useCallback(
-    (g: ApiGame, q: ApiQuestion) => {
-      setCommentsGame(g);
-      setCommentsQuestion(q);
-      setCommentsOpen(true);
-      setCommentText("");
-      setCommentErr("");
-      setCommentsList([]);
-    },
-    []
-  );
+  const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
+    setCommentsGame(g);
+    setCommentsQuestion(q);
+    setCommentsOpen(true);
+    setCommentText("");
+    setCommentErr("");
+    setCommentsList([]);
+  }, []);
 
   const closeComments = useCallback(() => {
     setCommentsOpen(false);
@@ -569,6 +565,7 @@ export default function PicksPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [commentsOpen, closeComments]);
 
+  // Subscribe to comments
   useEffect(() => {
     if (!commentsOpen || !commentsQuestion) return;
 
@@ -582,30 +579,42 @@ export default function PicksPage() {
       commentsUnsubRef.current = null;
     }
 
+    // ✅ NO orderBy -> no composite index required
     const qRef = query(
       collection(db, "comments"),
       where("questionId", "==", commentsQuestion.id),
-      orderBy("createdAt", "desc"),
       limit(50)
     );
 
     commentsUnsubRef.current = onSnapshot(
       qRef,
       (snap) => {
-        const rows: CommentRow[] = snap.docs.map((d) => {
-          const data = d.data() as any;
-          return {
-            id: d.id,
-            questionId: data?.questionId ?? commentsQuestion.id,
-            gameId: data?.gameId ?? null,
-            roundNumber: typeof data?.roundNumber === "number" ? data.roundNumber : null,
-            userId: data?.userId ?? null,
-            displayName: data?.displayName ?? null,
-            username: data?.username ?? null,
-            text: typeof data?.text === "string" ? data.text : "",
-            createdAt: data?.createdAt,
-          };
-        });
+        const rows: CommentRow[] = snap.docs
+          .map((d) => {
+            const data = d.data() as any;
+
+            // ✅ match Firestore docs: body
+            const body =
+              typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
+
+            return {
+              id: d.id,
+              questionId: data?.questionId ?? commentsQuestion.id,
+              gameId: data?.gameId ?? null,
+              roundNumber: typeof data?.roundNumber === "number" ? data.roundNumber : null,
+              userId: data?.userId ?? null,
+              displayName: data?.displayName ?? null,
+              username: data?.username ?? null,
+              body,
+              createdAt: data?.createdAt,
+            };
+          })
+          // ✅ sort in JS by createdAt desc
+          .sort((a, b) => {
+            const ams = a.createdAt?.toMillis?.() ?? 0;
+            const bms = b.createdAt?.toMillis?.() ?? 0;
+            return bms - ams;
+          });
 
         setCommentsList(rows);
         setCommentsLoading(false);
@@ -644,7 +653,6 @@ export default function PicksPage() {
       return;
     }
 
-    // super basic spam guard
     if (txt.length > 240) {
       setCommentErr("Keep it under 240 characters.");
       return;
@@ -658,12 +666,14 @@ export default function PicksPage() {
         roundNumber: typeof roundNumber === "number" ? roundNumber : null,
         userId: user.uid,
         displayName: user.displayName ?? null,
-        text: txt,
+
+        // ✅ match Firestore: body
+        body: txt,
+
         createdAt: serverTimestamp(),
       };
 
       await addDoc(collection(db, "comments"), payload);
-
       setCommentText("");
     } catch (e) {
       console.error("postComment error", e);
@@ -941,7 +951,6 @@ export default function PicksPage() {
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
           onMouseDown={(e) => {
-            // click outside closes
             if (e.target === e.currentTarget) closeComments();
           }}
           style={{
@@ -1031,7 +1040,11 @@ export default function PicksPage() {
                 </button>
               </div>
 
-              {commentErr ? <div className="mt-2 text-[12px]" style={{ color: COLORS.noFill }}>{commentErr}</div> : null}
+              {commentErr ? (
+                <div className="mt-2 text-[12px]" style={{ color: COLORS.noFill }}>
+                  {commentErr}
+                </div>
+              ) : null}
 
               <div className="mt-4">
                 <div className="flex items-center justify-between text-[11px] text-white/55">
@@ -1043,11 +1056,23 @@ export default function PicksPage() {
 
                 <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
                   {commentsLoading ? (
-                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                    <div
+                      className="rounded-xl border p-3 text-[12px] text-white/70"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.10)",
+                        background: "rgba(255,255,255,0.03)",
+                      }}
+                    >
                       Loading comments…
                     </div>
                   ) : commentsList.length === 0 ? (
-                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                    <div
+                      className="rounded-xl border p-3 text-[12px] text-white/70"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.10)",
+                        background: "rgba(255,255,255,0.03)",
+                      }}
+                    >
                       No comments yet. Be the first to chirp.
                     </div>
                   ) : (
@@ -1065,10 +1090,12 @@ export default function PicksPage() {
                             <div className="text-[12px] font-black text-white/90 truncate">
                               {c.displayName || c.username || "Anonymous"}
                             </div>
-                            <div className="text-[11px] text-white/45 shrink-0">{formatCommentTime(c.createdAt)}</div>
+                            <div className="text-[11px] text-white/45 shrink-0">
+                              {formatCommentTime(c.createdAt)}
+                            </div>
                           </div>
                           <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">
-                            {c.text}
+                            {c.body}
                           </div>
                         </div>
                       ))}
@@ -1240,7 +1267,9 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 text-[11px] text-white/55">
-              {user ? "Pick what you like — no pressure to do them all." : "Log in to save picks + appear on leaderboards."}
+              {user
+                ? "Pick what you like — no pressure to do them all."
+                : "Log in to save picks + appear on leaderboards."}
             </div>
           </div>
 
@@ -1479,7 +1508,7 @@ export default function PicksPage() {
                                     ✕
                                   </button>
 
-                                  {/* ✅ Comments */}
+                                  {/* Comments */}
                                   <button
                                     type="button"
                                     className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
