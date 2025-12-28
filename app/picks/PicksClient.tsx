@@ -58,14 +58,27 @@ type LeaderboardApiResponse = {
   userLifetime?: any;
 };
 
+/**
+ * ✅ Requested updates:
+ * - YES greener, NO redder
+ * - When a selection is made (either YES or NO) -> turn BLUE (selected state)
+ * - Orange adjusted to match your "Create a league" button orange (warmer / softer)
+ */
 const COLORS = {
   bg: "#0D1117",
   panel: "#0F1623",
   panel2: "#0A0F18",
 
-  orange: "#FF3D00",
-  green: "#76FF03",
-  red: "#FF073A",
+  // 🟧 New orange (closer to your 2nd image button)
+  orange: "#F4B247",
+
+  // ✅ Greener YES, redder NO
+  yesGreen: "#00E676",
+  noRed: "#FF1744",
+
+  // ✅ Selected state blue
+  selectedBlue: "#2F80FF",
+
   cyan: "#00E5FF",
   white: "#FFFFFF",
 };
@@ -106,8 +119,8 @@ function msToCountdown(ms: number): string {
 
 function majorityLabel(yes: number, no: number): { label: string; color: string } {
   if (yes === no) return { label: "Split crowd", color: "rgba(255,255,255,0.70)" };
-  if (yes > no) return { label: "Majority is YES", color: "rgba(118,255,3,0.85)" };
-  return { label: "Majority is NO", color: "rgba(255,7,58,0.85)" };
+  if (yes > no) return { label: "Majority is YES", color: "rgba(0,230,118,0.90)" };
+  return { label: "Majority is NO", color: "rgba(255,23,68,0.90)" };
 }
 
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
@@ -117,7 +130,7 @@ function safeLocalKey(uid: string | null, roundNumber: number | null) {
 type LocalPickMap = Record<string, PickOutcome>;
 
 export default function PicksPage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [games, setGames] = useState<ApiGame[]>([]);
@@ -137,7 +150,7 @@ export default function PicksPage() {
 
   const hasHydratedLocalRef = useRef(false);
 
-  // Stable 1s timer (prevents runaway)
+  // Stable 1s timer
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -186,7 +199,7 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // Hydrate local picks after roundNumber known
+  // Hydrate local picks
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -234,7 +247,7 @@ export default function PicksPage() {
     return () => unsub();
   }, [user]);
 
-  // Leader streak from leaderboard API
+  // Leader streak
   const loadLeader = useCallback(
     async (silent?: boolean) => {
       try {
@@ -272,7 +285,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // Confetti milestones (5, 10, 15...)
+  // Confetti milestones
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -390,13 +403,12 @@ export default function PicksPage() {
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
 
-  // Smaller pick-card sizing (≈75% height): tighten vertical padding + margins + bar heights
-  const PICK_CARD_PAD_Y = "py-1.5"; // down from ~py-2
-  const PICK_CARD_PAD_X = "px-3"; // keep
-  const PICK_BUTTON_PAD_Y = "py-1.5"; // down from py-2
-  const SENTIMENT_BAR_H = "h-[6px]"; // down from h-2
+  // Slightly compact cards (kept from your last request)
+  const PICK_CARD_PAD_Y = "py-1.5";
+  const PICK_CARD_PAD_X = "px-3";
+  const PICK_BUTTON_PAD_Y = "py-1.5";
+  const SENTIMENT_BAR_H = "h-[6px]";
 
-  // Render helpers
   const renderStatusPill = (q: ApiQuestion) => {
     const base =
       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border";
@@ -482,9 +494,9 @@ export default function PicksPage() {
       <span
         className={base}
         style={{
-          borderColor: isCorrect ? "rgba(118,255,3,0.55)" : "rgba(255,7,58,0.55)",
-          background: isCorrect ? "rgba(118,255,3,0.12)" : "rgba(255,7,58,0.12)",
-          color: isCorrect ? "rgba(118,255,3,0.95)" : "rgba(255,7,58,0.95)",
+          borderColor: isCorrect ? "rgba(0,230,118,0.55)" : "rgba(255,23,68,0.55)",
+          background: isCorrect ? "rgba(0,230,118,0.12)" : "rgba(255,23,68,0.12)",
+          color: isCorrect ? "rgba(0,230,118,0.95)" : "rgba(255,23,68,0.95)",
         }}
       >
         {isCorrect ? "Correct" : "Wrong"}
@@ -526,16 +538,14 @@ export default function PicksPage() {
               className="h-full"
               style={{
                 width: `${yesW}%`,
-                background:
-                  "linear-gradient(90deg, rgba(118,255,3,0.85), rgba(0,229,255,0.65))",
+                background: `linear-gradient(90deg, rgba(0,230,118,0.95), rgba(0,229,255,0.55))`,
               }}
             />
             <div
               className="h-full"
               style={{
                 width: `${noW}%`,
-                background:
-                  "linear-gradient(90deg, rgba(255,61,0,0.55), rgba(255,7,58,0.75))",
+                background: `linear-gradient(90deg, rgba(255,23,68,0.55), rgba(255,23,68,0.95))`,
               }}
             />
           </div>
@@ -549,7 +559,7 @@ export default function PicksPage() {
           {aligned === null ? (
             <span className="text-white/45">Pick to see if you’re with the crowd</span>
           ) : aligned ? (
-            <span style={{ color: COLORS.green }} className="font-semibold">
+            <span style={{ color: COLORS.yesGreen }} className="font-semibold">
               With majority
             </span>
           ) : (
@@ -566,13 +576,51 @@ export default function PicksPage() {
     );
   };
 
+  /**
+   * ✅ Buttons now:
+   * - YES is greener, NO is redder (when NOT selected)
+   * - If a pick is selected, the selected button turns BLUE (both YES/NO)
+   */
   const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
     const pick = localPicks[q.id] ?? q.userPick;
-    const yesActive = pick === "yes";
-    const noActive = pick === "no";
+
+    const isYesSelected = pick === "yes";
+    const isNoSelected = pick === "no";
 
     const baseBtn =
       "flex-1 rounded-xl border font-extrabold tracking-wide transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed";
+
+    const makeBtnStyle = (variant: "yes" | "no") => {
+      const selected = variant === "yes" ? isYesSelected : isNoSelected;
+
+      if (selected) {
+        return {
+          borderColor: "rgba(47,128,255,0.75)",
+          background: "linear-gradient(180deg, rgba(47,128,255,0.28), rgba(47,128,255,0.14))",
+          color: "rgba(255,255,255,0.96)",
+          boxShadow: "0 0 26px rgba(47,128,255,0.22)",
+          transform: "translateY(-1px)",
+        } as const;
+      }
+
+      if (variant === "yes") {
+        return {
+          borderColor: "rgba(0,230,118,0.70)",
+          background: "linear-gradient(180deg, rgba(0,230,118,0.22), rgba(0,230,118,0.10))",
+          color: "rgba(0,230,118,0.95)",
+          boxShadow: "0 0 22px rgba(0,230,118,0.14)",
+          transform: "none",
+        } as const;
+      }
+
+      return {
+        borderColor: "rgba(255,23,68,0.70)",
+        background: "linear-gradient(180deg, rgba(255,23,68,0.22), rgba(255,23,68,0.10))",
+        color: "rgba(255,23,68,0.95)",
+        boxShadow: "0 0 22px rgba(255,23,68,0.14)",
+        transform: "none",
+      } as const;
+    };
 
     return (
       <div className="mt-1.5 flex gap-2">
@@ -581,15 +629,7 @@ export default function PicksPage() {
           disabled={isLocked || q.status === "void"}
           onClick={() => setPick(q, "yes")}
           className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
-          style={{
-            borderColor: yesActive ? "rgba(118,255,3,0.70)" : "rgba(255,255,255,0.12)",
-            background: yesActive
-              ? "linear-gradient(180deg, rgba(118,255,3,0.22), rgba(118,255,3,0.12))"
-              : "rgba(255,255,255,0.04)",
-            color: yesActive ? "rgba(118,255,3,0.95)" : "rgba(255,255,255,0.86)",
-            boxShadow: yesActive ? "0 0 24px rgba(118,255,3,0.18)" : "none",
-            transform: yesActive ? "translateY(-1px)" : "none",
-          }}
+          style={makeBtnStyle("yes")}
         >
           YES
         </button>
@@ -599,15 +639,7 @@ export default function PicksPage() {
           disabled={isLocked || q.status === "void"}
           onClick={() => setPick(q, "no")}
           className={`${baseBtn} px-4 ${PICK_BUTTON_PAD_Y} text-[12px]`}
-          style={{
-            borderColor: noActive ? "rgba(255,7,58,0.70)" : "rgba(255,255,255,0.12)",
-            background: noActive
-              ? "linear-gradient(180deg, rgba(255,7,58,0.22), rgba(255,7,58,0.12))"
-              : "rgba(255,255,255,0.04)",
-            color: noActive ? "rgba(255,7,58,0.95)" : "rgba(255,255,255,0.86)",
-            boxShadow: noActive ? "0 0 24px rgba(255,7,58,0.18)" : "none",
-            transform: noActive ? "translateY(-1px)" : "none",
-          }}
+          style={makeBtnStyle("no")}
         >
           NO
         </button>
@@ -693,7 +725,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.mine}%`,
-                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,61,0,0.30))`,
+                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(244,178,71,0.22))`,
                   }}
                 />
               </div>
@@ -703,7 +735,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.lead}%`,
-                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.25))`,
+                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.22))`,
                   }}
                 />
               </div>
@@ -761,7 +793,7 @@ export default function PicksPage() {
                 style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
               >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
-                <p className="text-xl font-black mt-1" style={{ color: COLORS.green }}>
+                <p className="text-xl font-black mt-1" style={{ color: COLORS.yesGreen }}>
                   {accuracyPct}%
                 </p>
               </div>
@@ -820,8 +852,8 @@ export default function PicksPage() {
               <div
                 className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
                 style={{
-                  borderColor: "rgba(255,61,0,0.30)",
-                  background: "rgba(255,61,0,0.08)",
+                  borderColor: "rgba(244,178,71,0.40)",
+                  background: "rgba(244,178,71,0.10)",
                 }}
               >
                 <span className="font-bold" style={{ color: COLORS.orange }}>
@@ -834,7 +866,7 @@ export default function PicksPage() {
         </div>
 
         {err ? (
-          <div className="mt-4 text-sm" style={{ color: COLORS.red }}>
+          <div className="mt-4 text-sm" style={{ color: COLORS.noRed }}>
             {err} Try refreshing.
           </div>
         ) : null}
@@ -875,16 +907,16 @@ export default function PicksPage() {
                   key={g.id}
                   className="rounded-2xl border overflow-hidden"
                   style={{
-                    borderColor: "rgba(255,61,0,0.70)",
-                    background: `linear-gradient(180deg, rgba(255,61,0,0.28) 0%, rgba(255,61,0,0.18) 42%, rgba(13,17,23,0.88) 100%)`,
-                    boxShadow: "0 0 40px rgba(255,61,0,0.22), inset 0 0 0 1px rgba(255,61,0,0.40)",
+                    borderColor: "rgba(244,178,71,0.80)",
+                    background: `linear-gradient(180deg, rgba(244,178,71,0.22) 0%, rgba(244,178,71,0.14) 42%, rgba(13,17,23,0.88) 100%)`,
+                    boxShadow: "0 0 40px rgba(244,178,71,0.16), inset 0 0 0 1px rgba(244,178,71,0.35)",
                   }}
                 >
-                  {/* ✅ Game info block now ORANGE (stronger + clearer) */}
+                  {/* Game info block (orange family) */}
                   <div
                     className="px-4 py-3"
                     style={{
-                      background: `linear-gradient(180deg, rgba(255,61,0,0.45) 0%, rgba(255,61,0,0.22) 100%)`,
+                      background: `linear-gradient(180deg, rgba(244,178,71,0.40) 0%, rgba(244,178,71,0.18) 100%)`,
                       borderBottom: "1px solid rgba(255,255,255,0.10)",
                     }}
                   >
@@ -925,7 +957,6 @@ export default function PicksPage() {
                       </div>
                     </div>
 
-                    {/* progress */}
                     <div className="mt-3">
                       <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(13,17,23,0.35)" }}>
                         <div
@@ -939,7 +970,7 @@ export default function PicksPage() {
                     </div>
                   </div>
 
-                  {/* Questions (reduced size ~75%) */}
+                  {/* Questions */}
                   <div className="px-3 pb-3">
                     <div className="flex flex-col gap-2">
                       {g.questions.map((q) => {
@@ -953,15 +984,15 @@ export default function PicksPage() {
                             className="rounded-2xl border"
                             style={{
                               borderColor: finalWrong
-                                ? "rgba(255,7,58,0.55)"
+                                ? "rgba(255,23,68,0.55)"
                                 : finalCorrect
-                                ? "rgba(118,255,3,0.45)"
+                                ? "rgba(0,230,118,0.45)"
                                 : "rgba(255,255,255,0.10)",
                               background: "rgba(13,17,23,0.78)",
                               boxShadow: finalWrong
-                                ? "0 0 24px rgba(255,7,58,0.10)"
+                                ? "0 0 24px rgba(255,23,68,0.10)"
                                 : finalCorrect
-                                ? "0 0 24px rgba(118,255,3,0.08)"
+                                ? "0 0 24px rgba(0,230,118,0.08)"
                                 : "none",
                             }}
                           >
@@ -969,19 +1000,16 @@ export default function PicksPage() {
                               <div className="flex items-start justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   {renderStatusPill(q)}
-
-                                  {/* ✅ "Q1" -> "Quarter 1" */}
                                   <span className="text-[11px] font-black text-white/75 uppercase tracking-wide">
                                     Quarter {q.quarter}
                                   </span>
-
                                   {q.isSponsorQuestion ? (
                                     <span
                                       className="text-[10px] font-black rounded-full px-2 py-0.5 border"
                                       style={{
-                                        borderColor: "rgba(255,61,0,0.35)",
-                                        background: "rgba(255,61,0,0.10)",
-                                        color: "rgba(255,61,0,0.95)",
+                                        borderColor: "rgba(244,178,71,0.45)",
+                                        background: "rgba(244,178,71,0.12)",
+                                        color: "rgba(244,178,71,0.95)",
                                       }}
                                     >
                                       Sponsored
@@ -989,27 +1017,25 @@ export default function PicksPage() {
                                   ) : null}
                                 </div>
 
-                                {/* ✅ comment button bigger + stands out */}
                                 <button
                                   type="button"
                                   className="inline-flex items-center gap-1 rounded-full px-3 py-1 text-[12px] font-black border transition active:scale-[0.99]"
                                   style={{
-                                    borderColor: q.commentCount && q.commentCount >= 100 ? "rgba(255,61,0,0.55)" : "rgba(0,229,255,0.35)",
+                                    borderColor:
+                                      q.commentCount && q.commentCount >= 100
+                                        ? "rgba(244,178,71,0.55)"
+                                        : "rgba(0,229,255,0.35)",
                                     background:
                                       q.commentCount && q.commentCount >= 100
-                                        ? "rgba(255,61,0,0.14)"
+                                        ? "rgba(244,178,71,0.14)"
                                         : "rgba(0,229,255,0.10)",
                                     color: "rgba(255,255,255,0.92)",
                                     boxShadow:
                                       q.commentCount && q.commentCount >= 100
-                                        ? "0 0 18px rgba(255,61,0,0.20)"
+                                        ? "0 0 18px rgba(244,178,71,0.18)"
                                         : "0 0 18px rgba(0,229,255,0.12)",
                                   }}
-                                  onClick={() => {
-                                    // Placeholder for your comments UX (modal/page)
-                                    // If you already have a route, swap this to router.push(...)
-                                    alert("Comments coming next — wire this to your comments UI.");
-                                  }}
+                                  onClick={() => alert("Comments coming next — wire this to your comments UI.")}
                                 >
                                   💬 {q.commentCount ?? 0}
                                   {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
@@ -1021,7 +1047,6 @@ export default function PicksPage() {
                               </div>
 
                               {renderSentiment(q)}
-
                               {renderPickButtons(q, isLocked || q.status === "pending")}
                             </div>
                           </div>
