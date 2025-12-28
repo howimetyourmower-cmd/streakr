@@ -189,7 +189,7 @@ export default function LeagueLadderPage() {
 
   if (loading) {
     return (
-      <div className="py-6 md:py-8">
+      <div className="py-4 md:py-6">
         <p className="text-sm text-white/70">Loading ladder…</p>
       </div>
     );
@@ -197,7 +197,7 @@ export default function LeagueLadderPage() {
 
   if (!league) {
     return (
-      <div className="py-6 md:py-8 space-y-4">
+      <div className="py-4 md:py-6 space-y-4">
         <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
           ← Back to leagues
         </Link>
