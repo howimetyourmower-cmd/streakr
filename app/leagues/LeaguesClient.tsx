@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,8 +14,10 @@ import {
   getDocs,
   limit,
   query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
   where,
-  orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -40,6 +42,10 @@ function uniqById(list: MyLeagueRow[]) {
   return Array.from(map.values());
 }
 
+function normalizeCode(input: string) {
+  return input.trim().toUpperCase().replace(/\s+/g, "");
+}
+
 export default function LeaguesClient() {
   const router = useRouter();
   const { user } = useAuth();
@@ -48,6 +54,12 @@ export default function LeaguesClient() {
   const [myLeagues, setMyLeagues] = useState<MyLeagueRow[]>([]);
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+
+  // Join a league state
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
 
   const selected = useMemo(
     () => myLeagues.find((x) => x.league.id === selectedLeagueId) || null,
@@ -95,16 +107,13 @@ export default function LeaguesClient() {
           return { league, uiRole: "manager" };
         });
 
-        // 2) Leagues where I'm a member (collectionGroup: leagues/*/members/*)
-        // NOTE: This requires members docs to contain { uid: "<user uid>" }
+        // 2) Leagues where I'm a member via collectionGroup members
         const membersCG = collectionGroup(db, "members");
         const membersQ = query(membersCG, where("uid", "==", uid), limit(100));
         const membersSnap = await getDocs(membersQ);
 
-        // For each member doc, fetch the parent league
         const memberRows: MyLeagueRow[] = await Promise.all(
           membersSnap.docs.map(async (m) => {
-            // m.ref path = leagues/{leagueId}/members/{memberDoc}
             const leagueRef = m.ref.parent.parent;
             if (!leagueRef) return null;
 
@@ -128,23 +137,26 @@ export default function LeaguesClient() {
               memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
             };
 
-            const roleFromMember = (m.data() as any)?.role as "manager" | "member" | undefined;
+            const roleFromMember = (m.data() as any)?.role as
+              | "manager"
+              | "member"
+              | undefined;
 
             const uiRole: "manager" | "member" =
-              league.managerId === uid || roleFromMember === "manager" ? "manager" : "member";
+              league.managerId === uid || roleFromMember === "manager"
+                ? "manager"
+                : "member";
 
             return { league, uiRole };
           })
         ).then((x) => x.filter(Boolean) as MyLeagueRow[]);
 
-        // Merge + de-dup + sort
         const merged = uniqById([...managerLeagues, ...memberRows]).sort((a, b) =>
           a.league.name.localeCompare(b.league.name)
         );
 
         setMyLeagues(merged);
 
-        // Keep selection stable
         if (merged.length > 0) {
           setSelectedLeagueId((prev) => {
             if (prev && merged.some((x) => x.league.id === prev)) return prev;
@@ -165,6 +177,74 @@ export default function LeaguesClient() {
 
     load();
   }, [user?.uid]);
+
+  const handleJoin = async (e: FormEvent) => {
+    e.preventDefault();
+    setJoinError(null);
+    setJoinSuccess(null);
+
+    if (!user) {
+      setJoinError("You need to be logged in to join a league.");
+      return;
+    }
+
+    const code = normalizeCode(joinCode);
+    if (!code || code.length < 4) {
+      setJoinError("Enter a valid invite code.");
+      return;
+    }
+
+    setJoining(true);
+
+    try {
+      // Find league by inviteCode
+      const leaguesRef = collection(db, "leagues");
+      const qLeagues = query(leaguesRef, where("inviteCode", "==", code), limit(1));
+      const snap = await getDocs(qLeagues);
+
+      if (snap.empty) {
+        setJoinError("No league found with that code.");
+        setJoining(false);
+        return;
+      }
+
+      const leagueDoc = snap.docs[0];
+      const leagueId = leagueDoc.id;
+
+      const leagueData = leagueDoc.data() as any;
+      const managerId = leagueData.managerId ?? "";
+      const memberCount = Number(leagueData.memberCount ?? 0);
+
+      // Create/merge member doc
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      await setDoc(
+        memberRef,
+        {
+          uid: user.uid,
+          displayName: (user as any).displayName || (user as any).email || "Player",
+          role: user.uid === managerId ? "manager" : "member",
+          joinedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Bump memberCount (best-effort; won’t be perfect without transaction but OK for now)
+      await updateDoc(doc(db, "leagues", leagueId), {
+        memberCount: memberCount > 0 ? memberCount : 1,
+      }).catch(() => {});
+
+      setJoinSuccess("You’re in. Opening league…");
+      setJoinCode("");
+
+      // Navigate straight into ladder (or league page if you prefer)
+      router.push(`/leagues/${leagueId}/ladder`);
+    } catch (err) {
+      console.error(err);
+      setJoinError("Failed to join league. Please try again.");
+    } finally {
+      setJoining(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050814] text-white">
@@ -188,8 +268,9 @@ export default function LeaguesClient() {
           </p>
         )}
 
+        {/* Top row: My leagues (left) + Create league (right) */}
         <div className="grid gap-4 md:grid-cols-2">
-          {/* LEFT: My leagues (home base) */}
+          {/* LEFT: My leagues */}
           <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
             <h2 className="text-xl font-bold">My leagues</h2>
             <p className="text-sm text-white/70">
@@ -226,8 +307,7 @@ export default function LeaguesClient() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold truncate">
-                          {selected.league.name}{" "}
-                          {selected.uiRole === "manager" ? "👑" : ""}
+                          {selected.league.name} {selected.uiRole === "manager" ? "👑" : ""}
                         </div>
                         <div className="text-xs text-white/60 mt-1">
                           Invite code:{" "}
@@ -274,8 +354,7 @@ export default function LeaguesClient() {
           <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
             <h2 className="text-xl font-bold">Create a league</h2>
             <p className="text-sm text-white/70">
-              You&apos;re the commish. Name your league, set how many mates can join,
-              and share a single invite code with the crew.
+              You&apos;re the commish. Name your league, and share a single invite code with the crew.
             </p>
 
             <ul className="text-sm text-white/70 list-disc pl-5 space-y-1">
@@ -295,6 +374,42 @@ export default function LeaguesClient() {
             <p className="text-xs text-white/50">
               Tip: your league ladder is separate bragging rights — your global streak still lives on the main leaderboard.
             </p>
+          </div>
+        </div>
+
+        {/* FULL-WIDTH: Join a league */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold">Join a league</h2>
+              <p className="text-sm text-white/70">
+                Got a code from a mate? Drop it in and you’ll appear on that league’s ladder.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] items-start">
+            <form onSubmit={handleJoin} className="contents">
+              <div className="space-y-2">
+                <label className="text-xs text-white/60">Invite code</label>
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  placeholder="E.g. TM668W"
+                  className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                />
+                {joinError && <p className="text-xs text-red-400">{joinError}</p>}
+                {joinSuccess && <p className="text-xs text-emerald-400">{joinSuccess}</p>}
+              </div>
+
+              <button
+                type="submit"
+                disabled={joining || !joinCode.trim()}
+                className="h-[42px] md:mt-[22px] inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-6 py-2 transition-colors disabled:opacity-60"
+              >
+                {joining ? "Joining…" : "Join with a code"}
+              </button>
+            </form>
           </div>
         </div>
       </div>
