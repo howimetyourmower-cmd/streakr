@@ -1,4 +1,4 @@
-// app/leagues/[leagueId]/ladder/page.tsx
+// /app/leagues/[leagueId]/ladder/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +10,8 @@ import {
   collection,
   doc,
   getDoc,
+  getDocs,
   limit,
-  onSnapshot,
   orderBy,
   query,
 } from "firebase/firestore";
@@ -19,289 +19,269 @@ import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 import SportBadge from "@/components/SportBadge";
 
-// eslint-disable-next-line @next/next/no-img-element
-type MemberRow = {
-  id: string;
-  uid: string;
-  displayName: string;
-  role: "manager" | "member";
-  joinedAt?: any;
-};
-
 type League = {
   id: string;
   name: string;
   inviteCode: string;
   managerId: string;
-  description?: string;
-  memberCount?: number;
+};
+
+type MemberDoc = {
+  uid: string;
+  displayName?: string;
+  role?: "manager" | "member";
 };
 
 type UserProfile = {
   uid: string;
   displayName?: string;
-  username?: string; // @handle
-  photoURL?: string;
+  username?: string;
   avatarUrl?: string;
-
-  currentStreak?: number;
+  photoURL?: string;
+  photoUrl?: string;
   bestStreak?: number;
-  correctPicks?: number;
-  totalPicks?: number;
+  currentStreak?: number;
+  accuracy?: number; // 0..1 or 0..100 (we’ll handle both)
 };
 
 type LadderRow = {
-  rank: number;
   uid: string;
-
-  // stored role from members collection (may be wrong / stale)
-  storedRole: "manager" | "member";
-
-  // derived role for UI (managerId always wins)
-  uiRole: "admin" | "member";
-
   name: string;
   username?: string;
-  avatar?: string;
-
+  avatar?: string | null;
+  uiRole: "admin" | "member";
   bestStreak: number;
   currentStreak: number;
-  correctPicks: number;
-  totalPicks: number;
+  accuracy: number | null; // 0..1
 };
 
-function safeNum(v: any, fallback = 0) {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+function safeNum(v: any, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function initials(name: string) {
-  const parts = (name || "P").trim().split(/\s+/).slice(0, 2);
-  const a = parts[0]?.[0] ?? "P";
-  const b = parts[1]?.[0] ?? "";
-  return (a + b).toUpperCase();
+function normalizeAccuracy(v: any): number | null {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  // support either 0..1 or 0..100
+  if (n > 1.0001) return Math.max(0, Math.min(1, n / 100));
+  return Math.max(0, Math.min(1, n));
 }
 
-function formatRatio(correct: number, total: number) {
-  if (!total) return "—";
-  const pct = Math.round((correct / total) * 100);
-  return `${correct}/${total} (${pct}%)`;
+function formatAccuracy(v: number | null): string {
+  if (v === null) return "—";
+  return `${Math.round(v * 100)}%`;
 }
 
 export default function LeagueLadderPage() {
   const params = useParams();
-  const leagueId = (params?.leagueId as string) || "";
+  const leagueId = params?.leagueId as string;
+
   const { user } = useAuth();
 
   const [league, setLeague] = useState<League | null>(null);
-  const [members, setMembers] = useState<MemberRow[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
+  const [rows, setRows] = useState<LadderRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [profilesLoading, setProfilesLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // --- Load league doc ---
+  const isLoggedIn = !!user;
+
+  const myRow = useMemo(() => {
+    if (!user) return null;
+    return rows.find((r) => r.uid === user.uid) ?? null;
+  }, [rows, user]);
+
   useEffect(() => {
-    const load = async () => {
+    const run = async () => {
       if (!leagueId) return;
+
       setLoading(true);
       setError(null);
 
       try {
+        // 1) Load league
         const leagueRef = doc(db, "leagues", leagueId);
-        const snap = await getDoc(leagueRef);
+        const leagueSnap = await getDoc(leagueRef);
 
-        if (!snap.exists()) {
+        if (!leagueSnap.exists()) {
           setLeague(null);
+          setRows([]);
           setError("League not found.");
           setLoading(false);
           return;
         }
 
-        const data = snap.data() as any;
+        const ld = leagueSnap.data() as any;
 
         const managerId: string =
-          data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+          ld.managerId ?? ld.managerUid ?? ld.managerUID ?? "";
         const inviteCode: string =
-          data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+          ld.inviteCode ?? ld.code ?? ld.leagueCode ?? "";
 
-        setLeague({
-          id: snap.id,
-          name: data.name ?? "Unnamed league",
+        const leagueObj: League = {
+          id: leagueSnap.id,
+          name: ld.name ?? "Unnamed league",
           inviteCode,
           managerId,
-          description: data.description ?? "",
-          memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
+        };
+        setLeague(leagueObj);
+
+        // 2) Load members
+        const membersRef = collection(leagueRef, "members");
+        const membersQ = query(membersRef, orderBy("joinedAt", "asc"), limit(500));
+        const membersSnap = await getDocs(membersQ);
+
+        const members: MemberDoc[] = membersSnap.docs.map((d) => {
+          const m = d.data() as any;
+          return {
+            uid: m.uid ?? d.id,
+            displayName: m.displayName,
+            role: m.role,
+          };
         });
+
+        // 3) Load user profiles for those member uids (batched in chunks of 10 for Firestore)
+        const uids = Array.from(new Set(members.map((m) => m.uid).filter(Boolean)));
+
+        const profilesByUid = new Map<string, UserProfile>();
+
+        const chunkSize = 10;
+        for (let i = 0; i < uids.length; i += chunkSize) {
+          const chunk = uids.slice(i, i + chunkSize);
+
+          // Firestore “in” query (chunked)
+          const usersRef = collection(db, "users");
+          const qUsers = query(usersRef as any, (await import("firebase/firestore")).where("uid", "in", chunk));
+          const usersSnap = await getDocs(qUsers);
+
+          usersSnap.docs.forEach((ud) => {
+            const p = ud.data() as any;
+            const uid = (p.uid ?? ud.id) as string;
+            profilesByUid.set(uid, {
+              uid,
+              displayName: p.displayName ?? p.name,
+              username: p.username,
+              avatarUrl: p.avatarUrl,
+              photoURL: p.photoURL,
+              photoUrl: p.photoUrl,
+              bestStreak: p.bestStreak,
+              currentStreak: p.currentStreak,
+              accuracy: p.accuracy,
+            });
+          });
+
+          // Fallback: if your users collection doesn’t store uid field and uses docId = uid,
+          // make sure we still try to read direct doc ids for anything missing.
+          const missing = chunk.filter((uid) => !profilesByUid.has(uid));
+          for (const uid of missing) {
+            const uRef = doc(db, "users", uid);
+            const uSnap = await getDoc(uRef);
+            if (uSnap.exists()) {
+              const p = uSnap.data() as any;
+              profilesByUid.set(uid, {
+                uid,
+                displayName: p.displayName ?? p.name,
+                username: p.username,
+                avatarUrl: p.avatarUrl,
+                photoURL: p.photoURL,
+                photoUrl: p.photoUrl,
+                bestStreak: p.bestStreak,
+                currentStreak: p.currentStreak,
+                accuracy: p.accuracy,
+              });
+            }
+          }
+        }
+
+        // 4) Build ladder rows
+        const built: LadderRow[] = members.map((m) => {
+          const p = profilesByUid.get(m.uid);
+
+          const usernameRaw = (p?.username || "").trim();
+          const username =
+            usernameRaw.length > 0
+              ? usernameRaw.startsWith("@")
+                ? usernameRaw
+                : `@${usernameRaw}`
+              : undefined;
+
+          const avatar =
+            p?.avatarUrl ||
+            p?.photoURL ||
+            p?.photoUrl ||
+            null;
+
+          // ✅ UI role: managerId always wins (don’t trust stored role for display)
+          const uiRole: "admin" | "member" =
+            m.uid === leagueObj.managerId ? "admin" : "member";
+
+          const name =
+            (p?.displayName || m.displayName || "Player").toString();
+
+          const bestStreak = safeNum(p?.bestStreak, 0);
+          const currentStreak = safeNum(p?.currentStreak, 0);
+          const acc = normalizeAccuracy(p?.accuracy);
+
+          return {
+            uid: m.uid,
+            name,
+            username,
+            avatar,
+            uiRole,
+            bestStreak,
+            currentStreak,
+            accuracy: acc,
+          };
+        });
+
+        // 5) Sort by Current desc, then Best desc, then Accuracy desc, then name
+        built.sort((a, b) => {
+          if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
+          if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
+
+          const aAcc = a.accuracy ?? -1;
+          const bAcc = b.accuracy ?? -1;
+          if (bAcc !== aAcc) return bAcc - aAcc;
+
+          return a.name.localeCompare(b.name);
+        });
+
+        setRows(built);
       } catch (e) {
-        console.error("Failed to load league", e);
-        setError("Failed to load league. Please try again.");
+        console.error("Failed to load league ladder", e);
+        setError("Failed to load ladder. Please try again.");
+        setLeague(null);
+        setRows([]);
       } finally {
         setLoading(false);
       }
     };
 
-    load();
+    run();
   }, [leagueId]);
 
-  // --- Live members ---
-  useEffect(() => {
-    if (!leagueId) return;
-
-    const membersRef = collection(db, "leagues", leagueId, "members");
-    const qRef = query(membersRef, orderBy("joinedAt", "asc"), limit(300));
-
-    const unsub = onSnapshot(
-      qRef,
-      (snap) => {
-        const list: MemberRow[] = snap.docs.map((d) => {
-          const m = d.data() as any;
-          const uid = (m.uid ?? d.id) as string;
-          return {
-            id: d.id,
-            uid,
-            displayName: m.displayName ?? "Player",
-            role: (m.role as "manager" | "member") ?? "member",
-            joinedAt: m.joinedAt,
-          };
-        });
-
-        setMembers(list);
-      },
-      (err) => {
-        console.error("Failed to load members", err);
-        setError("Failed to load league members.");
-      }
+  const renderAvatar = (row: LadderRow) => {
+    if (row.avatar) {
+      // eslint-disable-next-line @next/next/no-img-element
+      return (
+        <img
+          src={row.avatar}
+          alt={row.name}
+          className="h-10 w-10 rounded-full object-cover border border-white/10"
+        />
+      );
+    }
+    return (
+      <div className="h-10 w-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-xs text-white/70">
+        {row.name?.slice(0, 1)?.toUpperCase() ?? "P"}
+      </div>
     );
-
-    return () => unsub();
-  }, [leagueId]);
-
-  // --- Membership gate ---
-  const isMemberUser = useMemo(() => {
-    if (!user) return false;
-    if (!league) return false;
-    if (user.uid === league.managerId) return true;
-    return members.some((m) => m.uid === user.uid);
-  }, [user, league, members]);
-
-  // --- Load user profiles for members (avatar + username + streak stats) ---
-  useEffect(() => {
-    const loadProfiles = async () => {
-      if (!leagueId) return;
-
-      if (!members.length) {
-        setProfiles({});
-        return;
-      }
-
-      setProfilesLoading(true);
-      try {
-        const uids = Array.from(new Set(members.map((m) => m.uid))).filter(Boolean);
-
-        const docs = await Promise.all(
-          uids.map(async (uid) => {
-            try {
-              const uRef = doc(db, "users", uid);
-              const uSnap = await getDoc(uRef);
-              if (!uSnap.exists()) return null;
-              const d = uSnap.data() as any;
-
-              const profile: UserProfile = {
-                uid,
-                displayName: d.displayName ?? d.name ?? d.fullName ?? undefined,
-                username: d.username ?? d.handle ?? d.userName ?? undefined,
-                photoURL: d.photoURL ?? d.photoUrl ?? undefined,
-                avatarUrl: d.avatarUrl ?? d.avatarURL ?? d.avatar ?? undefined,
-
-                currentStreak: safeNum(d.currentStreak, 0),
-                bestStreak: safeNum(d.bestStreak, 0),
-                correctPicks: safeNum(d.correctPicks, 0),
-                totalPicks: safeNum(d.totalPicks, 0),
-              };
-
-              return profile;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        const map: Record<string, UserProfile> = {};
-        for (const p of docs) {
-          if (p?.uid) map[p.uid] = p;
-        }
-        setProfiles(map);
-      } finally {
-        setProfilesLoading(false);
-      }
-    };
-
-    loadProfiles();
-  }, [leagueId, members]);
-
-  const ladder: LadderRow[] = useMemo(() => {
-    const managerId = league?.managerId || "";
-
-    const rows: LadderRow[] = members.map((m) => {
-      const p = profiles[m.uid];
-
-      const name =
-        (p?.displayName && String(p.displayName).trim()) ||
-        (m.displayName && String(m.displayName).trim()) ||
-        "Player";
-
-      const usernameRaw = p?.username ? String(p.username).trim() : "";
-      const username = usernameRaw
-        ? usernameRaw.startsWith("@")
-          ? usernameRaw
-          : `@${usernameRaw}`
-        : undefined;
-
-      const avatar = p?.avatarUrl || p?.photoURL || undefined;
-
-      // ✅ UI role: managerId always wins
-      const uiRole: "admin" | "member" = m.uid === managerId ? "admin" : "member";
-
-      return {
-        rank: 9999,
-        uid: m.uid,
-m        storedRole: m.role,
-        uiRole,
-        name,
-        username,
-        avatar,
-        bestStreak: safeNum(p?.bestStreak, 0),
-        currentStreak: safeNum(p?.currentStreak, 0),
-        correctPicks: safeNum(p?.correctPicks, 0),
-        totalPicks: safeNum(p?.totalPicks, 0),
-      };
-    });
-
-    rows.sort((a, b) => {
-      if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
-      if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
-
-      const aPct = a.totalPicks ? a.correctPicks / a.totalPicks : 0;
-      const bPct = b.totalPicks ? b.correctPicks / b.totalPicks : 0;
-      if (bPct !== aPct) return bPct - aPct;
-
-      return a.name.localeCompare(b.name);
-    });
-
-    return rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
-  }, [members, profiles, league?.managerId]);
-
-  const myRow = useMemo(() => {
-    if (!user) return null;
-    return ladder.find((r) => r.uid === user.uid) ?? null;
-  }, [ladder, user]);
-
-  const title = `${league?.name || "Group"} Ladder`;
+  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#050814] text-white">
-        <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-10">
+      <div className="min-h-screen bg-[#050814] text-white px-4 py-6">
+        <div className="mx-auto w-full max-w-5xl">
           <p className="text-sm text-white/70">Loading ladder…</p>
         </div>
       </div>
@@ -310,256 +290,221 @@ m        storedRole: m.role,
 
   if (!league) {
     return (
-      <div className="min-h-screen bg-[#050814] text-white">
-        <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-10 space-y-4">
+      <div className="min-h-screen bg-[#050814] text-white px-4 py-6">
+        <div className="mx-auto w-full max-w-5xl space-y-4">
           <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
             ← Back to leagues
           </Link>
-          <p className="text-sm text-red-400">
-            {error ?? "League not found or no longer available."}
-          </p>
+          <p className="text-sm text-red-400">{error ?? "League not found."}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-10 space-y-6">
-        <div className="flex items-center justify-between gap-3">
-          <Link
-            href={`/leagues/${leagueId}`}
-            className="text-sm text-sky-400 hover:text-sky-300"
-          >
-            ← Back to league
-          </Link>
-          <SportBadge sport="afl" />
-        </div>
+    <div className="min-h-screen bg-[#050814] text-white px-4 py-6 md:py-8">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
+        <Link href={`/leagues/${league.id}`} className="text-sm text-sky-400 hover:text-sky-300">
+          ← Back to league
+        </Link>
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold">{title}</h1>
-            <p className="mt-1 text-sm text-white/70">
+        {/* Header */}
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <h1 className="text-4xl font-extrabold tracking-tight">
+              {league.name} Ladder
+            </h1>
+            <p className="text-sm text-white/70">
               Bragging rights only. (Your global streak still counts on the main leaderboard.)
             </p>
           </div>
 
-          <div className="flex flex-col items-start md:items-end gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-white/60">Invite</span>
-              <span className="font-mono text-[12px] bg-white/5 border border-white/10 rounded-md px-2 py-1 max-w-[120px] truncate">
-                {league.inviteCode || "—"}
-              </span>
-              <button
-                type="button"
-                onClick={() => league.inviteCode && navigator.clipboard.writeText(league.inviteCode)}
-                className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-60"
-                disabled={!league.inviteCode}
+          <div className="flex items-center gap-3">
+            <SportBadge sport="afl" />
+            <div className="flex flex-col items-end gap-1 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-white/60">Invite</span>
+                <span className="font-mono rounded-md bg-white/5 border border-white/10 px-2 py-1">
+                  {league.inviteCode || "—"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => league.inviteCode && navigator.clipboard.writeText(league.inviteCode)}
+                  className="text-sky-400 hover:text-sky-300 disabled:opacity-60"
+                  disabled={!league.inviteCode}
+                >
+                  Copy
+                </button>
+              </div>
+              <Link
+                href="/picks"
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2"
               >
-                Copy
-              </button>
+                Make picks →
+              </Link>
             </div>
-            <span className="text-xs text-white/60">
-              Members: {league.memberCount ?? members.length}
-              {profilesLoading ? " • updating…" : ""}
-            </span>
           </div>
         </div>
 
-        {!user && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            Log in to view this ladder.
-          </div>
-        )}
-
-        {user && !isMemberUser && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 space-y-2">
-            <p className="text-sm text-white/80 font-semibold">Private ladder</p>
-            <p className="text-sm text-white/60">
-              You’re not a member of this league, so you can’t view the ladder.
-            </p>
-            <div className="flex flex-wrap gap-2 pt-2">
-              <Link
-                href="/leagues/join"
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2"
-              >
-                Join a league →
-              </Link>
-              <Link
-                href="/leagues"
-                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2"
-              >
-                Back to leagues
-              </Link>
-            </div>
-          </div>
-        )}
-
-        {user && isMemberUser && (
-          <>
-            {myRow && (
-              <div className="rounded-2xl border border-orange-500/35 bg-orange-500/10 p-4">
-                <p className="text-xs uppercase tracking-wide text-orange-200/80">
-                  Your position
-                </p>
-
-                <div className="mt-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
-                      {myRow.avatar ? (
-                        <img
-                          src={myRow.avatar}
-                          alt={myRow.name}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-xs font-bold text-white/80">
-                          {initials(myRow.name)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="text-lg font-bold">
-                        #{myRow.rank}{" "}
-                        <span className="text-white/90">{myRow.name}</span>
-                        {myRow.username && (
-                          <span className="ml-2 text-sm font-semibold text-white/50">
-                            {myRow.username}
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-white/60">
-                        Best: <span className="text-white font-semibold">{myRow.bestStreak}</span> •
-                        Current: <span className="text-white font-semibold">{myRow.currentStreak}</span> •
-                        Accuracy:{" "}
-                        <span className="text-white font-semibold">
-                          {formatRatio(myRow.correctPicks, myRow.totalPicks)}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <Link
-                    href="/picks"
-                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2"
-                  >
-                    Make picks →
-                  </Link>
-                </div>
-              </div>
+        {/* Your position */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h2 className="text-sm font-semibold text-white/70 uppercase tracking-wide">
+              Your position
+            </h2>
+            {!isLoggedIn && (
+              <span className="text-xs text-white/50">Log in to see your rank.</span>
             )}
+          </div>
 
-            <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
-                <h2 className="text-sm font-semibold">League ladder</h2>
-                <p className="text-[11px] text-white/50">
-                  Ranking: Current → Best → Accuracy
-                </p>
+          {user && myRow ? (
+            <div className="flex items-center gap-3 rounded-xl bg-black/25 border border-white/10 px-4 py-3">
+              {renderAvatar(myRow)}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold truncate">{myRow.name}</span>
+                  {myRow.username && (
+                    <span className="text-sm text-white/60 truncate">{myRow.username}</span>
+                  )}
+                  <span className="ml-auto text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-orange-500/40 text-orange-300 bg-white/5">
+                    YOU
+                  </span>
+                </div>
+
+                <div className="mt-1 text-xs text-white/70 flex flex-wrap gap-x-3 gap-y-1">
+                  <span>Current: <span className="text-white font-semibold">{myRow.currentStreak}</span></span>
+                  <span>Best: <span className="text-white font-semibold">{myRow.bestStreak}</span></span>
+                  <span>Accuracy: <span className="text-white font-semibold">{formatAccuracy(myRow.accuracy)}</span></span>
+                  <span className="text-white/50">•</span>
+                  <span className="text-white/70">
+                    Role:{" "}
+                    <span className="text-white font-semibold">
+                      {myRow.uiRole === "admin" ? "Admin" : "Member"}
+                    </span>
+                  </span>
+                </div>
               </div>
+            </div>
+          ) : (
+            <p className="text-sm text-white/70">
+              {user ? "You’re not in this league." : "Log in to see your position."}
+            </p>
+          )}
+        </div>
 
-              {error && (
-                <div className="px-4 py-3">
-                  <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                    {error}
-                  </p>
-                </div>
-              )}
+        {/* Ladder table */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
+          <div className="px-5 py-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">League ladder</h2>
+            <span className="text-xs text-white/60">
+              Ranking: Current → Best → Accuracy
+            </span>
+          </div>
 
-              {ladder.length === 0 ? (
-                <div className="px-4 py-6">
-                  <p className="text-sm text-white/60">
-                    No members found yet. Share the invite code and get the crew in.
-                  </p>
-                </div>
-              ) : (
-                <div className="w-full overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-black/20 text-white/60">
-                      <tr className="text-left">
-                        <th className="px-4 py-2 w-[64px]">Rank</th>
-                        <th className="px-4 py-2 min-w-[280px]">Player</th>
-                        <th className="px-4 py-2 w-[110px]">Best</th>
-                        <th className="px-4 py-2 w-[110px]">Current</th>
-                        <th className="px-4 py-2 w-[160px]">Accuracy</th>
-                        <th className="px-4 py-2 w-[110px]">Role</th>
-                      </tr>
-                    </thead>
+          {error && (
+            <div className="px-5 pb-4">
+              <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+                {error}
+              </p>
+            </div>
+          )}
 
-                    <tbody>
-                      {ladder.map((r) => {
-                        const isOwn = !!user && r.uid === user.uid;
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-black/20 border-t border-white/10">
+                <tr className="text-white/70">
+                  <th className="text-left px-5 py-3 w-[80px]">Rank</th>
+                  <th className="text-left px-5 py-3">Player</th>
+                  <th className="text-center px-5 py-3 w-[110px]">Best</th>
+                  <th className="text-center px-5 py-3 w-[120px]">Current</th>
+                  <th className="text-center px-5 py-3 w-[140px]">Accuracy</th>
+                  <th className="text-center px-5 py-3 w-[120px]">Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-6 text-white/60">
+                      No members yet.
+                    </td>
+                  </tr>
+                ) : (
+                  rows.map((r, idx) => {
+                    const isMe = !!user && r.uid === user.uid;
 
-                        return (
-                          <tr
-                            key={r.uid}
-                            className={`border-t border-white/10 ${
-                              isOwn ? "bg-orange-500/10" : "hover:bg-white/5"
+                    return (
+                      <tr
+                        key={r.uid}
+                        className={`border-t border-white/10 ${
+                          isMe ? "bg-white/5" : "bg-transparent"
+                        }`}
+                      >
+                        <td className="px-5 py-4 font-semibold">
+                          {idx === 0 ? (
+                            <span className="inline-flex items-center gap-2">
+                              <span>1</span>
+                              <span title="Top of the ladder" className="text-orange-300">👑</span>
+                            </span>
+                          ) : (
+                            idx + 1
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-3 min-w-[260px]">
+                            {renderAvatar(r)}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold truncate">{r.name}</span>
+                                {r.username && (
+                                  <span className="text-white/60 truncate">{r.username}</span>
+                                )}
+                                {isMe && (
+                                  <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-orange-500/40 text-orange-300 bg-white/5">
+                                    YOU
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 text-center font-semibold">
+                          {r.bestStreak}
+                        </td>
+
+                        <td className="px-5 py-4 text-center font-semibold">
+                          {r.currentStreak}
+                        </td>
+
+                        <td className="px-5 py-4 text-center font-semibold">
+                          {formatAccuracy(r.accuracy)}
+                        </td>
+
+                        <td className="px-5 py-4 text-center">
+                          <span
+                            className={`inline-flex items-center justify-center rounded-full px-3 py-1 text-[11px] font-semibold border ${
+                              r.uiRole === "admin"
+                                ? "border-orange-500/40 text-orange-300 bg-orange-500/10"
+                                : "border-white/15 text-white/70 bg-white/5"
                             }`}
                           >
-                            <td className="px-4 py-3 font-semibold">#{r.rank}</td>
+                            {r.uiRole === "admin" ? "ADMIN" : "MEMBER"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
 
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                <div className="h-9 w-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                                  {r.avatar ? (
-                                    <img
-                                      src={r.avatar}
-                                      alt={r.name}
-                                      className="h-full w-full object-cover"
-                                    />
-                                  ) : (
-                                    <span className="text-xs font-bold text-white/80">
-                                      {initials(r.name)}
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="min-w-0">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <span className="font-semibold truncate">{r.name}</span>
-                                    {r.username && (
-                                      <span className="text-xs text-white/45 font-semibold truncate">
-                                        {r.username}
-                                      </span>
-                                    )}
-                                    {isOwn && (
-                                      <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 border border-orange-500/40 text-orange-200 bg-orange-500/10">
-                                        You
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-
-                            <td className="px-4 py-3 font-bold text-orange-200">
-                              {r.bestStreak}
-                            </td>
-
-                            <td className="px-4 py-3 font-semibold text-white/80">
-                              {r.currentStreak}
-                            </td>
-
-                            <td className="px-4 py-3 text-white/70">
-                              {formatRatio(r.correctPicks, r.totalPicks)}
-                            </td>
-
-                            <td className="px-4 py-3">
-                              <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
-                                {r.uiRole === "admin" ? "Admin" : "Member"}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </>
-        )}
+          <div className="px-5 py-4 border-t border-white/10 text-xs text-white/50">
+            Tip: If streaks look wrong, make sure you are writing <span className="font-mono text-white/70">currentStreak</span> and{" "}
+            <span className="font-mono text-white/70">bestStreak</span> to <span className="font-mono text-white/70">users/{`{uid}`}</span>.
+          </div>
+        </div>
       </div>
     </div>
   );
