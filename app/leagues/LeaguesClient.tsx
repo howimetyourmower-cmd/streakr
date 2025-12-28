@@ -1,23 +1,26 @@
-// app/leagues/[leagueId]/ladder/page.tsx
+// /app/leagues/LeaguesClient.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   collection,
+  collectionGroup,
   doc,
   getDoc,
   getDocs,
   limit,
-  orderBy,
   query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
-import SportBadge from "@/components/SportBadge";
 
 type League = {
   id: string;
@@ -25,325 +28,389 @@ type League = {
   inviteCode: string;
   managerId: string;
   description?: string;
+  memberCount?: number;
 };
 
-type MemberDoc = {
-  uid: string;
-  displayName?: string;
-  username?: string;
-  avatarUrl?: string;
-  photoURL?: string;
-  role?: "manager" | "member";
+type MyLeagueRow = {
+  league: League;
+  uiRole: "manager" | "member";
 };
 
-type UserProfile = {
-  displayName?: string;
-  name?: string;
-  username?: string;
-  avatarUrl?: string;
-  photoURL?: string;
-  currentStreak?: number;
-};
-
-type Row = {
-  uid: string;
-  name: string;
-  username?: string;
-  avatar?: string;
-  current: number;
-  uiRole: "admin" | "member";
-};
-
-function safeTrim(s: any): string {
-  return typeof s === "string" ? s.trim() : "";
-}
-function normalizeUsername(raw: any): string | undefined {
-  const t = safeTrim(raw);
-  if (!t) return undefined;
-  return t.startsWith("@") ? t : `@${t}`;
-}
-function safeNum(n: any, fallback = 0): number {
-  const x = Number(n);
-  return Number.isFinite(x) ? x : fallback;
+function uniqById(list: MyLeagueRow[]) {
+  const map = new Map<string, MyLeagueRow>();
+  for (const item of list) map.set(item.league.id, item);
+  return Array.from(map.values());
 }
 
-export default function LeagueLadderPage() {
-  const params = useParams();
-  const leagueId = params?.leagueId as string;
+function normalizeCode(input: string) {
+  return input.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+export default function LeaguesClient() {
+  const router = useRouter();
   const { user } = useAuth();
 
-  const [league, setLeague] = useState<League | null>(null);
-  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
+  const [myLeagues, setMyLeagues] = useState<MyLeagueRow[]>([]);
+  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
-  const myUid = user?.uid;
+  // Join a league state
+  const [joinCode, setJoinCode] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
+
+  const selected = useMemo(
+    () => myLeagues.find((x) => x.league.id === selectedLeagueId) || null,
+    [myLeagues, selectedLeagueId]
+  );
 
   useEffect(() => {
     const load = async () => {
-      if (!leagueId) return;
+      if (!user) {
+        setMyLeagues([]);
+        setSelectedLeagueId("");
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
       setError(null);
 
       try {
-        const leagueRef = doc(db, "leagues", leagueId);
-        const leagueSnap = await getDoc(leagueRef);
+        const uid = user.uid;
 
-        if (!leagueSnap.exists()) {
-          setLeague(null);
-          setRows([]);
-          setError("League not found.");
-          setLoading(false);
-          return;
-        }
+        // 1) Leagues where I'm manager
+        const leaguesRef = collection(db, "leagues");
+        const managerQ = query(leaguesRef, where("managerId", "==", uid), limit(50));
+        const managerSnap = await getDocs(managerQ);
 
-        const data = leagueSnap.data() as any;
+        const managerLeagues: MyLeagueRow[] = managerSnap.docs.map((d) => {
+          const data = d.data() as any;
 
-        const managerId: string = data.managerId ?? data.managerUid ?? data.managerUID ?? "";
-        const inviteCode: string = data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+          const inviteCode =
+            data.inviteCode ?? data.code ?? data.leagueCode ?? "";
 
-        const leagueData: League = {
-          id: leagueSnap.id,
-          name: data.name ?? "Unnamed league",
-          inviteCode,
-          managerId,
-          description: data.description ?? "",
-        };
+          const managerId =
+            data.managerId ?? data.managerUid ?? data.managerUID ?? "";
 
-        setLeague(leagueData);
+          const league: League = {
+            id: d.id,
+            name: data.name ?? "Unnamed league",
+            inviteCode,
+            managerId,
+            description: data.description ?? "",
+            memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
+          };
 
-        // Members
-        const membersRef = collection(db, "leagues", leagueId, "members");
-        const membersQ = query(membersRef, orderBy("joinedAt", "asc"), limit(300));
-        const membersSnap = await getDocs(membersQ);
-
-        const members: MemberDoc[] = membersSnap.docs.map((d) => d.data() as any);
-
-        // Build rows by enriching from users/{uid} for display + current streak
-        const built: Row[] = await Promise.all(
-          members.map(async (m) => {
-            let profile: UserProfile | null = null;
-            try {
-              const uSnap = await getDoc(doc(db, "users", m.uid));
-              profile = uSnap.exists() ? (uSnap.data() as any) : null;
-            } catch {
-              profile = null;
-            }
-
-            const name =
-              safeTrim(m.displayName) ||
-              safeTrim(profile?.displayName) ||
-              safeTrim(profile?.name) ||
-              "Player";
-
-            const username =
-              normalizeUsername(m.username) ||
-              normalizeUsername(profile?.username);
-
-            const avatar =
-              m.avatarUrl ||
-              m.photoURL ||
-              profile?.avatarUrl ||
-              profile?.photoURL ||
-              undefined;
-
-            const current = safeNum(profile?.currentStreak, 0);
-
-            const uiRole: "admin" | "member" =
-              leagueData.managerId && m.uid === leagueData.managerId ? "admin" : "member";
-
-            return {
-              uid: m.uid,
-              name,
-              username,
-              avatar,
-              current,
-              uiRole,
-            };
-          })
-        );
-
-        // Rank by current streak desc (ties keep stable)
-        const sorted = [...built].sort((a, b) => {
-          if (b.current !== a.current) return b.current - a.current;
-          return a.name.localeCompare(b.name);
+          return { league, uiRole: "manager" };
         });
 
-        setRows(sorted);
+        // 2) Leagues where I'm a member via collectionGroup members
+        const membersCG = collectionGroup(db, "members");
+        const membersQ = query(membersCG, where("uid", "==", uid), limit(100));
+        const membersSnap = await getDocs(membersQ);
+
+        const memberRows: MyLeagueRow[] = await Promise.all(
+          membersSnap.docs.map(async (m) => {
+            const leagueRef = m.ref.parent.parent;
+            if (!leagueRef) return null;
+
+            const leagueSnap = await getDoc(doc(db, "leagues", leagueRef.id));
+            if (!leagueSnap.exists()) return null;
+
+            const data = leagueSnap.data() as any;
+
+            const inviteCode =
+              data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+
+            const managerId =
+              data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+
+            const league: League = {
+              id: leagueSnap.id,
+              name: data.name ?? "Unnamed league",
+              inviteCode,
+              managerId,
+              description: data.description ?? "",
+              memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
+            };
+
+            const roleFromMember = (m.data() as any)?.role as
+              | "manager"
+              | "member"
+              | undefined;
+
+            const uiRole: "manager" | "member" =
+              league.managerId === uid || roleFromMember === "manager"
+                ? "manager"
+                : "member";
+
+            return { league, uiRole };
+          })
+        ).then((x) => x.filter(Boolean) as MyLeagueRow[]);
+
+        const merged = uniqById([...managerLeagues, ...memberRows]).sort((a, b) =>
+          a.league.name.localeCompare(b.league.name)
+        );
+
+        setMyLeagues(merged);
+
+        if (merged.length > 0) {
+          setSelectedLeagueId((prev) => {
+            if (prev && merged.some((x) => x.league.id === prev)) return prev;
+            return merged[0].league.id;
+          });
+        } else {
+          setSelectedLeagueId("");
+        }
       } catch (e) {
         console.error(e);
-        setError("Failed to load ladder.");
+        setError("Could not load your leagues. Please try again.");
+        setMyLeagues([]);
+        setSelectedLeagueId("");
       } finally {
         setLoading(false);
       }
     };
 
     load();
-  }, [leagueId]);
+  }, [user?.uid]);
 
-  const myRow = useMemo(() => {
-    if (!myUid) return null;
-    return rows.find((r) => r.uid === myUid) ?? null;
-  }, [rows, myUid]);
+  const handleJoin = async (e: FormEvent) => {
+    e.preventDefault();
+    setJoinError(null);
+    setJoinSuccess(null);
 
-  if (loading) {
-    return (
-      <div className="py-6 md:py-8">
-        <p className="text-sm text-white/70">Loading ladder…</p>
-      </div>
-    );
-  }
+    if (!user) {
+      setJoinError("You need to be logged in to join a league.");
+      return;
+    }
 
-  if (!league) {
-    return (
-      <div className="py-6 md:py-8 space-y-4">
-        <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
-          ← Back to leagues
-        </Link>
-        <p className="text-sm text-red-400">{error ?? "League not found."}</p>
-      </div>
-    );
-  }
+    const code = normalizeCode(joinCode);
+    if (!code || code.length < 4) {
+      setJoinError("Enter a valid invite code.");
+      return;
+    }
+
+    setJoining(true);
+
+    try {
+      // Find league by inviteCode
+      const leaguesRef = collection(db, "leagues");
+      const qLeagues = query(leaguesRef, where("inviteCode", "==", code), limit(1));
+      const snap = await getDocs(qLeagues);
+
+      if (snap.empty) {
+        setJoinError("No league found with that code.");
+        setJoining(false);
+        return;
+      }
+
+      const leagueDoc = snap.docs[0];
+      const leagueId = leagueDoc.id;
+
+      const leagueData = leagueDoc.data() as any;
+      const managerId = leagueData.managerId ?? "";
+      const memberCount = Number(leagueData.memberCount ?? 0);
+
+      // Create/merge member doc
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      await setDoc(
+        memberRef,
+        {
+          uid: user.uid,
+          displayName: (user as any).displayName || (user as any).email || "Player",
+          role: user.uid === managerId ? "manager" : "member",
+          joinedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // Bump memberCount (best-effort; won’t be perfect without transaction but OK for now)
+      await updateDoc(doc(db, "leagues", leagueId), {
+        memberCount: memberCount > 0 ? memberCount : 1,
+      }).catch(() => {});
+
+      setJoinSuccess("You’re in. Opening league…");
+      setJoinCode("");
+
+      // Navigate straight into ladder (or league page if you prefer)
+      router.push(`/leagues/${leagueId}/ladder`);
+    } catch (err) {
+      console.error(err);
+      setJoinError("Failed to join league. Please try again.");
+    } finally {
+      setJoining(false);
+    }
+  };
 
   return (
-    <div className="py-6 md:py-8 space-y-6">
-      <Link href={`/leagues/${leagueId}`} className="text-sm text-sky-400 hover:text-sky-300">
-        ← Back to league
-      </Link>
-
-      {/* Title: "GroupName Ladder" same font size as Ladder */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <h1 className="text-3xl md:text-4xl font-bold">{league.name} Ladder</h1>
-          <SportBadge sport="afl" />
-        </div>
-        <p className="text-sm text-white/70 max-w-3xl">
-          Bragging rights only. (Your global streak still counts on the main leaderboard.)
-        </p>
-      </div>
-
-      {/* Your position card */}
-      {myRow && (
-        <div className="rounded-2xl border border-orange-500/25 bg-orange-500/10 p-4 md:p-5">
-          <div className="text-[11px] uppercase tracking-wide text-orange-200/80 mb-2">
-            Your position
+    <div className="min-h-screen bg-[#050814] text-white">
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-6">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-orange-300">
+            <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
+            Private leagues are live
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="h-11 w-11 rounded-full bg-black/20 border border-white/10 overflow-hidden shrink-0">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {myRow.avatar ? (
-                  <img src={myRow.avatar} alt={myRow.name} className="h-full w-full object-cover" />
-                ) : null}
+          <h1 className="mt-2 text-3xl md:text-4xl font-extrabold">Leagues</h1>
+          <p className="mt-2 text-sm text-white/70 max-w-3xl">
+            Play STREAKr with your mates, work crew or fantasy league. Create a private league,
+            invite your friends with a code, and battle it out on your own ladder while still
+            counting towards the global streak leaderboard.
+          </p>
+        </div>
+
+        {error && (
+          <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+            {error}
+          </p>
+        )}
+
+        {/* Top row: My leagues (left) + Create league (right) */}
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* LEFT: My leagues */}
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+            <h2 className="text-xl font-bold">My leagues</h2>
+            <p className="text-sm text-white/70">
+              This is your home base. Jump into a league and hit the ladder.
+            </p>
+
+            {loading ? (
+              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
+                Loading…
               </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="font-semibold truncate">{myRow.name}</span>
-                  {myRow.username && <span className="text-xs text-white/60 truncate">{myRow.username}</span>}
-                  <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-0.5 border border-orange-500/40 text-orange-200 bg-orange-500/10">
-                    You
-                  </span>
-                </div>
-                <div className="text-xs text-white/70 mt-0.5">
-                  Current streak: <span className="font-semibold text-white">{myRow.current}</span>
-                  <span className="text-white/40"> • </span>
-                  Role: <span className="font-semibold text-white">{myRow.uiRole === "admin" ? "Admin" : "Member"}</span>
-                </div>
+            ) : myLeagues.length === 0 ? (
+              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
+                No leagues yet — create one or join with a code.
               </div>
-            </div>
-
-            <Link
-              href="/picks"
-              className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors shrink-0"
-            >
-              Make picks →
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {/* Table */}
-      <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
-        <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-          <h2 className="text-sm font-semibold">League ladder</h2>
-          <div className="text-[11px] text-white/60">
-            Ranking: <span className="text-white/80">Current</span>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-black/20">
-              <tr className="text-left text-xs text-white/60">
-                <th className="px-4 py-3 w-[90px]">Rank</th>
-                <th className="px-4 py-3">Player</th>
-                <th className="px-4 py-3 w-[160px] text-right">Current</th>
-                <th className="px-4 py-3 w-[140px] text-right">Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, idx) => {
-                const rank = idx + 1;
-                const isMe = !!myUid && r.uid === myUid;
-                const showCrown = r.current > 0 && rank === 1;
-
-                return (
-                  <tr
-                    key={r.uid}
-                    className={`border-t border-white/10 ${
-                      isMe ? "bg-white/5" : "hover:bg-white/[0.03]"
-                    }`}
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <label className="text-xs text-white/60">Select a league</label>
+                  <select
+                    value={selectedLeagueId}
+                    onChange={(e) => setSelectedLeagueId(e.target.value)}
+                    className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
                   >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold">{rank}</span>
-                        {showCrown && <span title="Leader">👑</span>}
-                      </div>
-                    </td>
+                    {myLeagues.map((x) => (
+                      <option key={x.league.id} value={x.league.id}>
+                        {x.league.name} {x.uiRole === "manager" ? "(Manager)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-9 w-9 rounded-full bg-white/10 border border-white/10 overflow-hidden shrink-0">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          {r.avatar ? <img src={r.avatar} alt={r.name} className="h-full w-full object-cover" /> : null}
+                {selected && (
+                  <div className="rounded-xl bg-black/30 border border-white/10 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">
+                          {selected.league.name} {selected.uiRole === "manager" ? "👑" : ""}
                         </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-medium truncate">{r.name}</span>
-                            {r.username && <span className="text-xs text-white/50 truncate">{r.username}</span>}
-                            {isMe && (
-                              <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-0.5 border border-orange-500/40 text-orange-200 bg-orange-500/10">
-                                You
-                              </span>
-                            )}
-                          </div>
+                        <div className="text-xs text-white/60 mt-1">
+                          Invite code:{" "}
+                          <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-0.5">
+                            {selected.league.inviteCode || "—"}
+                          </span>
                         </div>
                       </div>
-                    </td>
+                    </div>
 
-                    <td className="px-4 py-3 text-right">
-                      <span className="font-semibold">{r.current}</span>
-                    </td>
+                    {/* BIG ORANGE VIEW LADDER */}
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/leagues/${selected.league.id}/ladder`)}
+                      className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-base px-5 py-3 transition-colors"
+                    >
+                      View ladder →
+                    </button>
 
-                    <td className="px-4 py-3 text-right">
-                      <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
-                        {r.uiRole === "admin" ? "Admin" : "Member"}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/leagues/${selected.league.id}`)}
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
+                      >
+                        Open league
+                      </button>
 
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-sm text-white/60">
-                    No members found for this league.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/leagues/${selected.league.id}/manage`)}
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* RIGHT: Create a league */}
+          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
+            <h2 className="text-xl font-bold">Create a league</h2>
+            <p className="text-sm text-white/70">
+              You&apos;re the commish. Name your league, and share a single invite code with the crew.
+            </p>
+
+            <ul className="text-sm text-white/70 list-disc pl-5 space-y-1">
+              <li>Automatically become League Manager</li>
+              <li>Share one code to invite players</li>
+              <li>Everyone&apos;s streak still counts globally</li>
+            </ul>
+
+            <button
+              type="button"
+              onClick={() => router.push("/leagues/new")}
+              className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
+            >
+              Create league
+            </button>
+
+            <p className="text-xs text-white/50">
+              Tip: your league ladder is separate bragging rights — your global streak still lives on the main leaderboard.
+            </p>
+          </div>
+        </div>
+
+        {/* FULL-WIDTH: Join a league */}
+        <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold">Join a league</h2>
+              <p className="text-sm text-white/70">
+                Got a code from a mate? Drop it in and you’ll appear on that league’s ladder.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] items-start">
+            <form onSubmit={handleJoin} className="contents">
+              <div className="space-y-2">
+                <label className="text-xs text-white/60">Invite code</label>
+                <input
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  placeholder="E.g. TM668W"
+                  className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                />
+                {joinError && <p className="text-xs text-red-400">{joinError}</p>}
+                {joinSuccess && <p className="text-xs text-emerald-400">{joinSuccess}</p>}
+              </div>
+
+              <button
+                type="submit"
+                disabled={joining || !joinCode.trim()}
+                className="h-[42px] md:mt-[22px] inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-6 py-2 transition-colors disabled:opacity-60"
+              >
+                {joining ? "Joining…" : "Join with a code"}
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
