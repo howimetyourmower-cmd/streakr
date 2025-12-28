@@ -103,16 +103,6 @@ const normaliseOutcome = (val: any): "yes" | "no" | "void" | null => {
   return null;
 };
 
-// ✅ streak safety – prevents insane negative/NaN UI
-function safeStreak(val: any): number {
-  const n = typeof val === "number" ? val : Number(val);
-  if (!Number.isFinite(n)) return 0;
-  if (n < 0) return 0;
-  // optional: cap to something sane so UI never explodes
-  if (n > 1000000) return 1000000;
-  return Math.floor(n);
-}
-
 // ---------- AFL team logo helpers ----------
 type AflTeamKey =
   | "adelaide"
@@ -181,15 +171,13 @@ function getAflTeamKeyFromSegment(seg: string): AflTeamKey | null {
   if (s.includes("gws") || s.includes("giants")) return "gws";
   if (s.includes("hawthorn") || s.includes("hawks")) return "hawthorn";
   if (s.includes("melbourne") && !s.includes("north")) return "melbourne";
-  if (s.includes("north melbourne") || s.includes("kangaroos"))
-    return "north-melbourne";
+  if (s.includes("north melbourne") || s.includes("kangaroos")) return "north-melbourne";
   if (s.includes("port adelaide") || s.includes("power")) return "port-adelaide";
   if (s.includes("richmond") || s.includes("tigers")) return "richmond";
   if (s.includes("st kilda") || s.includes("stkilda")) return "st-kilda";
   if (s.includes("sydney") || s.includes("swans")) return "sydney";
   if (s.includes("west coast") || s.includes("eagles")) return "west-coast";
-  if (s.includes("western bulldogs") || s.includes("bulldogs"))
-    return "western-bulldogs";
+  if (s.includes("western bulldogs") || s.includes("bulldogs")) return "western-bulldogs";
   return null;
 }
 
@@ -203,12 +191,7 @@ function parseAflMatchTeams(match: string) {
   const awaySeg = (parts[1] ?? "").trim();
   const homeKey = getAflTeamKeyFromSegment(homeSeg);
   const awayKey = getAflTeamKeyFromSegment(awaySeg);
-  return {
-    homeKey,
-    awayKey,
-    homeLabel: homeSeg || null,
-    awayLabel: awaySeg || null,
-  };
+  return { homeKey, awayKey, homeLabel: homeSeg || null, awayLabel: awaySeg || null };
 }
 
 export default function PicksClient() {
@@ -255,8 +238,7 @@ export default function PicksClient() {
   // window size for Confetti
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const handleResize = () =>
-      setWindowSize({ width: window.innerWidth, height: window.innerHeight });
+    const handleResize = () => setWindowSize({ width: window.innerWidth, height: window.innerHeight });
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -288,8 +270,7 @@ export default function PicksClient() {
         g.questions.map((q: ApiQuestion) => {
           const historyPick = history[q.id];
 
-          const rawOutcome =
-            normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
+          const rawOutcome = normaliseOutcome(q.correctOutcome) ?? normaliseOutcome(q.outcome);
           const correctOutcome: QuestionRow["correctOutcome"] =
             q.status === "final" || q.status === "void" ? rawOutcome : null;
 
@@ -306,7 +287,7 @@ export default function PicksClient() {
             yesPercent: typeof q.yesPercent === "number" ? q.yesPercent : 0,
             noPercent: typeof q.noPercent === "number" ? q.noPercent : 0,
             sport: (q.sport ?? g.sport ?? "AFL").toString(),
-            commentCount: q.commentCount ?? 0,
+            commentCount: typeof q.commentCount === "number" ? q.commentCount : 0,
             isSponsorQuestion: !!q.isSponsorQuestion,
             correctOutcome,
           };
@@ -330,9 +311,7 @@ export default function PicksClient() {
 
         const flat = flattenApi(data, pickHistory);
         setRows(flat);
-        setFilteredRows(
-          activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter)
-        );
+        setFilteredRows(activeFilter === "all" ? flat : flat.filter((r) => r.status === activeFilter));
       } catch (e) {
         console.error(e);
         if (!opts?.silent) setError("Failed to load picks");
@@ -394,9 +373,11 @@ export default function PicksClient() {
     return () => clearInterval(id);
   }, [fetchPicks]);
 
+  // ---- IMPORTANT FIX: stable key for comment-count subscriptions ----
   const questionIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const questionIdsKey = useMemo(() => questionIds.join("|"), [questionIds]);
 
-  // Comment-count live updates
+  // Comment-count live updates (stable subscription; no loop)
   useEffect(() => {
     if (!questionIds.length) return;
 
@@ -408,29 +389,56 @@ export default function PicksClient() {
 
     const chunks = chunkArray(questionIds, 10);
 
+    // throttle state writes to avoid UI churn
+    let pendingTimer: any = null;
+    const pendingCountsById: Record<string, number> = {};
+
+    const flush = () => {
+      pendingTimer = null;
+      const applyCounts = { ...pendingCountsById };
+      for (const k of Object.keys(pendingCountsById)) delete pendingCountsById[k];
+
+      setRows((prev) =>
+        prev.map((r) => (applyCounts[r.id] !== undefined ? { ...r, commentCount: applyCounts[r.id] } : r))
+      );
+      setFilteredRows((prev) =>
+        prev.map((r) => (applyCounts[r.id] !== undefined ? { ...r, commentCount: applyCounts[r.id] } : r))
+      );
+    };
+
     const unsubs = chunks.map((ids) => {
       const commentsRef = collection(db, "comments");
       const qRef = query(commentsRef, where("questionId", "in", ids));
 
       return onSnapshot(qRef, (snapshot) => {
+        // IMPORTANT: initialise all ids in this chunk to 0
         const counts: Record<string, number> = {};
+        ids.forEach((id) => (counts[id] = 0));
+
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
           const qid = data.questionId as string;
+          if (!qid) return;
           counts[qid] = (counts[qid] ?? 0) + 1;
         });
 
-        setRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
-        );
-        setFilteredRows((prev) =>
-          prev.map((r) => (counts[r.id] !== undefined ? { ...r, commentCount: counts[r.id] } : r))
-        );
+        // stage updates
+        for (const [qid, c] of Object.entries(counts)) {
+          pendingCountsById[qid] = c;
+        }
+
+        if (!pendingTimer) {
+          pendingTimer = setTimeout(flush, 250);
+        }
       });
     });
 
-    return () => unsubs.forEach((unsub) => unsub());
-  }, [questionIds]);
+    return () => {
+      if (pendingTimer) clearTimeout(pendingTimer);
+      unsubs.forEach((unsub) => unsub());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [questionIdsKey]); // ✅ stable signature, not array ref
 
   // Load picks from backend and merge into local history
   useEffect(() => {
@@ -447,7 +455,6 @@ export default function PicksClient() {
         const json = await res.json();
         let historyFromApi: PickHistory = {};
 
-        // supports legacy bulk shape OR single pick shape
         if (Array.isArray(json?.picks)) {
           for (const p of json.picks) {
             const qid = p?.questionId;
@@ -500,8 +507,7 @@ export default function PicksClient() {
     loadLocks();
   }, [roundNumber]);
 
-  // IMPORTANT:
-  // If a gameId isn't present in gameLocks, default TRUE (open)
+  // IMPORTANT: If a gameId isn't present in gameLocks, default TRUE (open)
   const isGameUnlocked = useCallback(
     (gameId: string) => {
       const val = gameLocks[gameId];
@@ -522,7 +528,8 @@ export default function PicksClient() {
         let leaderVal: number | null = null;
         snapshot.forEach((docSnap) => {
           const data = docSnap.data() as any;
-          leaderVal = safeStreak(data?.currentStreak);
+          const val = typeof data.currentStreak === "number" ? data.currentStreak : 0;
+          leaderVal = val;
         });
         setLeaderCurrentStreak(leaderVal);
         setStreakLoading(false);
@@ -551,9 +558,9 @@ export default function PicksClient() {
       (userSnap) => {
         if (userSnap.exists()) {
           const data = userSnap.data() as any;
-          const current = safeStreak(data?.currentStreak);
+          const current = typeof data.currentStreak === "number" ? data.currentStreak : 0;
           const badges =
-            data?.streakBadges && typeof data.streakBadges === "object"
+            data.streakBadges && typeof data.streakBadges === "object"
               ? (data.streakBadges as Record<string, boolean>)
               : {};
           setUserCurrentStreak(current);
@@ -662,7 +669,7 @@ export default function PicksClient() {
 
       try {
         const idToken = await user.getIdToken();
-        await fetch("/api/user-picks", {
+        const res = await fetch("/api/user-picks", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -672,9 +679,15 @@ export default function PicksClient() {
             questionId: row.id,
             outcome: pick,
             roundNumber,
+            sport: "AFL",
             gameId: row.gameId, // ✅ IMPORTANT
           }),
         });
+
+        // don’t throw; just log
+        if (!res.ok) {
+          console.error("Pick save failed:", await res.text());
+        }
       } catch (e) {
         console.error("Pick save error:", e);
       }
@@ -698,22 +711,30 @@ export default function PicksClient() {
       });
 
       if (!user) return;
+
+      // Optional: only call API if your route supports "clear"
       try {
         const idToken = await user.getIdToken();
-        await fetch("/api/user-picks", {
+        const res = await fetch("/api/user-picks", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${idToken}`,
           },
           body: JSON.stringify({
-            action: "clear",
             questionId: row.id,
+            action: "clear",
             outcome: null,
             roundNumber,
-            gameId: row.gameId, // ✅ keep consistent
+            sport: "AFL",
+            gameId: row.gameId,
           }),
         });
+
+        if (!res.ok) {
+          // don’t spam console in prod
+          console.warn("Pick clear not supported or failed:", await res.text());
+        }
       } catch (e) {
         console.error("Pick clear error:", e);
       }
@@ -801,15 +822,10 @@ export default function PicksClient() {
     }
   };
 
-  // Bars compare CURRENT vs CURRENT leader (safe)
-  const safeUserStreak = user ? safeStreak(animatedCurrentStreak) : 0;
-  const safeLeaderStreak = safeStreak(leaderCurrentStreak ?? 0);
-  const maxBarValue = Math.max(safeUserStreak, safeLeaderStreak, 1);
-
-  const barWidth = (val: number | null) => {
-    const v = safeStreak(val ?? 0);
-    return `${Math.max(0, Math.min(1, v / maxBarValue)) * 100}%`;
-  };
+  // Bars compare CURRENT vs CURRENT leader
+  const maxBarValue = Math.max(userCurrentStreak ?? 0, leaderCurrentStreak ?? 0, 1);
+  const barWidth = (val: number | null) =>
+    `${Math.max(0, Math.min(1, (val ?? 0) / maxBarValue)) * 100}%`;
 
   const hasSponsorQuestion = useMemo(() => rows.some((r) => r.isSponsorQuestion), [rows]);
 
@@ -886,7 +902,7 @@ export default function PicksClient() {
       venue: string;
       pickedCount: number;
       isFinal: boolean;
-      earned: number; // 0..12
+      earned: number;
       summary: string;
     };
 
@@ -956,7 +972,6 @@ export default function PicksClient() {
     return out;
   }, [rows, pickHistory]);
 
-  // ✅ UI-friendly journey lines
   const streakJourney = useMemo(() => {
     type Line =
       | { kind: "clean"; gameId: string; plus: number }
@@ -978,9 +993,13 @@ export default function PicksClient() {
       }
 
       if (g.isFinal) {
-        if (picked === 0) lines.push({ kind: "not-picked", gameId: g.gameId });
-        else if (g.earned > 0) lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
-        else lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
+        if (picked === 0) {
+          lines.push({ kind: "not-picked", gameId: g.gameId });
+        } else if (g.earned > 0) {
+          lines.push({ kind: "clean", gameId: g.gameId, plus: g.earned });
+        } else {
+          lines.push({ kind: "cooked", gameId: g.gameId, picks: picked });
+        }
         continue;
       }
 
@@ -1002,7 +1021,8 @@ export default function PicksClient() {
 
   const handleShare = async () => {
     try {
-      const shareUrl = typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
+      const shareUrl =
+        typeof window !== "undefined" ? window.location.href : "https://streakr.com.au";
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({
           title: "STREAKr – How long can you last?",
@@ -1065,7 +1085,12 @@ export default function PicksClient() {
   return (
     <>
       {showConfetti && windowSize.width > 0 && (
-        <Confetti width={windowSize.width} height={windowSize.height} numberOfPieces={350} recycle={false} />
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          numberOfPieces={350}
+          recycle={false}
+        />
       )}
 
       <div className="w-full max-w-7xl mx-auto p-4 sm:p-6 min-h-screen bg-black text-white">
@@ -1084,7 +1109,9 @@ export default function PicksClient() {
             70% { filter: drop-shadow(0 0 18px rgba(239, 68, 68, 0.95)); transform: translateX(2px); }
             100% { filter: drop-shadow(0 0 0 rgba(239, 68, 68, 0)); transform: translateX(0); }
           }
-          .streakr-reset-fx { animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out; }
+          .streakr-reset-fx {
+            animation: streakrShake 0.38s ease-in-out, streakrGlowRed 0.7s ease-in-out;
+          }
         `}</style>
 
         <div className="flex flex-col gap-3 mb-4">
@@ -1132,15 +1159,13 @@ export default function PicksClient() {
                       streakResetFx ? "streakr-reset-fx" : "",
                     ].join(" ")}
                   >
-                    {user ? safeUserStreak : "-"}
+                    {user ? animatedCurrentStreak : "-"}
                   </p>
                 </div>
                 <div className="h-8 w-px bg-white/10" />
                 <div className="text-right">
                   <p className="text-[11px] text-white/60">Leader</p>
-                  <p className="text-lg sm:text-xl font-bold text-sky-300">
-                    {leaderCurrentStreak === null ? "-" : safeLeaderStreak}
-                  </p>
+                  <p className="text-lg sm:text-xl font-bold text-sky-300">{leaderCurrentStreak ?? "-"}</p>
                 </div>
               </div>
 
@@ -1158,7 +1183,7 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Current streak</span>
-                <span className="font-semibold text-orange-300">{user ? safeUserStreak : 0}</span>
+                <span className="font-semibold text-orange-300">{user ? animatedCurrentStreak ?? 0 : 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
@@ -1171,7 +1196,7 @@ export default function PicksClient() {
             <div>
               <div className="flex justify-between text-[11px] text-white/70 mb-1">
                 <span>Leader</span>
-                <span className="font-semibold text-sky-300">{safeLeaderStreak}</span>
+                <span className="font-semibold text-sky-300">{leaderCurrentStreak ?? 0}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-900 overflow-hidden">
                 <div
@@ -1384,12 +1409,9 @@ export default function PicksClient() {
                     <div className="mb-2 rounded-xl bg-[#0b1220] border border-slate-700 px-4 py-3 shadow-[0_10px_30px_rgba(0,0,0,0.55)]">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                         <div className="min-w-0">
-                          <div className="text-sm sm:text-base font-extrabold text-white truncate">
-                            {row.match}
-                          </div>
+                          <div className="text-sm sm:text-base font-extrabold text-white truncate">{row.match}</div>
                           <div className="text-[11px] sm:text-xs text-white/70">
-                            {row.venue} • {formatStartDate(row.startTime).date}{" "}
-                            {formatStartDate(row.startTime).time} AEDT
+                            {row.venue} • {formatStartDate(row.startTime).date} {formatStartDate(row.startTime).time} AEDT
                           </div>
                         </div>
 
@@ -1417,9 +1439,7 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-6 md:col-span-1">
-                        <span
-                          className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}
-                        >
+                        <span className={`${statusClasses(row.status)} text-[10px] px-2 py-0.5 rounded-full font-bold`}>
                           {row.status.toUpperCase()}
                         </span>
                       </div>
@@ -1429,13 +1449,9 @@ export default function PicksClient() {
                           (() => {
                             const parsed = parseAflMatchTeams(row.match);
                             const homeTeam =
-                              parsed.homeKey && AFL_TEAM_LOGOS[parsed.homeKey]
-                                ? AFL_TEAM_LOGOS[parsed.homeKey]
-                                : null;
+                              parsed.homeKey && AFL_TEAM_LOGOS[parsed.homeKey] ? AFL_TEAM_LOGOS[parsed.homeKey] : null;
                             const awayTeam =
-                              parsed.awayKey && AFL_TEAM_LOGOS[parsed.awayKey]
-                                ? AFL_TEAM_LOGOS[parsed.awayKey]
-                                : null;
+                              parsed.awayKey && AFL_TEAM_LOGOS[parsed.awayKey] ? AFL_TEAM_LOGOS[parsed.awayKey] : null;
                             const useAflLayout = homeTeam || awayTeam ? true : false;
 
                             return useAflLayout ? (
@@ -1455,9 +1471,7 @@ export default function PicksClient() {
                                       {parsed.homeLabel || homeTeam?.name || ""}
                                     </span>
                                   </div>
-                                  <span className="text-xs uppercase tracking-wide text-white/70">
-                                    vs
-                                  </span>
+                                  <span className="text-xs uppercase tracking-wide text-white/70">vs</span>
                                   <div className="flex items-center gap-1 min-w-0">
                                     <span className="text-sm font-semibold truncate">
                                       {parsed.awayLabel || awayTeam?.name || ""}
@@ -1473,9 +1487,7 @@ export default function PicksClient() {
                                     )}
                                   </div>
                                 </div>
-                                <div className="text-[11px] text-white/80 mt-0.5">
-                                  {row.venue}
-                                </div>
+                                <div className="text-[11px] text-white/80 mt-0.5">{row.venue}</div>
                               </>
                             ) : (
                               <>
@@ -1493,9 +1505,7 @@ export default function PicksClient() {
                       </div>
 
                       <div className="col-span-3 md:col-span-1 text-sm font-bold md:text-center">
-                        <span className="block">
-                          {row.quarter === 0 ? "Match" : `Quarter ${row.quarter}`}
-                        </span>
+                        <span className="block">{row.quarter === 0 ? "Match" : `Quarter ${row.quarter}`}</span>
                       </div>
 
                       <div className="col-span-9 md:col-span-2">
@@ -1567,9 +1577,7 @@ export default function PicksClient() {
                               aria-label="Clear selection"
                               className="group inline-flex items-center justify-center h-7 w-7 rounded-full border border-white/15 bg-black/40 hover:bg-white/10 transition"
                             >
-                              <span className="text-white/70 group-hover:text-white text-sm leading-none">
-                                ✕
-                              </span>
+                              <span className="text-white/70 group-hover:text-white text-sm leading-none">✕</span>
                             </button>
                           )}
                         </div>
@@ -1672,11 +1680,7 @@ export default function PicksClient() {
                   </h2>
                   <p className="text-sm text-gray-300">{commentsOpenFor.question}</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeComments}
-                  className="text-sm text-gray-400 hover:text-white"
-                >
+                <button type="button" onClick={closeComments} className="text-sm text-gray-400 hover:text-white">
                   ✕
                 </button>
               </div>
