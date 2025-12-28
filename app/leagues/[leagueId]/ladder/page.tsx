@@ -19,15 +19,6 @@ import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 import SportBadge from "@/components/SportBadge";
 
-// eslint-disable-next-line @next/next/no-img-element
-type MemberRow = {
-  id: string;
-  uid: string;
-  displayName: string;
-  role: "manager" | "member";
-  joinedAt?: any;
-};
-
 type League = {
   id: string;
   name: string;
@@ -37,40 +28,72 @@ type League = {
   memberCount?: number;
 };
 
-type UserProfile = {
+type MemberRow = {
   uid: string;
-  displayName?: string;
-  username?: string; // @handle
-  photoURL?: string; // firebase auth-style
-  avatarUrl?: string; // common custom field
+  displayName: string;
+  role: "manager" | "member";
+  joinedAt?: any;
+};
 
-  // If you already store these on user doc (recommended)
-  currentStreak?: number;
-  bestStreak?: number;
-  correctPicks?: number;
-  totalPicks?: number;
+type Scope =
+  | "overall"
+  | "opening-round"
+  | "round-1"
+  | "round-2"
+  | "round-3"
+  | "round-4"
+  | "round-5"
+  | "round-6"
+  | "round-7"
+  | "round-8"
+  | "round-9"
+  | "round-10"
+  | "round-11"
+  | "round-12"
+  | "round-13"
+  | "round-14"
+  | "round-15"
+  | "round-16"
+  | "round-17"
+  | "round-18"
+  | "round-19"
+  | "round-20"
+  | "round-21"
+  | "round-22"
+  | "round-23"
+  | "finals";
+
+type LeaderboardEntry = {
+  uid: string;
+  displayName: string;
+  username?: string;
+  avatarUrl?: string;
+  rank: number;
+  currentStreak: number;
+  totalWins: number;
+  totalLosses: number;
+  winPct: number;
+};
+
+type LeaderboardApiResponse = {
+  entries: LeaderboardEntry[];
+  userEntry: LeaderboardEntry | null;
+  userLifetime: any | null;
 };
 
 type LadderRow = {
   rank: number;
   uid: string;
   role: "manager" | "member";
-
-  // display
-  name: string;
+  displayName: string;
   username?: string;
-  avatar?: string;
+  avatarUrl?: string;
 
-  // stats
-  bestStreak: number;
   currentStreak: number;
-  correctPicks: number;
-  totalPicks: number;
+  totalWins: number;
+  totalLosses: number;
+  winPct: number;
 };
-
-function safeNum(v: any, fallback = 0) {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
-}
 
 function initials(name: string) {
   const parts = (name || "P").trim().split(/\s+/).slice(0, 2);
@@ -79,10 +102,9 @@ function initials(name: string) {
   return (a + b).toUpperCase();
 }
 
-function formatRatio(correct: number, total: number) {
-  if (!total) return "—";
-  const pct = Math.round((correct / total) * 100);
-  return `${correct}/${total} (${pct}%)`;
+function formatWinPct(p: number): string {
+  if (!p || p <= 0) return ".000";
+  return p.toFixed(3).replace(/^0/, "");
 }
 
 export default function LeagueLadderPage() {
@@ -92,15 +114,19 @@ export default function LeagueLadderPage() {
 
   const [league, setLeague] = useState<League | null>(null);
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [profiles, setProfiles] = useState<Record<string, UserProfile>>({});
   const [loading, setLoading] = useState(true);
-  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [membersLoading, setMembersLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // --- Load league doc ---
+  const [lbLoading, setLbLoading] = useState(false);
+  const [lbError, setLbError] = useState<string | null>(null);
+  const [lbEntries, setLbEntries] = useState<LeaderboardEntry[]>([]);
+
+  // Load league doc
   useEffect(() => {
     const load = async () => {
       if (!leagueId) return;
+
       setLoading(true);
       setError(null);
 
@@ -117,7 +143,6 @@ export default function LeagueLadderPage() {
 
         const data = snap.data() as any;
 
-        // support old+new schema
         const managerId: string =
           data.managerId ?? data.managerUid ?? data.managerUID ?? "";
         const inviteCode: string =
@@ -142,9 +167,11 @@ export default function LeagueLadderPage() {
     load();
   }, [leagueId]);
 
-  // --- Live members (subcollection) ---
+  // Live members list
   useEffect(() => {
     if (!leagueId) return;
+
+    setMembersLoading(true);
 
     const membersRef = collection(db, "leagues", leagueId, "members");
     const qRef = query(membersRef, orderBy("joinedAt", "asc"), limit(300));
@@ -156,18 +183,18 @@ export default function LeagueLadderPage() {
           const m = d.data() as any;
           const uid = (m.uid ?? d.id) as string;
           return {
-            id: d.id,
             uid,
             displayName: m.displayName ?? "Player",
             role: (m.role as "manager" | "member") ?? "member",
             joinedAt: m.joinedAt,
           };
         });
-
         setMembers(list);
+        setMembersLoading(false);
       },
       (err) => {
         console.error("Failed to load members", err);
+        setMembersLoading(false);
         setError("Failed to load league members.");
       }
     );
@@ -175,7 +202,7 @@ export default function LeagueLadderPage() {
     return () => unsub();
   }, [leagueId]);
 
-  // --- Membership gate ---
+  // Membership gate
   const isMemberUser = useMemo(() => {
     if (!user) return false;
     if (!league) return false;
@@ -183,114 +210,110 @@ export default function LeagueLadderPage() {
     return members.some((m) => m.uid === user.uid);
   }, [user, league, members]);
 
-  // --- Load user profiles for members (avatar + username + streak stats) ---
+  // Load global leaderboard entries (same API as /app/leaderboards)
   useEffect(() => {
-    const loadProfiles = async () => {
-      if (!leagueId) return;
-      if (!members.length) {
-        setProfiles({});
-        return;
+    const loadLeaderboard = async () => {
+      if (!user) {
+        // If not logged in, still try without auth (API might allow public)
+        // but the ladder itself is gated anyway.
       }
 
-      setProfilesLoading(true);
+      // Only bother fetching if the user can actually view it
+      if (!isMemberUser) return;
+
+      setLbLoading(true);
+      setLbError(null);
+
       try {
-        const uids = Array.from(new Set(members.map((m) => m.uid))).filter(Boolean);
+        let authHeader: Record<string, string> = {};
 
-        // simple + reliable for small leagues: fetch each user doc
-        const docs = await Promise.all(
-          uids.map(async (uid) => {
-            try {
-              const uRef = doc(db, "users", uid);
-              const uSnap = await getDoc(uRef);
-              if (!uSnap.exists()) return null;
-              const d = uSnap.data() as any;
-
-              const profile: UserProfile = {
-                uid,
-                displayName: d.displayName ?? d.name ?? d.fullName ?? undefined,
-                username: d.username ?? d.handle ?? d.userName ?? undefined,
-                photoURL: d.photoURL ?? d.photoUrl ?? undefined,
-                avatarUrl: d.avatarUrl ?? d.avatarURL ?? d.avatar ?? undefined,
-
-                // stats (optional fields)
-                currentStreak: safeNum(d.currentStreak, 0),
-                bestStreak: safeNum(d.bestStreak, 0),
-                correctPicks: safeNum(d.correctPicks, 0),
-                totalPicks: safeNum(d.totalPicks, 0),
-              };
-
-              return profile;
-            } catch {
-              return null;
-            }
-          })
-        );
-
-        const map: Record<string, UserProfile> = {};
-        for (const p of docs) {
-          if (p?.uid) map[p.uid] = p;
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch (err) {
+            console.error("Failed to get ID token for league ladder", err);
+          }
         }
-        setProfiles(map);
+
+        const res = await fetch(`/api/leaderboard?scope=overall` as any, {
+          headers: {
+            ...authHeader,
+          },
+        });
+
+        if (!res.ok) {
+          console.error("Leaderboard API error:", await res.text());
+          throw new Error("Failed to load leaderboard");
+        }
+
+        const data: LeaderboardApiResponse = await res.json();
+        setLbEntries(data.entries || []);
+      } catch (e) {
+        console.error(e);
+        setLbError("Could not load league ladder stats right now.");
+        setLbEntries([]);
       } finally {
-        setProfilesLoading(false);
+        setLbLoading(false);
       }
     };
 
-    loadProfiles();
-  }, [leagueId, members]);
+    loadLeaderboard();
+  }, [user, isMemberUser]);
 
-  // --- Build ladder rows using user profile stats first (fallback to member displayName) ---
-  const ladder: LadderRow[] = useMemo(() => {
+  const inviteJoinLink = useMemo(() => {
+    if (!league?.inviteCode) return "";
+    // your join page supports ?code=
+    return `${typeof window !== "undefined" ? window.location.origin : ""}/leagues/join?code=${league.inviteCode}`;
+  }, [league?.inviteCode]);
+
+  // Build ladder rows by intersecting league members with global leaderboard API results
+  const ladderRows: LadderRow[] = useMemo(() => {
+    const memberUidSet = new Set(members.map((m) => m.uid));
+
+    const byUid = new Map<string, LeaderboardEntry>();
+    lbEntries.forEach((e) => byUid.set(e.uid, e));
+
     const rows: LadderRow[] = members.map((m) => {
-      const p = profiles[m.uid];
+      const e = byUid.get(m.uid);
 
-      const name =
-        (p?.displayName && String(p.displayName).trim()) ||
-        (m.displayName && String(m.displayName).trim()) ||
-        "Player";
-
-      const usernameRaw = p?.username ? String(p.username).trim() : "";
+      const usernameRaw = e?.username ? String(e.username).trim() : "";
       const username = usernameRaw
         ? usernameRaw.startsWith("@")
           ? usernameRaw
           : `@${usernameRaw}`
         : undefined;
 
-      const avatar = p?.avatarUrl || p?.photoURL || undefined;
-
       return {
         rank: 9999,
         uid: m.uid,
         role: m.role,
-        name,
+        displayName: e?.displayName ?? m.displayName ?? "Player",
         username,
-        avatar,
-        bestStreak: safeNum(p?.bestStreak, 0),
-        currentStreak: safeNum(p?.currentStreak, 0),
-        correctPicks: safeNum(p?.correctPicks, 0),
-        totalPicks: safeNum(p?.totalPicks, 0),
+        avatarUrl: e?.avatarUrl,
+
+        currentStreak: e?.currentStreak ?? 0,
+        totalWins: e?.totalWins ?? 0,
+        totalLosses: e?.totalLosses ?? 0,
+        winPct: e?.winPct ?? 0,
       };
     });
 
-    // rank by current streak (match your main leaderboard vibe), then best, then accuracy
+    // Sort like the leaderboard: currentStreak desc, then winPct desc, then wins desc
     rows.sort((a, b) => {
       if (b.currentStreak !== a.currentStreak) return b.currentStreak - a.currentStreak;
-      if (b.bestStreak !== a.bestStreak) return b.bestStreak - a.bestStreak;
-
-      const aPct = a.totalPicks ? a.correctPicks / a.totalPicks : 0;
-      const bPct = b.totalPicks ? b.correctPicks / b.totalPicks : 0;
-      if (bPct !== aPct) return bPct - aPct;
-
-      return a.name.localeCompare(b.name);
+      if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+      if (b.totalWins !== a.totalWins) return b.totalWins - a.totalWins;
+      return a.displayName.localeCompare(b.displayName);
     });
 
     return rows.map((r, idx) => ({ ...r, rank: idx + 1 }));
-  }, [members, profiles]);
+  }, [members, lbEntries]);
 
   const myRow = useMemo(() => {
     if (!user) return null;
-    return ladder.find((r) => r.uid === user.uid) ?? null;
-  }, [ladder, user]);
+    return ladderRows.find((r) => r.uid === user.uid) ?? null;
+  }, [ladderRows, user]);
 
   if (loading) {
     return (
@@ -337,11 +360,11 @@ export default function LeagueLadderPage() {
             </p>
           </div>
 
-          {/* compact code */}
+          {/* Invite / share area (compact) */}
           <div className="flex flex-col items-start md:items-end gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-white/60">Invite</span>
-              <span className="font-mono text-[12px] bg-white/5 border border-white/10 rounded-md px-2 py-1 max-w-[120px] truncate">
+              <span className="text-[11px] text-white/60">Code</span>
+              <span className="font-mono text-[12px] bg-white/5 border border-white/10 rounded-md px-2 py-1 max-w-[110px] truncate">
                 {league.inviteCode || "—"}
               </span>
               <button
@@ -353,9 +376,20 @@ export default function LeagueLadderPage() {
                 Copy
               </button>
             </div>
+
+            {league.inviteCode && (
+              <a
+                href={inviteJoinLink}
+                className="text-[11px] text-white/50 hover:text-white/70 truncate max-w-[320px]"
+              >
+                Join link: <span className="text-orange-300">{inviteJoinLink}</span>
+              </a>
+            )}
+
             <span className="text-xs text-white/60">
               Members: {league.memberCount ?? members.length}
-              {profilesLoading ? " • updating…" : ""}
+              {membersLoading ? " • loading…" : ""}
+              {lbLoading ? " • updating streaks…" : ""}
             </span>
           </div>
         </div>
@@ -392,6 +426,12 @@ export default function LeagueLadderPage() {
 
         {user && isMemberUser && (
           <>
+            {(error || lbError) && (
+              <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
+                {error ?? lbError}
+              </p>
+            )}
+
             {/* My position */}
             {myRow && (
               <div className="rounded-2xl border border-orange-500/35 bg-orange-500/10 p-4">
@@ -402,15 +442,16 @@ export default function LeagueLadderPage() {
                 <div className="mt-2 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden">
-                      {myRow.avatar ? (
+                      {myRow.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          src={myRow.avatar}
-                          alt={myRow.name}
+                          src={myRow.avatarUrl}
+                          alt={myRow.displayName}
                           className="h-full w-full object-cover"
                         />
                       ) : (
                         <span className="text-xs font-bold text-white/80">
-                          {initials(myRow.name)}
+                          {initials(myRow.displayName)}
                         </span>
                       )}
                     </div>
@@ -418,7 +459,7 @@ export default function LeagueLadderPage() {
                     <div>
                       <p className="text-lg font-bold">
                         #{myRow.rank}{" "}
-                        <span className="text-white/90">{myRow.name}</span>
+                        <span className="text-white/90">{myRow.displayName}</span>
                         {myRow.username && (
                           <span className="ml-2 text-sm font-semibold text-white/50">
                             {myRow.username}
@@ -426,11 +467,15 @@ export default function LeagueLadderPage() {
                         )}
                       </p>
                       <p className="text-xs text-white/60">
-                        Best: <span className="text-white font-semibold">{myRow.bestStreak}</span> •
-                        Current: <span className="text-white font-semibold">{myRow.currentStreak}</span> •
-                        Accuracy:{" "}
+                        Current streak:{" "}
+                        <span className="text-white font-semibold">{myRow.currentStreak}</span>{" "}
+                        • W/L:{" "}
                         <span className="text-white font-semibold">
-                          {formatRatio(myRow.correctPicks, myRow.totalPicks)}
+                          {myRow.totalWins}/{myRow.totalLosses}
+                        </span>{" "}
+                        • Win %:{" "}
+                        <span className="text-white font-semibold font-mono">
+                          {formatWinPct(myRow.winPct)}
                         </span>
                       </p>
                     </div>
@@ -447,44 +492,35 @@ export default function LeagueLadderPage() {
             )}
 
             {/* Table */}
-            <div className="rounded-2xl bg-white/5 border border-white/10 overflow-hidden">
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-white/10">
+            <div className="rounded-2xl bg-[#020617] border border-slate-800 overflow-hidden shadow-[0_24px_60px_rgba(0,0,0,0.8)]">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-800">
                 <h2 className="text-sm font-semibold">League ladder</h2>
                 <p className="text-[11px] text-white/50">
-                  Ranking: Current → Best → Accuracy
+                  Sorted by current streak (same as main leaderboard)
                 </p>
               </div>
 
-              {error && (
-                <div className="px-4 py-3">
-                  <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                    {error}
-                  </p>
-                </div>
-              )}
-
-              {ladder.length === 0 ? (
-                <div className="px-4 py-6">
-                  <p className="text-sm text-white/60">
-                    No members found yet. Share the invite code and get the crew in.
-                  </p>
+              {ladderRows.length === 0 ? (
+                <div className="px-4 py-6 text-sm text-white/70">
+                  No members found yet. Share the invite code and get the crew in.
                 </div>
               ) : (
                 <div className="w-full overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-black/20 text-white/60">
                       <tr className="text-left">
-                        <th className="px-4 py-2 w-[64px]">Rank</th>
+                        <th className="px-4 py-2 w-[70px]">Rank</th>
                         <th className="px-4 py-2 min-w-[280px]">Player</th>
-                        <th className="px-4 py-2 w-[110px]">Best</th>
-                        <th className="px-4 py-2 w-[110px]">Current</th>
-                        <th className="px-4 py-2 w-[160px]">Accuracy</th>
-                        <th className="px-4 py-2 w-[110px]">Role</th>
+                        <th className="px-4 py-2 w-[140px]">Current</th>
+                        <th className="px-4 py-2 w-[120px]">Wins</th>
+                        <th className="px-4 py-2 w-[120px]">Losses</th>
+                        <th className="px-4 py-2 w-[120px]">Win %</th>
+                        <th className="px-4 py-2 w-[120px]">Role</th>
                       </tr>
                     </thead>
 
                     <tbody>
-                      {ladder.map((r) => {
+                      {ladderRows.map((r) => {
                         const isOwn = !!user && r.uid === user.uid;
 
                         return (
@@ -499,22 +535,23 @@ export default function LeagueLadderPage() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-3">
                                 <div className="h-9 w-9 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
-                                  {r.avatar ? (
+                                  {r.avatarUrl ? (
+                                    // eslint-disable-next-line @next/next/no-img-element
                                     <img
-                                      src={r.avatar}
-                                      alt={r.name}
+                                      src={r.avatarUrl}
+                                      alt={r.displayName}
                                       className="h-full w-full object-cover"
                                     />
                                   ) : (
                                     <span className="text-xs font-bold text-white/80">
-                                      {initials(r.name)}
+                                      {initials(r.displayName)}
                                     </span>
                                   )}
                                 </div>
 
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2 min-w-0">
-                                    <span className="font-semibold truncate">{r.name}</span>
+                                    <span className="font-semibold truncate">{r.displayName}</span>
                                     {r.username && (
                                       <span className="text-xs text-white/45 font-semibold truncate">
                                         {r.username}
@@ -527,7 +564,8 @@ export default function LeagueLadderPage() {
                                     )}
                                   </div>
 
-                                  <p className="text-[11px] text-white/35 truncate max-w-[460px]">
+                                  {/* UID line (small + muted) */}
+                                  <p className="text-[11px] text-white/35 truncate max-w-[420px]">
                                     {r.uid}
                                   </p>
                                 </div>
@@ -535,15 +573,19 @@ export default function LeagueLadderPage() {
                             </td>
 
                             <td className="px-4 py-3 font-bold text-orange-200">
-                              {r.bestStreak}
-                            </td>
-
-                            <td className="px-4 py-3 font-semibold text-white/80">
                               {r.currentStreak}
                             </td>
 
-                            <td className="px-4 py-3 text-white/70">
-                              {formatRatio(r.correctPicks, r.totalPicks)}
+                            <td className="px-4 py-3 text-white/80 font-semibold">
+                              {r.totalWins}
+                            </td>
+
+                            <td className="px-4 py-3 text-white/80 font-semibold">
+                              {r.totalLosses}
+                            </td>
+
+                            <td className="px-4 py-3 text-emerald-300 font-mono font-semibold">
+                              {formatWinPct(r.winPct)}
                             </td>
 
                             <td className="px-4 py-3">
@@ -560,9 +602,10 @@ export default function LeagueLadderPage() {
               )}
 
               <div className="px-4 py-3 border-t border-white/10 text-[11px] text-white/50">
-                This ladder reads streak + profile from{" "}
-                <span className="font-mono text-white/70">users/{`{uid}`}</span>.
-                If a user doc doesn’t have streak fields yet, it’ll show 0 until you start writing them.
+                League ladder uses the same source as{" "}
+                <span className="font-mono text-white/70">/app/leaderboards</span>{" "}
+                (via <span className="font-mono text-white/70">/api/leaderboard</span>),
+                then filters to league members — so streaks will always match.
               </div>
             </div>
           </>
