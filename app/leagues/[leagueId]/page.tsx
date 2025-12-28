@@ -388,7 +388,7 @@ export default function LeagueDetailPage() {
   if (!league) {
     return (
       <div className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-6">
+      <div className="mx-auto w-full max-w-5xl px-3 py-5 md:py-6 space-y-4">
         <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
           ← Back to leagues
         </Link>
