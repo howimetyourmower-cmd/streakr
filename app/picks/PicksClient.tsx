@@ -786,7 +786,7 @@ export default function PicksPage() {
               ) : null}
             </div>
             <p className="mt-1 text-sm text-white/65">
-              Pick any questions you want
+              Pick any questions you want. 
             Choose 0, 1, 5 — or all 12 questions.
             Use the <span className="font-black text-white/90">X</span> to clear a pick.
             </p>
