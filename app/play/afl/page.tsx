@@ -420,7 +420,7 @@ export default function AflHubPage() {
                 </div>
 
                 <p className="mt-2 text-sm text-white/65">
-                  Quarter-by-quarter player-stat picks. One wrong call and your streak is cooked.
+                 Know your Stats. Make your Pick. One wrong call and your streak is cooked.
                 </p>
               </div>
             </div>
