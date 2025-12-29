@@ -194,8 +194,8 @@ export default function Navbar() {
           <Link href="/leaderboards" className="hover:text-orange-400">
             Leaderboards
           </Link>
-          <Link href="/lockerroom" className="hover:text-orange-400">
-            Locker Room
+          <Link href="/leagues" className="hover:text-orange-400">
+            Leagues
           </Link>
           <Link href="/venues" className="hover:text-orange-400">
             Venue Leagues
