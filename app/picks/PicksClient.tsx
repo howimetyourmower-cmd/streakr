@@ -741,30 +741,24 @@ export default function PicksPage() {
     const base =
       "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide border";
 
-    if (q.status === "open") {
-      return (
-        <span
-          className={base}
-          style={{
-            borderColor: "rgba(0,229,255,0.28)",
-            background: "rgba(0,229,255,0.08)",
-            color: "rgba(0,229,255,0.92)",
-          }}
-        >
-          <span className="relative flex h-1.5 w-1.5">
-            <span
-              className="absolute inline-flex h-full w-full rounded-full opacity-60"
-              style={{
-                background: "rgba(0,229,255,0.85)",
-                animation: "ping 1.6s cubic-bezier(0,0,0.2,1) infinite",
-              }}
-            />
-            <span className="relative inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.95)" }} />
-          </span>
-          LIVE
-        </span>
-      );
-    }
+   if (q.status === "open") {
+  return (
+    <span
+      className={base}
+      style={{
+        borderColor: "rgba(0,229,255,0.28)",
+        background: "rgba(0,229,255,0.08)",
+        color: "rgba(0,229,255,0.92)",
+      }}
+    >
+      <span
+        className="relative inline-flex h-1.5 w-1.5 rounded-full"
+        style={{ background: "rgba(0,229,255,0.95)" }}
+      />
+      LIVE
+    </span>
+  );
+}
 
     if (q.status === "pending") {
       return (
