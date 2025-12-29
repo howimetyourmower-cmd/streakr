@@ -1,6 +1,8 @@
 // /app/picks/page.tsx
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -18,11 +20,9 @@ import {
   where,
 } from "firebase/firestore";
 
-export const dynamic = "force-dynamic";
-
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
-type LocalPick = PickOutcome | "none"; // sentinel for “cleared”
+type LocalPick = PickOutcome | "none";
 
 type ApiQuestion = {
   id: string;
@@ -83,15 +83,19 @@ type CommentRow = {
 
 const COLORS = {
   bg: "#000000",
+
   panel: "rgba(255,255,255,0.035)",
   panel2: "rgba(255,255,255,0.02)",
+
   stroke: "rgba(255,255,255,0.10)",
   stroke2: "rgba(255,255,255,0.14)",
+
   textDim: "rgba(255,255,255,0.70)",
   textFaint: "rgba(255,255,255,0.50)",
 
   orange: "#FF7A00",
-  orange2: "#FF9A2B",
+  orangeSoft: "rgba(255,122,0,0.28)",
+  orangeSoft2: "rgba(255,122,0,0.18)",
 
   good: "rgba(25,195,125,0.95)",
   bad: "rgba(255,46,77,0.95)",
@@ -168,6 +172,31 @@ function formatCommentTime(createdAt: any): string {
 }
 
 /**
+ * Extracts team code like (Syd) or (Car) from question text.
+ * We’ll map that to /public/jerseys/<Code>.jpg
+ */
+function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic" {
+  const t = (qText || "").toLowerCase();
+
+  // Strong match: "(Syd)" "(Car)" "(GC)" "(Gee)"
+  const m = qText.match(/\(([A-Za-z]{2,3})\)/);
+  const raw = (m?.[1] || "").toLowerCase();
+
+  if (raw === "syd") return "Syd";
+  if (raw === "car") return "Car";
+  if (raw === "gc") return "GC";
+  if (raw === "gee") return "Gee";
+
+  // Fallback heuristics (optional)
+  if (t.includes("syd")) return "Syd";
+  if (t.includes("car")) return "Car";
+  if (t.includes("gc")) return "GC";
+  if (t.includes("gee")) return "Gee";
+
+  return "Generic";
+}
+
+/**
  * UI-only helper: best-effort player extraction from question text.
  */
 function extractPlayerName(qText: string): string | null {
@@ -183,29 +212,6 @@ function extractPlayerName(qText: string): string | null {
   const scoreIdx = rest.toLowerCase().indexOf(" score ");
   if (scoreIdx > 0) return rest.slice(0, scoreIdx).trim();
   return null;
-}
-
-/**
- * Team code extraction from question text:
- * "(Car)" "(Syd)" "(GC)" "(Gee)" etc.
- */
-function extractTeamCode(qText: string): string | null {
-  const m = (qText || "").match(/\(([A-Za-z]{2,4})\)/);
-  if (!m) return null;
-  return m[1];
-}
-
-/**
- * Map team codes to jersey images in /public
- * You said you have: car.jpg, generic.jpg, GC.jpg, gee.jpg, syd.jpg
- */
-function jerseySrcForTeamCode(codeRaw: string | null): string {
-  const code = (codeRaw || "").trim().toLowerCase();
-  if (code === "car") return "/car.jpg";
-  if (code === "syd") return "/syd.jpg";
-  if (code === "gc") return "/GC.jpg"; // keep exact case as your file
-  if (code === "gee") return "/gee.jpg";
-  return "/generic.jpg";
 }
 
 type LocalPickMap = Record<string, LocalPick>;
@@ -231,7 +237,7 @@ export default function PicksPage() {
 
   const hasHydratedLocalRef = useRef(false);
 
-  // ✅ Comments modal state
+  // Comments modal
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
   const [commentsGame, setCommentsGame] = useState<ApiGame | null>(null);
@@ -374,7 +380,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // Confetti milestone (keep), but no pulsing UI elsewhere
+  // Confetti milestone (keep)
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -434,7 +440,7 @@ export default function PicksPage() {
     return future[0] - nowMs;
   }, [games, nowMs]);
 
-  // ✅ Robust clear: UI clears instantly + persists server-side
+  // Robust clear
   const clearPick = useCallback(
     async (q: ApiQuestion) => {
       setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
@@ -444,7 +450,6 @@ export default function PicksPage() {
       try {
         const token = await user.getIdToken();
 
-        // 1) Try DELETE
         const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
@@ -452,7 +457,6 @@ export default function PicksPage() {
 
         if (delRes.ok) return;
 
-        // 2) Fallback: POST clear
         const postRes = await fetch("/api/user-picks", {
           method: "POST",
           headers: {
@@ -536,7 +540,7 @@ export default function PicksPage() {
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
 
-  // ✅ Comments: open modal + subscribe to Firestore
+  // Comments: open/close
   const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
     setCommentsGame(g);
     setCommentsQuestion(q);
@@ -563,7 +567,6 @@ export default function PicksPage() {
     }
   }, []);
 
-  // ESC closes modal
   useEffect(() => {
     if (!commentsOpen) return;
 
@@ -575,7 +578,6 @@ export default function PicksPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [commentsOpen, closeComments]);
 
-  // Subscribe to comments
   useEffect(() => {
     if (!commentsOpen || !commentsQuestion) return;
 
@@ -603,7 +605,11 @@ export default function PicksPage() {
             const data = d.data() as any;
 
             const body =
-              typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
+              typeof data?.body === "string"
+                ? data.body
+                : typeof data?.text === "string"
+                ? data.text
+                : "";
 
             return {
               id: d.id,
@@ -688,6 +694,7 @@ export default function PicksPage() {
   }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
   const renderStatusPill = (q: ApiQuestion) => {
+    // ✅ NO pulsing, no animation.
     const base =
       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border";
 
@@ -864,9 +871,6 @@ export default function PicksPage() {
       color: "rgba(255,255,255,0.88)",
     } as const;
 
-    const yesStyle = isYesSelected ? selectedStyle : neutralStyle;
-    const noStyle = isNoSelected ? selectedStyle : neutralStyle;
-
     return (
       <div className="mt-3 flex gap-2">
         <button
@@ -874,7 +878,7 @@ export default function PicksPage() {
           disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "yes")}
           className={btnBase}
-          style={yesStyle}
+          style={isYesSelected ? selectedStyle : neutralStyle}
           aria-pressed={isYesSelected}
           title={isYesSelected ? "Click again to clear" : "Pick YES"}
         >
@@ -886,7 +890,7 @@ export default function PicksPage() {
           disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "no")}
           className={btnBase}
-          style={noStyle}
+          style={isNoSelected ? selectedStyle : neutralStyle}
           aria-pressed={isNoSelected}
           title={isNoSelected ? "Click again to clear" : "Pick NO"}
         >
@@ -896,22 +900,11 @@ export default function PicksPage() {
     );
   };
 
-  const pageTitle = `Picks`;
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  // ----------------------------
-  // Chalkboard-inspired card (NOW WITH JERSEY IMAGE)
-  // ----------------------------
-  const PickCard = ({
-    g,
-    q,
-    isLocked,
-  }: {
-    g: ApiGame;
-    q: ApiQuestion;
-    isLocked: boolean;
-  }) => {
+  // Chalkboard-inspired card
+  const PickCard = ({ g, q, isLocked }: { g: ApiGame; q: ApiQuestion; isLocked: boolean }) => {
     const finalWrong = q.status === "final" && q.correctPick === false;
     const finalCorrect = q.status === "final" && q.correctPick === true;
 
@@ -921,30 +914,26 @@ export default function PicksPage() {
     const sponsor = q.isSponsorQuestion === true;
 
     const playerName = extractPlayerName(q.question) || "AFL Player";
-    const teamCode = extractTeamCode(q.question);
-    const jerseySrc = jerseySrcForTeamCode(teamCode);
+    const teamCode = extractTeamCode(q.question); // Syd/Car/GC/Gee/Generic
+    const jerseySrc = `/jerseys/${teamCode}.jpg`; // ✅ /public/jerseys/*
 
-    const cardBorder = sponsor
-      ? "rgba(255,122,0,0.70)"
-      : finalWrong
-      ? "rgba(255,46,77,0.40)"
-      : finalCorrect
-      ? "rgba(25,195,125,0.35)"
-      : "rgba(255,255,255,0.10)";
-
-    const cardBg = `linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.35) 100%)`;
+    // ✅ ORANGE OUTLINE ON EVERY CARD (base). Status affects glow only.
+    const baseBorder = sponsor ? "rgba(255,122,0,0.75)" : COLORS.orangeSoft;
 
     const glow = sponsor
-      ? "0 0 26px rgba(255,122,0,0.14)"
+      ? "0 0 26px rgba(255,122,0,0.18)"
       : finalWrong
-      ? "0 0 22px rgba(255,46,77,0.10)"
+      ? "0 0 22px rgba(255,46,77,0.12)"
       : finalCorrect
-      ? "0 0 22px rgba(25,195,125,0.08)"
-      : "0 0 22px rgba(255,255,255,0.04)";
+      ? "0 0 22px rgba(25,195,125,0.10)"
+      : "0 0 22px rgba(255,122,0,0.06)";
+
+    const cardBg =
+      "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.55) 100%)";
 
     const topAccent = sponsor
-      ? "linear-gradient(90deg, rgba(255,122,0,0.55), rgba(255,122,0,0.08))"
-      : "linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))";
+      ? "linear-gradient(90deg, rgba(255,122,0,0.55), rgba(255,122,0,0.10))"
+      : "linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.06))";
 
     const lockOverlayOn = isLocked || q.status === "pending";
 
@@ -952,7 +941,7 @@ export default function PicksPage() {
       <div
         className="group relative rounded-2xl border overflow-hidden"
         style={{
-          borderColor: cardBorder,
+          borderColor: baseBorder,
           background: cardBg,
           boxShadow: glow,
         }}
@@ -962,7 +951,7 @@ export default function PicksPage() {
           className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition"
           style={{
             background:
-              "radial-gradient(800px 200px at 50% 0%, rgba(255,122,0,0.10), transparent 60%)",
+              "radial-gradient(800px 240px at 50% 0%, rgba(255,122,0,0.10), transparent 60%)",
           }}
         />
 
@@ -970,7 +959,7 @@ export default function PicksPage() {
         <div className="h-1 w-full" style={{ background: topAccent }} />
 
         <div className="p-4">
-          {/* Header row: status + quarter + sponsor + actions */}
+          {/* Header row */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               {renderStatusPill(q)}
@@ -1035,43 +1024,55 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* ✅ Jersey area (image instead of emoji) */}
-          <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          {/* Jersey area */}
+          <div
+            className="mt-3 rounded-2xl border p-3"
+            style={{
+              borderColor: COLORS.orangeSoft2, // orange outline inside too
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+            }}
+          >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.textFaint }}>
                   Player
                 </div>
                 <div className="mt-1 text-[15px] font-black text-white truncate">{playerName}</div>
-
-                <div className="mt-2 text-[11px] text-white/55 truncate">
-                  {g.match} • {teamCode ? teamCode.toUpperCase() : "—"}
+                <div className="mt-1 text-[11px] text-white/55 truncate">
+                  {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
                 </div>
               </div>
 
               <div
-                className="relative h-16 w-16 rounded-2xl border overflow-hidden"
+                className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
                 style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+                  borderColor: COLORS.orangeSoft2,
+                  background: "rgba(0,0,0,0.35)",
                 }}
-                aria-hidden
+                title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
               >
                 <Image
                   src={jerseySrc}
-                  alt={teamCode ? `${teamCode.toUpperCase()} jersey` : "Jersey"}
+                  alt={`${teamCode} jersey`}
                   fill
-                  sizes="64px"
-                  className="object-contain p-2"
+                  sizes="54px"
+                  style={{ objectFit: "cover" }}
                   priority={false}
                 />
               </div>
             </div>
 
             <div className="mt-2 text-[11px] text-white/55 truncate">
-              {q.status === "open" ? "Live" : q.status === "pending" ? "Locked" : q.status === "final" ? "Final" : "—"}
-              {q.startTime ? ` • ${formatAedt(q.startTime)}` : ""}
+              {q.status === "open"
+                ? "Live"
+                : q.status === "pending"
+                ? "Locked"
+                : q.status === "final"
+                ? "Final"
+                : q.status === "void"
+                ? "Void"
+                : "—"}
             </div>
           </div>
 
@@ -1088,8 +1089,7 @@ export default function PicksPage() {
             <div
               className="pointer-events-none absolute inset-0"
               style={{
-                background:
-                  "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.45))",
+                background: "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55))",
               }}
             />
           ) : null}
@@ -1098,19 +1098,18 @@ export default function PicksPage() {
     );
   };
 
-  // close comments helper
-  const closeCommentsSafe = closeComments;
+  const pageTitle = "Picks";
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
-      {/* ✅ Comments Modal */}
+      {/* Comments Modal */}
       {commentsOpen && commentsQuestion ? (
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeCommentsSafe();
+            if (e.target === e.currentTarget) closeComments();
           }}
           style={{
             background: "rgba(0,0,0,0.70)",
@@ -1120,14 +1119,17 @@ export default function PicksPage() {
           <div
             className="w-full max-w-2xl rounded-2xl border overflow-hidden"
             style={{
-              borderColor: "rgba(255,255,255,0.14)",
+              borderColor: COLORS.orangeSoft,
               background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
               boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
             }}
           >
             <div
               className="px-5 py-4 border-b"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              style={{
+                borderColor: "rgba(255,122,0,0.20)",
+                background: "rgba(255,255,255,0.03)",
+              }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -1140,7 +1142,7 @@ export default function PicksPage() {
 
                 <button
                   type="button"
-                  onClick={closeCommentsSafe}
+                  onClick={closeComments}
                   className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
                   style={{
                     borderColor: "rgba(255,255,255,0.16)",
@@ -1159,7 +1161,10 @@ export default function PicksPage() {
               {!user ? (
                 <div
                   className="rounded-xl border p-3 text-[12px] text-white/80"
-                  style={{ borderColor: "rgba(255,122,0,0.35)", background: "rgba(255,122,0,0.10)" }}
+                  style={{
+                    borderColor: "rgba(255,122,0,0.35)",
+                    background: "rgba(255,122,0,0.10)",
+                  }}
                 >
                   Log in to post comments. You can still read the chat.
                 </div>
@@ -1281,7 +1286,7 @@ export default function PicksPage() {
                 <span
                   className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                   style={{
-                    borderColor: "rgba(255,122,0,0.35)",
+                    borderColor: COLORS.orangeSoft,
                     background: "rgba(255,122,0,0.10)",
                     color: "rgba(255,255,255,0.92)",
                   }}
@@ -1309,12 +1314,12 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* Premium top dashboard */}
+        {/* Top dashboard */}
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div
             className="rounded-2xl border p-4"
             style={{
-              borderColor: "rgba(255,255,255,0.10)",
+              borderColor: COLORS.orangeSoft,
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
               boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
@@ -1386,7 +1391,7 @@ export default function PicksPage() {
           <div
             className="rounded-2xl border p-4"
             style={{
-              borderColor: "rgba(255,255,255,0.10)",
+              borderColor: COLORS.orangeSoft,
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
               boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
@@ -1396,7 +1401,10 @@ export default function PicksPage() {
             <div className="mt-3 grid grid-cols-3 gap-3">
               <div
                 className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
               >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
                 <p className="text-xl font-black mt-1 text-white">
@@ -1406,7 +1414,10 @@ export default function PicksPage() {
 
               <div
                 className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
               >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
                 <p className="text-xl font-black mt-1" style={{ color: "rgba(25,195,125,0.95)" }}>
@@ -1416,7 +1427,10 @@ export default function PicksPage() {
 
               <div
                 className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
               >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
                 <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
@@ -1433,7 +1447,7 @@ export default function PicksPage() {
           <div
             className="rounded-2xl border p-4"
             style={{
-              borderColor: "rgba(255,255,255,0.10)",
+              borderColor: COLORS.orangeSoft,
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
               boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
@@ -1468,7 +1482,7 @@ export default function PicksPage() {
               <div
                 className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
                 style={{
-                  borderColor: "rgba(255,122,0,0.35)",
+                  borderColor: COLORS.orangeSoft,
                   background: "rgba(255,122,0,0.10)",
                 }}
               >
@@ -1490,9 +1504,13 @@ export default function PicksPage() {
         {/* Games */}
         <div className="mt-6 flex flex-col gap-6">
           {loading ? (
+            // ✅ NO PULSE
             <div
-              className="rounded-2xl border p-4 animate-pulse"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: COLORS.orangeSoft,
+                background: "rgba(255,255,255,0.03)",
+              }}
             >
               <div className="h-4 w-44 rounded bg-white/10" />
               <div className="mt-3 h-3 w-80 rounded bg-white/10" />
@@ -1501,7 +1519,10 @@ export default function PicksPage() {
           ) : games.length === 0 ? (
             <div
               className="rounded-2xl border p-4 text-sm text-white/70"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              style={{
+                borderColor: COLORS.orangeSoft,
+                background: "rgba(255,255,255,0.03)",
+              }}
             >
               No games found.
             </div>
@@ -1522,13 +1543,16 @@ export default function PicksPage() {
                 <div
                   key={g.id}
                   className="rounded-2xl border overflow-hidden"
-                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }}
+                  style={{
+                    borderColor: COLORS.orangeSoft, // ✅ orange outline for the game grid container too
+                    background: "rgba(255,255,255,0.02)",
+                  }}
                 >
                   {/* Game header */}
                   <div
                     className="px-4 py-4 border-b"
                     style={{
-                      borderColor: "rgba(255,255,255,0.08)",
+                      borderColor: "rgba(255,122,0,0.20)",
                       background:
                         "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)",
                     }}
@@ -1558,7 +1582,7 @@ export default function PicksPage() {
                         <span
                           className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                           style={{
-                            borderColor: isLocked ? "rgba(255,255,255,0.12)" : "rgba(255,122,0,0.28)",
+                            borderColor: isLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
                             background: isLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
                             color: "rgba(255,255,255,0.90)",
                           }}
@@ -1581,7 +1605,7 @@ export default function PicksPage() {
                     </div>
                   </div>
 
-                  {/* 3 cols desktop, 2 tablet, 1 mobile */}
+                  {/* Grid */}
                   <div className="p-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {g.questions.map((q) => (
