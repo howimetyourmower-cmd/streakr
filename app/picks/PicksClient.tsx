@@ -392,14 +392,16 @@ export default function PicksPage() {
     return Math.round((correct / settledPicked) * 100);
   }, [allQuestions, localPicks]);
 
-  const nextLockMs = useMemo(() => {
-    const future = games
-      .map((g) => new Date(g.startTime).get (\u2026)
-      .filter((t) => Number.isFinite(t) && t > nowMs)
-      .sort((a, b) => a - b);
-    if (!future.length) return 0;
-    return future[0] - nowMs;
-  }, [games, nowMs]);
+const nextLockMs = useMemo(() => {
+  const future = games
+    .map((g) => new Date(g.startTime).getTime())
+    .filter((t) => Number.isFinite(t) && t > nowMs)
+    .sort((a, b) => a - b);
+
+  if (!future.length) return 0;
+  return future[0] - nowMs;
+}, [games, nowMs]);
+
 
   const triggerSelectPop = useCallback((questionId: string) => {
     setSelectPulse((prev) => ({ ...prev, [questionId]: (prev[questionId] ?? 0) + 1 }));
