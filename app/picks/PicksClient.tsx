@@ -96,6 +96,8 @@ const COLORS = {
   orange: "#FF7A00",
   orangeSoft: "rgba(255,122,0,0.28)",
   orangeSoft2: "rgba(255,122,0,0.18)",
+  orangeBorder: "rgba(255,122,0,0.45)",
+  orangeBorderStrong: "rgba(255,122,0,0.75)",
 
   good: "rgba(25,195,125,0.95)",
   bad: "rgba(255,46,77,0.95)",
@@ -147,7 +149,10 @@ function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `streakr:picks:v6:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
+function effectivePick(
+  local: LocalPick | undefined,
+  api: PickOutcome | undefined
+): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
@@ -172,13 +177,21 @@ function formatCommentTime(createdAt: any): string {
 }
 
 /**
+ * Hard rule: you can only interact if the GAME is not locked AND the question is OPEN.
+ * This fixes "FINAL but still changeable".
+ */
+function isQuestionInteractable(q: ApiQuestion, gameLocked: boolean) {
+  if (gameLocked) return false;
+  return q.status === "open";
+}
+
+/**
  * Extracts team code like (Syd) or (Car) from question text.
  * We’ll map that to /public/jerseys/<Code>.jpg
  */
 function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic" {
   const t = (qText || "").toLowerCase();
 
-  // Strong match: "(Syd)" "(Car)" "(GC)" "(Gee)"
   const m = qText.match(/\(([A-Za-z]{2,3})\)/);
   const raw = (m?.[1] || "").toLowerCase();
 
@@ -187,7 +200,6 @@ function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic
   if (raw === "gc") return "GC";
   if (raw === "gee") return "Gee";
 
-  // Fallback heuristics (optional)
   if (t.includes("syd")) return "Syd";
   if (t.includes("car")) return "Car";
   if (t.includes("gc")) return "GC";
@@ -440,9 +452,11 @@ export default function PicksPage() {
     return future[0] - nowMs;
   }, [games, nowMs]);
 
-  // Robust clear
+  // Robust clear (now guarded)
   const clearPick = useCallback(
-    async (q: ApiQuestion) => {
+    async (q: ApiQuestion, gameLocked: boolean) => {
+      if (!isQuestionInteractable(q, gameLocked)) return;
+
       setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
 
       if (!user) return;
@@ -477,11 +491,13 @@ export default function PicksPage() {
   );
 
   const togglePick = useCallback(
-    async (q: ApiQuestion, outcome: PickOutcome) => {
+    async (q: ApiQuestion, outcome: PickOutcome, gameLocked: boolean) => {
+      if (!isQuestionInteractable(q, gameLocked)) return;
+
       const current = effectivePick(localPicks[q.id], q.userPick);
 
       if (current === outcome) {
-        await clearPick(q);
+        await clearPick(q, gameLocked);
         return;
       }
 
@@ -849,7 +865,7 @@ export default function PicksPage() {
     );
   };
 
-  const renderPickButtons = (q: ApiQuestion, isLocked: boolean) => {
+  const renderPickButtons = (q: ApiQuestion, canInteract: boolean, gameLocked: boolean) => {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
@@ -875,8 +891,8 @@ export default function PicksPage() {
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          disabled={isLocked || q.status === "void"}
-          onClick={() => togglePick(q, "yes")}
+          disabled={!canInteract}
+          onClick={() => togglePick(q, "yes", gameLocked)}
           className={btnBase}
           style={isYesSelected ? selectedStyle : neutralStyle}
           aria-pressed={isYesSelected}
@@ -887,8 +903,8 @@ export default function PicksPage() {
 
         <button
           type="button"
-          disabled={isLocked || q.status === "void"}
-          onClick={() => togglePick(q, "no")}
+          disabled={!canInteract}
+          onClick={() => togglePick(q, "no", gameLocked)}
           className={btnBase}
           style={isNoSelected ? selectedStyle : neutralStyle}
           aria-pressed={isNoSelected}
@@ -904,7 +920,7 @@ export default function PicksPage() {
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   // Chalkboard-inspired card
-  const PickCard = ({ g, q, isLocked }: { g: ApiGame; q: ApiQuestion; isLocked: boolean }) => {
+  const PickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
     const finalWrong = q.status === "final" && q.correctPick === false;
     const finalCorrect = q.status === "final" && q.correctPick === true;
 
@@ -914,11 +930,14 @@ export default function PicksPage() {
     const sponsor = q.isSponsorQuestion === true;
 
     const playerName = extractPlayerName(q.question) || "AFL Player";
-    const teamCode = extractTeamCode(q.question); // Syd/Car/GC/Gee/Generic
-    const jerseySrc = `/jerseys/${teamCode}.jpg`; // ✅ /public/jerseys/*
+    const teamCode = extractTeamCode(q.question);
+    const jerseySrc = `/jerseys/${teamCode}.jpg`;
 
-    // ✅ ORANGE OUTLINE ON EVERY CARD (base). Status affects glow only.
-    const baseBorder = sponsor ? "rgba(255,122,0,0.75)" : COLORS.orangeSoft;
+    const canInteract = isQuestionInteractable(q, gameLocked);
+    const lockOverlayOn = !canInteract;
+
+    // ✅ ORANGE OUTLINE ON EVERY CARD
+    const baseBorder = sponsor ? COLORS.orangeBorderStrong : COLORS.orangeBorder;
 
     const glow = sponsor
       ? "0 0 26px rgba(255,122,0,0.18)"
@@ -934,8 +953,6 @@ export default function PicksPage() {
     const topAccent = sponsor
       ? "linear-gradient(90deg, rgba(255,122,0,0.55), rgba(255,122,0,0.10))"
       : "linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.06))";
-
-    const lockOverlayOn = isLocked || q.status === "pending";
 
     return (
       <div
@@ -994,9 +1011,9 @@ export default function PicksPage() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  clearPick(q);
+                  clearPick(q, gameLocked);
                 }}
-                disabled={!hasPick || lockOverlayOn || q.status === "void"}
+                disabled={!hasPick || !canInteract}
                 title={hasPick ? "Clear selection" : "No selection to clear"}
                 aria-label="Clear selection"
               >
@@ -1028,7 +1045,7 @@ export default function PicksPage() {
           <div
             className="mt-3 rounded-2xl border p-3"
             style={{
-              borderColor: COLORS.orangeSoft2, // orange outline inside too
+              borderColor: COLORS.orangeBorder,
               background:
                 "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
             }}
@@ -1047,7 +1064,7 @@ export default function PicksPage() {
               <div
                 className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
                 style={{
-                  borderColor: COLORS.orangeSoft2,
+                  borderColor: COLORS.orangeBorder,
                   background: "rgba(0,0,0,0.35)",
                 }}
                 title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
@@ -1082,7 +1099,7 @@ export default function PicksPage() {
           </div>
 
           {renderSentiment(q)}
-          {renderPickButtons(q, lockOverlayOn)}
+          {renderPickButtons(q, canInteract, gameLocked)}
 
           {/* Lock overlay */}
           {lockOverlayOn ? (
@@ -1529,7 +1546,7 @@ export default function PicksPage() {
           ) : (
             games.map((g) => {
               const lockMs = new Date(g.startTime).getTime() - nowMs;
-              const isLocked = lockMs <= 0;
+              const gameLocked = lockMs <= 0;
 
               const gamePicked = g.questions.reduce((acc, q) => {
                 const p = effectivePick(localPicks[q.id], q.userPick);
@@ -1544,7 +1561,7 @@ export default function PicksPage() {
                   key={g.id}
                   className="rounded-2xl border overflow-hidden"
                   style={{
-                    borderColor: COLORS.orangeSoft, // ✅ orange outline for the game grid container too
+                    borderColor: COLORS.orangeBorder, // ✅ orange outline for the game grid container too
                     background: "rgba(255,255,255,0.02)",
                   }}
                 >
@@ -1582,12 +1599,12 @@ export default function PicksPage() {
                         <span
                           className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                           style={{
-                            borderColor: isLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
-                            background: isLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
+                            borderColor: gameLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
+                            background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
                             color: "rgba(255,255,255,0.90)",
                           }}
                         >
-                          {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
+                          {gameLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
                         </span>
                       </div>
                     </div>
@@ -1609,7 +1626,7 @@ export default function PicksPage() {
                   <div className="p-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {g.questions.map((q) => (
-                        <PickCard key={q.id} g={g} q={q} isLocked={isLocked || q.status === "pending"} />
+                        <PickCard key={q.id} g={g} q={q} gameLocked={gameLocked} />
                       ))}
                     </div>
                   </div>
