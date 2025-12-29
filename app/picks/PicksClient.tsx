@@ -113,6 +113,11 @@ const COLORS = {
   sponsorInk: "rgba(0,0,0,0.92)",
 };
 
+const ELIGIBILITY = {
+  MIN_STREAK: 5,
+  MIN_GAMES: 3,
+};
+
 function clampPct(n: number | undefined): number {
   if (typeof n !== "number" || Number.isNaN(n)) return 0;
   return Math.max(0, Math.min(100, n));
@@ -157,7 +162,10 @@ function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `streakr:picks:v7:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
+function effectivePick(
+  local: LocalPick | undefined,
+  api: PickOutcome | undefined
+): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
@@ -478,6 +486,50 @@ export default function PicksPage() {
     return future[0] - nowMs;
   }, [games, nowMs]);
 
+  // ✅ Phase 2: games played (counts only once the game is locked), and eligibility progress
+  const gamesPlayedLocked = useMemo(() => {
+    let count = 0;
+
+    for (const g of games) {
+      const lockMs = new Date(g.startTime).getTime() - nowMs;
+      const gameLocked = Number.isFinite(lockMs) && lockMs <= 0;
+      if (!gameLocked) continue;
+
+      const hasAnyPick = g.questions.some((q) => {
+        const p = effectivePick(localPicks[q.id], q.userPick);
+        return p === "yes" || p === "no";
+      });
+
+      if (hasAnyPick) count += 1;
+    }
+
+    return count;
+  }, [games, nowMs, localPicks]);
+
+  const eligibility = useMemo(() => {
+    const streakOk = (myCurrentStreak || 0) >= ELIGIBILITY.MIN_STREAK;
+    const gamesOk = gamesPlayedLocked >= ELIGIBILITY.MIN_GAMES;
+
+    const streakNeed = Math.max(0, ELIGIBILITY.MIN_STREAK - (myCurrentStreak || 0));
+    const gamesNeed = Math.max(0, ELIGIBILITY.MIN_GAMES - gamesPlayedLocked);
+
+    const streakProg = Math.max(
+      0,
+      Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100)
+    );
+    const gamesProg = Math.max(0, Math.min(100, (gamesPlayedLocked / ELIGIBILITY.MIN_GAMES) * 100));
+
+    return {
+      streakOk,
+      gamesOk,
+      eligibleNow: streakOk && gamesOk,
+      streakNeed,
+      gamesNeed,
+      streakProg,
+      gamesProg,
+    };
+  }, [myCurrentStreak, gamesPlayedLocked]);
+
   // ✅ FINAL questions must be locked (cannot change selection)
   function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
     if (q.status === "final") return true;
@@ -757,7 +809,10 @@ export default function PicksPage() {
             color: "rgba(0,229,255,0.92)",
           }}
         >
-          <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.92)" }} />
+          <span
+            className="inline-flex h-1.5 w-1.5 rounded-full"
+            style={{ background: "rgba(0,229,255,0.92)" }}
+          />
           LIVE
         </span>
       );
@@ -1058,9 +1113,21 @@ export default function PicksPage() {
                 type="button"
                 className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
                 style={{
-                  borderColor: sponsor ? "rgba(0,0,0,0.22)" : hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
-                  background: sponsor ? "rgba(0,0,0,0.10)" : hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
-                  color: sponsor ? "rgba(0,0,0,0.85)" : hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)",
+                  borderColor: sponsor
+                    ? "rgba(0,0,0,0.22)"
+                    : hasPick
+                    ? "rgba(255,255,255,0.18)"
+                    : "rgba(255,255,255,0.10)",
+                  background: sponsor
+                    ? "rgba(0,0,0,0.10)"
+                    : hasPick
+                    ? "rgba(255,255,255,0.07)"
+                    : "rgba(255,255,255,0.04)",
+                  color: sponsor
+                    ? "rgba(0,0,0,0.85)"
+                    : hasPick
+                    ? "rgba(255,255,255,0.92)"
+                    : "rgba(255,255,255,0.45)",
                 }}
                 onClick={(e) => {
                   e.preventDefault();
@@ -1068,7 +1135,13 @@ export default function PicksPage() {
                   clearPick(q);
                 }}
                 disabled={!hasPick || interactionLocked}
-                title={interactionLocked ? "Locked" : hasPick ? "Clear selection" : "No selection to clear"}
+                title={
+                  interactionLocked
+                    ? "Locked"
+                    : hasPick
+                    ? "Clear selection"
+                    : "No selection to clear"
+                }
                 aria-label="Clear selection"
               >
                 ✕
@@ -1095,61 +1168,61 @@ export default function PicksPage() {
             </div>
           </div>
 
-         {/* Jersey / Player area (hide until sponsor reveal) */}
-{(!sponsor || revealed) ? (
-  <div
-    className="mt-3 rounded-2xl border p-3"
-    style={{
-      borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-      background: sponsor
-        ? "rgba(0,0,0,0.10)"
-        : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-    }}
-  >
-    <div className="flex items-center justify-between gap-3">
-      <div className="min-w-0">
-        <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
-          Player
-        </div>
-        <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
-          {playerName}
-        </div>
-        <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
-          {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
-        </div>
-      </div>
+          {/* Jersey / Player area (hide until sponsor reveal) */}
+          {!sponsor || revealed ? (
+            <div
+              className="mt-3 rounded-2xl border p-3"
+              style={{
+                borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
+                background: sponsor
+                  ? "rgba(0,0,0,0.10)"
+                  : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+              }}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
+                    Player
+                  </div>
+                  <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
+                    {playerName}
+                  </div>
+                  <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
+                    {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
+                  </div>
+                </div>
 
-      <div
-        className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
-        style={{
-          borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-          background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
-        }}
-        title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
-      >
-        <Image
-          src={jerseySrc}
-          alt={`${teamCode} jersey`}
-          fill
-          sizes="54px"
-          style={{ objectFit: "cover" }}
-        />
-      </div>
-    </div>
+                <div
+                  className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
+                  style={{
+                    borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
+                    background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
+                  }}
+                  title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
+                >
+                  <Image
+                    src={jerseySrc}
+                    alt={`${teamCode} jersey`}
+                    fill
+                    sizes="54px"
+                    style={{ objectFit: "cover" }}
+                  />
+                </div>
+              </div>
 
-    <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
-      {q.status === "open"
-        ? "Live"
-        : q.status === "pending"
-        ? "Locked"
-        : q.status === "final"
-        ? "Final"
-        : q.status === "void"
-        ? "Void"
-        : "—"}
-    </div>
-  </div>
-) : null}
+              <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
+                {q.status === "open"
+                  ? "Live"
+                  : q.status === "pending"
+                  ? "Locked"
+                  : q.status === "final"
+                  ? "Final"
+                  : q.status === "void"
+                  ? "Void"
+                  : "—"}
+              </div>
+            </div>
+          ) : null}
 
           {/* ✅ Sponsor Cover (forces exposure + click to reveal) */}
           {sponsor && !revealed ? (
@@ -1160,7 +1233,10 @@ export default function PicksPage() {
                 background: "rgba(0,0,0,0.12)",
               }}
             >
-              <div className="text-[11px] font-black uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.75)" }}>
+              <div
+                className="text-[11px] font-black uppercase tracking-widest"
+                style={{ color: "rgba(0,0,0,0.75)" }}
+              >
                 Question proudly sponsored by
               </div>
 
@@ -1169,7 +1245,8 @@ export default function PicksPage() {
               </div>
 
               <div className="mt-2 text-[13px] font-semibold" style={{ color: "rgba(0,0,0,0.80)" }}>
-                Get this correct to go in the draw to win a <span className="font-black">{sponsorPrize}</span>.
+                Get this correct to go in the draw to win a{" "}
+                <span className="font-black">{sponsorPrize}</span>.
               </div>
 
               <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.65)" }}>
@@ -1197,14 +1274,14 @@ export default function PicksPage() {
                 {q.question}
               </div>
 
-              {/* Crowd (keep on normal cards; on sponsor cards still fine) */}
+              {/* Crowd */}
               <div style={{ color: sponsor ? "rgba(0,0,0,0.92)" : "inherit" }}>{renderSentiment(q)}</div>
 
               {renderPickButtons(q, interactionLocked)}
             </>
           )}
 
-          {/* Lock overlay: ONLY for locked questions (final/pending/void/game locked). Not for sponsor cover. */}
+          {/* Lock overlay */}
           {locked ? (
             <div
               className="pointer-events-none absolute inset-0"
@@ -1463,7 +1540,10 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 space-y-2">
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div
+                className="h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
                 <div
                   className="h-full"
                   style={{
@@ -1473,7 +1553,10 @@ export default function PicksPage() {
                 />
               </div>
 
-              <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div
+                className="h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
                 <div
                   className="h-full"
                   style={{
@@ -1562,7 +1645,9 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 text-[11px] text-white/55">
-              {user ? "Pick what you like — no pressure to do them all." : "Log in to save picks + appear on leaderboards."}
+              {user
+                ? "Pick what you like — no pressure to do them all."
+                : "Log in to save picks + appear on leaderboards."}
             </div>
           </div>
 
@@ -1612,6 +1697,174 @@ export default function PicksPage() {
                   Tip:
                 </span>{" "}
                 Sponsor questions count towards Streak — reveal them to enter the draw.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Phase 2: Eligibility panel (under dashboard items) */}
+        <div
+          className="mt-3 rounded-2xl border p-4"
+          style={{
+            borderColor: COLORS.orangeSoft,
+            background: `linear-gradient(180deg, rgba(255,122,0,0.08) 0%, rgba(255,255,255,0.03) 45%, rgba(0,0,0,0.35) 100%)`,
+            boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
+          }}
+        >
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: eligibility.eligibleNow ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
+                    background: eligibility.eligibleNow ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
+                    color: eligibility.eligibleNow ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.85)",
+                  }}
+                >
+                  {eligibility.eligibleNow ? "Eligible (so far)" : "Not eligible yet"}
+                </div>
+
+                <span className="text-[11px] uppercase tracking-widest text-white/55">
+                  Win checklist
+                </span>
+              </div>
+
+              <div className="mt-2 text-[13px] text-white/80">
+                To be in the mix: hit{" "}
+                <span className="font-black" style={{ color: COLORS.orange }}>
+                  streak {ELIGIBILITY.MIN_STREAK}+
+                </span>{" "}
+                and get picks into{" "}
+                <span className="font-black" style={{ color: COLORS.orange }}>
+                  {ELIGIBILITY.MIN_GAMES} locked games
+                </span>
+                .
+              </div>
+
+              <div className="mt-2 text-[11px] text-white/55">
+                Hybrid rule: your progress updates as games lock + results finalise.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 md:justify-end">
+              <div
+                className="rounded-xl border px-4 py-3"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Need</div>
+                <div className="mt-1 text-[12px] font-black text-white/90">
+                  {eligibility.eligibleNow
+                    ? "Nothing — you’re live 🔥"
+                    : `${eligibility.streakNeed > 0 ? `${eligibility.streakNeed} streak` : "Streak ok"}, ${
+                        eligibility.gamesNeed > 0 ? `${eligibility.gamesNeed} games` : "Games ok"
+                      }`}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Streak progress */}
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: eligibility.streakOk ? "rgba(25,195,125,0.30)" : "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-white/55">Streak target</div>
+                  <div className="mt-1 text-[18px] font-black">
+                    <span style={{ color: COLORS.orange }}>{myCurrentStreak}</span>
+                    <span className="text-white/55"> / {ELIGIBILITY.MIN_STREAK}</span>
+                  </div>
+                </div>
+
+                <div
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: eligibility.streakOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
+                    background: eligibility.streakOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
+                    color: eligibility.streakOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
+                  }}
+                >
+                  {eligibility.streakOk ? "✅ Met" : "⏳ Building"}
+                </div>
+              </div>
+
+              <div
+                className="mt-3 h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${eligibility.streakProg}%`,
+                    background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.95))`,
+                  }}
+                />
+              </div>
+
+              <div className="mt-2 text-[11px] text-white/55">
+                {eligibility.streakOk
+                  ? "Keep it alive — one slip and it snaps."
+                  : `Get to ${ELIGIBILITY.MIN_STREAK} to qualify.`}
+              </div>
+            </div>
+
+            {/* Games played progress (locked games only) */}
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: eligibility.gamesOk ? "rgba(25,195,125,0.30)" : "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-white/55">Games played</div>
+                  <div className="mt-1 text-[18px] font-black">
+                    <span style={{ color: COLORS.orange }}>{gamesPlayedLocked}</span>
+                    <span className="text-white/55"> / {ELIGIBILITY.MIN_GAMES}</span>
+                  </div>
+                </div>
+
+                <div
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: eligibility.gamesOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
+                    background: eligibility.gamesOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
+                    color: eligibility.gamesOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
+                  }}
+                >
+                  {eligibility.gamesOk ? "✅ Met" : "⏳ Get involved"}
+                </div>
+              </div>
+
+              <div
+                className="mt-3 h-2 rounded-full overflow-hidden"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              >
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${eligibility.gamesProg}%`,
+                    background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.95))`,
+                  }}
+                />
+              </div>
+
+              <div className="mt-2 text-[11px] text-white/55">
+                Counts once a game is{" "}
+                <span className="font-black" style={{ color: COLORS.cyan }}>
+                  locked
+                </span>{" "}
+                (started). One pick in the game is enough.
               </div>
             </div>
           </div>
@@ -1714,7 +1967,10 @@ export default function PicksPage() {
                     </div>
 
                     <div className="mt-3">
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                      <div
+                        className="h-2 rounded-full overflow-hidden"
+                        style={{ background: "rgba(255,255,255,0.06)" }}
+                      >
                         <div
                           className="h-full"
                           style={{
