@@ -141,7 +141,7 @@ async function hydrateGamesPlayedForTop(
       const q = db
         .collection("userPicks")
         .where("roundNumber", "==", roundNumber)
-        .where("uid", "in", uidChunk);
+        .where("userid", "in", uidChunk);
 
       const snap = await q.get();
 
