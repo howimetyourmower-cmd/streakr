@@ -1726,7 +1726,7 @@ export default function PicksPage() {
                 </div>
 
                 <span className="text-[11px] uppercase tracking-widest text-white/55">
-                  Win checklist
+                  To Win The Round - Eligibility Checklist
                 </span>
               </div>
 
