@@ -82,15 +82,15 @@ type CommentRow = {
 
 /**
  * ✅ This version:
- * - Layout rebuilt: chalkboard-inspired card hierarchy + grid (3/2/1)
- * - Option A header: two team badges + subtle split glow
- * - Preserves ALL logic (picks, comments, streak, etc.)
- * - No rules/settlement/schema changes
+ * - Full page code.
+ * - Full black background.
+ * - NO pulsing "LIVE" dot (removed ping animation).
+ * - Preserves all existing logic (picks, streak widgets, comments modal, local storage, etc).
  */
 const COLORS = {
-  bg: "#0D1117",
-  panel: "#0F1623",
-  panel2: "#0A0F18",
+  bg: "#000000", // ✅ full black background
+  panel: "rgba(255,255,255,0.035)",
+  panel2: "rgba(255,255,255,0.020)",
 
   orange: "#F4B247",
 
@@ -102,27 +102,6 @@ const COLORS = {
 
   cyan: "#00E5FF",
   white: "#FFFFFF",
-};
-
-const TEAM_COLORS: Record<string, { a: string; b: string }> = {
-  adelaide: { a: "rgba(0, 74, 128, 0.95)", b: "rgba(232, 36, 45, 0.90)" },
-  brisbane: { a: "rgba(103, 16, 35, 0.95)", b: "rgba(0, 74, 152, 0.85)" },
-  carlton: { a: "rgba(10, 30, 60, 0.98)", b: "rgba(10, 30, 60, 0.55)" },
-  collingwood: { a: "rgba(15, 15, 18, 0.96)", b: "rgba(240, 240, 240, 0.70)" },
-  essendon: { a: "rgba(170, 0, 0, 0.95)", b: "rgba(20, 20, 20, 0.85)" },
-  fremantle: { a: "rgba(56, 0, 76, 0.95)", b: "rgba(255, 255, 255, 0.55)" },
-  geelong: { a: "rgba(5, 36, 55, 0.95)", b: "rgba(255, 255, 255, 0.65)" },
-  goldcoast: { a: "rgba(203, 0, 31, 0.95)", b: "rgba(255, 197, 0, 0.85)" },
-  gws: { a: "rgba(244, 113, 33, 0.95)", b: "rgba(30, 30, 30, 0.75)" },
-  hawthorn: { a: "rgba(64, 40, 20, 0.95)", b: "rgba(255, 197, 0, 0.85)" },
-  melbourne: { a: "rgba(2, 36, 64, 0.95)", b: "rgba(186, 0, 0, 0.88)" },
-  northmelbourne: { a: "rgba(0, 92, 172, 0.95)", b: "rgba(255, 255, 255, 0.65)" },
-  portadelaide: { a: "rgba(0, 0, 0, 0.92)", b: "rgba(0, 168, 165, 0.80)" },
-  richmond: { a: "rgba(20, 20, 20, 0.95)", b: "rgba(255, 205, 0, 0.90)" },
-  stkilda: { a: "rgba(20, 20, 20, 0.92)", b: "rgba(186, 0, 0, 0.88)" },
-  sydney: { a: "rgba(186, 0, 0, 0.95)", b: "rgba(255, 255, 255, 0.65)" },
-  westcoast: { a: "rgba(0, 60, 160, 0.95)", b: "rgba(255, 197, 0, 0.85)" },
-  westernbulldogs: { a: "rgba(0, 60, 160, 0.95)", b: "rgba(186, 0, 0, 0.88)" },
 };
 
 function clampPct(n: number | undefined): number {
@@ -191,48 +170,6 @@ function formatCommentTime(createdAt: any): string {
   } catch {
     return "";
   }
-}
-
-function teamSlug(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\s/g, "");
-}
-
-function prettyTeamName(raw: string): string {
-  const t = raw.trim();
-  if (!t) return "Team";
-  return t;
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const a = parts[0]?.[0] ?? "T";
-  const b = parts[1]?.[0] ?? "";
-  return (a + b).toUpperCase();
-}
-
-function parseMatchTeams(match: string): { home: string; away: string } {
-  const m = String(match || "").trim();
-
-  // supports: "Carlton vs Brisbane", "Carlton v Brisbane", "Carlton V Brisbane", "Carlton VS Brisbane"
-  const split = m.split(/\s+v(?:s)?\s+/i);
-  if (split.length >= 2) {
-    return { home: split[0].trim(), away: split.slice(1).join(" v ").trim() };
-  }
-
-  // fallback: "Carlton - Brisbane"
-  const dash = m.split(/\s*-\s*/);
-  if (dash.length >= 2) {
-    return { home: dash[0].trim(), away: dash.slice(1).join(" - ").trim() };
-  }
-
-  // fallback: unknown
-  return { home: m || "Home", away: "Away" };
 }
 
 type LocalPickMap = Record<string, LocalPick>;
@@ -457,7 +394,7 @@ export default function PicksPage() {
 
   const nextLockMs = useMemo(() => {
     const future = games
-      .map((g) => new Date(g.startTime).getTime())
+      .map((g) => new Date(g.startTime).get (\u2026)
       .filter((t) => Number.isFinite(t) && t > nowMs)
       .sort((a, b) => a - b);
     if (!future.length) return 0;
@@ -580,10 +517,10 @@ export default function PicksPage() {
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
 
-  // ✅ Compact cards
+  // ✅ Compact cards (~75% height feel)
+  const PICK_CARD_PAD_Y = "py-1";
   const PICK_CARD_PAD_X = "px-3";
-  const PICK_CARD_PAD_Y = "py-3";
-  const PICK_BUTTON_PAD_Y = "py-2.5";
+  const PICK_BUTTON_PAD_Y = "py-2";
   const SENTIMENT_BAR_H = "h-[6px]";
 
   // ✅ Comments: open modal + subscribe to Firestore
@@ -652,6 +589,8 @@ export default function PicksPage() {
         const rows: CommentRow[] = snap.docs
           .map((d) => {
             const data = d.data() as any;
+
+            // ✅ match Firestore docs: body
             const body =
               typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
 
@@ -667,6 +606,7 @@ export default function PicksPage() {
               createdAt: data?.createdAt,
             };
           })
+          // ✅ sort in JS by createdAt desc
           .sort((a, b) => {
             const ams = a.createdAt?.toMillis?.() ?? 0;
             const bms = b.createdAt?.toMillis?.() ?? 0;
@@ -723,7 +663,10 @@ export default function PicksPage() {
         roundNumber: typeof roundNumber === "number" ? roundNumber : null,
         userId: user.uid,
         displayName: user.displayName ?? null,
+
+        // ✅ match Firestore: body
         body: txt,
+
         createdAt: serverTimestamp(),
       };
 
@@ -739,26 +682,27 @@ export default function PicksPage() {
 
   const renderStatusPill = (q: ApiQuestion) => {
     const base =
-      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide border";
+      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border";
 
-   if (q.status === "open") {
-  return (
-    <span
-      className={base}
-      style={{
-        borderColor: "rgba(0,229,255,0.28)",
-        background: "rgba(0,229,255,0.08)",
-        color: "rgba(0,229,255,0.92)",
-      }}
-    >
-      <span
-        className="relative inline-flex h-1.5 w-1.5 rounded-full"
-        style={{ background: "rgba(0,229,255,0.95)" }}
-      />
-      LIVE
-    </span>
-  );
-}
+    // ✅ OPEN (LIVE) — no pulsing animation
+    if (q.status === "open") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(0,229,255,0.28)",
+            background: "rgba(0,229,255,0.08)",
+            color: "rgba(0,229,255,0.92)",
+          }}
+        >
+          <span
+            className="relative inline-flex h-1.5 w-1.5 rounded-full"
+            style={{ background: "rgba(0,229,255,0.95)" }}
+          />
+          LIVE
+        </span>
+      );
+    }
 
     if (q.status === "pending") {
       return (
@@ -837,8 +781,8 @@ export default function PicksPage() {
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
-      <div className="mt-2">
-        <div className="flex items-center justify-between text-[11px] text-white/60">
+      <div className="mt-1">
+        <div className="flex items-center justify-between text-[11px] text-white/65">
           <span className="uppercase tracking-wide">Crowd</span>
           <span style={{ color: majority.color }} className="font-semibold">
             {majority.label}
@@ -934,14 +878,14 @@ export default function PicksPage() {
       } as const;
     };
 
-    const yesLabel = isYesSelected ? "YES" : "YES";
-    const noLabel = isNoSelected ? "NO" : "NO";
+    const yesLabel = isYesSelected ? "YES (selected)" : "YES";
+    const noLabel = isNoSelected ? "NO (selected)" : "NO";
 
     const pulseKey = selectPulse[q.id] ?? 0;
     const pulseClass = pulseKey ? "streakr-select-pop" : "";
 
     return (
-      <div className="mt-3 flex gap-2">
+      <div className="mt-1.5 flex gap-2">
         <button
           key={`yes-${q.id}-${pulseKey}`}
           type="button"
@@ -967,288 +911,6 @@ export default function PicksPage() {
         >
           {noLabel}
         </button>
-      </div>
-    );
-  };
-
-  const TeamBadge = ({ name, side }: { name: string; side: "home" | "away" }) => {
-    const label = prettyTeamName(name);
-    const slug = teamSlug(label);
-    const logoSrc = `/teams/${slug}.png`;
-
-    // We use <img> so missing assets won’t crash like next/image can in prod.
-    return (
-      <div className={`flex items-center gap-2 min-w-0 ${side === "away" ? "justify-end" : ""}`}>
-        {side === "home" ? (
-          <>
-            <div className="relative h-6 w-6 shrink-0">
-              <img
-                src={logoSrc}
-                alt={label}
-                className="h-6 w-6 rounded-md object-contain"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
-                onError={(e) => {
-                  // fallback to initials chip
-                  const el = e.currentTarget;
-                  el.style.display = "none";
-                }}
-              />
-              <div
-                className="absolute inset-0 flex items-center justify-center rounded-md text-[10px] font-black text-white/85"
-                style={{ border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
-              >
-                {initials(label)}
-              </div>
-            </div>
-            <span className="text-[11px] font-semibold text-white/75 truncate">{label}</span>
-          </>
-        ) : (
-          <>
-            <span className="text-[11px] font-semibold text-white/75 truncate">{label}</span>
-            <div className="relative h-6 w-6 shrink-0">
-              <img
-                src={logoSrc}
-                alt={label}
-                className="h-6 w-6 rounded-md object-contain"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}
-                onError={(e) => {
-                  const el = e.currentTarget;
-                  el.style.display = "none";
-                }}
-              />
-              <div
-                className="absolute inset-0 flex items-center justify-center rounded-md text-[10px] font-black text-white/85"
-                style={{ border: "1px solid rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
-              >
-                {initials(label)}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-    );
-  };
-
-  const PickCard = ({ g, q, isGameLocked }: { g: ApiGame; q: ApiQuestion; isGameLocked: boolean }) => {
-    const finalWrong = q.status === "final" && q.correctPick === false;
-    const finalCorrect = q.status === "final" && q.correctPick === true;
-
-    const pick = effectivePick(localPicks[q.id], q.userPick);
-    const hasPick = pick === "yes" || pick === "no";
-
-    const sponsor = q.isSponsorQuestion === true;
-
-    const { home, away } = parseMatchTeams(g.match);
-    const homeSlug = teamSlug(home);
-    const awaySlug = teamSlug(away);
-    const homeColors = TEAM_COLORS[homeSlug] ?? { a: "rgba(20, 35, 60, 0.95)", b: "rgba(20, 35, 60, 0.55)" };
-    const awayColors = TEAM_COLORS[awaySlug] ?? { a: "rgba(90, 10, 25, 0.90)", b: "rgba(90, 10, 25, 0.55)" };
-
-    const isLocked = isGameLocked || q.status === "pending";
-
-    // Card chrome
-    const border = sponsor
-      ? "rgba(244,178,71,0.95)"
-      : finalWrong
-      ? "rgba(255,46,77,0.55)"
-      : finalCorrect
-      ? "rgba(25,195,125,0.50)"
-      : "rgba(255,255,255,0.10)";
-
-    const glow = sponsor
-      ? "0 0 28px rgba(244,178,71,0.18), inset 0 0 0 1px rgba(244,178,71,0.20)"
-      : finalWrong
-      ? "0 0 24px rgba(255,46,77,0.10)"
-      : finalCorrect
-      ? "0 0 24px rgba(25,195,125,0.08)"
-      : "0 0 0 rgba(0,0,0,0)";
-
-    // Jersey hero area background (split glow)
-    const heroBg = `linear-gradient(135deg,
-      ${homeColors.a} 0%,
-      rgba(255,255,255,0.02) 46%,
-      rgba(255,255,255,0.02) 54%,
-      ${awayColors.a} 100%)`;
-
-    const heroInner = `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)`;
-
-    return (
-      <div
-        className="group rounded-2xl border overflow-hidden transition"
-        style={{
-          borderColor: border,
-          background: `linear-gradient(180deg, rgba(255,255,255,0.035) 0%, rgba(13,17,23,0.78) 100%)`,
-          boxShadow: glow,
-        }}
-      >
-        {/* Match header strip (Option A) */}
-        <div
-          className="px-3 py-2 border-b"
-          style={{
-            borderColor: "rgba(255,255,255,0.08)",
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <TeamBadge name={home} side="home" />
-            <span className="text-[10px] font-black text-white/35 uppercase tracking-widest shrink-0">vs</span>
-            <TeamBadge name={away} side="away" />
-          </div>
-        </div>
-
-        {/* Hero jersey zone */}
-        <div className={`${PICK_CARD_PAD_X} pt-3`}>
-          <div
-            className="rounded-2xl border overflow-hidden relative"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: heroBg,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.35)",
-            }}
-          >
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  "radial-gradient(600px 240px at 50% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 60%)",
-                opacity: 0.9,
-              }}
-            />
-            <div className="relative px-4 py-4">
-              <div
-                className="mx-auto h-[88px] w-[88px] rounded-[22px] border flex items-center justify-center"
-                style={{
-                  borderColor: "rgba(255,255,255,0.12)",
-                  background: heroInner,
-                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.05)",
-                }}
-                aria-hidden="true"
-              >
-                {/* Abstract jersey silhouette */}
-                <div className="relative h-[66px] w-[66px]">
-                  <div
-                    className="absolute inset-0 rounded-[18px]"
-                    style={{
-                      background:
-                        "linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 100%)",
-                      border: "1px solid rgba(255,255,255,0.12)",
-                      boxShadow: "0 10px 22px rgba(0,0,0,0.35)",
-                      clipPath:
-                        "polygon(18% 8%, 35% 0%, 65% 0%, 82% 8%, 95% 20%, 88% 35%, 78% 28%, 78% 100%, 22% 100%, 22% 28%, 12% 35%, 5% 20%)",
-                    }}
-                  />
-                  <div
-                    className="absolute left-1/2 top-[14px] -translate-x-1/2 h-[2px] w-[24px] rounded-full"
-                    style={{ background: "rgba(255,255,255,0.22)" }}
-                  />
-                </div>
-              </div>
-
-              {/* Top row: status + meta + actions */}
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  {renderStatusPill(q)}
-                  <span className="text-[10px] font-black text-white/55 uppercase tracking-wide">
-                    Q{q.quarter}
-                  </span>
-                  {sponsor ? (
-                    <span
-                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
-                      style={{
-                        borderColor: "rgba(244,178,71,0.85)",
-                        background: "rgba(244,178,71,0.22)",
-                        color: "rgba(13,17,23,0.95)",
-                        boxShadow: "0 0 14px rgba(244,178,71,0.22)",
-                      }}
-                    >
-                      SPONSORED
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Clear X */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center rounded-full border h-8 w-8 text-[13px] font-black transition active:scale-[0.99]"
-                    style={{
-                      borderColor: hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
-                      background: hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
-                      color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      clearPick(q);
-                    }}
-                    disabled={!hasPick || isLocked || q.status === "void"}
-                    title={hasPick ? "Clear selection" : "No selection to clear"}
-                    aria-label="Clear selection"
-                  >
-                    ✕
-                  </button>
-
-                  {/* Comments */}
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-full border h-8 px-3 text-[12px] font-black transition active:scale-[0.99]"
-                    style={{
-                      borderColor:
-                        q.commentCount && q.commentCount >= 100
-                          ? "rgba(244,178,71,0.45)"
-                          : "rgba(0,229,255,0.26)",
-                      background:
-                        q.commentCount && q.commentCount >= 100
-                          ? "rgba(244,178,71,0.12)"
-                          : "rgba(0,229,255,0.06)",
-                      color: "rgba(255,255,255,0.92)",
-                      boxShadow:
-                        q.commentCount && q.commentCount >= 100
-                          ? "0 0 18px rgba(244,178,71,0.12)"
-                          : "0 0 18px rgba(0,229,255,0.08)",
-                    }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      openComments(g, q);
-                    }}
-                    title="Open comments"
-                  >
-                    💬 {q.commentCount ?? 0}
-                    {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
-                  </button>
-                </div>
-              </div>
-
-              {/* Player + Question (clean hierarchy) */}
-              <div className="mt-3">
-                <div className="text-[11px] uppercase tracking-widest text-white/45">Player</div>
-                <div className="mt-1 text-[14px] font-black text-white/92 truncate">
-                  {/* Placeholder until you wire player names into API */}
-                  {/* Keeping layout-only — no schema changes */}
-                  {(() => {
-                    // If you later embed player in question string, this at least doesn’t crash now.
-                    // For now we show a strong generic label so the card still feels "player-first".
-                    return "AFL Player";
-                  })()}
-                </div>
-
-                <div className="mt-2 text-[13px] font-semibold leading-snug text-white/88">
-                  {q.question}
-                </div>
-
-                {/* Crowd stays (still useful), but visually calmer now */}
-                {renderSentiment(q)}
-
-                {/* Buttons */}
-                {renderPickButtons(q, isLocked)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom pad */}
-        <div className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y}`} />
       </div>
     );
   };
@@ -1281,16 +943,16 @@ export default function PicksPage() {
             if (e.target === e.currentTarget) closeComments();
           }}
           style={{
-            background: "rgba(0,0,0,0.62)",
-            backdropFilter: "blur(6px)",
+            background: "rgba(0,0,0,0.72)",
+            backdropFilter: "blur(8px)",
           }}
         >
           <div
             className="w-full max-w-2xl rounded-2xl border overflow-hidden"
             style={{
               borderColor: "rgba(255,255,255,0.14)",
-              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 24px 80px rgba(0,0,0,0.72)",
+              background: `linear-gradient(180deg, rgba(20,20,20,0.92) 0%, rgba(10,10,10,0.92) 100%)`,
+              boxShadow: "0 24px 80px rgba(0,0,0,0.78)",
             }}
           >
             <div
@@ -1477,14 +1139,14 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* Persistent Streak Widget */}
+        {/* Top widgets */}
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div
             className="rounded-2xl border p-4"
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
             }}
           >
             <div className="flex items-center justify-between">
@@ -1509,7 +1171,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.mine}%`,
-                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(244,178,71,0.22))`,
+                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(244,178,71,0.18))`,
                   }}
                 />
               </div>
@@ -1519,7 +1181,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.lead}%`,
-                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.22))`,
+                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.18))`,
                   }}
                 />
               </div>
@@ -1556,7 +1218,7 @@ export default function PicksPage() {
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
             }}
           >
             <p className="text-[11px] uppercase tracking-widest text-white/55">Dashboard</p>
@@ -1603,7 +1265,7 @@ export default function PicksPage() {
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
             }}
           >
             <p className="text-[11px] uppercase tracking-widest text-white/55">Quick</p>
@@ -1656,7 +1318,7 @@ export default function PicksPage() {
         ) : null}
 
         {/* Games */}
-        <div className="mt-6 flex flex-col gap-5">
+        <div className="mt-5 flex flex-col gap-4">
           {loading ? (
             <div
               className="rounded-2xl border p-4 animate-pulse"
@@ -1692,16 +1354,16 @@ export default function PicksPage() {
                   className="rounded-2xl border overflow-hidden"
                   style={{
                     borderColor: "rgba(244,178,71,0.55)",
-                    background: `linear-gradient(180deg, rgba(244,178,71,0.14) 0%, rgba(13,17,23,0.92) 65%, rgba(13,17,23,0.88) 100%)`,
-                    boxShadow: "0 0 40px rgba(244,178,71,0.10), inset 0 0 0 1px rgba(244,178,71,0.14)",
+                    background: `linear-gradient(180deg, rgba(244,178,71,0.10) 0%, rgba(244,178,71,0.05) 30%, rgba(0,0,0,0.98) 100%)`,
+                    boxShadow: "0 0 40px rgba(244,178,71,0.12), inset 0 0 0 1px rgba(244,178,71,0.18)",
                   }}
                 >
-                  {/* Game header */}
+                  {/* Game info block */}
                   <div
                     className="px-4 py-3"
                     style={{
-                      background: `linear-gradient(180deg, rgba(244,178,71,0.22) 0%, rgba(244,178,71,0.10) 100%)`,
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
+                      background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
+                      borderBottom: "1px solid rgba(255,255,255,0.10)",
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -1709,7 +1371,7 @@ export default function PicksPage() {
                         <div className="text-lg sm:text-xl font-extrabold truncate" style={{ color: COLORS.white }}>
                           {g.match}
                         </div>
-                        <div className="mt-0.5 text-[12px] text-white/85 truncate">
+                        <div className="mt-0.5 text-[12px] text-white/70 truncate">
                           {g.venue} • {formatAedt(g.startTime)}
                         </div>
                       </div>
@@ -1720,7 +1382,7 @@ export default function PicksPage() {
                             className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                             style={{
                               borderColor: "rgba(255,255,255,0.18)",
-                              background: "rgba(13,17,23,0.35)",
+                              background: "rgba(0,0,0,0.35)",
                               color: "rgba(255,255,255,0.92)",
                             }}
                           >
@@ -1731,8 +1393,8 @@ export default function PicksPage() {
                             className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                             style={{
                               borderColor: "rgba(255,255,255,0.18)",
-                              background: "rgba(13,17,23,0.30)",
-                              color: "rgba(255,255,255,0.90)",
+                              background: "rgba(0,0,0,0.35)",
+                              color: "rgba(255,255,255,0.86)",
                             }}
                           >
                             {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
@@ -1742,24 +1404,140 @@ export default function PicksPage() {
                     </div>
 
                     <div className="mt-3">
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(13,17,23,0.35)" }}>
+                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
                         <div
                           className="h-full"
                           style={{
                             width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(0,229,255,0.15), rgba(0,229,255,0.55))`,
+                            background: `linear-gradient(90deg, rgba(244,178,71,0.15), rgba(0,229,255,0.38))`,
                           }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* ✅ Questions grid: 3 cols desktop, 2 tablet, 1 mobile */}
-                  <div className="p-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                      {g.questions.map((q) => (
-                        <PickCard key={q.id} g={g} q={q} isGameLocked={isLocked} />
-                      ))}
+                  {/* Questions */}
+                  <div className="px-3 pb-3">
+                    {/* ✅ Grid: desktop 3 cols, tablet 2 cols, mobile 1 col */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {g.questions.map((q) => {
+                        const finalWrong = q.status === "final" && q.correctPick === false;
+                        const finalCorrect = q.status === "final" && q.correctPick === true;
+
+                        const pick = effectivePick(localPicks[q.id], q.userPick);
+                        const hasPick = pick === "yes" || pick === "no";
+
+                        const sponsor = q.isSponsorQuestion === true;
+
+                        return (
+                          <div
+                            key={q.id}
+                            className="rounded-2xl border"
+                            style={{
+                              borderColor: sponsor
+                                ? "rgba(244,178,71,0.75)"
+                                : finalWrong
+                                ? "rgba(255,46,77,0.45)"
+                                : finalCorrect
+                                ? "rgba(25,195,125,0.35)"
+                                : "rgba(255,255,255,0.10)",
+                              background: sponsor ? "rgba(244,178,71,0.08)" : "rgba(255,255,255,0.03)",
+                              boxShadow: sponsor
+                                ? "0 0 22px rgba(244,178,71,0.14), inset 0 0 0 1px rgba(244,178,71,0.10)"
+                                : finalWrong
+                                ? "0 0 18px rgba(255,46,77,0.08)"
+                                : finalCorrect
+                                ? "0 0 18px rgba(25,195,125,0.06)"
+                                : "none",
+                            }}
+                          >
+                            <div className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y}`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  {renderStatusPill(q)}
+                                  <span className="text-[11px] font-black text-white/70 uppercase tracking-wide">
+                                    Q{q.quarter}
+                                  </span>
+
+                                  {sponsor ? (
+                                    <span
+                                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
+                                      style={{
+                                        borderColor: "rgba(244,178,71,0.65)",
+                                        background: "rgba(244,178,71,0.18)",
+                                        color: "rgba(255,255,255,0.92)",
+                                        boxShadow: "0 0 14px rgba(244,178,71,0.14)",
+                                      }}
+                                    >
+                                      SPONSORED
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  {/* Clear X */}
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                                    style={{
+                                      borderColor: hasPick ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
+                                      background: hasPick ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
+                                      color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
+                                    }}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      clearPick(q);
+                                    }}
+                                    disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
+                                    title={hasPick ? "Clear selection" : "No selection to clear"}
+                                    aria-label="Clear selection"
+                                  >
+                                    ✕
+                                  </button>
+
+                                  {/* Comments */}
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
+                                    style={{
+                                      borderColor:
+                                        q.commentCount && q.commentCount >= 100
+                                          ? "rgba(244,178,71,0.45)"
+                                          : "rgba(0,229,255,0.28)",
+                                      background:
+                                        q.commentCount && q.commentCount >= 100
+                                          ? "rgba(244,178,71,0.10)"
+                                          : "rgba(0,229,255,0.07)",
+                                      color: "rgba(255,255,255,0.92)",
+                                      boxShadow:
+                                        q.commentCount && q.commentCount >= 100
+                                          ? "0 0 14px rgba(244,178,71,0.10)"
+                                          : "0 0 14px rgba(0,229,255,0.08)",
+                                    }}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      openComments(g, q);
+                                    }}
+                                    title="Open comments"
+                                  >
+                                    💬 {q.commentCount ?? 0}
+                                    {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="mt-1 text-[13px] font-semibold leading-tight text-white/90">
+                                {q.question}
+                              </div>
+
+                              {renderSentiment(q)}
+                              {renderPickButtons(q, isLocked || q.status === "pending")}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
