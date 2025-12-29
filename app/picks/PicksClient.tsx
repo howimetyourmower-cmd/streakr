@@ -1095,59 +1095,61 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Jersey area */}
-          <div
-            className="mt-3 rounded-2xl border p-3"
-            style={{
-              borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-              background: sponsor
-                ? "rgba(0,0,0,0.10)"
-                : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-            }}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
-                  Player
-                </div>
-                <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
-                  {playerName}
-                </div>
-                <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
-                  {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
-                </div>
-              </div>
+         {/* Jersey / Player area (hide until sponsor reveal) */}
+{(!sponsor || revealed) ? (
+  <div
+    className="mt-3 rounded-2xl border p-3"
+    style={{
+      borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
+      background: sponsor
+        ? "rgba(0,0,0,0.10)"
+        : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
+    }}
+  >
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
+          Player
+        </div>
+        <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
+          {playerName}
+        </div>
+        <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
+          {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
+        </div>
+      </div>
 
-              <div
-                className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
-                style={{
-                  borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-                  background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
-                }}
-                title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
-              >
-                <Image
-                  src={jerseySrc}
-                  alt={`${teamCode} jersey`}
-                  fill
-                  sizes="54px"
-                  style={{ objectFit: "cover" }}
-                />
-              </div>
-            </div>
+      <div
+        className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
+        style={{
+          borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
+          background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
+        }}
+        title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
+      >
+        <Image
+          src={jerseySrc}
+          alt={`${teamCode} jersey`}
+          fill
+          sizes="54px"
+          style={{ objectFit: "cover" }}
+        />
+      </div>
+    </div>
 
-            <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
-              {q.status === "open"
-                ? "Live"
-                : q.status === "pending"
-                ? "Locked"
-                : q.status === "final"
-                ? "Final"
-                : q.status === "void"
-                ? "Void"
-                : "—"}
-            </div>
-          </div>
+    <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
+      {q.status === "open"
+        ? "Live"
+        : q.status === "pending"
+        ? "Locked"
+        : q.status === "final"
+        ? "Final"
+        : q.status === "void"
+        ? "Void"
+        : "—"}
+    </div>
+  </div>
+) : null}
 
           {/* ✅ Sponsor Cover (forces exposure + click to reveal) */}
           {sponsor && !revealed ? (
