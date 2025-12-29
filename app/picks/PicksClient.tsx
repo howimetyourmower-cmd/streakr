@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import Confetti from "react-confetti";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
@@ -81,7 +82,7 @@ type CommentRow = {
 };
 
 const COLORS = {
-  bg: "#000000", // ✅ full black
+  bg: "#000000",
   panel: "rgba(255,255,255,0.035)",
   panel2: "rgba(255,255,255,0.02)",
   stroke: "rgba(255,255,255,0.10)",
@@ -139,7 +140,7 @@ function majorityLabel(yes: number, no: number): { label: string; color: string 
 }
 
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
-  return `streakr:picks:v5:${uid || "anon"}:${roundNumber ?? "na"}`;
+  return `streakr:picks:v6:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
 function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
@@ -168,10 +169,6 @@ function formatCommentTime(createdAt: any): string {
 
 /**
  * UI-only helper: best-effort player extraction from question text.
- * Examples:
- *  - "Will Patrick Cripps (Car) have 6 or more disposals..." -> "Patrick Cripps"
- *  - "Will Charlie Curnow (Syd) kick 1 or more..." -> "Charlie Curnow"
- *  - Anything else -> null
  */
 function extractPlayerName(qText: string): string | null {
   const t = (qText || "").trim();
@@ -186,6 +183,29 @@ function extractPlayerName(qText: string): string | null {
   const scoreIdx = rest.toLowerCase().indexOf(" score ");
   if (scoreIdx > 0) return rest.slice(0, scoreIdx).trim();
   return null;
+}
+
+/**
+ * Team code extraction from question text:
+ * "(Car)" "(Syd)" "(GC)" "(Gee)" etc.
+ */
+function extractTeamCode(qText: string): string | null {
+  const m = (qText || "").match(/\(([A-Za-z]{2,4})\)/);
+  if (!m) return null;
+  return m[1];
+}
+
+/**
+ * Map team codes to jersey images in /public
+ * You said you have: car.jpg, generic.jpg, GC.jpg, gee.jpg, syd.jpg
+ */
+function jerseySrcForTeamCode(codeRaw: string | null): string {
+  const code = (codeRaw || "").trim().toLowerCase();
+  if (code === "car") return "/car.jpg";
+  if (code === "syd") return "/syd.jpg";
+  if (code === "gc") return "/GC.jpg"; // keep exact case as your file
+  if (code === "gee") return "/gee.jpg";
+  return "/generic.jpg";
 }
 
 type LocalPickMap = Record<string, LocalPick>;
@@ -668,7 +688,6 @@ export default function PicksPage() {
   }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
   const renderStatusPill = (q: ApiQuestion) => {
-    // ✅ NO pulsing. Clean chalkboard-ish micro pill.
     const base =
       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border";
 
@@ -828,7 +847,6 @@ export default function PicksPage() {
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
 
-    // Chalkboard-ish: tight segmented action row
     const btnBase =
       "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
 
@@ -883,7 +901,7 @@ export default function PicksPage() {
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   // ----------------------------
-  // Chalkboard-inspired card
+  // Chalkboard-inspired card (NOW WITH JERSEY IMAGE)
   // ----------------------------
   const PickCard = ({
     g,
@@ -903,6 +921,8 @@ export default function PicksPage() {
     const sponsor = q.isSponsorQuestion === true;
 
     const playerName = extractPlayerName(q.question) || "AFL Player";
+    const teamCode = extractTeamCode(q.question);
+    const jerseySrc = jerseySrcForTeamCode(teamCode);
 
     const cardBorder = sponsor
       ? "rgba(255,122,0,0.70)"
@@ -1015,18 +1035,22 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* “Jersey area” placeholder (no icons yet) */}
+          {/* ✅ Jersey area (image instead of emoji) */}
           <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.textFaint }}>
                   Player
                 </div>
                 <div className="mt-1 text-[15px] font-black text-white truncate">{playerName}</div>
+
+                <div className="mt-2 text-[11px] text-white/55 truncate">
+                  {g.match} • {teamCode ? teamCode.toUpperCase() : "—"}
+                </div>
               </div>
 
               <div
-                className="h-12 w-12 rounded-2xl border flex items-center justify-center"
+                className="relative h-16 w-16 rounded-2xl border overflow-hidden"
                 style={{
                   borderColor: "rgba(255,255,255,0.10)",
                   background:
@@ -1034,12 +1058,20 @@ export default function PicksPage() {
                 }}
                 aria-hidden
               >
-                <div className="text-white/35 text-[18px]">👕</div>
+                <Image
+                  src={jerseySrc}
+                  alt={teamCode ? `${teamCode.toUpperCase()} jersey` : "Jersey"}
+                  fill
+                  sizes="64px"
+                  className="object-contain p-2"
+                  priority={false}
+                />
               </div>
             </div>
 
             <div className="mt-2 text-[11px] text-white/55 truncate">
-              {g.match} • {q.status === "open" ? "Live" : q.status === "pending" ? "Locked" : q.status === "final" ? "Final" : "—"}
+              {q.status === "open" ? "Live" : q.status === "pending" ? "Locked" : q.status === "final" ? "Final" : "—"}
+              {q.startTime ? ` • ${formatAedt(q.startTime)}` : ""}
             </div>
           </div>
 
@@ -1066,6 +1098,9 @@ export default function PicksPage() {
     );
   };
 
+  // close comments helper
+  const closeCommentsSafe = closeComments;
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
@@ -1075,7 +1110,7 @@ export default function PicksPage() {
         <div
           className="fixed inset-0 z-[80] flex items-center justify-center p-4"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeComments();
+            if (e.target === e.currentTarget) closeCommentsSafe();
           }}
           style={{
             background: "rgba(0,0,0,0.70)",
@@ -1105,7 +1140,7 @@ export default function PicksPage() {
 
                 <button
                   type="button"
-                  onClick={closeComments}
+                  onClick={closeCommentsSafe}
                   className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
                   style={{
                     borderColor: "rgba(255,255,255,0.16)",
@@ -1274,7 +1309,7 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* Premium top dashboard (kept, cleaned) */}
+        {/* Premium top dashboard */}
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div
             className="rounded-2xl border p-4"
@@ -1359,21 +1394,30 @@ export default function PicksPage() {
             <p className="text-[11px] uppercase tracking-widest text-white/55">Dashboard</p>
 
             <div className="mt-3 grid grid-cols-3 gap-3">
-              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
                 <p className="text-xl font-black mt-1 text-white">
                   {picksMade}/{totalPickable}
                 </p>
               </div>
 
-              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
                 <p className="text-xl font-black mt-1" style={{ color: "rgba(25,195,125,0.95)" }}>
                   {accuracyPct}%
                 </p>
               </div>
 
-              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+              <div
+                className="rounded-xl border px-3 py-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+              >
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
                 <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
                   {topLockText}
@@ -1446,13 +1490,19 @@ export default function PicksPage() {
         {/* Games */}
         <div className="mt-6 flex flex-col gap-6">
           {loading ? (
-            <div className="rounded-2xl border p-4 animate-pulse" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+            <div
+              className="rounded-2xl border p-4 animate-pulse"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+            >
               <div className="h-4 w-44 rounded bg-white/10" />
               <div className="mt-3 h-3 w-80 rounded bg-white/10" />
               <div className="mt-5 h-24 rounded bg-white/5" />
             </div>
           ) : games.length === 0 ? (
-            <div className="rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+            <div
+              className="rounded-2xl border p-4 text-sm text-white/70"
+              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+            >
               No games found.
             </div>
           ) : (
@@ -1469,8 +1519,12 @@ export default function PicksPage() {
               const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
 
               return (
-                <div key={g.id} className="rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }}>
-                  {/* Game header (clean, chalkboard-ish) */}
+                <div
+                  key={g.id}
+                  className="rounded-2xl border overflow-hidden"
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }}
+                >
+                  {/* Game header */}
                   <div
                     className="px-4 py-4 border-b"
                     style={{
@@ -1527,16 +1581,11 @@ export default function PicksPage() {
                     </div>
                   </div>
 
-                  {/* ✅ LOCKED LAYOUT: 3 cols desktop, 2 tablet, 1 mobile */}
+                  {/* 3 cols desktop, 2 tablet, 1 mobile */}
                   <div className="p-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {g.questions.map((q) => (
-                        <PickCard
-                          key={q.id}
-                          g={g}
-                          q={q}
-                          isLocked={isLocked || q.status === "pending"}
-                        />
+                        <PickCard key={q.id} g={g} q={q} isLocked={isLocked || q.status === "pending"} />
                       ))}
                     </div>
                   </div>
