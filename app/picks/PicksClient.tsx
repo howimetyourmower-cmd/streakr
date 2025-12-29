@@ -927,28 +927,34 @@ export default function PicksPage() {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const hasPick = pick === "yes" || pick === "no";
 
-    const sponsor = q.isSponsorQuestion === true;
+const sponsor = q.isSponsorQuestion === true;
 
-    const playerName = extractPlayerName(q.question) || "AFL Player";
-    const teamCode = extractTeamCode(q.question);
-    const jerseySrc = `/jerseys/${teamCode}.jpg`;
+const baseBorder = sponsor
+  ? "rgba(255,122,0,0.95)"
+  : COLORS.orangeSoft;
 
-    const canInteract = isQuestionInteractable(q, gameLocked);
-    const lockOverlayOn = !canInteract;
+const glow = sponsor
+  ? "0 0 40px rgba(255,122,0,0.35)"
+  : finalWrong
+  ? "0 0 22px rgba(255,46,77,0.12)"
+  : finalCorrect
+  ? "0 0 22px rgba(25,195,125,0.10)"
+  : "0 0 22px rgba(255,122,0,0.06)";
 
-    // ✅ ORANGE OUTLINE ON EVERY CARD
-    const baseBorder = sponsor ? COLORS.orangeBorderStrong : COLORS.orangeBorder;
+const cardBg = sponsor
+  ? `linear-gradient(
+      180deg,
+      rgba(255,154,43,0.95) 0%,
+      rgba(255,122,0,0.95) 40%,
+      rgba(255,94,0,0.92) 100%
+    )`
+  : `linear-gradient(
+      180deg,
+      rgba(255,255,255,0.05) 0%,
+      rgba(255,255,255,0.02) 45%,
+      rgba(0,0,0,0.55) 100%
+    )`;
 
-    const glow = sponsor
-      ? "0 0 26px rgba(255,122,0,0.18)"
-      : finalWrong
-      ? "0 0 22px rgba(255,46,77,0.12)"
-      : finalCorrect
-      ? "0 0 22px rgba(25,195,125,0.10)"
-      : "0 0 22px rgba(255,122,0,0.06)";
-
-    const cardBg =
-      "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.55) 100%)";
 
     const topAccent = sponsor
       ? "linear-gradient(90deg, rgba(255,122,0,0.55), rgba(255,122,0,0.10))"
