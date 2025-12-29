@@ -1173,7 +1173,7 @@ export default function PicksPage() {
               </div>
 
               <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.65)" }}>
-                1 winner only. Bonus question (doesn’t affect your streak).
+                1 winner only. Sponsor question is counted in your streak.
               </div>
 
               <button
