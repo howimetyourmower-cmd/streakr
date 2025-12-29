@@ -36,6 +36,12 @@ type ApiQuestion = {
   noPercent?: number;
   commentCount?: number;
   isSponsorQuestion?: boolean;
+
+  // Monetisation polish (optional fields from API if you add later)
+  sponsorName?: string; // e.g. "Rebel Sport"
+  sponsorPrize?: string; // e.g. "$100 gift card"
+  sponsorExcludeFromStreak?: boolean; // if you add later; we treat sponsor as bonus UI anyway
+
   venue?: string;
   startTime?: string;
   correctPick?: boolean;
@@ -102,8 +108,9 @@ const COLORS = {
   cyan: "rgba(0,229,255,0.95)",
   white: "rgba(255,255,255,0.98)",
 
-  ink: "rgba(0,0,0,0.92)",
-  inkDim: "rgba(0,0,0,0.75)",
+  sponsorBgA: "rgba(255,122,0,0.95)",
+  sponsorBgB: "rgba(255,154,43,0.92)",
+  sponsorInk: "rgba(0,0,0,0.92)",
 };
 
 function clampPct(n: number | undefined): number {
@@ -147,7 +154,7 @@ function majorityLabel(yes: number, no: number): { label: string; color: string 
 }
 
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
-  return `streakr:picks:v6:${uid || "anon"}:${roundNumber ?? "na"}`;
+  return `streakr:picks:v7:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
 function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
@@ -175,8 +182,8 @@ function formatCommentTime(createdAt: any): string {
 }
 
 /**
- * Extract team code like (Syd) or (Car) from question text.
- * We’ll map that to /public/jerseys/<Code>.jpg
+ * Extracts team code like (Syd) or (Car) from question text.
+ * Map to /public/jerseys/<Code>.jpg
  */
 function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic" {
   const t = (qText || "").toLowerCase();
@@ -188,10 +195,11 @@ function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic
   if (raw === "gc") return "GC";
   if (raw === "gee") return "Gee";
 
-  if (t.includes("(syd)")) return "Syd";
-  if (t.includes("(car)")) return "Car";
-  if (t.includes("(gc)")) return "GC";
-  if (t.includes("(gee)")) return "Gee";
+  // fallback heuristics
+  if (t.includes("(syd)") || t.includes(" sydney ")) return "Syd";
+  if (t.includes("(car)") || t.includes(" carlton ")) return "Car";
+  if (t.includes("(gc)") || t.includes(" gold coast ")) return "GC";
+  if (t.includes("(gee)") || t.includes(" geelong ")) return "Gee";
 
   return "Generic";
 }
@@ -237,6 +245,10 @@ export default function PicksPage() {
 
   const hasHydratedLocalRef = useRef(false);
 
+  // ✅ Sponsor reveal state (per-user, per-round, per-question)
+  const [sponsorRevealed, setSponsorRevealed] = useState<Record<string, boolean>>({});
+  const hasHydratedSponsorRef = useRef(false);
+
   // Comments modal
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
@@ -246,7 +258,6 @@ export default function PicksPage() {
   const [commentText, setCommentText] = useState("");
   const [commentErr, setCommentErr] = useState("");
   const [commentPosting, setCommentPosting] = useState(false);
-
   const commentsUnsubRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
@@ -322,6 +333,33 @@ export default function PicksPage() {
     } catch {}
   }, [localPicks, user?.uid, roundNumber]);
 
+  // ✅ Hydrate sponsor reveal state
+  useEffect(() => {
+    if (hasHydratedSponsorRef.current) return;
+    if (roundNumber === null) return;
+
+    try {
+      const key = `streakr:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        if (parsed && typeof parsed === "object") setSponsorRevealed(parsed);
+      }
+    } catch (e) {
+      console.warn("Failed to hydrate sponsor reveal state", e);
+    } finally {
+      hasHydratedSponsorRef.current = true;
+    }
+  }, [user?.uid, roundNumber]);
+
+  useEffect(() => {
+    if (roundNumber === null) return;
+    try {
+      const key = `streakr:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
+      localStorage.setItem(key, JSON.stringify(sponsorRevealed));
+    } catch {}
+  }, [sponsorRevealed, user?.uid, roundNumber]);
+
   // Live streak from users/{uid}
   useEffect(() => {
     if (!user) {
@@ -380,7 +418,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // Confetti milestone
+  // Confetti milestone (keep)
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -440,6 +478,16 @@ export default function PicksPage() {
     return future[0] - nowMs;
   }, [games, nowMs]);
 
+  // ✅ FINAL questions must be locked (cannot change selection)
+  function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
+    if (q.status === "final") return true;
+    if (q.status === "void") return true; // also lock; void is informational
+    if (q.status === "pending") return true;
+    if (gameLocked) return true; // game started/locked
+    return false;
+  }
+
+  // Robust clear
   const clearPick = useCallback(
     async (q: ApiQuestion) => {
       setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
@@ -476,7 +524,9 @@ export default function PicksPage() {
   );
 
   const togglePick = useCallback(
-    async (q: ApiQuestion, outcome: PickOutcome) => {
+    async (q: ApiQuestion, outcome: PickOutcome, locked: boolean) => {
+      if (locked) return;
+
       const current = effectivePick(localPicks[q.id], q.userPick);
 
       if (current === outcome) {
@@ -692,7 +742,8 @@ export default function PicksPage() {
     }
   }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
-  const renderStatusPill = (q: ApiQuestion, sponsor: boolean) => {
+  const renderStatusPill = (q: ApiQuestion) => {
+    // ✅ NO pulsing, no animation.
     const base =
       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border";
 
@@ -701,15 +752,12 @@ export default function PicksPage() {
         <span
           className={base}
           style={{
-            borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(0,229,255,0.26)",
-            background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(0,229,255,0.08)",
-            color: sponsor ? "rgba(0,0,0,0.85)" : "rgba(0,229,255,0.92)",
+            borderColor: "rgba(0,229,255,0.26)",
+            background: "rgba(0,229,255,0.08)",
+            color: "rgba(0,229,255,0.92)",
           }}
         >
-          <span
-            className="inline-flex h-1.5 w-1.5 rounded-full"
-            style={{ background: sponsor ? "rgba(0,0,0,0.85)" : "rgba(0,229,255,0.92)" }}
-          />
+          <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.92)" }} />
           LIVE
         </span>
       );
@@ -720,9 +768,9 @@ export default function PicksPage() {
         <span
           className={base}
           style={{
-            borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.14)",
-            background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.05)",
-            color: sponsor ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.70)",
+            borderColor: "rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.05)",
+            color: "rgba(255,255,255,0.70)",
           }}
         >
           Locked
@@ -735,9 +783,9 @@ export default function PicksPage() {
         <span
           className={base}
           style={{
-            borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.12)",
-            background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.04)",
-            color: sponsor ? "rgba(0,0,0,0.70)" : "rgba(255,255,255,0.55)",
+            borderColor: "rgba(255,255,255,0.12)",
+            background: "rgba(255,255,255,0.04)",
+            color: "rgba(255,255,255,0.55)",
           }}
         >
           Void
@@ -754,9 +802,9 @@ export default function PicksPage() {
         <span
           className={base}
           style={{
-            borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.14)",
-            background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.05)",
-            color: sponsor ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.70)",
+            borderColor: "rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.05)",
+            color: "rgba(255,255,255,0.70)",
           }}
         >
           Final
@@ -769,7 +817,7 @@ export default function PicksPage() {
         className={base}
         style={{
           borderColor: isCorrect ? "rgba(25,195,125,0.45)" : "rgba(255,46,77,0.45)",
-          background: isCorrect ? "rgba(25,195,125,0.12)" : "rgba(255,46,77,0.12)",
+          background: isCorrect ? "rgba(25,195,125,0.10)" : "rgba(255,46,77,0.10)",
           color: isCorrect ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)",
         }}
       >
@@ -778,7 +826,7 @@ export default function PicksPage() {
     );
   };
 
-  const renderSentiment = (q: ApiQuestion, sponsor: boolean) => {
+  const renderSentiment = (q: ApiQuestion) => {
     const yes = clampPct(q.yesPercent);
     const no = clampPct(q.noPercent);
 
@@ -791,12 +839,9 @@ export default function PicksPage() {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
-    const labelColor = sponsor ? COLORS.inkDim : "rgba(255,255,255,0.60)";
-    const smallColor = sponsor ? "rgba(0,0,0,0.72)" : "rgba(255,255,255,0.55)";
-
     return (
       <div className="mt-2">
-        <div className="flex items-center justify-between text-[10px]" style={{ color: labelColor }}>
+        <div className="flex items-center justify-between text-[10px] text-white/60">
           <span className="uppercase tracking-widest">Crowd</span>
           <span style={{ color: majority.color }} className="font-bold">
             {majority.label}
@@ -806,8 +851,8 @@ export default function PicksPage() {
         <div
           className="mt-1 h-[7px] rounded-full overflow-hidden border"
           style={{
-            borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.10)",
-            background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.06)",
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.06)",
           }}
         >
           <div className="h-full flex">
@@ -828,13 +873,13 @@ export default function PicksPage() {
           </div>
         </div>
 
-        <div className="mt-1 flex items-center justify-between text-[10px]" style={{ color: smallColor }}>
+        <div className="mt-1 flex items-center justify-between text-[10px] text-white/55">
           <span>
-            YES <span className="font-bold" style={{ color: sponsor ? "rgba(0,0,0,0.82)" : "rgba(255,255,255,0.80)" }}>{Math.round(yes)}%</span>
+            YES <span className="font-bold text-white/80">{Math.round(yes)}%</span>
           </span>
 
           {aligned === null ? (
-            <span style={{ color: sponsor ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.40)" }}>Pick to compare</span>
+            <span className="text-white/40">Pick to compare</span>
           ) : aligned ? (
             <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-bold">
               With crowd
@@ -846,14 +891,14 @@ export default function PicksPage() {
           )}
 
           <span>
-            NO <span className="font-bold" style={{ color: sponsor ? "rgba(0,0,0,0.82)" : "rgba(255,255,255,0.80)" }}>{Math.round(no)}%</span>
+            NO <span className="font-bold text-white/80">{Math.round(no)}%</span>
           </span>
         </div>
       </div>
     );
   };
 
-  const renderPickButtons = (q: ApiQuestion, canInteract: boolean, sponsor: boolean) => {
+  const renderPickButtons = (q: ApiQuestion, locked: boolean) => {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
@@ -862,45 +907,47 @@ export default function PicksPage() {
       "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
 
     const selectedStyle = {
-      borderColor: sponsor ? "rgba(0,0,0,0.30)" : "rgba(255,122,0,0.65)",
-      background: sponsor
-        ? "linear-gradient(180deg, rgba(0,0,0,0.92), rgba(0,0,0,0.82))"
-        : `linear-gradient(180deg, rgba(255,122,0,0.95), rgba(255,154,43,0.88))`,
-      boxShadow: sponsor
-        ? "0 0 22px rgba(0,0,0,0.20), inset 0 0 0 1px rgba(255,255,255,0.10)"
-        : "0 0 26px rgba(255,122,0,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
-      color: sponsor ? "rgba(255,255,255,0.92)" : "rgba(0,0,0,0.92)",
+      borderColor: "rgba(255,122,0,0.65)",
+      background: `linear-gradient(180deg, rgba(255,122,0,0.95), rgba(255,154,43,0.88))`,
+      boxShadow: "0 0 26px rgba(255,122,0,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
+      color: "rgba(0,0,0,0.92)",
     } as const;
 
     const neutralStyle = {
-      borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.12)",
-      background: sponsor ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.04)",
-      boxShadow: sponsor ? "inset 0 0 0 1px rgba(0,0,0,0.08)" : "inset 0 0 0 1px rgba(255,255,255,0.05)",
-      color: sponsor ? "rgba(0,0,0,0.85)" : "rgba(255,255,255,0.88)",
+      borderColor: "rgba(255,255,255,0.12)",
+      background: "rgba(255,255,255,0.04)",
+      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.05)",
+      color: "rgba(255,255,255,0.88)",
+    } as const;
+
+    const lockedStyle = {
+      borderColor: "rgba(255,255,255,0.10)",
+      background: "rgba(255,255,255,0.03)",
+      color: "rgba(255,255,255,0.55)",
     } as const;
 
     return (
       <div className="mt-3 flex gap-2">
         <button
           type="button"
-          disabled={!canInteract}
-          onClick={() => togglePick(q, "yes")}
+          disabled={locked}
+          onClick={() => togglePick(q, "yes", locked)}
           className={btnBase}
-          style={isYesSelected ? selectedStyle : neutralStyle}
+          style={locked ? lockedStyle : isYesSelected ? selectedStyle : neutralStyle}
           aria-pressed={isYesSelected}
-          title={!canInteract ? "Locked" : isYesSelected ? "Click again to clear" : "Pick YES"}
+          title={locked ? "Locked" : isYesSelected ? "Click again to clear" : "Pick YES"}
         >
           YES
         </button>
 
         <button
           type="button"
-          disabled={!canInteract}
-          onClick={() => togglePick(q, "no")}
+          disabled={locked}
+          onClick={() => togglePick(q, "no", locked)}
           className={btnBase}
-          style={isNoSelected ? selectedStyle : neutralStyle}
+          style={locked ? lockedStyle : isNoSelected ? selectedStyle : neutralStyle}
           aria-pressed={isNoSelected}
-          title={!canInteract ? "Locked" : isNoSelected ? "Click again to clear" : "Pick NO"}
+          title={locked ? "Locked" : isNoSelected ? "Click again to clear" : "Pick NO"}
         >
           NO
         </button>
@@ -911,52 +958,61 @@ export default function PicksPage() {
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  // Chalkboard-inspired card
-  const PickCard = ({ g, q, isLocked }: { g: ApiGame; q: ApiQuestion; isLocked: boolean }) => {
-    const sponsor = q.isSponsorQuestion === true;
+  // Sponsor reveal action
+  const revealSponsor = useCallback((questionId: string) => {
+    setSponsorRevealed((prev) => ({ ...prev, [questionId]: true }));
+  }, []);
 
-    const finalWrong = q.status === "final" && q.correctPick === false;
-    const finalCorrect = q.status === "final" && q.correctPick === true;
+  // Chalkboard-inspired card
+  const PickCard = ({
+    g,
+    q,
+    gameLocked,
+  }: {
+    g: ApiGame;
+    q: ApiQuestion;
+    gameLocked: boolean;
+  }) => {
+    const sponsor = q.isSponsorQuestion === true;
+    const sponsorName = (q.sponsorName || "Rebel Sport").trim();
+    const sponsorPrize = (q.sponsorPrize || "$100 gift card").trim();
+
+    const teamCode = extractTeamCode(q.question); // Syd/Car/GC/Gee/Generic
+    const jerseySrc = `/jerseys/${teamCode}.jpg`;
+
+    const playerName = extractPlayerName(q.question) || "AFL Player";
+
+    const locked = isQuestionLocked(q, gameLocked);
 
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const hasPick = pick === "yes" || pick === "no";
 
-    const playerName = extractPlayerName(q.question) || "AFL Player";
-    const teamCode = extractTeamCode(q.question);
-    const jerseySrc = `/jerseys/${teamCode}.jpg`;
+    const revealed = sponsor ? !!sponsorRevealed[q.id] : true;
+    const interactionLocked = locked || (sponsor && !revealed); // can’t pick until revealed for sponsor
 
-    // ✅ lock rules:
-    // - game lock (start time passed)
-    // - pending lock
-    // - final lock
-    // - void lock
-    const lockOverlayOn = isLocked || q.status === "pending" || q.status === "final" || q.status === "void";
+    // ORANGE outline on every card
+    const baseBorder = sponsor ? "rgba(255,122,0,0.90)" : COLORS.orangeSoft;
 
-    // ✅ the missing variable that broke your build previously
-    const canInteract = !lockOverlayOn && q.status === "open";
-
-    // ✅ ORANGE OUTLINE ON EVERY CARD
-    const baseBorder = "rgba(255,122,0,0.75)"; // always orange
-
-    const glow = sponsor
-      ? "0 0 34px rgba(255,122,0,0.40)"
-      : finalWrong
-      ? "0 0 22px rgba(255,46,77,0.12)"
-      : finalCorrect
-      ? "0 0 22px rgba(25,195,125,0.10)"
-      : "0 0 22px rgba(255,122,0,0.08)";
-
-    // ✅ sponsored background = ORANGE so it stands out hard
+    // Sponsor background: FULL ORANGE so it pops
     const cardBg = sponsor
-      ? "linear-gradient(180deg, rgba(255,122,0,0.98) 0%, rgba(255,154,43,0.92) 45%, rgba(255,122,0,0.86) 100%)"
+      ? "linear-gradient(180deg, rgba(255,154,43,0.98) 0%, rgba(255,122,0,0.98) 55%, rgba(255,122,0,0.92) 100%)"
       : "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.55) 100%)";
 
+    const glow = sponsor
+      ? "0 0 40px rgba(255,122,0,0.28)"
+      : q.status === "final" && q.correctPick === false
+      ? "0 0 22px rgba(255,46,77,0.12)"
+      : q.status === "final" && q.correctPick === true
+      ? "0 0 22px rgba(25,195,125,0.10)"
+      : "0 0 22px rgba(255,122,0,0.06)";
+
     const topAccent = sponsor
-      ? "linear-gradient(90deg, rgba(0,0,0,0.35), rgba(0,0,0,0.05))"
+      ? "linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.00))"
       : "linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.06))";
 
-    const textPrimary = sponsor ? "rgba(0,0,0,0.92)" : "rgba(255,255,255,0.92)";
-    const textSecondary = sponsor ? "rgba(0,0,0,0.72)" : "rgba(255,255,255,0.55)";
+    const ink = sponsor ? COLORS.sponsorInk : "rgba(255,255,255,0.92)";
+    const dimInk = sponsor ? "rgba(0,0,0,0.70)" : "rgba(255,255,255,0.70)";
+    const faintInk = sponsor ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.55)";
 
     return (
       <div
@@ -967,27 +1023,17 @@ export default function PicksPage() {
           boxShadow: glow,
         }}
       >
-        {/* subtle hover glow */}
-        <div
-          className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition"
-          style={{
-            background: sponsor
-              ? "radial-gradient(900px 260px at 50% 0%, rgba(0,0,0,0.14), transparent 60%)"
-              : "radial-gradient(800px 240px at 50% 0%, rgba(255,122,0,0.10), transparent 60%)",
-          }}
-        />
-
-        {/* Top accent strip */}
+        {/* top accent strip */}
         <div className="h-1 w-full" style={{ background: topAccent }} />
 
         <div className="p-4">
           {/* Header row */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              {renderStatusPill(q, sponsor)}
+              {renderStatusPill(q)}
               <span
                 className="text-[11px] font-black uppercase tracking-wide"
-                style={{ color: sponsor ? "rgba(0,0,0,0.75)" : "rgba(255,255,255,0.70)" }}
+                style={{ color: dimInk }}
               >
                 Q{q.quarter}
               </span>
@@ -996,9 +1042,9 @@ export default function PicksPage() {
                 <span
                   className="text-[10px] font-black rounded-full px-2 py-1 border"
                   style={{
-                    borderColor: "rgba(0,0,0,0.25)",
+                    borderColor: "rgba(0,0,0,0.22)",
                     background: "rgba(0,0,0,0.10)",
-                    color: "rgba(0,0,0,0.88)",
+                    color: "rgba(0,0,0,0.85)",
                   }}
                 >
                   SPONSORED
@@ -1012,17 +1058,17 @@ export default function PicksPage() {
                 type="button"
                 className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
                 style={{
-                  borderColor: sponsor ? "rgba(0,0,0,0.25)" : hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
-                  background: sponsor ? "rgba(0,0,0,0.08)" : hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
-                  color: sponsor ? "rgba(0,0,0,0.90)" : hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)",
+                  borderColor: sponsor ? "rgba(0,0,0,0.22)" : hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+                  background: sponsor ? "rgba(0,0,0,0.10)" : hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                  color: sponsor ? "rgba(0,0,0,0.85)" : hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)",
                 }}
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   clearPick(q);
                 }}
-                disabled={!hasPick || !canInteract}
-                title={!canInteract ? "Locked" : hasPick ? "Clear selection" : "No selection to clear"}
+                disabled={!hasPick || interactionLocked}
+                title={interactionLocked ? "Locked" : hasPick ? "Clear selection" : "No selection to clear"}
                 aria-label="Clear selection"
               >
                 ✕
@@ -1033,9 +1079,9 @@ export default function PicksPage() {
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-black border transition active:scale-[0.99]"
                 style={{
-                  borderColor: sponsor ? "rgba(0,0,0,0.25)" : "rgba(255,255,255,0.12)",
-                  background: sponsor ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.04)",
-                  color: sponsor ? "rgba(0,0,0,0.90)" : "rgba(255,255,255,0.90)",
+                  borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.12)",
+                  background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.04)",
+                  color: sponsor ? "rgba(0,0,0,0.88)" : "rgba(255,255,255,0.90)",
                 }}
                 onClick={(e) => {
                   e.preventDefault();
@@ -1053,24 +1099,21 @@ export default function PicksPage() {
           <div
             className="mt-3 rounded-2xl border p-3"
             style={{
-              borderColor: sponsor ? "rgba(0,0,0,0.22)" : COLORS.orangeSoft2,
+              borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
               background: sponsor
-                ? "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.06))"
+                ? "rgba(0,0,0,0.10)"
                 : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
             }}
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div
-                  className="text-[10px] uppercase tracking-widest"
-                  style={{ color: sponsor ? "rgba(0,0,0,0.62)" : COLORS.textFaint }}
-                >
+                <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
                   Player
                 </div>
-                <div className="mt-1 text-[15px] font-black truncate" style={{ color: textPrimary }}>
+                <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
                   {playerName}
                 </div>
-                <div className="mt-1 text-[11px] truncate" style={{ color: textSecondary }}>
+                <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
                   {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
                 </div>
               </div>
@@ -1078,8 +1121,8 @@ export default function PicksPage() {
               <div
                 className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
                 style={{
-                  borderColor: sponsor ? "rgba(0,0,0,0.22)" : COLORS.orangeSoft2,
-                  background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(0,0,0,0.35)",
+                  borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
+                  background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
                 }}
                 title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
               >
@@ -1089,12 +1132,11 @@ export default function PicksPage() {
                   fill
                   sizes="54px"
                   style={{ objectFit: "cover" }}
-                  priority={false}
                 />
               </div>
             </div>
 
-            <div className="mt-2 text-[11px] truncate" style={{ color: sponsor ? "rgba(0,0,0,0.70)" : "rgba(255,255,255,0.55)" }}>
+            <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
               {q.status === "open"
                 ? "Live"
                 : q.status === "pending"
@@ -1107,21 +1149,66 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Question */}
-          <div className="mt-3 text-[13px] font-semibold leading-snug" style={{ color: textPrimary }}>
-            {q.question}
-          </div>
+          {/* ✅ Sponsor Cover (forces exposure + click to reveal) */}
+          {sponsor && !revealed ? (
+            <div
+              className="mt-3 rounded-2xl border p-4"
+              style={{
+                borderColor: "rgba(0,0,0,0.22)",
+                background: "rgba(0,0,0,0.12)",
+              }}
+            >
+              <div className="text-[11px] font-black uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.75)" }}>
+                Question proudly sponsored by
+              </div>
 
-          {renderSentiment(q, sponsor)}
-          {renderPickButtons(q, canInteract, sponsor)}
+              <div className="mt-1 text-[22px] font-black" style={{ color: "rgba(0,0,0,0.92)" }}>
+                {sponsorName}
+              </div>
 
-          {/* Lock overlay */}
-          {lockOverlayOn ? (
+              <div className="mt-2 text-[13px] font-semibold" style={{ color: "rgba(0,0,0,0.80)" }}>
+                Get this correct to go in the draw to win a <span className="font-black">{sponsorPrize}</span>.
+              </div>
+
+              <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.65)" }}>
+                1 winner only. Bonus question (doesn’t affect your streak).
+              </div>
+
+              <button
+                type="button"
+                onClick={() => revealSponsor(q.id)}
+                className="mt-4 w-full rounded-xl border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(0,0,0,0.28)",
+                  background: "rgba(0,0,0,0.16)",
+                  color: "rgba(0,0,0,0.92)",
+                }}
+                title="Reveal sponsor question"
+              >
+                🔓 Reveal sponsor question
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Question */}
+              <div className="mt-3 text-[13px] font-semibold leading-snug" style={{ color: ink }}>
+                {q.question}
+              </div>
+
+              {/* Crowd (keep on normal cards; on sponsor cards still fine) */}
+              <div style={{ color: sponsor ? "rgba(0,0,0,0.92)" : "inherit" }}>{renderSentiment(q)}</div>
+
+              {renderPickButtons(q, interactionLocked)}
+            </>
+          )}
+
+          {/* Lock overlay: ONLY for locked questions (final/pending/void/game locked). Not for sponsor cover. */}
+          {locked ? (
             <div
               className="pointer-events-none absolute inset-0"
               style={{
                 background: sponsor
-                  ? "linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.18))"
+                  ? "linear-gradient(180deg, rgba(255,122,0,0.02), rgba(0,0,0,0.20))"
                   : "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55))",
               }}
             />
@@ -1329,7 +1416,7 @@ export default function PicksPage() {
               ) : null}
             </div>
             <p className="mt-1 text-sm text-white/60">
-              Pick any questions you want. Click the same option again to clear, or use ✕.
+              Pick any questions you want. Finalised questions are locked.
             </p>
           </div>
 
@@ -1522,7 +1609,7 @@ export default function PicksPage() {
                 <span className="font-black" style={{ color: COLORS.orange }}>
                   Tip:
                 </span>{" "}
-                Click the same option again to clear, or hit ✕.
+                Sponsor questions are bonus — reveal them to enter the draw.
               </div>
             </div>
           </div>
@@ -1561,7 +1648,7 @@ export default function PicksPage() {
           ) : (
             games.map((g) => {
               const lockMs = new Date(g.startTime).getTime() - nowMs;
-              const isLocked = lockMs <= 0;
+              const gameLocked = lockMs <= 0;
 
               const gamePicked = g.questions.reduce((acc, q) => {
                 const p = effectivePick(localPicks[q.id], q.userPick);
@@ -1576,7 +1663,7 @@ export default function PicksPage() {
                   key={g.id}
                   className="rounded-2xl border overflow-hidden"
                   style={{
-                    borderColor: COLORS.orangeSoft, // orange outline for game container
+                    borderColor: COLORS.orangeSoft,
                     background: "rgba(255,255,255,0.02)",
                   }}
                 >
@@ -1614,12 +1701,12 @@ export default function PicksPage() {
                         <span
                           className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                           style={{
-                            borderColor: isLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
-                            background: isLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
+                            borderColor: gameLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
+                            background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
                             color: "rgba(255,255,255,0.90)",
                           }}
                         >
-                          {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
+                          {gameLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
                         </span>
                       </div>
                     </div>
@@ -1641,7 +1728,7 @@ export default function PicksPage() {
                   <div className="p-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       {g.questions.map((q) => (
-                        <PickCard key={q.id} g={g} q={q} isLocked={isLocked} />
+                        <PickCard key={q.id} g={g} q={q} gameLocked={gameLocked} />
                       ))}
                     </div>
                   </div>
