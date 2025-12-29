@@ -82,13 +82,11 @@ type CommentRow = {
 
 /**
  * ✅ This version:
- * - Fix comments: real modal + Firestore-backed list + add comment.
- * - FIX: comment field mismatch (body vs text) — now uses "body" and falls back to "text".
- * - FIX: Firestore query index issue — removed orderBy; sort in JS.
- * - FIX: X clear works (no “fallback to q.userPick”) using LocalPick="none" sentinel + effectivePick() helper.
- * - Clear persists server-side (tries DELETE, falls back to POST {action:"clear"}).
- * - Selected pick becomes BLUE when selected.
- * - Haptic-style micro animation (press + select pop) using CSS keyframes (no libs).
+ * - Layout rebuild ONLY: Chalkboard-inspired premium grid layout.
+ * - Desktop: 3 columns, Tablet: 2, Mobile: 1.
+ * - Per game: clean header + grid of pick cards (cards align; no wide tables).
+ * - Preserves ALL existing logic, API calls, Firestore, streak widgets, comments modal, etc.
+ * - Player name: best-effort extraction from question text (NO schema changes).
  */
 const COLORS = {
   bg: "#0D1117",
@@ -173,6 +171,27 @@ function formatCommentTime(createdAt: any): string {
   } catch {
     return "";
   }
+}
+
+// Best-effort player extraction from question text (no schema change).
+// Examples it can handle reasonably:
+// - "Nick Daicos — Over 24.5 disposals" -> "Nick Daicos"
+// - "Charlie Curnow: Kicks 2+ goals" -> "Charlie Curnow"
+// - "Lachie Neale - 25+ disposals" -> "Lachie Neale"
+// If no clear delimiter is present, returns "—" (so we do not guess).
+function extractPlayerName(question: string): string {
+  const q = (question || "").trim();
+  if (!q) return "—";
+
+  const candidates = [" — ", " – ", " - ", ": "];
+  for (const d of candidates) {
+    const idx = q.indexOf(d);
+    if (idx > 0 && idx <= 28) {
+      const left = q.slice(0, idx).trim();
+      if (left.length >= 2 && left.length <= 28) return left;
+    }
+  }
+  return "—";
 }
 
 type LocalPickMap = Record<string, LocalPick>;
@@ -521,8 +540,8 @@ export default function PicksPage() {
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
 
   // ✅ Compact cards (~75% height feel)
-  const PICK_CARD_PAD_Y = "py-1";
-  const PICK_CARD_PAD_X = "px-3";
+  const PICK_CARD_PAD_Y = "py-3";
+  const PICK_CARD_PAD_X = "px-4";
   const PICK_BUTTON_PAD_Y = "py-2";
   const SENTIMENT_BAR_H = "h-[6px]";
 
@@ -792,7 +811,7 @@ export default function PicksPage() {
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
-      <div className="mt-1">
+      <div className="mt-2">
         <div className="flex items-center justify-between text-[11px] text-white/65">
           <span className="uppercase tracking-wide">Crowd</span>
           <span style={{ color: majority.color }} className="font-semibold">
@@ -889,14 +908,14 @@ export default function PicksPage() {
       } as const;
     };
 
-    const yesLabel = isYesSelected ? "YES (selected)" : "YES";
-    const noLabel = isNoSelected ? "NO (selected)" : "NO";
+    const yesLabel = isYesSelected ? "YES" : "YES";
+    const noLabel = isNoSelected ? "NO" : "NO";
 
     const pulseKey = selectPulse[q.id] ?? 0;
     const pulseClass = pulseKey ? "streakr-select-pop" : "";
 
     return (
-      <div className="mt-1.5 flex gap-2">
+      <div className="mt-3 flex gap-2">
         <button
           key={`yes-${q.id}-${pulseKey}`}
           type="button"
@@ -929,6 +948,303 @@ export default function PicksPage() {
   const pageTitle = `Picks`;
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+
+  // ===== UI-only components (same file, no logic refactor) =====
+
+  const GameHeader = ({
+    g,
+    isLocked,
+    lockMs,
+    gamePicked,
+    gameTotal,
+    progressPct,
+  }: {
+    g: ApiGame;
+    isLocked: boolean;
+    lockMs: number;
+    gamePicked: number;
+    gameTotal: number;
+    progressPct: number;
+  }) => {
+    return (
+      <div
+        className="rounded-2xl border overflow-hidden"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: `linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 55%, rgba(0,0,0,0.00) 100%)`,
+          boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+        }}
+      >
+        <div
+          className="px-4 sm:px-5 py-4 border-b"
+          style={{
+            borderColor: "rgba(255,255,255,0.08)",
+            background: `linear-gradient(180deg, rgba(244,178,71,0.18) 0%, rgba(15,22,35,0.70) 100%)`,
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-widest text-white/55">Game</div>
+              <div className="mt-1 text-lg sm:text-xl font-extrabold truncate text-white">
+                {g.match}
+              </div>
+              <div className="mt-0.5 text-[12px] text-white/70 truncate">
+                {g.venue} • {formatAedt(g.startTime)}
+              </div>
+            </div>
+
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.88)",
+                  }}
+                >
+                  Picks: {gamePicked}/{gameTotal}
+                </span>
+
+                <span
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: isLocked ? "rgba(255,255,255,0.16)" : "rgba(0,229,255,0.30)",
+                    background: isLocked ? "rgba(255,255,255,0.05)" : "rgba(0,229,255,0.08)",
+                    color: isLocked ? "rgba(255,255,255,0.78)" : "rgba(0,229,255,0.92)",
+                  }}
+                >
+                  {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
+                </span>
+              </div>
+
+              <div className="w-[220px] max-w-[55vw]">
+                <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${progressPct}%`,
+                      background: `linear-gradient(90deg, rgba(244,178,71,0.95), rgba(0,229,255,0.35))`,
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-[11px] text-white/55">
+            12 picks • 4 rows • 3 columns on desktop
+          </div>
+        </div>
+
+        <div className="px-4 sm:px-5 py-4">
+          <div
+            className="rounded-xl border px-3 py-2 text-[12px] text-white/70"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <span className="font-black text-white/90">Tip:</span> Tap YES/NO. Tap the same option again to clear,
+            or use ✕.
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const PickCard = ({
+    g,
+    q,
+    isLocked,
+  }: {
+    g: ApiGame;
+    q: ApiQuestion;
+    isLocked: boolean;
+  }) => {
+    const finalWrong = q.status === "final" && q.correctPick === false;
+    const finalCorrect = q.status === "final" && q.correctPick === true;
+
+    const pick = effectivePick(localPicks[q.id], q.userPick);
+    const hasPick = pick === "yes" || pick === "no";
+
+    const sponsor = q.isSponsorQuestion === true;
+    const playerName = extractPlayerName(q.question);
+
+    const cardBorder = sponsor
+      ? "rgba(244,178,71,0.75)"
+      : finalWrong
+      ? "rgba(255,46,77,0.45)"
+      : finalCorrect
+      ? "rgba(25,195,125,0.40)"
+      : "rgba(255,255,255,0.10)";
+
+    const cardBg = sponsor
+      ? "linear-gradient(180deg, rgba(244,178,71,0.12), rgba(13,17,23,0.78))"
+      : "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(13,17,23,0.80))";
+
+    const cardShadow = sponsor
+      ? "0 0 28px rgba(244,178,71,0.12)"
+      : finalWrong
+      ? "0 0 24px rgba(255,46,77,0.08)"
+      : finalCorrect
+      ? "0 0 24px rgba(25,195,125,0.06)"
+      : "0 0 0 rgba(0,0,0,0)";
+
+    return (
+      <div
+        className="group rounded-2xl border transition-transform"
+        style={{
+          borderColor: cardBorder,
+          background: cardBg,
+          boxShadow: cardShadow,
+        }}
+      >
+        <div
+          className="rounded-2xl"
+          style={{
+            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)",
+          }}
+        >
+          <div
+            className="rounded-2xl transition"
+            style={{
+              background: "rgba(0,0,0,0.00)",
+            }}
+          >
+            <div
+              className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y} transition`}
+              style={{
+                boxShadow: "0 0 0 rgba(0,0,0,0)",
+              }}
+            >
+              {/* Top row: status + quarter + actions */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {renderStatusPill(q)}
+                  <span className="text-[11px] font-black text-white/65 uppercase tracking-wide">
+                    Q{q.quarter}
+                  </span>
+
+                  {sponsor ? (
+                    <span
+                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
+                      style={{
+                        borderColor: "rgba(244,178,71,0.70)",
+                        background: "rgba(244,178,71,0.18)",
+                        color: "rgba(255,255,255,0.92)",
+                        boxShadow: "0 0 14px rgba(244,178,71,0.18)",
+                      }}
+                    >
+                      SPONSORED
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* Clear X */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                    style={{
+                      borderColor: hasPick ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.10)",
+                      background: hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                      color: hasPick ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.50)",
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      clearPick(q);
+                    }}
+                    disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
+                    title={hasPick ? "Clear selection" : "No selection to clear"}
+                    aria-label="Clear selection"
+                  >
+                    ✕
+                  </button>
+
+                  {/* Comments */}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[12px] font-black border transition active:scale-[0.99]"
+                    style={{
+                      borderColor:
+                        q.commentCount && q.commentCount >= 100
+                          ? "rgba(244,178,71,0.55)"
+                          : "rgba(0,229,255,0.28)",
+                      background:
+                        q.commentCount && q.commentCount >= 100
+                          ? "rgba(244,178,71,0.12)"
+                          : "rgba(0,229,255,0.07)",
+                      color: "rgba(255,255,255,0.90)",
+                      boxShadow:
+                        q.commentCount && q.commentCount >= 100
+                          ? "0 0 18px rgba(244,178,71,0.12)"
+                          : "0 0 18px rgba(0,229,255,0.08)",
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openComments(g, q);
+                    }}
+                    title="Open comments"
+                  >
+                    💬 {q.commentCount ?? 0}
+                    {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
+                  </button>
+                </div>
+              </div>
+
+              {/* Player + question */}
+              <div className="mt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] uppercase tracking-widest text-white/50">Player</div>
+                    <div className="mt-0.5 text-[15px] font-extrabold text-white truncate">
+                      {playerName}
+                    </div>
+                  </div>
+
+                  {/* Game context */}
+                  <div className="text-right shrink-0">
+                    <div className="text-[10px] uppercase tracking-widest text-white/45">Game</div>
+                    <div className="mt-0.5 text-[12px] font-bold text-white/70 max-w-[180px] truncate">
+                      {g.match}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2 text-[13px] font-semibold leading-tight text-white/90">
+                  {q.question}
+                </div>
+              </div>
+
+              {renderSentiment(q)}
+              {renderPickButtons(q, isLocked || q.status === "pending")}
+
+              {/* Hover glow (subtle) */}
+              <div
+                className="pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{
+                  position: "absolute",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Chalkboard-ish hover glow */}
+        <div
+          className="pointer-events-none rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{
+            position: "absolute",
+            inset: 0,
+            boxShadow: "0 0 42px rgba(244,178,71,0.08), 0 0 28px rgba(0,229,255,0.05)",
+          }}
+        />
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
@@ -1112,7 +1428,7 @@ export default function PicksPage() {
         </div>
       ) : null}
 
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6">
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -1132,7 +1448,7 @@ export default function PicksPage() {
               ) : null}
             </div>
             <p className="mt-1 text-sm text-white/65">
-              Pick any questions you want. Change your mind anytime — click again to unselect, or hit the ✕.
+              Pick any questions you want. Change your mind anytime — tap the same option again, or hit ✕.
             </p>
           </div>
 
@@ -1318,7 +1634,7 @@ export default function PicksPage() {
                 <span className="font-bold" style={{ color: COLORS.orange }}>
                   Tip:
                 </span>{" "}
-                Click the same pick again to unselect, or hit the ✕ clear button.
+                Tap YES/NO to pick. Tap again to clear, or hit ✕.
               </div>
             </div>
           </div>
@@ -1331,7 +1647,7 @@ export default function PicksPage() {
         ) : null}
 
         {/* Games */}
-        <div className="mt-5 flex flex-col gap-4">
+        <div className="mt-6 flex flex-col gap-6">
           {loading ? (
             <div
               className="rounded-2xl border p-4 animate-pulse"
@@ -1361,196 +1677,26 @@ export default function PicksPage() {
               const gameTotal = g.questions.length;
               const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
 
+              // Layout rule: 12 picks per game. We do NOT change logic—only presentation.
+              // If fewer/more exist, we still render what's provided.
               return (
-                <div
-                  key={g.id}
-                  className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: "rgba(244,178,71,0.80)",
-                    background: `linear-gradient(180deg, rgba(244,178,71,0.22) 0%, rgba(244,178,71,0.14) 42%, rgba(13,17,23,0.88) 100%)`,
-                    boxShadow: "0 0 40px rgba(244,178,71,0.16), inset 0 0 0 1px rgba(244,178,71,0.35)",
-                  }}
-                >
-                  {/* Game info block (ORANGE) */}
-                  <div
-                    className="px-4 py-3"
-                    style={{
-                      background: `linear-gradient(180deg, rgba(244,178,71,0.40) 0%, rgba(244,178,71,0.18) 100%)`,
-                      borderBottom: "1px solid rgba(255,255,255,0.10)",
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-lg sm:text-xl font-extrabold truncate" style={{ color: COLORS.white }}>
-                          {g.match}
-                        </div>
-                        <div className="mt-0.5 text-[12px] text-white/85 truncate">
-                          {g.venue} • {formatAedt(g.startTime)}
-                        </div>
+                <div key={g.id} className="space-y-4">
+                  <GameHeader
+                    g={g}
+                    isLocked={isLocked}
+                    lockMs={lockMs}
+                    gamePicked={gamePicked}
+                    gameTotal={gameTotal}
+                    progressPct={progressPct}
+                  />
+
+                  {/* Picks Grid: 3 cols desktop, 2 tablet, 1 mobile */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {g.questions.map((q) => (
+                      <div key={q.id} className="relative">
+                        <PickCard g={g} q={q} isLocked={isLocked} />
                       </div>
-
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                            style={{
-                              borderColor: "rgba(255,255,255,0.22)",
-                              background: "rgba(13,17,23,0.35)",
-                              color: "rgba(255,255,255,0.92)",
-                            }}
-                          >
-                            Picks: {gamePicked}/{gameTotal}
-                          </span>
-
-                          <span
-                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                            style={{
-                              borderColor: isLocked ? "rgba(255,255,255,0.22)" : "rgba(13,17,23,0.55)",
-                              background: isLocked ? "rgba(13,17,23,0.35)" : "rgba(13,17,23,0.30)",
-                              color: isLocked ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.92)",
-                            }}
-                          >
-                            {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(13,17,23,0.35)" }}>
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(13,17,23,0.10), rgba(0,229,255,0.45))`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Questions */}
-                  <div className="px-3 pb-3">
-                    <div className="flex flex-col gap-2">
-                      {g.questions.map((q) => {
-                        const finalWrong = q.status === "final" && q.correctPick === false;
-                        const finalCorrect = q.status === "final" && q.correctPick === true;
-
-                        const pick = effectivePick(localPicks[q.id], q.userPick);
-                        const hasPick = pick === "yes" || pick === "no";
-
-                        const sponsor = q.isSponsorQuestion === true;
-
-                        return (
-                          <div
-                            key={q.id}
-                            className="rounded-2xl border"
-                            style={{
-                              borderColor: sponsor
-                                ? "rgba(244,178,71,0.95)"
-                                : finalWrong
-                                ? "rgba(255,46,77,0.55)"
-                                : finalCorrect
-                                ? "rgba(25,195,125,0.50)"
-                                : "rgba(255,255,255,0.10)",
-                              background: sponsor ? "rgba(244,178,71,0.12)" : "rgba(13,17,23,0.78)",
-                              boxShadow: sponsor
-                                ? "0 0 28px rgba(244,178,71,0.18), inset 0 0 0 1px rgba(244,178,71,0.20)"
-                                : finalWrong
-                                ? "0 0 24px rgba(255,46,77,0.10)"
-                                : finalCorrect
-                                ? "0 0 24px rgba(25,195,125,0.08)"
-                                : "none",
-                            }}
-                          >
-                            <div className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y}`}>
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  {renderStatusPill(q)}
-                                  <span className="text-[11px] font-black text-white/75 uppercase tracking-wide">
-                                    Quarter {q.quarter}
-                                  </span>
-
-                                  {sponsor ? (
-                                    <span
-                                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
-                                      style={{
-                                        borderColor: "rgba(244,178,71,0.85)",
-                                        background: "rgba(244,178,71,0.22)",
-                                        color: "rgba(13,17,23,0.95)",
-                                        boxShadow: "0 0 14px rgba(244,178,71,0.22)",
-                                      }}
-                                    >
-                                      SPONSORED ☆
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  {/* Clear X */}
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
-                                    style={{
-                                      borderColor: hasPick ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
-                                      background: hasPick ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
-                                      color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
-                                    }}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      clearPick(q);
-                                    }}
-                                    disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
-                                    title={hasPick ? "Clear selection" : "No selection to clear"}
-                                    aria-label="Clear selection"
-                                  >
-                                    ✕
-                                  </button>
-
-                                  {/* Comments */}
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
-                                    style={{
-                                      borderColor:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.55)"
-                                          : "rgba(0,229,255,0.32)",
-                                      background:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.14)"
-                                          : "rgba(0,229,255,0.08)",
-                                      color: "rgba(255,255,255,0.92)",
-                                      boxShadow:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "0 0 18px rgba(244,178,71,0.14)"
-                                          : "0 0 18px rgba(0,229,255,0.10)",
-                                    }}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      openComments(g, q);
-                                    }}
-                                    title="Open comments"
-                                  >
-                                    💬 {q.commentCount ?? 0}
-                                    {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="mt-1 text-[13px] font-semibold leading-tight text-white/90">
-                                {q.question}
-                              </div>
-
-                              {renderSentiment(q)}
-                              {renderPickButtons(q, isLocked || q.status === "pending")}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    ))}
                   </div>
                 </div>
               );
