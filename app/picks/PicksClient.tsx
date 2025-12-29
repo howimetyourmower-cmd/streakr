@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
-type LocalPick = PickOutcome | "none"; // ✅ sentinel for “cleared” so UI won’t fall back to API pick
+type LocalPick = PickOutcome | "none"; // sentinel for “cleared”
 
 type ApiQuestion = {
   id: string;
@@ -76,32 +76,26 @@ type CommentRow = {
   userId?: string | null;
   displayName?: string | null;
   username?: string | null;
-  body: string; // ✅ matches Firestore screenshot (field is "body")
+  body: string;
   createdAt?: any;
 };
 
-/**
- * ✅ This version:
- * - Full page code.
- * - Full black background.
- * - NO pulsing "LIVE" dot (removed ping animation).
- * - Preserves all existing logic (picks, streak widgets, comments modal, local storage, etc).
- */
 const COLORS = {
-  bg: "#000000", // ✅ full black background
+  bg: "#000000", // ✅ full black
   panel: "rgba(255,255,255,0.035)",
-  panel2: "rgba(255,255,255,0.020)",
+  panel2: "rgba(255,255,255,0.02)",
+  stroke: "rgba(255,255,255,0.10)",
+  stroke2: "rgba(255,255,255,0.14)",
+  textDim: "rgba(255,255,255,0.70)",
+  textFaint: "rgba(255,255,255,0.50)",
 
-  orange: "#F4B247",
+  orange: "#FF7A00",
+  orange2: "#FF9A2B",
 
-  yesFill: "#19C37D",
-  noFill: "#FF2E4D",
-
-  selectedBlue: "#2F7CFF",
-  selectedBlueDeep: "#1D4ED8",
-
-  cyan: "#00E5FF",
-  white: "#FFFFFF",
+  good: "rgba(25,195,125,0.95)",
+  bad: "rgba(255,46,77,0.95)",
+  cyan: "rgba(0,229,255,0.95)",
+  white: "rgba(255,255,255,0.98)",
 };
 
 function clampPct(n: number | undefined): number {
@@ -172,8 +166,29 @@ function formatCommentTime(createdAt: any): string {
   }
 }
 
+/**
+ * UI-only helper: best-effort player extraction from question text.
+ * Examples:
+ *  - "Will Patrick Cripps (Car) have 6 or more disposals..." -> "Patrick Cripps"
+ *  - "Will Charlie Curnow (Syd) kick 1 or more..." -> "Charlie Curnow"
+ *  - Anything else -> null
+ */
+function extractPlayerName(qText: string): string | null {
+  const t = (qText || "").trim();
+  if (!t.toLowerCase().startsWith("will ")) return null;
+  const rest = t.slice(5);
+  const parenIdx = rest.indexOf("(");
+  if (parenIdx > 0) return rest.slice(0, parenIdx).trim();
+  const haveIdx = rest.toLowerCase().indexOf(" have ");
+  if (haveIdx > 0) return rest.slice(0, haveIdx).trim();
+  const kickIdx = rest.toLowerCase().indexOf(" kick ");
+  if (kickIdx > 0) return rest.slice(0, kickIdx).trim();
+  const scoreIdx = rest.toLowerCase().indexOf(" score ");
+  if (scoreIdx > 0) return rest.slice(0, scoreIdx).trim();
+  return null;
+}
+
 type LocalPickMap = Record<string, LocalPick>;
-type SelectPulseMap = Record<string, number>;
 
 export default function PicksPage() {
   const { user } = useAuth();
@@ -195,10 +210,6 @@ export default function PicksPage() {
   const lastMilestoneRef = useRef<number>(0);
 
   const hasHydratedLocalRef = useRef(false);
-
-  // Haptic pop trigger per question
-  const [selectPulse, setSelectPulse] = useState<SelectPulseMap>({});
-  const pulseTimerRef = useRef<Record<string, any>>({});
 
   // ✅ Comments modal state
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -343,6 +354,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
+  // Confetti milestone (keep), but no pulsing UI elsewhere
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -351,7 +363,7 @@ export default function PicksPage() {
       lastMilestoneRef.current = milestone;
       setConfettiOn(true);
       if (confettiTimeoutRef.current) clearTimeout(confettiTimeoutRef.current);
-      confettiTimeoutRef.current = setTimeout(() => setConfettiOn(false), 1400);
+      confettiTimeoutRef.current = setTimeout(() => setConfettiOn(false), 1200);
     }
   }, [myCurrentStreak]);
 
@@ -392,34 +404,20 @@ export default function PicksPage() {
     return Math.round((correct / settledPicked) * 100);
   }, [allQuestions, localPicks]);
 
-const nextLockMs = useMemo(() => {
-  const future = games
-    .map((g) => new Date(g.startTime).getTime())
-    .filter((t) => Number.isFinite(t) && t > nowMs)
-    .sort((a, b) => a - b);
+  const nextLockMs = useMemo(() => {
+    const future = games
+      .map((g) => new Date(g.startTime).getTime())
+      .filter((t) => Number.isFinite(t) && t > nowMs)
+      .sort((a, b) => a - b);
 
-  if (!future.length) return 0;
-  return future[0] - nowMs;
-}, [games, nowMs]);
-
-
-  const triggerSelectPop = useCallback((questionId: string) => {
-    setSelectPulse((prev) => ({ ...prev, [questionId]: (prev[questionId] ?? 0) + 1 }));
-    if (pulseTimerRef.current[questionId]) clearTimeout(pulseTimerRef.current[questionId]);
-    pulseTimerRef.current[questionId] = setTimeout(() => {
-      setSelectPulse((prev) => {
-        const next = { ...prev };
-        delete next[questionId];
-        return next;
-      });
-    }, 260);
-  }, []);
+    if (!future.length) return 0;
+    return future[0] - nowMs;
+  }, [games, nowMs]);
 
   // ✅ Robust clear: UI clears instantly + persists server-side
   const clearPick = useCallback(
     async (q: ApiQuestion) => {
       setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
-      triggerSelectPop(q.id);
 
       if (!user) return;
 
@@ -451,7 +449,7 @@ const nextLockMs = useMemo(() => {
         console.error("Clear pick error", e);
       }
     },
-    [user, triggerSelectPop]
+    [user]
   );
 
   const togglePick = useCallback(
@@ -464,7 +462,6 @@ const nextLockMs = useMemo(() => {
       }
 
       setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
-      triggerSelectPop(q.id);
 
       if (!user) return;
 
@@ -491,7 +488,7 @@ const nextLockMs = useMemo(() => {
         console.error("Pick save error", e);
       }
     },
-    [user, roundNumber, localPicks, clearPick, triggerSelectPop]
+    [user, roundNumber, localPicks, clearPick]
   );
 
   const shareStreak = useCallback(async () => {
@@ -518,12 +515,6 @@ const nextLockMs = useMemo(() => {
   }, [myCurrentStreak, leaderStreak]);
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
-
-  // ✅ Compact cards (~75% height feel)
-  const PICK_CARD_PAD_Y = "py-1";
-  const PICK_CARD_PAD_X = "px-3";
-  const PICK_BUTTON_PAD_Y = "py-2";
-  const SENTIMENT_BAR_H = "h-[6px]";
 
   // ✅ Comments: open modal + subscribe to Firestore
   const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
@@ -578,7 +569,6 @@ const nextLockMs = useMemo(() => {
       commentsUnsubRef.current = null;
     }
 
-    // ✅ NO orderBy -> no composite index required
     const qRef = query(
       collection(db, "comments"),
       where("questionId", "==", commentsQuestion.id),
@@ -592,7 +582,6 @@ const nextLockMs = useMemo(() => {
           .map((d) => {
             const data = d.data() as any;
 
-            // ✅ match Firestore docs: body
             const body =
               typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
 
@@ -608,7 +597,6 @@ const nextLockMs = useMemo(() => {
               createdAt: data?.createdAt,
             };
           })
-          // ✅ sort in JS by createdAt desc
           .sort((a, b) => {
             const ams = a.createdAt?.toMillis?.() ?? 0;
             const bms = b.createdAt?.toMillis?.() ?? 0;
@@ -665,10 +653,7 @@ const nextLockMs = useMemo(() => {
         roundNumber: typeof roundNumber === "number" ? roundNumber : null,
         userId: user.uid,
         displayName: user.displayName ?? null,
-
-        // ✅ match Firestore: body
         body: txt,
-
         createdAt: serverTimestamp(),
       };
 
@@ -683,24 +668,21 @@ const nextLockMs = useMemo(() => {
   }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
   const renderStatusPill = (q: ApiQuestion) => {
+    // ✅ NO pulsing. Clean chalkboard-ish micro pill.
     const base =
-      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide border";
+      "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border";
 
-    // ✅ OPEN (LIVE) — no pulsing animation
     if (q.status === "open") {
       return (
         <span
           className={base}
           style={{
-            borderColor: "rgba(0,229,255,0.28)",
+            borderColor: "rgba(0,229,255,0.26)",
             background: "rgba(0,229,255,0.08)",
             color: "rgba(0,229,255,0.92)",
           }}
         >
-          <span
-            className="relative inline-flex h-1.5 w-1.5 rounded-full"
-            style={{ background: "rgba(0,229,255,0.95)" }}
-          />
+          <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.92)" }} />
           LIVE
         </span>
       );
@@ -783,16 +765,16 @@ const nextLockMs = useMemo(() => {
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
     return (
-      <div className="mt-1">
-        <div className="flex items-center justify-between text-[11px] text-white/65">
-          <span className="uppercase tracking-wide">Crowd</span>
-          <span style={{ color: majority.color }} className="font-semibold">
+      <div className="mt-2">
+        <div className="flex items-center justify-between text-[10px] text-white/60">
+          <span className="uppercase tracking-widest">Crowd</span>
+          <span style={{ color: majority.color }} className="font-bold">
             {majority.label}
           </span>
         </div>
 
         <div
-          className={`mt-1 ${SENTIMENT_BAR_H} rounded-full overflow-hidden border`}
+          className="mt-1 h-[7px] rounded-full overflow-hidden border"
           style={{
             borderColor: "rgba(255,255,255,0.10)",
             background: "rgba(255,255,255,0.06)",
@@ -803,14 +785,14 @@ const nextLockMs = useMemo(() => {
               className="h-full"
               style={{
                 width: `${yesW}%`,
-                background: `linear-gradient(90deg, rgba(25,195,125,0.85), rgba(25,195,125,0.18))`,
+                background: `linear-gradient(90deg, rgba(25,195,125,0.85), rgba(25,195,125,0.20))`,
               }}
             />
             <div
               className="h-full"
               style={{
                 width: `${noW}%`,
-                background: `linear-gradient(90deg, rgba(255,46,77,0.18), rgba(255,46,77,0.85))`,
+                background: `linear-gradient(90deg, rgba(255,46,77,0.20), rgba(255,46,77,0.85))`,
               }}
             />
           </div>
@@ -818,23 +800,23 @@ const nextLockMs = useMemo(() => {
 
         <div className="mt-1 flex items-center justify-between text-[10px] text-white/55">
           <span>
-            YES <span className="font-semibold text-white/80">{Math.round(yes)}%</span>
+            YES <span className="font-bold text-white/80">{Math.round(yes)}%</span>
           </span>
 
           {aligned === null ? (
-            <span className="text-white/45">Pick to see if you’re with the crowd</span>
+            <span className="text-white/40">Pick to compare</span>
           ) : aligned ? (
-            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-semibold">
-              With majority
+            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-bold">
+              With crowd
             </span>
           ) : (
-            <span style={{ color: COLORS.orange }} className="font-semibold">
-              Against majority
+            <span style={{ color: COLORS.orange }} className="font-bold">
+              Against crowd
             </span>
           )}
 
           <span>
-            NO <span className="font-semibold text-white/80">{Math.round(no)}%</span>
+            NO <span className="font-bold text-white/80">{Math.round(no)}%</span>
           </span>
         </div>
       </div>
@@ -846,72 +828,51 @@ const nextLockMs = useMemo(() => {
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
 
-    const baseBtn =
-      "flex-1 rounded-xl font-extrabold tracking-wide transition disabled:opacity-50 disabled:cursor-not-allowed";
+    // Chalkboard-ish: tight segmented action row
+    const btnBase =
+      "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
 
-    const pressClasses = "active:scale-[0.985]";
+    const selectedStyle = {
+      borderColor: "rgba(255,122,0,0.65)",
+      background: `linear-gradient(180deg, rgba(255,122,0,0.95), rgba(255,154,43,0.88))`,
+      boxShadow: "0 0 26px rgba(255,122,0,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
+      color: "rgba(0,0,0,0.92)",
+    } as const;
 
-    const makeBtnStyle = (variant: "yes" | "no") => {
-      const selected = variant === "yes" ? isYesSelected : isNoSelected;
+    const neutralStyle = {
+      borderColor: "rgba(255,255,255,0.12)",
+      background: "rgba(255,255,255,0.04)",
+      boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.05)",
+      color: "rgba(255,255,255,0.88)",
+    } as const;
 
-      if (selected) {
-        return {
-          borderColor: "rgba(47,124,255,0.85)",
-          background: `linear-gradient(180deg, rgba(47,124,255,0.92), rgba(29,78,216,0.88))`,
-          color: "rgba(255,255,255,0.98)",
-          boxShadow: "0 0 22px rgba(47,124,255,0.26), inset 0 0 0 1px rgba(255,255,255,0.10)",
-        } as const;
-      }
-
-      if (variant === "yes") {
-        return {
-          borderColor: "rgba(25,195,125,0.75)",
-          background: `linear-gradient(180deg, rgba(25,195,125,0.95), rgba(16,140,92,0.92))`,
-          color: "rgba(255,255,255,0.98)",
-          boxShadow: "0 0 18px rgba(25,195,125,0.14)",
-        } as const;
-      }
-
-      return {
-        borderColor: "rgba(255,46,77,0.78)",
-        background: `linear-gradient(180deg, rgba(255,46,77,0.95), rgba(190,22,50,0.92))`,
-        color: "rgba(255,255,255,0.98)",
-        boxShadow: "0 0 18px rgba(255,46,77,0.14)",
-      } as const;
-    };
-
-    const yesLabel = isYesSelected ? "YES (selected)" : "YES";
-    const noLabel = isNoSelected ? "NO (selected)" : "NO";
-
-    const pulseKey = selectPulse[q.id] ?? 0;
-    const pulseClass = pulseKey ? "streakr-select-pop" : "";
+    const yesStyle = isYesSelected ? selectedStyle : neutralStyle;
+    const noStyle = isNoSelected ? selectedStyle : neutralStyle;
 
     return (
-      <div className="mt-1.5 flex gap-2">
+      <div className="mt-3 flex gap-2">
         <button
-          key={`yes-${q.id}-${pulseKey}`}
           type="button"
           disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "yes")}
-          className={`${baseBtn} ${pressClasses} ${pulseClass} px-4 ${PICK_BUTTON_PAD_Y} text-[12px] border`}
-          style={makeBtnStyle("yes")}
+          className={btnBase}
+          style={yesStyle}
           aria-pressed={isYesSelected}
-          title={isYesSelected ? "Click again to unselect" : "Pick YES"}
+          title={isYesSelected ? "Click again to clear" : "Pick YES"}
         >
-          {yesLabel}
+          YES
         </button>
 
         <button
-          key={`no-${q.id}-${pulseKey}`}
           type="button"
           disabled={isLocked || q.status === "void"}
           onClick={() => togglePick(q, "no")}
-          className={`${baseBtn} ${pressClasses} ${pulseClass} px-4 ${PICK_BUTTON_PAD_Y} text-[12px] border`}
-          style={makeBtnStyle("no")}
+          className={btnBase}
+          style={noStyle}
           aria-pressed={isNoSelected}
-          title={isNoSelected ? "Click again to unselect" : "Pick NO"}
+          title={isNoSelected ? "Click again to clear" : "Pick NO"}
         >
-          {noLabel}
+          NO
         </button>
       </div>
     );
@@ -921,20 +882,192 @@ const nextLockMs = useMemo(() => {
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
+  // ----------------------------
+  // Chalkboard-inspired card
+  // ----------------------------
+  const PickCard = ({
+    g,
+    q,
+    isLocked,
+  }: {
+    g: ApiGame;
+    q: ApiQuestion;
+    isLocked: boolean;
+  }) => {
+    const finalWrong = q.status === "final" && q.correctPick === false;
+    const finalCorrect = q.status === "final" && q.correctPick === true;
+
+    const pick = effectivePick(localPicks[q.id], q.userPick);
+    const hasPick = pick === "yes" || pick === "no";
+
+    const sponsor = q.isSponsorQuestion === true;
+
+    const playerName = extractPlayerName(q.question) || "AFL Player";
+
+    const cardBorder = sponsor
+      ? "rgba(255,122,0,0.70)"
+      : finalWrong
+      ? "rgba(255,46,77,0.40)"
+      : finalCorrect
+      ? "rgba(25,195,125,0.35)"
+      : "rgba(255,255,255,0.10)";
+
+    const cardBg = `linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.35) 100%)`;
+
+    const glow = sponsor
+      ? "0 0 26px rgba(255,122,0,0.14)"
+      : finalWrong
+      ? "0 0 22px rgba(255,46,77,0.10)"
+      : finalCorrect
+      ? "0 0 22px rgba(25,195,125,0.08)"
+      : "0 0 22px rgba(255,255,255,0.04)";
+
+    const topAccent = sponsor
+      ? "linear-gradient(90deg, rgba(255,122,0,0.55), rgba(255,122,0,0.08))"
+      : "linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02))";
+
+    const lockOverlayOn = isLocked || q.status === "pending";
+
+    return (
+      <div
+        className="group relative rounded-2xl border overflow-hidden"
+        style={{
+          borderColor: cardBorder,
+          background: cardBg,
+          boxShadow: glow,
+        }}
+      >
+        {/* subtle hover glow */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition"
+          style={{
+            background:
+              "radial-gradient(800px 200px at 50% 0%, rgba(255,122,0,0.10), transparent 60%)",
+          }}
+        />
+
+        {/* Top accent strip */}
+        <div className="h-1 w-full" style={{ background: topAccent }} />
+
+        <div className="p-4">
+          {/* Header row: status + quarter + sponsor + actions */}
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {renderStatusPill(q)}
+              <span className="text-[11px] font-black text-white/70 uppercase tracking-wide">
+                Q{q.quarter}
+              </span>
+
+              {sponsor ? (
+                <span
+                  className="text-[10px] font-black rounded-full px-2 py-1 border"
+                  style={{
+                    borderColor: "rgba(255,122,0,0.60)",
+                    background: "rgba(255,122,0,0.16)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  SPONSORED
+                </span>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Clear */}
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+                  background: hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                  color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  clearPick(q);
+                }}
+                disabled={!hasPick || lockOverlayOn || q.status === "void"}
+                title={hasPick ? "Clear selection" : "No selection to clear"}
+                aria-label="Clear selection"
+              >
+                ✕
+              </button>
+
+              {/* Comments */}
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-black border transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.90)",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openComments(g, q);
+                }}
+                title="Open comments"
+              >
+                💬 {q.commentCount ?? 0}
+              </button>
+            </div>
+          </div>
+
+          {/* “Jersey area” placeholder (no icons yet) */}
+          <div className="mt-3 rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-widest" style={{ color: COLORS.textFaint }}>
+                  Player
+                </div>
+                <div className="mt-1 text-[15px] font-black text-white truncate">{playerName}</div>
+              </div>
+
+              <div
+                className="h-12 w-12 rounded-2xl border flex items-center justify-center"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02))",
+                }}
+                aria-hidden
+              >
+                <div className="text-white/35 text-[18px]">👕</div>
+              </div>
+            </div>
+
+            <div className="mt-2 text-[11px] text-white/55 truncate">
+              {g.match} • {q.status === "open" ? "Live" : q.status === "pending" ? "Locked" : q.status === "final" ? "Final" : "—"}
+            </div>
+          </div>
+
+          {/* Question */}
+          <div className="mt-3 text-[13px] font-semibold leading-snug text-white/90">
+            {q.question}
+          </div>
+
+          {renderSentiment(q)}
+          {renderPickButtons(q, lockOverlayOn)}
+
+          {/* Lock overlay */}
+          {lockOverlayOn ? (
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background:
+                  "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.45))",
+              }}
+            />
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <style>{`
-        .streakr-select-pop{
-          animation: streakrPop 220ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
-          will-change: transform;
-        }
-        @keyframes streakrPop{
-          0% { transform: scale(1); }
-          55% { transform: scale(1.03); }
-          100% { transform: scale(1); }
-        }
-      `}</style>
-
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
       {/* ✅ Comments Modal */}
@@ -945,7 +1078,7 @@ const nextLockMs = useMemo(() => {
             if (e.target === e.currentTarget) closeComments();
           }}
           style={{
-            background: "rgba(0,0,0,0.72)",
+            background: "rgba(0,0,0,0.70)",
             backdropFilter: "blur(8px)",
           }}
         >
@@ -953,8 +1086,8 @@ const nextLockMs = useMemo(() => {
             className="w-full max-w-2xl rounded-2xl border overflow-hidden"
             style={{
               borderColor: "rgba(255,255,255,0.14)",
-              background: `linear-gradient(180deg, rgba(20,20,20,0.92) 0%, rgba(10,10,10,0.92) 100%)`,
-              boxShadow: "0 24px 80px rgba(0,0,0,0.78)",
+              background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
+              boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
             }}
           >
             <div
@@ -991,7 +1124,7 @@ const nextLockMs = useMemo(() => {
               {!user ? (
                 <div
                   className="rounded-xl border p-3 text-[12px] text-white/80"
-                  style={{ borderColor: "rgba(244,178,71,0.35)", background: "rgba(244,178,71,0.10)" }}
+                  style={{ borderColor: "rgba(255,122,0,0.35)", background: "rgba(255,122,0,0.10)" }}
                 >
                   Log in to post comments. You can still read the chat.
                 </div>
@@ -1032,7 +1165,7 @@ const nextLockMs = useMemo(() => {
               </div>
 
               {commentErr ? (
-                <div className="mt-2 text-[12px]" style={{ color: COLORS.noFill }}>
+                <div className="mt-2 text-[12px]" style={{ color: COLORS.bad }}>
                   {commentErr}
                 </div>
               ) : null}
@@ -1111,26 +1244,26 @@ const nextLockMs = useMemo(() => {
               <h1 className="text-3xl sm:text-4xl font-black">{pageTitle}</h1>
               {roundLabel ? (
                 <span
-                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold border"
+                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                   style={{
-                    borderColor: "rgba(0,229,255,0.28)",
-                    background: "rgba(0,229,255,0.08)",
-                    color: "rgba(0,229,255,0.92)",
+                    borderColor: "rgba(255,122,0,0.35)",
+                    background: "rgba(255,122,0,0.10)",
+                    color: "rgba(255,255,255,0.92)",
                   }}
                 >
                   {roundLabel}
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-sm text-white/65">
-              Pick any questions you want. Change your mind anytime — click again to unselect, or hit the ✕.
+            <p className="mt-1 text-sm text-white/60">
+              Pick any questions you want. Click the same option again to clear, or use ✕.
             </p>
           </div>
 
           <div className="hidden sm:flex items-center gap-2">
             <Link
               href="/how-to-play"
-              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-[12px] font-bold border"
+              className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-[12px] font-black border"
               style={{
                 borderColor: "rgba(255,255,255,0.12)",
                 background: "rgba(255,255,255,0.04)",
@@ -1141,14 +1274,14 @@ const nextLockMs = useMemo(() => {
           </div>
         </div>
 
-        {/* Top widgets */}
+        {/* Premium top dashboard (kept, cleaned) */}
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
           <div
             className="rounded-2xl border p-4"
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
           >
             <div className="flex items-center justify-between">
@@ -1173,7 +1306,7 @@ const nextLockMs = useMemo(() => {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.mine}%`,
-                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(244,178,71,0.18))`,
+                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,122,0,0.18))`,
                   }}
                 />
               </div>
@@ -1220,36 +1353,27 @@ const nextLockMs = useMemo(() => {
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
           >
             <p className="text-[11px] uppercase tracking-widest text-white/55">Dashboard</p>
 
             <div className="mt-3 grid grid-cols-3 gap-3">
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
-              >
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
                 <p className="text-xl font-black mt-1 text-white">
                   {picksMade}/{totalPickable}
                 </p>
               </div>
 
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
-              >
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
                 <p className="text-xl font-black mt-1" style={{ color: "rgba(25,195,125,0.95)" }}>
                   {accuracyPct}%
                 </p>
               </div>
 
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
-              >
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
                 <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
                 <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
                   {topLockText}
@@ -1267,7 +1391,7 @@ const nextLockMs = useMemo(() => {
             style={{
               borderColor: "rgba(255,255,255,0.10)",
               background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
             }}
           >
             <p className="text-[11px] uppercase tracking-widest text-white/55">Quick</p>
@@ -1300,41 +1424,35 @@ const nextLockMs = useMemo(() => {
               <div
                 className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
                 style={{
-                  borderColor: "rgba(244,178,71,0.40)",
-                  background: "rgba(244,178,71,0.10)",
+                  borderColor: "rgba(255,122,0,0.35)",
+                  background: "rgba(255,122,0,0.10)",
                 }}
               >
-                <span className="font-bold" style={{ color: COLORS.orange }}>
+                <span className="font-black" style={{ color: COLORS.orange }}>
                   Tip:
                 </span>{" "}
-                Click the same pick again to unselect, or hit the ✕ clear button.
+                Click the same option again to clear, or hit ✕.
               </div>
             </div>
           </div>
         </div>
 
         {err ? (
-          <div className="mt-4 text-sm" style={{ color: COLORS.noFill }}>
+          <div className="mt-4 text-sm" style={{ color: COLORS.bad }}>
             {err} Try refreshing.
           </div>
         ) : null}
 
         {/* Games */}
-        <div className="mt-5 flex flex-col gap-4">
+        <div className="mt-6 flex flex-col gap-6">
           {loading ? (
-            <div
-              className="rounded-2xl border p-4 animate-pulse"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
-            >
+            <div className="rounded-2xl border p-4 animate-pulse" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
               <div className="h-4 w-44 rounded bg-white/10" />
               <div className="mt-3 h-3 w-80 rounded bg-white/10" />
               <div className="mt-5 h-24 rounded bg-white/5" />
             </div>
           ) : games.length === 0 ? (
-            <div
-              className="rounded-2xl border p-4 text-sm text-white/70"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
-            >
+            <div className="rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
               No games found.
             </div>
           ) : (
@@ -1351,26 +1469,19 @@ const nextLockMs = useMemo(() => {
               const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
 
               return (
-                <div
-                  key={g.id}
-                  className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: "rgba(244,178,71,0.55)",
-                    background: `linear-gradient(180deg, rgba(244,178,71,0.10) 0%, rgba(244,178,71,0.05) 30%, rgba(0,0,0,0.98) 100%)`,
-                    boxShadow: "0 0 40px rgba(244,178,71,0.12), inset 0 0 0 1px rgba(244,178,71,0.18)",
-                  }}
-                >
-                  {/* Game info block */}
+                <div key={g.id} className="rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }}>
+                  {/* Game header (clean, chalkboard-ish) */}
                   <div
-                    className="px-4 py-3"
+                    className="px-4 py-4 border-b"
                     style={{
-                      background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
-                      borderBottom: "1px solid rgba(255,255,255,0.10)",
+                      borderColor: "rgba(255,255,255,0.08)",
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)",
                     }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-lg sm:text-xl font-extrabold truncate" style={{ color: COLORS.white }}>
+                        <div className="text-lg sm:text-xl font-black truncate" style={{ color: COLORS.white }}>
                           {g.match}
                         </div>
                         <div className="mt-0.5 text-[12px] text-white/70 truncate">
@@ -1378,30 +1489,28 @@ const nextLockMs = useMemo(() => {
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                            style={{
-                              borderColor: "rgba(255,255,255,0.18)",
-                              background: "rgba(0,0,0,0.35)",
-                              color: "rgba(255,255,255,0.92)",
-                            }}
-                          >
-                            Picks: {gamePicked}/{gameTotal}
-                          </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                          style={{
+                            borderColor: "rgba(255,255,255,0.12)",
+                            background: "rgba(255,255,255,0.04)",
+                            color: "rgba(255,255,255,0.90)",
+                          }}
+                        >
+                          Picks: {gamePicked}/{gameTotal}
+                        </span>
 
-                          <span
-                            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                            style={{
-                              borderColor: "rgba(255,255,255,0.18)",
-                              background: "rgba(0,0,0,0.35)",
-                              color: "rgba(255,255,255,0.86)",
-                            }}
-                          >
-                            {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
-                          </span>
-                        </div>
+                        <span
+                          className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                          style={{
+                            borderColor: isLocked ? "rgba(255,255,255,0.12)" : "rgba(255,122,0,0.28)",
+                            background: isLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
+                            color: "rgba(255,255,255,0.90)",
+                          }}
+                        >
+                          {isLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
+                        </span>
                       </div>
                     </div>
 
@@ -1411,135 +1520,24 @@ const nextLockMs = useMemo(() => {
                           className="h-full"
                           style={{
                             width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(244,178,71,0.15), rgba(0,229,255,0.38))`,
+                            background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.85))`,
                           }}
                         />
                       </div>
                     </div>
                   </div>
 
-                  {/* Questions */}
-                  <div className="px-3 pb-3">
-                    {/* ✅ Grid: desktop 3 cols, tablet 2 cols, mobile 1 col */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {g.questions.map((q) => {
-                        const finalWrong = q.status === "final" && q.correctPick === false;
-                        const finalCorrect = q.status === "final" && q.correctPick === true;
-
-                        const pick = effectivePick(localPicks[q.id], q.userPick);
-                        const hasPick = pick === "yes" || pick === "no";
-
-                        const sponsor = q.isSponsorQuestion === true;
-
-                        return (
-                          <div
-                            key={q.id}
-                            className="rounded-2xl border"
-                            style={{
-                              borderColor: sponsor
-                                ? "rgba(244,178,71,0.75)"
-                                : finalWrong
-                                ? "rgba(255,46,77,0.45)"
-                                : finalCorrect
-                                ? "rgba(25,195,125,0.35)"
-                                : "rgba(255,255,255,0.10)",
-                              background: sponsor ? "rgba(244,178,71,0.08)" : "rgba(255,255,255,0.03)",
-                              boxShadow: sponsor
-                                ? "0 0 22px rgba(244,178,71,0.14), inset 0 0 0 1px rgba(244,178,71,0.10)"
-                                : finalWrong
-                                ? "0 0 18px rgba(255,46,77,0.08)"
-                                : finalCorrect
-                                ? "0 0 18px rgba(25,195,125,0.06)"
-                                : "none",
-                            }}
-                          >
-                            <div className={`${PICK_CARD_PAD_X} ${PICK_CARD_PAD_Y}`}>
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex items-center gap-2">
-                                  {renderStatusPill(q)}
-                                  <span className="text-[11px] font-black text-white/70 uppercase tracking-wide">
-                                    Q{q.quarter}
-                                  </span>
-
-                                  {sponsor ? (
-                                    <span
-                                      className="text-[10px] font-black rounded-full px-2 py-0.5 border"
-                                      style={{
-                                        borderColor: "rgba(244,178,71,0.65)",
-                                        background: "rgba(244,178,71,0.18)",
-                                        color: "rgba(255,255,255,0.92)",
-                                        boxShadow: "0 0 14px rgba(244,178,71,0.14)",
-                                      }}
-                                    >
-                                      SPONSORED
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  {/* Clear X */}
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
-                                    style={{
-                                      borderColor: hasPick ? "rgba(255,255,255,0.22)" : "rgba(255,255,255,0.10)",
-                                      background: hasPick ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.04)",
-                                      color: hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.55)",
-                                    }}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      clearPick(q);
-                                    }}
-                                    disabled={!hasPick || isLocked || q.status === "pending" || q.status === "void"}
-                                    title={hasPick ? "Clear selection" : "No selection to clear"}
-                                    aria-label="Clear selection"
-                                  >
-                                    ✕
-                                  </button>
-
-                                  {/* Comments */}
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 rounded-full px-4 py-1.5 text-[13px] font-black border transition active:scale-[0.99]"
-                                    style={{
-                                      borderColor:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.45)"
-                                          : "rgba(0,229,255,0.28)",
-                                      background:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "rgba(244,178,71,0.10)"
-                                          : "rgba(0,229,255,0.07)",
-                                      color: "rgba(255,255,255,0.92)",
-                                      boxShadow:
-                                        q.commentCount && q.commentCount >= 100
-                                          ? "0 0 14px rgba(244,178,71,0.10)"
-                                          : "0 0 14px rgba(0,229,255,0.08)",
-                                    }}
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                      openComments(g, q);
-                                    }}
-                                    title="Open comments"
-                                  >
-                                    💬 {q.commentCount ?? 0}
-                                    {q.commentCount && q.commentCount >= 100 ? <span>🔥</span> : null}
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="mt-1 text-[13px] font-semibold leading-tight text-white/90">
-                                {q.question}
-                              </div>
-
-                              {renderSentiment(q)}
-                              {renderPickButtons(q, isLocked || q.status === "pending")}
-                            </div>
-                          </div>
-                        );
-                      })}
+                  {/* ✅ LOCKED LAYOUT: 3 cols desktop, 2 tablet, 1 mobile */}
+                  <div className="p-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {g.questions.map((q) => (
+                        <PickCard
+                          key={q.id}
+                          g={g}
+                          q={q}
+                          isLocked={isLocked || q.status === "pending"}
+                        />
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -1548,8 +1546,8 @@ const nextLockMs = useMemo(() => {
           )}
         </div>
 
-        <div className="mt-8 pb-8 text-center text-[11px] text-white/45">
-          <span className="font-bold" style={{ color: COLORS.orange }}>
+        <div className="mt-10 pb-8 text-center text-[11px] text-white/45">
+          <span className="font-black" style={{ color: COLORS.orange }}>
             STREAKr
           </span>{" "}
           — Back yourself. One slip and it’s back to zero.
