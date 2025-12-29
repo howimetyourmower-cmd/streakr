@@ -1611,7 +1611,7 @@ export default function PicksPage() {
                 <span className="font-black" style={{ color: COLORS.orange }}>
                   Tip:
                 </span>{" "}
-                Sponsor questions are bonus — reveal them to enter the draw.
+                Sponsor questions count towards Streak — reveal them to enter the draw.
               </div>
             </div>
           </div>
