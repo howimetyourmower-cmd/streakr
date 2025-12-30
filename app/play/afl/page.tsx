@@ -380,10 +380,10 @@ export default function AflHubPage() {
               <span
                 style={{
                   color: COLORS.white,
-                  textShadow: "0 0 18px rgba(255,255,255,0.20)",
+                  textShadow: "0 0 22px rgba(255,255,255,0.20)",
                 }}
               >
-                AFL TORPY
+               TORPY
               </span>
 
               <span className="block mt-2" style={{ color: COLORS.red }}>
