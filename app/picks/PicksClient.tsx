@@ -99,17 +99,19 @@ const COLORS = {
   textDim: "rgba(255,255,255,0.70)",
   textFaint: "rgba(255,255,255,0.50)",
 
-  orange: "#FF7A00",
-  orangeSoft: "rgba(255,122,0,0.28)",
-  orangeSoft2: "rgba(255,122,0,0.18)",
+  // ✅ Brand accent changed from ORANGE -> RED (keep key names to avoid refactors)
+  orange: "#FF2E4D",
+  orangeSoft: "rgba(255,46,77,0.28)",
+  orangeSoft2: "rgba(255,46,77,0.18)",
 
   good: "rgba(25,195,125,0.95)",
   bad: "rgba(255,46,77,0.95)",
   cyan: "rgba(0,229,255,0.95)",
   white: "rgba(255,255,255,0.98)",
 
-  sponsorBgA: "rgba(255,122,0,0.95)",
-  sponsorBgB: "rgba(255,154,43,0.92)",
+  // Sponsor “pop” updated to red spectrum
+  sponsorBgA: "rgba(255,46,77,0.95)",
+  sponsorBgB: "rgba(255,96,120,0.92)",
   sponsorInk: "rgba(0,0,0,0.92)",
 };
 
@@ -962,9 +964,9 @@ export default function PicksPage() {
       "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
 
     const selectedStyle = {
-      borderColor: "rgba(255,122,0,0.65)",
-      background: `linear-gradient(180deg, rgba(255,122,0,0.95), rgba(255,154,43,0.88))`,
-      boxShadow: "0 0 26px rgba(255,122,0,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
+      borderColor: "rgba(255,46,77,0.65)",
+      background: `linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,96,120,0.88))`,
+      boxShadow: "0 0 26px rgba(255,46,77,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
       color: "rgba(0,0,0,0.92)",
     } as const;
 
@@ -1045,25 +1047,25 @@ export default function PicksPage() {
     const revealed = sponsor ? !!sponsorRevealed[q.id] : true;
     const interactionLocked = locked || (sponsor && !revealed); // can’t pick until revealed for sponsor
 
-    // ORANGE outline on every card
-    const baseBorder = sponsor ? "rgba(255,122,0,0.90)" : COLORS.orangeSoft;
+    // RED outline on every card
+    const baseBorder = sponsor ? "rgba(255,46,77,0.90)" : COLORS.orangeSoft;
 
-    // Sponsor background: FULL ORANGE so it pops
+    // Sponsor background: FULL RED so it pops
     const cardBg = sponsor
-      ? "linear-gradient(180deg, rgba(255,154,43,0.98) 0%, rgba(255,122,0,0.98) 55%, rgba(255,122,0,0.92) 100%)"
+      ? "linear-gradient(180deg, rgba(255,96,120,0.98) 0%, rgba(255,46,77,0.98) 55%, rgba(255,46,77,0.92) 100%)"
       : "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.55) 100%)";
 
     const glow = sponsor
-      ? "0 0 40px rgba(255,122,0,0.28)"
+      ? "0 0 40px rgba(255,46,77,0.28)"
       : q.status === "final" && q.correctPick === false
       ? "0 0 22px rgba(255,46,77,0.12)"
       : q.status === "final" && q.correctPick === true
       ? "0 0 22px rgba(25,195,125,0.10)"
-      : "0 0 22px rgba(255,122,0,0.06)";
+      : "0 0 22px rgba(255,46,77,0.06)";
 
     const topAccent = sponsor
       ? "linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.00))"
-      : "linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.06))";
+      : "linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.06))";
 
     const ink = sponsor ? COLORS.sponsorInk : "rgba(255,255,255,0.92)";
     const dimInk = sponsor ? "rgba(0,0,0,0.70)" : "rgba(255,255,255,0.70)";
@@ -1287,7 +1289,7 @@ export default function PicksPage() {
               className="pointer-events-none absolute inset-0"
               style={{
                 background: sponsor
-                  ? "linear-gradient(180deg, rgba(255,122,0,0.02), rgba(0,0,0,0.20))"
+                  ? "linear-gradient(180deg, rgba(255,46,77,0.02), rgba(0,0,0,0.20))"
                   : "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55))",
               }}
             />
@@ -1326,7 +1328,7 @@ export default function PicksPage() {
             <div
               className="px-5 py-4 border-b"
               style={{
-                borderColor: "rgba(255,122,0,0.20)",
+                borderColor: "rgba(255,46,77,0.20)",
                 background: "rgba(255,255,255,0.03)",
               }}
             >
@@ -1361,8 +1363,8 @@ export default function PicksPage() {
                 <div
                   className="rounded-xl border p-3 text-[12px] text-white/80"
                   style={{
-                    borderColor: "rgba(255,122,0,0.35)",
-                    background: "rgba(255,122,0,0.10)",
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.10)",
                   }}
                 >
                   Log in to post comments. You can still read the chat.
@@ -1486,7 +1488,7 @@ export default function PicksPage() {
                   className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                   style={{
                     borderColor: COLORS.orangeSoft,
-                    background: "rgba(255,122,0,0.10)",
+                    background: "rgba(255,46,77,0.10)",
                     color: "rgba(255,255,255,0.92)",
                   }}
                 >
@@ -1548,7 +1550,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${myVsLeaderPct.mine}%`,
-                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,122,0,0.18))`,
+                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,46,77,0.18))`,
                   }}
                 />
               </div>
@@ -1690,7 +1692,7 @@ export default function PicksPage() {
                 className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
                 style={{
                   borderColor: COLORS.orangeSoft,
-                  background: "rgba(255,122,0,0.10)",
+                  background: "rgba(255,46,77,0.10)",
                 }}
               >
                 <span className="font-black" style={{ color: COLORS.orange }}>
@@ -1707,7 +1709,7 @@ export default function PicksPage() {
           className="mt-3 rounded-2xl border p-4"
           style={{
             borderColor: COLORS.orangeSoft,
-            background: `linear-gradient(180deg, rgba(255,122,0,0.08) 0%, rgba(255,255,255,0.03) 45%, rgba(0,0,0,0.35) 100%)`,
+            background: `linear-gradient(180deg, rgba(255,46,77,0.08) 0%, rgba(255,255,255,0.03) 45%, rgba(0,0,0,0.35) 100%)`,
             boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
           }}
         >
@@ -1805,7 +1807,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${eligibility.streakProg}%`,
-                    background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.95))`,
+                    background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.95))`,
                   }}
                 />
               </div>
@@ -1854,7 +1856,7 @@ export default function PicksPage() {
                   className="h-full"
                   style={{
                     width: `${eligibility.gamesProg}%`,
-                    background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.95))`,
+                    background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.95))`,
                   }}
                 />
               </div>
@@ -1926,7 +1928,7 @@ export default function PicksPage() {
                   <div
                     className="px-4 py-4 border-b"
                     style={{
-                      borderColor: "rgba(255,122,0,0.20)",
+                      borderColor: "rgba(255,46,77,0.20)",
                       background:
                         "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)",
                     }}
@@ -1957,7 +1959,7 @@ export default function PicksPage() {
                           className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                           style={{
                             borderColor: gameLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
-                            background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,122,0,0.10)",
+                            background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,46,77,0.10)",
                             color: "rgba(255,255,255,0.90)",
                           }}
                         >
@@ -1975,7 +1977,7 @@ export default function PicksPage() {
                           className="h-full"
                           style={{
                             width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(255,122,0,0.25), rgba(255,122,0,0.85))`,
+                            background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.85))`,
                           }}
                         />
                       </div>
