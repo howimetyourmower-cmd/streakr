@@ -16,6 +16,7 @@ import {
   arrayUnion,
   increment,
   getDoc,
+  limit,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -39,7 +40,8 @@ function normalizeCode(raw: string): string {
 }
 
 function safeNum(v: any, fallback = 0): number {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 function safeStr(v: any, fallback = ""): string {
@@ -120,9 +122,9 @@ export default function JoinLeagueClient() {
     try {
       setState("searching");
 
-      // 1) Find league by inviteCode
+      // 1) Find room by inviteCode (limit 1)
       const leaguesRef = collection(db, "leagues");
-      const qRef = query(leaguesRef, where("inviteCode", "==", inviteCode));
+      const qRef = query(leaguesRef, where("inviteCode", "==", inviteCode), limit(1));
       const snap = await getDocs(qRef);
 
       if (snap.empty) {
@@ -134,7 +136,7 @@ export default function JoinLeagueClient() {
       const leagueDoc = snap.docs[0];
       const data = leagueDoc.data() as any;
 
-      // AFL-only guard
+      // AFL-only guard (default to afl)
       const sport = (data.sport || "afl").toString().toLowerCase();
       if (sport !== "afl") {
         setError("That room isn’t an AFL room.");
@@ -153,12 +155,11 @@ export default function JoinLeagueClient() {
         isPublic: typeof data.isPublic === "boolean" ? data.isPublic : undefined,
       };
 
-      // capacity guard
+      // Capacity guard (best-effort)
       if (
         typeof league.maxMembers === "number" &&
         league.maxMembers > 0 &&
-        league.memberCount !== undefined &&
-        league.memberCount >= league.maxMembers
+        (league.memberCount ?? 0) >= league.maxMembers
       ) {
         setFound(league);
         setError("That room is full.");
@@ -167,33 +168,42 @@ export default function JoinLeagueClient() {
       }
 
       setFound(league);
-
-      // 2) Join
       setState("joining");
 
       const leagueRef = doc(db, "leagues", league.id);
-      const leagueSnap = await getDoc(leagueRef);
 
+      // 2) Check membership using members subdoc (more reliable than memberIds array)
+      const memberRef = doc(db, "leagues", league.id, "members", user.uid);
+      const memberSnap = await getDoc(memberRef);
+
+      if (memberSnap.exists()) {
+        // Already a member — just ensure user doc is linked then redirect
+        await setDoc(
+          doc(db, "users", user.uid),
+          { leagueIds: arrayUnion(league.id), updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+
+        setState("joined");
+        router.push(`/leagues/${league.id}/ladder`);
+        return;
+      }
+
+      // Re-check league exists
+      const leagueSnap = await getDoc(leagueRef);
       if (!leagueSnap.exists()) {
         setError("That room no longer exists.");
         setState("error");
         return;
       }
 
-      const leagueData = leagueSnap.data() as any;
-      const memberIds: string[] = Array.isArray(leagueData.memberIds)
-        ? leagueData.memberIds
-        : [];
-
-      const alreadyMember = memberIds.includes(user.uid);
-
-      const memberRef = doc(db, "leagues", league.id, "members", user.uid);
       const displayName =
         (user as any).displayName ||
         (user as any).username ||
         (user as any).email ||
         "Player";
 
+      // 3) Create member doc
       await setDoc(
         memberRef,
         {
@@ -206,30 +216,24 @@ export default function JoinLeagueClient() {
         { merge: true }
       );
 
-      const updates: Record<string, any> = {
+      // 4) Update league counts + ids
+      await updateDoc(leagueRef, {
         memberIds: arrayUnion(user.uid),
+        memberCount: increment(1),
         updatedAt: serverTimestamp(),
-      };
+      });
 
-      if (!alreadyMember) {
-        updates.memberCount = increment(1);
-      }
-
-      await updateDoc(leagueRef, updates);
-
-      const userRef = doc(db, "users", user.uid);
+      // 5) Update user for quick lookup
       await setDoc(
-        userRef,
-        {
-          leagueIds: arrayUnion(league.id),
-          updatedAt: serverTimestamp(),
-        },
+        doc(db, "users", user.uid),
+        { leagueIds: arrayUnion(league.id), updatedAt: serverTimestamp() },
         { merge: true }
       );
 
       setState("joined");
+      router.push(`/leagues/${league.id}/ladder`);
     } catch (err) {
-      console.error("Failed to join league", err);
+      console.error("Failed to join room", err);
       setError("Could not join that room right now. Try again.");
       setState("error");
     }
@@ -238,7 +242,7 @@ export default function JoinLeagueClient() {
   return (
     <main className="min-h-screen bg-[#050814] text-white">
       <div className="mx-auto w-full max-w-3xl px-4 py-6 md:py-8 space-y-4">
-        {/* Compact header */}
+        {/* Header */}
         <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -276,7 +280,8 @@ export default function JoinLeagueClient() {
                   Enter room code
                 </h2>
                 <p className="mt-0.5 text-[12px] leading-snug text-white/65">
-                  Codes are usually 6 characters. Links can prefill via <span className="font-mono">?code=</span>.
+                  Codes are usually 6 characters. Links can prefill via{" "}
+                  <span className="font-mono">?code=</span>.
                 </p>
               </div>
 
@@ -328,7 +333,7 @@ export default function JoinLeagueClient() {
             </form>
 
             {/* Found room preview */}
-            {found && state !== "error" && (
+            {found && state !== "error" && state !== "joined" && (
               <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -355,38 +360,6 @@ export default function JoinLeagueClient() {
                     </p>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Joined */}
-            {state === "joined" && found && (
-              <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-emerald-200 font-extrabold text-[15px]">
-                    You’ve joined <span className="text-white">{found.name}</span> ✅
-                  </p>
-                  <Pill tone="emerald">Welcome</Pill>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Link
-                    href={`/leagues/${found.id}`}
-                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-sm px-5 py-3 transition"
-                  >
-                    Go to room →
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => router.push("/leagues")}
-                    className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-sm px-5 py-3 transition"
-                  >
-                    Back to rooms
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-white/60">
-                  If it doesn’t show instantly, refresh once — Firestore usually catches up fast.
-                </p>
               </div>
             )}
           </div>
