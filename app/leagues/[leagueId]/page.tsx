@@ -62,10 +62,10 @@ function safeTrim(s: any) {
   return s.trim();
 }
 
-function buildInviteText(leagueName: string, code: string) {
-  const cleanName = leagueName || "STREAKr league";
+function buildInviteText(roomName: string, code: string) {
+  const cleanName = roomName || "Torpy room";
   const cleanCode = code || "";
-  return `Join my STREAKr league "${cleanName}"\n\nInvite code: ${cleanCode}\n\nOpen STREAKr → Leagues → Join a league → enter the code`;
+  return `Join my Torpy Locker Room "${cleanName}"\n\nInvite code: ${cleanCode}\n\nOpen Torpy → Locker Rooms → Join → enter the code`;
 }
 
 export default function LeagueDetailPage() {
@@ -131,6 +131,13 @@ export default function LeagueDetailPage() {
     return buildInviteText(league.name, league.inviteCode);
   }, [league?.inviteCode, league?.name]);
 
+  // auto-clear toasty success after a beat
+  useEffect(() => {
+    if (!success) return;
+    const t = setTimeout(() => setSuccess(null), 2200);
+    return () => clearTimeout(t);
+  }, [success]);
+
   useEffect(() => {
     const loadLeague = async () => {
       if (!leagueId) return;
@@ -143,7 +150,7 @@ export default function LeagueDetailPage() {
         const leagueSnap = await getDoc(leagueRef);
 
         if (!leagueSnap.exists()) {
-          setError("League not found.");
+          setError("Room not found.");
           setLeague(null);
           setMembers([]);
           setLoading(false);
@@ -160,7 +167,7 @@ export default function LeagueDetailPage() {
 
         const leagueData: League = {
           id: leagueSnap.id,
-          name: data.name ?? "Unnamed league",
+          name: data.name ?? "Unnamed room",
           inviteCode,
           managerId,
           description: data.description ?? "",
@@ -192,8 +199,8 @@ export default function LeagueDetailPage() {
 
         setMembers(loadedMembers);
       } catch (err) {
-        console.error("Failed to load league", err);
-        setError("Failed to load league. Please try again.");
+        console.error("Failed to load room", err);
+        setError("Failed to load room. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -246,7 +253,7 @@ export default function LeagueDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members]);
 
-  // load live chat messages for this league (members only)
+  // load live chat messages for this room (members only)
   useEffect(() => {
     if (!leagueId) return;
 
@@ -284,7 +291,7 @@ export default function LeagueDetailPage() {
         setChatLoading(false);
       },
       (err) => {
-        console.error("League chat error", err);
+        console.error("Room chat error", err);
         setChatError("Failed to load chat. Please try again later.");
         setChatLoading(false);
       }
@@ -355,7 +362,7 @@ export default function LeagueDetailPage() {
     try {
       if (canUseNativeShare) {
         await (navigator as any).share({
-          title: `STREAKr League: ${league.name}`,
+          title: `Torpy Room: ${league.name}`,
           text,
         });
         return;
@@ -366,7 +373,7 @@ export default function LeagueDetailPage() {
 
     try {
       await navigator.clipboard.writeText(text);
-      setSuccess("Invite copied. Paste it into SMS / WhatsApp / email.");
+      setSuccess("Invite copied — paste it into SMS/WhatsApp.");
     } catch {
       setError("Could not share/copy. Please copy the code manually.");
     }
@@ -376,7 +383,7 @@ export default function LeagueDetailPage() {
     if (!league?.inviteCode) return;
     try {
       await navigator.clipboard.writeText(league.inviteCode);
-      setSuccess("Invite code copied.");
+      setSuccess("Code copied.");
     } catch {
       setError("Could not copy code.");
     }
@@ -410,10 +417,10 @@ export default function LeagueDetailPage() {
           : prev
       );
 
-      setSuccess("League details updated.");
+      setSuccess("Updated.");
     } catch (err) {
-      console.error("Failed to update league", err);
-      setError("Failed to update league. Please try again.");
+      console.error("Failed to update room", err);
+      setError("Failed to update room. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -422,7 +429,7 @@ export default function LeagueDetailPage() {
   const handleDeleteLeague = async () => {
     if (!league || !isManager) return;
     const confirmed = window.confirm(
-      "Are you sure you want to delete this league? This cannot be undone."
+      "Delete this room? This cannot be undone."
     );
     if (!confirmed) return;
 
@@ -434,8 +441,8 @@ export default function LeagueDetailPage() {
       await deleteDoc(leagueRef);
       router.push("/leagues");
     } catch (err) {
-      console.error("Failed to delete league", err);
-      setError("Failed to delete league. Please try again.");
+      console.error("Failed to delete room", err);
+      setError("Failed to delete room. Please try again.");
     } finally {
       setDeleteLoading(false);
     }
@@ -450,7 +457,7 @@ export default function LeagueDetailPage() {
       return;
     }
     if (!isMemberUser) {
-      setChatError("Only league members can send messages.");
+      setChatError("Only room members can send messages.");
       return;
     }
 
@@ -479,7 +486,7 @@ export default function LeagueDetailPage() {
       setChatInput("");
     } catch (err) {
       console.error("Failed to send message", err);
-      setChatError("Failed to send message. Please try again.");
+      setChatError("Failed to send. Try again.");
     } finally {
       setSending(false);
     }
@@ -487,326 +494,363 @@ export default function LeagueDetailPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:py-8">
-        <p className="text-sm text-white/70">Loading league…</p>
-      </div>
+      <main className="min-h-screen bg-[#050814] text-white">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6">
+          <p className="text-sm text-white/70">Loading room…</p>
+        </div>
+      </main>
     );
   }
 
   if (!league) {
     return (
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:py-8 space-y-4">
-        <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
-          ← Back to leagues
-        </Link>
-        <p className="text-sm text-red-400">
-          {error ?? "League not found or no longer available."}
-        </p>
-      </div>
+      <main className="min-h-screen bg-[#050814] text-white">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 space-y-3">
+          <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
+            ← Back to locker rooms
+          </Link>
+          <p className="text-sm text-red-400">
+            {error ?? "Room not found or no longer available."}
+          </p>
+        </div>
+      </main>
     );
   }
 
+  const membersCount = league.memberCount ?? members.length;
+  const roomIsYours = isManager ? "Manager" : "Member";
+
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 md:py-8 space-y-6">
-      {/* Top breadcrumb */}
-      <div className="flex items-center justify-between gap-3">
-        <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
-          ← Back to leagues
-        </Link>
+    <main className="min-h-screen bg-[#050814] text-white">
+      <div className="mx-auto w-full max-w-5xl px-4 py-5 md:py-6 space-y-4">
+        {/* Top row (compact) */}
+        <div className="flex items-center justify-between gap-3">
+          <Link href="/leagues" className="text-sm text-sky-400 hover:text-sky-300">
+            ← Back
+          </Link>
 
-        {/* quick action */}
-        <Link
-          href={`/leagues/${league.id}/ladder`}
-          className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-        >
-          View ladder →
-        </Link>
-      </div>
+          <button
+            type="button"
+            onClick={() => router.push(`/leagues/${league.id}/ladder`)}
+            className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs px-4 py-2 transition"
+          >
+            View ladder →
+          </button>
+        </div>
 
-      {/* Header block */}
-      <div className="rounded-2xl bg-white/5 border border-white/10 p-5 md:p-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl md:text-3xl font-bold truncate">
+        {/* Header card (tight) */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide text-orange-200">
+                  <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+                  Torpy Locker Room
+                </div>
+                <SportBadge sport="afl" />
+                <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-bold text-white/70">
+                  {roomIsYours}
+                </span>
+              </div>
+
+              <h1 className="mt-2 text-xl md:text-2xl font-extrabold tracking-tight truncate">
                 {league.name}
               </h1>
-              <SportBadge sport="afl" />
-              {isManager && (
-                <span className="hidden sm:inline-flex items-center rounded-full bg-white/5 border border-orange-500/40 text-orange-300 px-2 py-1 text-[11px] uppercase tracking-wide">
-                  League Manager
-                </span>
+
+              {league.description ? (
+                <p className="mt-1 text-[12px] md:text-sm text-white/60 max-w-3xl">
+                  {league.description}
+                </p>
+              ) : (
+                <p className="mt-1 text-[12px] md:text-sm text-white/50 max-w-3xl">
+                  Private room — bragging rights only. Your global streak still counts.
+                </p>
               )}
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-white/55">
+                <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1">
+                  Members: <span className="text-white/80 font-bold">{membersCount}</span>
+                </span>
+                <span className="rounded-full border border-white/10 bg-black/20 px-2 py-1">
+                  Code:{" "}
+                  <span className="font-mono text-white/90">{league.inviteCode || "—"}</span>
+                </span>
+              </div>
             </div>
 
-            <p className="mt-2 text-sm text-white/70 max-w-3xl">
-              Private league — bragging rights only. Your global streak still counts on
-              the main leaderboard.
-            </p>
-          </div>
-
-          {/* Invite actions (compact) */}
-          <div className="w-full md:w-auto">
-            <div className="flex flex-wrap items-center justify-start md:justify-end gap-2">
-              <span className="font-mono text-xs bg-black/30 border border-white/15 rounded-md px-2 py-1">
-                {league.inviteCode || "—"}
-              </span>
-
-              <button
-                type="button"
-                onClick={handleCopyCode}
-                className="text-xs text-sky-400 hover:text-sky-300 disabled:opacity-60"
-                disabled={!league.inviteCode}
-              >
-                Copy code
-              </button>
-
-              <button
-                type="button"
-                onClick={handleShareInvite}
-                className="rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-[12px] px-3 py-1.5 transition-colors disabled:opacity-60"
-                disabled={!league.inviteCode}
-                title={headerInviteText}
-              >
-                Share invite
-              </button>
-            </div>
-
-            <div className="mt-2 flex items-center justify-start md:justify-end gap-3 text-xs text-white/60">
-              <span>Members: {league.memberCount ?? members.length}</span>
-              {isManager && (
+            {/* Actions (super compact) */}
+            <div className="w-full md:w-auto">
+              <div className="grid grid-cols-2 gap-2 md:flex md:flex-col md:items-end">
                 <button
                   type="button"
-                  onClick={handleDeleteLeague}
-                  disabled={deleteLoading}
-                  className="text-red-400 hover:text-red-300"
+                  onClick={handleCopyCode}
+                  disabled={!league.inviteCode}
+                  className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-xs px-4 py-2 transition disabled:opacity-60"
                 >
-                  {deleteLoading ? "Deleting…" : "Delete league"}
+                  Copy code
                 </button>
-              )}
-            </div>
 
-            {(error || success) && (
-              <div className="mt-3 space-y-2">
-                {error && (
-                  <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-                    {error}
-                  </p>
-                )}
-                {success && (
-                  <p className="text-sm text-emerald-400 border border-emerald-500/40 rounded-md bg-emerald-500/10 px-3 py-2">
-                    {success}
-                  </p>
+                <button
+                  type="button"
+                  onClick={handleShareInvite}
+                  disabled={!league.inviteCode}
+                  title={headerInviteText}
+                  className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs px-4 py-2 transition disabled:opacity-60"
+                >
+                  Share invite
+                </button>
+
+                {isManager && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteLeague}
+                    disabled={deleteLoading}
+                    className="col-span-2 md:col-span-1 inline-flex items-center justify-center rounded-full border border-red-500/30 bg-red-500/10 hover:bg-red-500/15 text-red-200 font-extrabold text-xs px-4 py-2 transition disabled:opacity-60"
+                  >
+                    {deleteLoading ? "Deleting…" : "Delete room"}
+                  </button>
                 )}
               </div>
-            )}
+
+              {(error || success) && (
+                <div className="mt-2 space-y-2">
+                  {error && (
+                    <p className="text-xs text-red-200 border border-red-500/35 rounded-xl bg-red-500/10 px-3 py-2">
+                      {error}
+                    </p>
+                  )}
+                  {success && (
+                    <p className="text-xs text-emerald-200 border border-emerald-500/35 rounded-xl bg-emerald-500/10 px-3 py-2">
+                      {success}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Main content: Left column (settings+chat), Right column (members sticky-ish) */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] items-start">
-        {/* LEFT */}
-        <div className="space-y-4">
-          {/* Settings */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
-            <div className="flex items-center justify-between gap-2 mb-4">
-              <h2 className="text-lg font-semibold">League settings</h2>
-              {!isManager && (
-                <span className="inline-flex items-center rounded-full bg-white/5 border border-white/10 text-white/70 px-2 py-1 text-[11px] uppercase tracking-wide">
-                  Member
+        {/* Main grid (compact) */}
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] items-start">
+          {/* LEFT: settings + chat */}
+          <div className="space-y-4">
+            {/* Settings (tight) */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm md:text-base font-extrabold">Room settings</h2>
+                <span className="text-[11px] text-white/50">
+                  {isManager ? "Manager controls" : "Read-only"}
                 </span>
-              )}
-            </div>
-
-            <form onSubmit={handleSave} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">League name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={!isManager}
-                  className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70 disabled:opacity-60"
-                />
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  Description (optional)
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  disabled={!isManager}
-                  rows={3}
-                  className="w-full rounded-md bg-[#050816]/60 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70 disabled:opacity-60"
-                  placeholder="E.g. Round-by-round comp. Loser shouts the pub lunch."
-                />
-              </div>
+              <form onSubmit={handleSave} className="mt-3 space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                    Room name
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={!isManager}
+                    className="w-full rounded-xl bg-black/35 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70 disabled:opacity-60"
+                  />
+                </div>
 
-              {isManager && (
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : "Save changes"}
-                </button>
-              )}
-            </form>
-          </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                    Description
+                  </label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    disabled={!isManager}
+                    rows={3}
+                    className="w-full rounded-xl bg-black/35 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70 disabled:opacity-60"
+                    placeholder="What’s this room about?"
+                  />
+                </div>
 
-          {/* Chat */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <h2 className="text-lg font-semibold">League chat</h2>
-              <span className="text-[11px] text-white/60">
-                Members only
-              </span>
+                {isManager && (
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs px-4 py-2 transition disabled:opacity-60"
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                )}
+              </form>
             </div>
 
-            {!user && (
-              <p className="text-sm text-white/70">
-                Log in to join the conversation in this league.
-              </p>
-            )}
+            {/* Chat (tight, fast) */}
+            <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-sm md:text-base font-extrabold">Room chat</h2>
+                <span className="text-[11px] text-white/50">Members only</span>
+              </div>
 
-            {user && !isMemberUser && (
-              <p className="text-sm text-white/70">
-                You&apos;re not a member of this league. Join the league to access chat.
-              </p>
-            )}
+              {!user && (
+                <p className="mt-2 text-sm text-white/60">
+                  Log in to join the chat.
+                </p>
+              )}
 
-            {user && isMemberUser && (
-              <>
-                <div className="h-72 md:h-80 overflow-y-auto rounded-xl bg-black/40 border border-white/10 px-3 py-2 space-y-2 text-sm">
-                  {chatLoading ? (
-                    <p className="text-xs text-white/60">Loading messages…</p>
-                  ) : messages.length === 0 ? (
-                    <p className="text-xs text-white/60">
-                      No messages yet. Start the banter!
-                    </p>
-                  ) : (
-                    messages.map((msg) => {
-                      const isOwn = !!user && msg.uid === user.uid;
-                      const displayName = getBestProfileName(msg.uid, msg.displayName);
-                      const username = getBestProfileUsername(msg.uid);
+              {user && !isMemberUser && (
+                <p className="mt-2 text-sm text-white/60">
+                  You’re not a member of this room. Join to access chat.
+                </p>
+              )}
 
-                      return (
-                        <div
-                          key={msg.id}
-                          className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
-                        >
+              {user && isMemberUser && (
+                <>
+                  <div className="mt-3 h-64 md:h-72 overflow-y-auto rounded-2xl bg-black/40 border border-white/10 px-3 py-2 space-y-2">
+                    {chatLoading ? (
+                      <p className="text-xs text-white/60">Loading…</p>
+                    ) : messages.length === 0 ? (
+                      <p className="text-xs text-white/60">
+                        No messages yet. Start the banter 👇
+                      </p>
+                    ) : (
+                      messages.map((msg) => {
+                        const isOwn = !!user && msg.uid === user.uid;
+                        const displayName = getBestProfileName(msg.uid, msg.displayName);
+                        const username = getBestProfileUsername(msg.uid);
+
+                        return (
                           <div
-                            className={`max-w-[86%] rounded-2xl px-3 py-2 border text-xs ${
-                              isOwn
-                                ? "bg-orange-500 text-black border-orange-300"
-                                : "bg-[#050816] text-white border-white/15"
-                            }`}
+                            key={msg.id}
+                            className={`flex ${isOwn ? "justify-end" : "justify-start"}`}
                           >
-                            <div className="flex items-center justify-between gap-2 mb-0.5">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-semibold truncate">{displayName}</span>
-                                {username && (
-                                  <span className="text-[10px] opacity-70 truncate">
-                                    {username}
+                            <div
+                              className={`max-w-[88%] rounded-2xl px-3 py-2 border ${
+                                isOwn
+                                  ? "bg-orange-500 text-black border-orange-300"
+                                  : "bg-[#050816] text-white border-white/15"
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2 mb-0.5">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="text-xs font-extrabold truncate">
+                                    {displayName}
+                                  </span>
+                                  {username && (
+                                    <span className="text-[10px] opacity-70 truncate">
+                                      {username}
+                                    </span>
+                                  )}
+                                </div>
+                                {msg.createdAt && (
+                                  <span className="text-[10px] opacity-70">
+                                    {formatMessageTime(msg.createdAt)}
                                   </span>
                                 )}
                               </div>
-                              {msg.createdAt && (
-                                <span className="text-[10px] opacity-70">
-                                  {formatMessageTime(msg.createdAt)}
-                                </span>
-                              )}
+                              <p className="text-xs whitespace-pre-wrap break-words">
+                                {msg.body}
+                              </p>
                             </div>
-                            <p className="whitespace-pre-wrap break-words">{msg.body}</p>
                           </div>
-                        </div>
-                      );
-                    })
+                        );
+                      })
+                    )}
+                    <div ref={messagesEndRef} />
+                  </div>
+
+                  {chatError && (
+                    <p className="mt-2 text-xs text-red-300">{chatError}</p>
                   )}
-                  <div ref={messagesEndRef} />
-                </div>
 
-                {chatError && <p className="mt-2 text-xs text-red-400">{chatError}</p>}
-
-                <form onSubmit={handleSendMessage} className="mt-3 flex flex-col sm:flex-row gap-2">
-                  <textarea
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    rows={2}
-                    className="flex-1 rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                    placeholder="Type a message for your league…"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sending || !chatInput.trim()}
-                    className="sm:self-end inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-5 py-2 transition-colors disabled:opacity-60"
+                  <form
+                    onSubmit={handleSendMessage}
+                    className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
                   >
-                    {sending ? "Sending…" : "Send"}
-                  </button>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
+                    <textarea
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      rows={2}
+                      className="w-full rounded-2xl bg-black/35 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                      placeholder="Message…"
+                    />
+                    <button
+                      type="submit"
+                      disabled={sending || !chatInput.trim()}
+                      className="h-[44px] inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-xs px-5 transition disabled:opacity-60"
+                    >
+                      {sending ? "Sending…" : "Send"}
+                    </button>
+                  </form>
 
-        {/* RIGHT: Members */}
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-5 lg:sticky lg:top-6">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h2 className="text-lg font-semibold">League members</h2>
-            <span className="text-xs text-white/60">
-              {members.length} total
-            </span>
+                  <p className="mt-2 text-[11px] text-white/45">
+                    Keep it clean. Banter yes. Abuse no.
+                  </p>
+                </>
+              )}
+            </div>
           </div>
 
-          {members.length === 0 ? (
-            <p className="text-sm text-white/70">
-              No members yet. Share your invite code to get the crew in.
-            </p>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {members.map((m) => {
-                const displayName = getBestProfileName(m.uid, m.displayName);
-                const username = getBestProfileUsername(m.uid);
-                const isYou = !!user && user.uid === m.uid;
+          {/* RIGHT: Members (compact + sticky on desktop) */}
+          <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 lg:sticky lg:top-5">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm md:text-base font-extrabold">Members</h2>
+              <span className="text-[11px] text-white/50">{members.length}</span>
+            </div>
 
-                return (
-                  <li
-                    key={m.id}
-                    className="flex items-center justify-between gap-2 rounded-lg bg-black/20 border border-white/10 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-medium truncate">{displayName}</span>
-                        {username && (
-                          <span className="text-xs text-white/60 truncate">{username}</span>
-                        )}
-                        {isYou && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full border border-white/15 text-white/70 bg-white/5">
-                            YOU
+            {members.length === 0 ? (
+              <p className="mt-2 text-sm text-white/60">
+                No members yet. Share the invite code.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {members.map((m) => {
+                  const displayName = getBestProfileName(m.uid, m.displayName);
+                  const username = getBestProfileUsername(m.uid);
+                  const isYou = !!user && user.uid === m.uid;
+
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 rounded-xl bg-black/25 border border-white/10 px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-semibold truncate">
+                            {displayName}
                           </span>
-                        )}
+                          {username && (
+                            <span className="text-xs text-white/55 truncate">
+                              {username}
+                            </span>
+                          )}
+                          {isYou && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full border border-white/15 text-white/70 bg-white/5">
+                              YOU
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    <span className="text-[11px] uppercase tracking-wide rounded-full px-2 py-1 border border-white/15 text-white/70">
-                      {m.role === "manager" ? "Manager" : "Member"}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                      <span
+                        className={`text-[10px] uppercase tracking-wide rounded-full px-2 py-1 border ${
+                          m.role === "manager"
+                            ? "border-orange-500/35 bg-orange-500/10 text-orange-200"
+                            : "border-white/15 bg-white/5 text-white/70"
+                        }`}
+                      >
+                        {m.role === "manager" ? "Manager" : "Member"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-          {/* small footer tip */}
-          <div className="mt-4 text-xs text-white/60 border-t border-white/10 pt-3">
-            Tip: keep the banter flowing — share the code, then hit{" "}
-            <span className="text-white/80">View ladder</span>.
+            <div className="mt-4 border-t border-white/10 pt-3 text-[11px] text-white/50">
+              Tip: share the code, then hit <span className="text-white/75 font-semibold">View ladder</span>.
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
