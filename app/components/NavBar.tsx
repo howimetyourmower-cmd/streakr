@@ -80,7 +80,7 @@ export default function Navbar() {
         {/* LOGO / WORDMARK */}
         <Link href="/" className="flex items-center gap-3">
           <span className="font-extrabold text-3xl tracking-tight text-white">
-            TOR<span className="text-red-500">PY</span>
+            TORPY<span className="text-red-500">
           </span>
         </Link>
 
