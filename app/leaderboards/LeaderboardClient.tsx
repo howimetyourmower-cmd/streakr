@@ -175,6 +175,10 @@ function computeEligibility(entry: LeaderboardEntry): {
   };
 }
 
+// TORPY Fire Engine Red
+const TORPY_RED = "#CE2029";
+const TORPY_RED_RGB = "206,32,41";
+
 export default function LeaderboardsPage() {
   const { user } = useAuth();
 
@@ -315,9 +319,9 @@ export default function LeaderboardsPage() {
       <span
         className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
           isOnFire
-            ? "bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-black shadow-[0_0_18px_rgba(248,113,22,0.9)]"
+            ? "bg-gradient-to-r from-[var(--torpy-red)] via-rose-500 to-pink-500 text-black shadow-[0_0_18px_rgba(206,32,41,0.65)]"
             : isHot
-            ? "bg-orange-500/20 text-orange-300 border border-orange-500/70"
+            ? "bg-[rgba(var(--torpy-red-rgb),0.12)] text-red-100 border border-[rgba(var(--torpy-red-rgb),0.70)]"
             : "bg-slate-800 text-slate-100 border border-slate-600"
         }`}
       >
@@ -333,7 +337,7 @@ export default function LeaderboardsPage() {
     if (info.eligible) {
       return (
         <div className="inline-flex flex-col items-start gap-0.5">
-          <span className="inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold bg-orange-500/15 text-orange-200 border border-orange-400/70 shadow-[0_0_18px_rgba(248,144,35,0.18)]">
+          <span className="inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold bg-[rgba(var(--torpy-red-rgb),0.12)] text-red-100 border border-[rgba(var(--torpy-red-rgb),0.75)] shadow-[0_0_18px_rgba(206,32,41,0.20)]">
             ✅ Eligible
           </span>
           <span className="text-[10px] text-white/55">
@@ -392,7 +396,6 @@ export default function LeaderboardsPage() {
       };
     }
 
-    // Eligible entries are already sorted by rank in API (assumed), but we compute top streak safely anyway.
     const topEligibleStreak = Math.max(...eligible.map((e) => e.currentStreak ?? 0));
     const winnersCount = eligible.filter((e) => (e.currentStreak ?? 0) === topEligibleStreak).length;
 
@@ -400,23 +403,31 @@ export default function LeaderboardsPage() {
   })();
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen">
+    <div
+      className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen"
+      style={
+        {
+          ["--torpy-red" as any]: TORPY_RED,
+          ["--torpy-red-rgb" as any]: TORPY_RED_RGB,
+        } as any
+      }
+    >
       {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
         <div>
           <h1 className="text-3xl sm:text-4xl font-bold">Leaderboards</h1>
           <p className="mt-1 text-sm text-white/70 max-w-md">
             Live ranking of players with the{" "}
-            <span className="font-semibold text-orange-300">highest current streak</span>.
+            <span className="font-semibold text-[var(--torpy-red)]">highest current streak</span>.
           </p>
 
           {/* Win rules strip (always visible, non-gambling language) */}
-          <div className="mt-3 inline-flex flex-wrap items-center gap-2 rounded-full border border-orange-400/40 bg-orange-500/10 px-4 py-2 text-[12px] text-orange-100">
+          <div className="mt-3 inline-flex flex-wrap items-center gap-2 rounded-full border border-[rgba(var(--torpy-red-rgb),0.45)] bg-[rgba(var(--torpy-red-rgb),0.12)] px-4 py-2 text-[12px] text-red-100">
             <span className="font-semibold">To win:</span>
             <span className="font-semibold">Streak {WIN_MIN_STREAK}+</span>
-            <span className="text-orange-200/70">•</span>
+            <span className="text-red-200/60">•</span>
             <span className="font-semibold">{WIN_MIN_GAMES}+ games played</span>
-            <span className="text-orange-200/70">•</span>
+            <span className="text-red-200/60">•</span>
             <span className="font-semibold">Ties split</span>
           </div>
         </div>
@@ -427,7 +438,12 @@ export default function LeaderboardsPage() {
             <select
               value={scope}
               onChange={handleScopeChange}
-              className="rounded-full bg-[#020617] border border-orange-400/80 px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(248,144,35,0.3)] focus:outline-none focus:ring-2 focus:ring-orange-400"
+              className="rounded-full bg-[#020617] border px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(206,32,41,0.28)] focus:outline-none focus:ring-2"
+              style={{
+                borderColor: "rgba(206,32,41,0.85)",
+                boxShadow: "0 0 20px rgba(206,32,41,0.28)",
+                outlineColor: TORPY_RED,
+              }}
             >
               {SCOPE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -443,7 +459,7 @@ export default function LeaderboardsPage() {
             onClick={() => setShowEligibleOnly((prev) => !prev)}
             className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold border transition ${
               showEligibleOnly
-                ? "bg-orange-500/15 border-orange-400 text-orange-200"
+                ? "bg-[rgba(var(--torpy-red-rgb),0.14)] border-[rgba(var(--torpy-red-rgb),0.75)] text-red-100"
                 : "bg-slate-900/80 border-slate-600 text-slate-200"
             }`}
             title="Show only players eligible to win (streak 5+ and 3+ games played)"
@@ -462,13 +478,15 @@ export default function LeaderboardsPage() {
 
       {/* Winners strip (only when roundComplete + non-overall) */}
       {winnersInfo && (
-        <div className="mb-5 rounded-2xl bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent border border-orange-500/50 px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.75)]">
+        <div className="mb-5 rounded-2xl bg-gradient-to-r from-[rgba(var(--torpy-red-rgb),0.16)] via-sky-500/10 to-transparent border border-[rgba(var(--torpy-red-rgb),0.55)] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.75)]">
           {winnersInfo.winnersCount > 0 ? (
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-orange-300">Round complete</p>
+                <p className="text-[11px] uppercase tracking-wide text-[var(--torpy-red)]">
+                  Round complete
+                </p>
                 <p className="text-sm text-white/85">
-                  <span className="font-semibold text-orange-200">
+                  <span className="font-semibold text-red-100">
                     Winners ({winnersInfo.winnersCount})
                   </span>{" "}
                   — prize split between all winners.
@@ -482,7 +500,9 @@ export default function LeaderboardsPage() {
           ) : (
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-orange-300">Round complete</p>
+                <p className="text-[11px] uppercase tracking-wide text-[var(--torpy-red)]">
+                  Round complete
+                </p>
                 <p className="text-sm text-white/80">No eligible winners for this scope.</p>
               </div>
             </div>
@@ -501,7 +521,7 @@ export default function LeaderboardsPage() {
             {leaderStreak !== null && (
               <div className="text-right text-xs text-slate-300">
                 <p>Current top streak</p>
-                <p className="text-xl font-bold text-orange-300">{leaderStreak}</p>
+                <p className="text-xl font-bold text-[var(--torpy-red)]">{leaderStreak}</p>
               </div>
             )}
           </div>
@@ -538,18 +558,22 @@ export default function LeaderboardsPage() {
                       </div>
                     )}
                   </div>
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-xs font-semibold truncate">
                           #{entry.rank} {entry.displayName}
-                          {isYou && <span className="ml-1 text-[10px] text-orange-300">(You)</span>}
+                          {isYou && (
+                            <span className="ml-1 text-[10px] text-[var(--torpy-red)]">(You)</span>
+                          )}
                         </p>
                         {entry.username && (
                           <p className="text-[10px] text-slate-400 truncate">@{entry.username}</p>
                         )}
                         <div className="mt-2">{renderEligibilityPill(entry)}</div>
                       </div>
+
                       <div className="flex flex-col items-end">
                         {renderStreakPill(entry.currentStreak)}
                         {renderRankDelta(entry.rankDelta)}
@@ -570,7 +594,9 @@ export default function LeaderboardsPage() {
             ? `${totalPlayers} player${totalPlayers === 1 ? "" : "s"} currently have a streak in this leaderboard.`
             : "No players on the board yet – first streak takes top spot."}
         </span>
-        {streakBandDescription && <span className="text-[11px] text-slate-300">{streakBandDescription}</span>}
+        {streakBandDescription && (
+          <span className="text-[11px] text-slate-300">{streakBandDescription}</span>
+        )}
       </div>
 
       {error && <p className="mb-3 text-sm text-red-400">{error} Try refreshing the page.</p>}
@@ -615,7 +641,7 @@ export default function LeaderboardsPage() {
                 <li
                   key={entry.uid}
                   className={`grid grid-cols-12 px-4 py-3 items-center text-sm transform transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-slate-800/40 ${
-                    isYou ? "ring-1 ring-orange-400/60" : ""
+                    isYou ? "ring-1 ring-[rgba(var(--torpy-red-rgb),0.65)]" : ""
                   } ${rankClass}`}
                 >
                   {/* Rank + movement */}
@@ -648,9 +674,15 @@ export default function LeaderboardsPage() {
                     <div className="flex flex-col min-w-0">
                       <span className="font-medium truncate">
                         {entry.displayName}
-                        {isYou && <span className="ml-1 text-[11px] text-orange-300 font-semibold">(You)</span>}
+                        {isYou && (
+                          <span className="ml-1 text-[11px] text-[var(--torpy-red)] font-semibold">
+                            (You)
+                          </span>
+                        )}
                       </span>
-                      {entry.username && <span className="text-[11px] text-white/60 truncate">@{entry.username}</span>}
+                      {entry.username && (
+                        <span className="text-[11px] text-white/60 truncate">@{entry.username}</span>
+                      )}
                     </div>
                   </div>
 
@@ -658,7 +690,9 @@ export default function LeaderboardsPage() {
                   <div className="col-span-2">{renderEligibilityPill(entry)}</div>
 
                   {/* Current streak pill */}
-                  <div className="col-span-2 text-right sm:text-center">{renderStreakPill(entry.currentStreak)}</div>
+                  <div className="col-span-2 text-right sm:text-center">
+                    {renderStreakPill(entry.currentStreak)}
+                  </div>
                 </li>
               );
             })}
@@ -669,8 +703,10 @@ export default function LeaderboardsPage() {
       {/* Your position if outside top 10 */}
       {user ? (
         userOutsideTop10 && userEntry ? (
-          <div className="mb-4 rounded-2xl bg-gradient-to-r from-orange-500/15 via-sky-500/10 to-transparent border border-orange-500/60 px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)] transform transition-all duration-300 ease-out">
-            <p className="text-xs uppercase tracking-wide text-orange-300 mb-1">Your position</p>
+          <div className="mb-4 rounded-2xl bg-gradient-to-r from-[rgba(var(--torpy-red-rgb),0.16)] via-sky-500/10 to-transparent border border-[rgba(var(--torpy-red-rgb),0.65)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)] transform transition-all duration-300 ease-out">
+            <p className="text-xs uppercase tracking-wide text-[var(--torpy-red)] mb-1">
+              Your position
+            </p>
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -709,7 +745,7 @@ export default function LeaderboardsPage() {
                 {leaderStreak !== null && leaderStreak > userEntry.currentStreak && (
                   <p className="mt-1 text-[11px] text-slate-300">
                     Need{" "}
-                    <span className="font-semibold text-orange-300">
+                    <span className="font-semibold text-[var(--torpy-red)]">
                       {leaderStreak - userEntry.currentStreak}
                     </span>{" "}
                     more to catch the leaders.
@@ -725,8 +761,9 @@ export default function LeaderboardsPage() {
             {/* Small eligibility reminder for non-eligible users */}
             {!computeEligibility(userEntry).eligible && (
               <div className="mt-3 text-[11px] text-white/65">
-                To win: streak <span className="font-semibold text-orange-200">{WIN_MIN_STREAK}+</span> and{" "}
-                <span className="font-semibold text-orange-200">{WIN_MIN_GAMES}+ games</span> played.
+                To win: streak{" "}
+                <span className="font-semibold text-red-100">{WIN_MIN_STREAK}+</span> and{" "}
+                <span className="font-semibold text-red-100">{WIN_MIN_GAMES}+ games</span> played.
               </div>
             )}
           </div>
