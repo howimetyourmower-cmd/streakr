@@ -1,12 +1,7 @@
-// /app/leagues/page.tsx
-import dynamic from "next/dynamic";
+import { redirect } from "next/navigation";
 
-const LeaguesClient = dynamic(() => import("./LeaguesClient"), { ssr: false });
+export const dynamic = "force-dynamic";
 
-export default function Page() {
-  return (
-    <main className="min-h-screen bg-black text-white p-6">
-      <LeaguesClient />
-    </main>
-  );
+export default function LockerRoomRedirectPage() {
+  redirect("/leagues");
 }
