@@ -82,13 +82,9 @@ export default function AflHubPage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  const [showPreloader, setShowPreloader] = useState(true);
-  const [isPreloaderFading, setIsPreloaderFading] = useState(false);
-
   const picksHref = "/picks?sport=AFL";
   const encodedReturnTo = encodeURIComponent(picksHref);
 
-  
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
@@ -163,7 +159,10 @@ export default function AflHubPage() {
 
   const previewQuestions = useMemo(() => questions.slice(0, 6), [questions]);
 
-  const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
+  const goToPicksWithPreviewFocus = (
+    questionId: string,
+    intendedPick: "yes" | "no"
+  ) => {
     if (!user) {
       setShowAuthModal(true);
       return;
@@ -252,7 +251,10 @@ export default function AflHubPage() {
   } as const;
 
   return (
-    <main className="min-h-screen relative text-white" style={{ backgroundColor: COLORS.bg }}>
+    <main
+      className="min-h-screen relative text-white"
+      style={{ backgroundColor: COLORS.bg }}
+    >
       <style>{`
         @keyframes torpyPing {
           0% { transform: scale(1); opacity: .55; }
@@ -260,44 +262,6 @@ export default function AflHubPage() {
           100% { transform: scale(1.6); opacity: 0; }
         }
       `}</style>
-
-      {/* ========= PRELOADER ========= */}
-      {showPreloader && (
-        <div
-          className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-700 ${
-            isPreloaderFading ? "opacity-0 pointer-events-none" : "opacity-100"
-          }`}
-          style={{ backgroundColor: COLORS.bg }}
-        >
-          <div className="relative w-full h-full overflow-hidden" style={{ backgroundColor: COLORS.bg }}>
-            <video
-              src="/preloadervideo.mp4"
-              autoPlay
-              muted
-              playsInline
-              onEnded={hidePreloaderNow}
-              onError={hidePreloaderNow}
-              className="absolute inset-0 w-full h-full object-contain"
-              style={{ backgroundColor: COLORS.bg }}
-            />
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-            <div className="pointer-events-none absolute bottom-10 left-1/2 -translate-x-1/2 text-center px-4">
-              <p className="text-xs sm:text-sm text-white/55 tracking-[0.25em] uppercase mb-1">
-                Welcome to
-              </p>
-              <p
-                className="text-3xl sm:text-4xl font-extrabold"
-                style={{ color: COLORS.white, textShadow: "0 0 22px rgba(255,255,255,0.18)" }}
-              >
-                TORPY
-              </p>
-              <p className="mt-1 text-[11px] sm:text-xs" style={{ color: "rgba(255,46,77,0.85)" }}>
-                How Long Can You Last?
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ========= PAGE BG ========= */}
       <div className="pointer-events-none absolute inset-0 -z-10">
@@ -344,10 +308,31 @@ export default function AflHubPage() {
                   boxShadow: "0 0 26px rgba(255,46,77,0.16)",
                 }}
               >
-                <svg viewBox="0 0 120 80" className="h-10 w-10" fill="none" style={{ color: COLORS.white }}>
-                  <ellipse cx="60" cy="40" rx="46" ry="30" stroke="currentColor" strokeWidth="6" />
-                  <path d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0" stroke="currentColor" strokeWidth="4" />
-                  <path d="M60 18v44" stroke="currentColor" strokeWidth="4" opacity="0.6" />
+                <svg
+                  viewBox="0 0 120 80"
+                  className="h-10 w-10"
+                  fill="none"
+                  style={{ color: COLORS.white }}
+                >
+                  <ellipse
+                    cx="60"
+                    cy="40"
+                    rx="46"
+                    ry="30"
+                    stroke="currentColor"
+                    strokeWidth="6"
+                  />
+                  <path
+                    d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    d="M60 18v44"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    opacity="0.6"
+                  />
                 </svg>
               </div>
 
@@ -381,7 +366,8 @@ export default function AflHubPage() {
                 </div>
 
                 <p className="mt-2 text-sm text-white/65">
-                  Know your stats. Make your pick. One wrong call and your streak is cooked.
+                  Know your stats. Make your pick. One wrong call and your
+                  streak is cooked.
                 </p>
               </div>
             </div>
@@ -396,7 +382,12 @@ export default function AflHubPage() {
                 Footy. Banter. Bragging rights.
               </span>
 
-              <span style={{ color: COLORS.white, textShadow: "0 0 18px rgba(255,255,255,0.20)" }}>
+              <span
+                style={{
+                  color: COLORS.white,
+                  textShadow: "0 0 18px rgba(255,255,255,0.20)",
+                }}
+              >
                 AFL TORPY
               </span>
 
@@ -406,13 +397,16 @@ export default function AflHubPage() {
             </h1>
 
             <p className="text-base sm:text-lg text-white/65 max-w-xl mb-6">
-              Think you know your AFL? Prove it or pipe down. Back your gut, ride the hot hand, and roast your mates
-              when you&apos;re on a run. One wrong call and your streak is cooked — back to zip.
+              Think you know your AFL? Prove it or pipe down. Back your gut,
+              ride the hot hand, and roast your mates when you&apos;re on a run.
+              One wrong call and your streak is cooked — back to zip.
             </p>
 
             <div className="inline-flex flex-wrap items-center gap-3 mb-6">
               <div className="rounded-full px-4 py-1.5 border" style={redBadgeStyle}>
-                <span className="text-sm font-semibold">Up to $1,000 in prizes every round*</span>
+                <span className="text-sm font-semibold">
+                  Up to $1,000 in prizes every round*
+                </span>
               </div>
               <span className="hidden sm:inline text-[11px] text-white/45">
                 Free to play • 18+ • No gambling • Just bragging rights
@@ -439,8 +433,8 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-[11px] text-white/45">
-              *Prizes subject to T&amp;Cs. TORPY is a free game of skill. No gambling. 18+ only. Don&apos;t be a mug —
-              play for fun.
+              *Prizes subject to T&amp;Cs. TORPY is a free game of skill. No
+              gambling. 18+ only. Don&apos;t be a mug — play for fun.
             </p>
           </div>
 
@@ -452,7 +446,13 @@ export default function AflHubPage() {
                 borderColor: "rgba(255,255,255,0.10)",
               }}
             >
-              <Image src="/mcg-hero.jpg" alt="Night footy at the G" fill className="object-cover opacity-85" priority />
+              <Image
+                src="/mcg-hero.jpg"
+                alt="Night footy at the G"
+                fill
+                className="object-cover opacity-85"
+                priority
+              />
               <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
 
               <div className="absolute top-4 right-4">
@@ -465,23 +465,36 @@ export default function AflHubPage() {
                     boxShadow: "0 0 18px rgba(255,46,77,0.14)",
                   }}
                 >
-                  <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red }} />
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: COLORS.red }}
+                  />
                   AFL MODE
                 </span>
               </div>
 
               <div className="absolute top-4 left-4 flex items-center gap-2">
-                <span className="rounded-full border px-3 py-1 text-[11px] font-semibold" style={subtlePillStyle}>
+                <span
+                  className="rounded-full border px-3 py-1 text-[11px] font-semibold"
+                  style={subtlePillStyle}
+                >
                   Live AFL player-stat picks
                 </span>
               </div>
 
               <div className="absolute bottom-4 left-4 right-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                 <div>
-                  <p className="text-[11px] text-white/45 mb-1">Group chats. Pub banter. Office comps.</p>
-                  <p className="text-sm font-semibold text-white/90">One streak. Battle your mates. Endless sledging.</p>
+                  <p className="text-[11px] text-white/45 mb-1">
+                    Group chats. Pub banter. Office comps.
+                  </p>
+                  <p className="text-sm font-semibold text-white/90">
+                    One streak. Battle your mates. Endless sledging.
+                  </p>
                 </div>
-                <div className="rounded-full text-xs font-black px-3 py-1 whitespace-nowrap border" style={primaryCtaStyle}>
+                <div
+                  className="rounded-full text-xs font-black px-3 py-1 whitespace-nowrap border"
+                  style={primaryCtaStyle}
+                >
                   Start playing now
                 </div>
               </div>
@@ -494,15 +507,26 @@ export default function AflHubPage() {
           <div className="text-center mb-8">
             <h2 className="text-2xl sm:text-3xl font-extrabold mb-2">
               How to play{" "}
-              <span style={{ color: COLORS.red, textShadow: "0 0 14px rgba(255,46,77,0.25)" }}>TORPY</span>
+              <span
+                style={{
+                  color: COLORS.red,
+                  textShadow: "0 0 14px rgba(255,46,77,0.25)",
+                }}
+              >
+                TORPY
+              </span>
             </h2>
             <p className="text-sm sm:text-base text-white/65 max-w-2xl mx-auto">
-              Three simple steps. Fast picks. Big sweat. One wrong call and you&apos;re cooked.
+              Three simple steps. Fast picks. Big sweat. One wrong call and
+              you&apos;re cooked.
             </p>
           </div>
 
           <div className="grid sm:grid-cols-3 gap-5 mb-6">
-            <div className="relative rounded-3xl border p-6 transition-all group" style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}>
+            <div
+              className="relative rounded-3xl border p-6 transition-all group"
+              style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}
+            >
               <div
                 className="absolute top-4 left-4 h-10 w-10 rounded-full flex items-center justify-center text-white font-black text-lg border"
                 style={{
@@ -518,19 +542,28 @@ export default function AflHubPage() {
                   Pick Yes / No
                 </h3>
                 <p className="text-sm text-white/65 leading-relaxed mb-4">
-                  Live AFL player-stat questions drop each quarter. Back your read.
+                  Live AFL player-stat questions drop each quarter. Back your
+                  read.
                 </p>
                 <div className="flex items-center gap-2">
                   <span
                     className="inline-flex items-center rounded-full px-3 py-1 text-xs font-black border"
-                    style={{ borderColor: "rgba(255,255,255,0.35)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.95)" }}
+                    style={{
+                      borderColor: "rgba(255,255,255,0.35)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.95)",
+                    }}
                   >
                     YES
                   </span>
                   <span className="text-white/45">or</span>
                   <span
                     className="inline-flex items-center rounded-full px-3 py-1 text-xs font-black border"
-                    style={{ borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.12)", color: "rgba(255,255,255,0.95)" }}
+                    style={{
+                      borderColor: "rgba(255,46,77,0.55)",
+                      background: "rgba(255,46,77,0.12)",
+                      color: "rgba(255,255,255,0.95)",
+                    }}
                   >
                     NO
                   </span>
@@ -538,7 +571,10 @@ export default function AflHubPage() {
               </div>
             </div>
 
-            <div className="relative rounded-3xl border p-6 transition-all group" style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}>
+            <div
+              className="relative rounded-3xl border p-6 transition-all group"
+              style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}
+            >
               <div
                 className="absolute top-4 left-4 h-10 w-10 rounded-full flex items-center justify-center text-white font-black text-lg border"
                 style={{
@@ -564,15 +600,27 @@ export default function AflHubPage() {
                   </span>
                   .
                 </p>
-                <div className="rounded-lg px-3 py-2 border" style={{ borderColor: "rgba(255,46,77,0.30)", background: "rgba(255,46,77,0.10)" }}>
-                  <p className="text-xs font-semibold" style={{ color: "rgba(255,255,255,0.92)" }}>
+                <div
+                  className="rounded-lg px-3 py-2 border"
+                  style={{
+                    borderColor: "rgba(255,46,77,0.30)",
+                    background: "rgba(255,46,77,0.10)",
+                  }}
+                >
+                  <p
+                    className="text-xs font-semibold"
+                    style={{ color: "rgba(255,255,255,0.92)" }}
+                  >
                     ⚠️ One wrong = back to zero
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="relative rounded-3xl border p-6 transition-all group" style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}>
+            <div
+              className="relative rounded-3xl border p-6 transition-all group"
+              style={{ ...cardStyle, borderColor: "rgba(255,255,255,0.10)" }}
+            >
               <div
                 className="absolute top-4 left-4 h-10 w-10 rounded-full flex items-center justify-center text-white font-black text-lg border"
                 style={{
@@ -588,11 +636,16 @@ export default function AflHubPage() {
                   Climb the leaderboard
                 </h3>
                 <p className="text-sm text-white/65 leading-relaxed mb-4">
-                  Longest streak wins the round. Beat your mates, win prizes, talk big.
+                  Longest streak wins the round. Beat your mates, win prizes,
+                  talk big.
                 </p>
                 <span
                   className="inline-flex items-center rounded-full px-3 py-1 text-xs font-black border"
-                  style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.92)" }}
+                  style={{
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.10)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
                 >
                   🏆 Up to $1,000 prizes
                 </span>
@@ -619,13 +672,26 @@ export default function AflHubPage() {
               Next <span style={{ color: COLORS.red }}>6</span> available picks
             </h2>
             <p className="text-sm sm:text-base text-white/65 max-w-2xl mx-auto">
-              Tap <span className="font-semibold" style={{ color: COLORS.white }}>Yes</span> or{" "}
-              <span className="font-semibold" style={{ color: COLORS.red }}>No</span> to jump straight into Picks.
+              Tap{" "}
+              <span className="font-semibold" style={{ color: COLORS.white }}>
+                Yes
+              </span>{" "}
+              or{" "}
+              <span className="font-semibold" style={{ color: COLORS.red }}>
+                No
+              </span>{" "}
+              to jump straight into Picks.
             </p>
           </div>
 
           {error ? (
-            <div className="rounded-2xl border px-5 py-4 mb-6" style={{ borderColor: "rgba(255,46,77,0.30)", background: "rgba(255,46,77,0.10)" }}>
+            <div
+              className="rounded-2xl border px-5 py-4 mb-6"
+              style={{
+                borderColor: "rgba(255,46,77,0.30)",
+                background: "rgba(255,46,77,0.10)",
+              }}
+            >
               <p className="text-sm" style={{ color: "rgba(255,255,255,0.92)" }}>
                 {error}
               </p>
@@ -635,7 +701,11 @@ export default function AflHubPage() {
           {loading ? (
             <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <div key={i} className="rounded-2xl border px-5 py-4 animate-pulse" style={{ ...cardStyle }}>
+                <div
+                  key={i}
+                  className="rounded-2xl border px-5 py-4 animate-pulse"
+                  style={{ ...cardStyle }}
+                >
                   <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
                   <div className="h-3 bg-white/5 rounded w-1/2" />
                 </div>
@@ -645,7 +715,9 @@ export default function AflHubPage() {
 
           {!loading && previewQuestions.length === 0 && !error ? (
             <div className="rounded-2xl border px-6 py-8 text-center" style={{ ...cardStyle }}>
-              <p className="text-sm text-white/65 mb-4">No open questions right now. Check back closer to bounce.</p>
+              <p className="text-sm text-white/65 mb-4">
+                No open questions right now. Check back closer to bounce.
+              </p>
               <Link
                 href={picksHref}
                 onClick={onClickGoToPicks}
@@ -670,15 +742,20 @@ export default function AflHubPage() {
                     borderColor: "rgba(255,255,255,0.10)",
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = cardHoverBorder;
+                    (e.currentTarget as HTMLDivElement).style.borderColor =
+                      cardHoverBorder;
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.10)";
+                    (e.currentTarget as HTMLDivElement).style.borderColor =
+                      "rgba(255,255,255,0.10)";
                   }}
                 >
                   <div
                     className="absolute -top-3 -left-3 h-8 w-8 rounded-full border-2 border-black flex items-center justify-center text-white font-black text-sm"
-                    style={{ background: COLORS.red, boxShadow: "0 0 18px rgba(255,46,77,0.18)" }}
+                    style={{
+                      background: COLORS.red,
+                      boxShadow: "0 0 18px rgba(255,46,77,0.18)",
+                    }}
                   >
                     {idx + 1}
                   </div>
@@ -686,16 +763,23 @@ export default function AflHubPage() {
                   <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45 mb-2">
-                        <span className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black" style={redPillStyle}>
+                        <span
+                          className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
+                          style={redPillStyle}
+                        >
                           <span className="relative flex h-2 w-2">
                             <span
                               className="absolute inline-flex h-full w-full rounded-full"
                               style={{
                                 background: "rgba(255,46,77,0.85)",
-                                animation: "torpyPing 1.6s cubic-bezier(0,0,0.2,1) infinite",
+                                animation:
+                                  "torpyPing 1.6s cubic-bezier(0,0,0.2,1) infinite",
                               }}
                             />
-                            <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
+                            <span
+                              className="relative inline-flex h-2 w-2 rounded-full"
+                              style={{ background: "rgba(255,46,77,0.95)" }}
+                            />
                           </span>
                           AFL Q{q.quarter}
                         </span>
@@ -708,10 +792,14 @@ export default function AflHubPage() {
                         <span className="text-white/65">{q.venue}</span>
                       </div>
 
-                      <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
+                      <div className="text-xs sm:text-sm font-black text-white/85 mb-2">
+                        {q.match}
+                      </div>
 
                       <div className="text-sm sm:text-base font-semibold text-white/90 group-hover:text-white transition-colors">
-                        <span style={{ color: "rgba(255,255,255,0.92)" }}>{q.question}</span>
+                        <span style={{ color: "rgba(255,255,255,0.92)" }}>
+                          {q.question}
+                        </span>
                       </div>
                     </div>
 
@@ -755,38 +843,70 @@ export default function AflHubPage() {
         </section>
 
         {/* ========= SOCIAL PROOF / STATS ========= */}
-        <section className="mb-16 rounded-3xl border px-6 py-8 transition-colors" style={{ ...cardStyle }}>
+        <section
+          className="mb-16 rounded-3xl border px-6 py-8 transition-colors"
+          style={{ ...cardStyle }}
+        >
           <div className="grid sm:grid-cols-3 gap-6 text-center">
             <div>
-              <div className="text-3xl sm:text-4xl font-extrabold mb-1" style={{ color: COLORS.white, textShadow: "0 0 14px rgba(255,255,255,0.14)" }}>
+              <div
+                className="text-3xl sm:text-4xl font-extrabold mb-1"
+                style={{
+                  color: COLORS.white,
+                  textShadow: "0 0 14px rgba(255,255,255,0.14)",
+                }}
+              >
                 Live
               </div>
-              <p className="text-sm text-white/65">Real-time picks during every AFL match</p>
+              <p className="text-sm text-white/65">
+                Real-time picks during every AFL match
+              </p>
             </div>
 
             <div>
-              <div className="text-3xl sm:text-4xl font-extrabold mb-1" style={{ color: COLORS.red, textShadow: "0 0 14px rgba(255,46,77,0.22)" }}>
+              <div
+                className="text-3xl sm:text-4xl font-extrabold mb-1"
+                style={{
+                  color: COLORS.red,
+                  textShadow: "0 0 14px rgba(255,46,77,0.22)",
+                }}
+              >
                 $1,000
               </div>
               <p className="text-sm text-white/65">In prizes every round*</p>
             </div>
 
             <div>
-              <div className="text-3xl sm:text-4xl font-extrabold mb-1" style={{ color: COLORS.white, textShadow: "0 0 14px rgba(255,255,255,0.12)" }}>
+              <div
+                className="text-3xl sm:text-4xl font-extrabold mb-1"
+                style={{
+                  color: COLORS.white,
+                  textShadow: "0 0 14px rgba(255,255,255,0.12)",
+                }}
+              >
                 Free
               </div>
-              <p className="text-sm text-white/65">No gambling. Just skill &amp; bragging rights</p>
+              <p className="text-sm text-white/65">
+                No gambling. Just skill &amp; bragging rights
+              </p>
             </div>
           </div>
         </section>
 
-        <footer className="border-t pt-6 mt-4 text-sm" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+        <footer
+          className="border-t pt-6 mt-4 text-sm"
+          style={{ borderColor: "rgba(255,255,255,0.10)" }}
+        >
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/45">
             <p>
-              TORPY is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions. Play
-              responsibly.
+              TORPY is a free game of skill. No gambling. 18+ only. Prizes subject
+              to terms and conditions. Play responsibly.
             </p>
-            <Link href="/faq" className="hover:underline underline-offset-2" style={{ color: COLORS.red }}>
+            <Link
+              href="/faq"
+              className="hover:underline underline-offset-2"
+              style={{ color: COLORS.red }}
+            >
               FAQ
             </Link>
           </div>
@@ -798,7 +918,9 @@ export default function AflHubPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm rounded-2xl border p-6" style={{ ...cardStyle }}>
             <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">Log in to play AFL</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Log in to play AFL
+              </h2>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
@@ -810,7 +932,8 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-sm text-white/65 mb-4">
-              You need a free TORPY account to make picks, build your streak and appear on the leaderboard.
+              You need a free TORPY account to make picks, build your streak and
+              appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
