@@ -380,7 +380,7 @@ export default function AflHubPage() {
               <span
                 style={{
                   color: COLORS.white,
-                  textShadow: "0 0 22px rgba(255,255,255,0.20)",
+                  textShadow: "0 0 19px rgba(255,255,255,0.20)",
                 }}
               >
                TORPY
