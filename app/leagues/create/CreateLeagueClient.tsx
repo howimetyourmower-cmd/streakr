@@ -16,12 +16,10 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
-import SportBadge from "@/components/SportBadge";
 
 function safeTrim(v: any): string {
   return typeof v === "string" ? v.trim() : "";
@@ -35,13 +33,11 @@ function generateInviteCode(length = 6): string {
   // no 0/O/1/I
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let out = "";
-  for (let i = 0; i < length; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  for (let i = 0; i < length; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
   return out;
 }
 
-async function findUniqueInviteCode(maxAttempts = 8): Promise<string> {
+async function findUniqueInviteCode(maxAttempts = 10): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
     const code = generateInviteCode(6);
     const leaguesRef = collection(db, "leagues");
@@ -49,8 +45,72 @@ async function findUniqueInviteCode(maxAttempts = 8): Promise<string> {
     const snap = await getDocs(qRef);
     if (snap.empty) return code;
   }
-  // worst-case fallback (still very unlikely)
   return `${generateInviteCode(6)}${Math.floor(Math.random() * 9)}`;
+}
+
+function Pill({
+  children,
+  tone = "orange",
+}: {
+  children: React.ReactNode;
+  tone?: "orange" | "sky" | "zinc" | "emerald";
+}) {
+  const cls =
+    tone === "orange"
+      ? "border-orange-500/30 bg-orange-500/10 text-orange-200"
+      : tone === "sky"
+        ? "border-sky-500/30 bg-sky-500/10 text-sky-200"
+        : tone === "emerald"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          : "border-white/10 bg-white/5 text-white/70";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${cls}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+      {children}
+    </span>
+  );
+}
+
+function Card({
+  title,
+  desc,
+  children,
+  accent = "orange",
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+  accent?: "orange" | "sky" | "zinc" | "emerald";
+}) {
+  const top =
+    accent === "orange"
+      ? "from-orange-500/18"
+      : accent === "sky"
+        ? "from-sky-500/18"
+        : accent === "emerald"
+          ? "from-emerald-500/18"
+          : "from-white/8";
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_0_40px_rgba(0,0,0,0.55)] overflow-hidden">
+      <div
+        className={`border-b border-white/10 bg-gradient-to-r ${top} via-transparent to-transparent px-4 py-3`}
+      >
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-extrabold tracking-tight md:text-lg">
+            {title}
+          </h2>
+          {desc ? (
+            <p className="mt-0.5 text-[12px] leading-snug text-white/65">{desc}</p>
+          ) : null}
+        </div>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
 }
 
 export default function CreateLeagueClient() {
@@ -59,6 +119,9 @@ export default function CreateLeagueClient() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+
+  // defaults (you said “defaults then we can update”)
+  const [maxMembers, setMaxMembers] = useState<number>(50);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
@@ -77,20 +140,22 @@ export default function CreateLeagueClient() {
     setInfo("");
 
     if (!user) {
-      setError("You need to log in to create a league.");
+      setError("You need to log in to create a room.");
       return;
     }
 
     const cleanName = safeTrim(name);
     if (cleanName.length < 3) {
-      setError("League name must be at least 3 characters.");
+      setError("Room name must be at least 3 characters.");
       return;
     }
+
+    const cleanMax = Number.isFinite(maxMembers) ? Math.max(2, Math.min(500, maxMembers)) : 50;
 
     setSubmitting(true);
 
     try {
-      const inviteCode = await findUniqueInviteCode();
+      const inviteCode = normalizeCode(await findUniqueInviteCode());
 
       const displayName =
         (user as any)?.displayName ||
@@ -98,26 +163,28 @@ export default function CreateLeagueClient() {
         (user as any)?.email ||
         "Player";
 
-      // 1) Create league doc
+      // 1) Create league (room) doc
       const leagueRef = await addDoc(collection(db, "leagues"), {
         name: cleanName,
         description: safeTrim(description),
-        inviteCode: normalizeCode(inviteCode),
+        inviteCode,
         managerId: user.uid,
         sport: "afl",
 
-        // optional but handy (keeps things consistent + can prevent double-count)
+        // For fast membership lookups + safe join increments
         memberIds: [user.uid],
         memberCount: 1,
+
+        // Defaults (editable later)
+        maxMembers: cleanMax,
 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
       // 2) Create manager member subdoc
-      const memberRef = doc(db, "leagues", leagueRef.id, "members", user.uid);
       await setDoc(
-        memberRef,
+        doc(db, "leagues", leagueRef.id, "members", user.uid),
         {
           uid: user.uid,
           displayName,
@@ -129,21 +196,17 @@ export default function CreateLeagueClient() {
       );
 
       // 3) Update user doc to include leagueId (so /leagues loads fast)
-      const userRef = doc(db, "users", user.uid);
       await setDoc(
-        userRef,
-        {
-          leagueIds: arrayUnion(leagueRef.id),
-          updatedAt: serverTimestamp(),
-        },
+        doc(db, "users", user.uid),
+        { leagueIds: arrayUnion(leagueRef.id), updatedAt: serverTimestamp() },
         { merge: true }
       );
 
-      setInfo("League created. Opening ladder…");
+      setInfo("Room created. Opening ladder…");
       router.push(`/leagues/${leagueRef.id}/ladder`);
     } catch (err) {
-      console.error("Create league failed", err);
-      setError("Could not create league right now. Please try again.");
+      console.error("Create room failed", err);
+      setError("Could not create a room right now. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -151,43 +214,63 @@ export default function CreateLeagueClient() {
 
   return (
     <main className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto w-full max-w-3xl px-4 py-8 space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 border border-orange-500/30 px-3 py-1 text-xs font-bold text-orange-300 uppercase tracking-wide">
-              <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
-              Create a league
+      <div className="mx-auto w-full max-w-5xl px-4 py-5 md:py-7 space-y-4">
+        {/* Header */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Pill tone="orange">Create a Locker Room</Pill>
+                <Pill tone="zinc">AFL</Pill>
+              </div>
+              <h1 className="mt-2 text-2xl font-extrabold tracking-tight md:text-3xl">
+                New Room
+              </h1>
+              <p className="mt-1 text-[12px] leading-snug text-white/65 md:text-sm">
+                Name your room, get an invite code, and bring the crew in. AFL-only for now.
+              </p>
             </div>
-            <h1 className="text-3xl font-extrabold leading-tight">New League</h1>
-            <p className="text-sm text-white/60 max-w-xl">
-              Name your league, get an invite code, and bring the crew in. AFL-only for now.
-            </p>
+
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <Link
+                href="/leagues"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/10"
+              >
+                Back to Locker Room
+              </Link>
+            </div>
           </div>
-          <SportBadge sport="afl" />
+
+          {!user && !loading && (
+            <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              You need to log in before you can create a room.
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          {info && (
+            <div className="mt-3 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+              {info}
+            </div>
+          )}
         </div>
 
-        {!user && !loading && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            You need to log in before you can create a league.
-          </div>
-        )}
-
-        {error && (
-          <div className="text-sm text-red-300 border border-red-500/40 rounded-xl bg-red-500/10 px-4 py-3">
-            {error}
-          </div>
-        )}
-
-        {info && (
-          <div className="text-sm text-emerald-200 border border-emerald-500/40 rounded-xl bg-emerald-500/10 px-4 py-3">
-            {info}
-          </div>
-        )}
-
-        <div className="rounded-2xl border border-white/10 bg-black/30 p-6 space-y-5">
+        {/* Form card */}
+        <Card
+          title="Room details"
+          desc="Short and savage names look best on the ladder."
+          accent="orange"
+        >
           <form onSubmit={handleCreate} className="space-y-4" autoComplete="off">
             <div className="space-y-1">
-              <label className="text-xs text-white/60">League name</label>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                Room name
+              </label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -195,12 +278,14 @@ export default function CreateLeagueClient() {
                 className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
               />
               <p className="text-[11px] text-white/45">
-                This shows on your league page and ladder.
+                This shows on the room page and ladder.
               </p>
             </div>
 
             <div className="space-y-1">
-              <label className="text-xs text-white/60">Description (optional)</label>
+              <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                Description (optional)
+              </label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -210,13 +295,42 @@ export default function CreateLeagueClient() {
               />
             </div>
 
+            {/* Default settings (keep simple) */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Max members
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={500}
+                  value={maxMembers}
+                  onChange={(e) => setMaxMembers(Number(e.target.value))}
+                  className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+                />
+                <p className="text-[11px] text-white/45">
+                  Default 50. We can hide this later if you want.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-[12px] text-white/65">
+                <div className="font-semibold text-white/80 mb-1">Defaults</div>
+                <ul className="space-y-1">
+                  <li>• Sport: AFL</li>
+                  <li>• Private room + invite code</li>
+                  <li>• You become Room Manager</li>
+                </ul>
+              </div>
+            </div>
+
             <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="submit"
                 disabled={!canSubmit}
                 className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black font-extrabold text-sm px-6 py-3 transition"
               >
-                {submitting ? "Creating…" : "Create league"}
+                {submitting ? "Creating…" : "Create room"}
               </button>
 
               <Link
@@ -228,17 +342,11 @@ export default function CreateLeagueClient() {
             </div>
 
             <div className="text-[11px] text-white/50 pt-2">
-              Creating a league generates a single invite code you can share with mates.
+              Creating a room generates a single invite code you can share with mates.
               Your global streak still counts on the main leaderboard.
             </div>
           </form>
-        </div>
-
-        <div className="text-xs text-white/50">
-          <Link href="/leagues" className="text-orange-300 hover:text-orange-200 font-extrabold">
-            ← Back to leagues
-          </Link>
-        </div>
+        </Card>
       </div>
     </main>
   );
