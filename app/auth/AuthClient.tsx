@@ -1,549 +1,274 @@
-// /app/auth/AuthClient.tsx
+// app/leagues/create/CreateLeagueClient.tsx
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+export const dynamic = "force-dynamic";
+
+import { FormEvent, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  sendEmailVerification,
-} from "firebase/auth";
-import { auth, db } from "@/lib/firebaseClient";
-import { doc, setDoc, getDoc } from "firebase/firestore";
+  addDoc,
+  arrayUnion,
+  collection,
+  doc,
+  getDocs,
+  limit,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
+import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
+import SportBadge from "@/components/SportBadge";
 
-type Mode = "login" | "signup";
+function generateInviteCode(length = 6): string {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+  let out = "";
+  for (let i = 0; i < length; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return out;
+}
 
-export default function AuthClient() {
+function safeTrim(v: any): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+async function findUniqueInviteCode(maxAttempts = 6): Promise<string> {
+  const leaguesRef = collection(db, "leagues");
+
+  for (let i = 0; i < maxAttempts; i++) {
+    const code = generateInviteCode(6);
+    const qRef = query(leaguesRef, where("inviteCode", "==", code), limit(1));
+    const snap = await getDocs(qRef);
+    if (snap.empty) return code;
+  }
+
+  // last resort
+  return `${generateInviteCode(4)}${Math.floor(Math.random() * 90 + 10)}`;
+}
+
+export default function CreateLeagueClient() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const [mode, setMode] = useState<Mode>("signup");
-
-  // Shared fields
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-
-  // Sign up extra fields
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [username, setUsername] = useState("");
-
-  const [firstName, setFirstName] = useState("");
-  const [surname, setSurname] = useState("");
-  const [dob, setDob] = useState("");
-  const [suburb, setSuburb] = useState("");
-  const [stateValue, setStateValue] = useState("");
-  const [phone, setPhone] = useState("");
-  const [gender, setGender] = useState("");
-  const [team, setTeam] = useState("");
-
-  // New: consent checkboxes
-  const [acceptTerms, setAcceptTerms] = useState(false);
-  const [marketingOptIn, setMarketingOptIn] = useState(true); // pre-ticked
-
-  // Show/Hide passwords
-  const [showPasswordSignup, setShowPasswordSignup] = useState(false);
-  const [showPasswordLogin, setShowPasswordLogin] = useState(false);
-
-  // UI state
-  const [error, setError] = useState("");
-  const [info, setInfo] = useState("");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [maxMembers, setMaxMembers] = useState<string>(""); // optional
   const [submitting, setSubmitting] = useState(false);
 
-  // If already logged in, send them to Picks
-  useEffect(() => {
-    if (!loading && user) {
-      router.push("/picks");
-    }
-  }, [user, loading, router]);
+  const [error, setError] = useState<string>("");
+  const [info, setInfo] = useState<string>("");
 
-  const resetMessages = () => {
+  const canSubmit = useMemo(() => {
+    if (loading) return false;
+    if (!user) return false;
+    if (!safeTrim(name)) return false;
+    return !submitting;
+  }, [loading, user, name, submitting]);
+
+  const handleCreate = async (e: FormEvent) => {
+    e.preventDefault();
     setError("");
     setInfo("");
-  };
 
-  const handleSignUp = async (e: FormEvent) => {
-    e.preventDefault();
-    resetMessages();
-
-    // Basic validation
-    if (!username.trim()) {
-      setError("Please choose a username.");
-      return;
-    }
-    if (!email || !password) {
-      setError("Please enter an email and password.");
-      return;
-    }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+    if (!user) {
+      setError("You need to be logged in to create a league.");
       return;
     }
 
-    if (!firstName.trim()) {
-      setError("Please enter your first name.");
-      return;
-    }
-    if (!surname.trim()) {
-      setError("Please enter your surname.");
-      return;
-    }
-    if (!dob) {
-      setError("Please enter your date of birth.");
-      return;
-    }
-    if (!suburb.trim()) {
-      setError("Please enter your suburb.");
-      return;
-    }
-    if (!stateValue.trim()) {
-      setError("Please select your state.");
-      return;
-    }
-    if (!phone.trim()) {
-      setError("Please enter your phone number.");
-      return;
-    }
-    if (!team.trim()) {
-      setError("Please select your favourite AFL team.");
+    const cleanName = safeTrim(name);
+    if (!cleanName) {
+      setError("Please enter a league name.");
       return;
     }
 
-    // must accept T&Cs
-    if (!acceptTerms) {
-      setError("You must accept the Terms & Conditions to create an account.");
+    const mm = Number(maxMembers);
+    const maxMembersNum =
+      maxMembers.trim() === ""
+        ? undefined
+        : Number.isFinite(mm) && mm >= 2
+          ? Math.floor(mm)
+          : NaN;
+
+    if (maxMembers.trim() !== "" && Number.isNaN(maxMembersNum as any)) {
+      setError("Max members must be a number (2 or more), or leave blank.");
       return;
     }
 
     setSubmitting(true);
+
     try {
-      // Check if username is already taken
-      const cleanUsername = username.trim().toLowerCase();
-      const usernameDocRef = doc(db, "usernames", cleanUsername);
-      const usernameSnap = await getDoc(usernameDocRef);
-      if (usernameSnap.exists()) {
-        setError("That username is already taken. Please choose another.");
-        setSubmitting(false);
-        return;
-      }
+      const inviteCode = await findUniqueInviteCode();
 
-      // Create auth account
-      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      // Create league doc
+      const leaguesRef = collection(db, "leagues");
+      const leagueDocRef = await addDoc(leaguesRef, {
+        name: cleanName,
+        description: safeTrim(description),
+        inviteCode,
+        managerId: user.uid,
+        sport: "afl", // AFL-only for now
+        isPublic: false,
+        maxMembers: typeof maxMembersNum === "number" ? maxMembersNum : undefined,
 
-      const uid = cred.user.uid;
-      const nowIso = new Date().toISOString();
+        memberCount: 1,
+        memberIds: [user.uid],
 
-      // Firestore user profile
-      const userRef = doc(db, "users", uid);
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      const leagueId = leagueDocRef.id;
+
+      // Create manager member subdoc
+      const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      const displayName =
+        (user as any).displayName || (user as any).username || (user as any).email || "Player";
+
       await setDoc(
-        userRef,
+        memberRef,
         {
-          uid,
-          email: email.toLowerCase(),
-          username: username.trim(),
-          firstName: firstName.trim(),
-          surname: surname.trim(),
-          dob,
-          suburb: suburb.trim(),
-          state: stateValue.trim(),
-          phone: phone.trim(),
-          gender: gender || "",
-          team,
-          favouriteTeam: team,
-          createdAt: nowIso,
-          currentStreak: 0,
-          longestStreak: 0,
-          acceptedTerms: true,
-          acceptedTermsAt: nowIso,
-          marketingOptIn: !!marketingOptIn,
+          uid: user.uid,
+          displayName,
+          role: "manager",
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      // Reserve username -> uid mapping
-      await setDoc(usernameDocRef, { uid });
-
-      // Send verification email
-      await sendEmailVerification(cred.user, {
-        url: "https://streakr-mu.vercel.app/auth?mode=verified",
-        handleCodeInApp: true,
-      });
-
-      setInfo(
-        "Account created. We’ve sent a verification email – please check your inbox (and spam/promotions folder) and click the link to verify."
+      // Ensure users/{uid}.leagueIds contains this league (so /leagues loads reliably)
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          leagueIds: arrayUnion(leagueId),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
       );
-      setError("");
+
+      // Belt + braces: ensure memberCount is sane (optional)
+      await updateDoc(doc(db, "leagues", leagueId), {
+        memberCount: 1,
+        updatedAt: serverTimestamp(),
+      }).catch(() => {});
+
+      setInfo("League created. Opening…");
+      router.push(`/leagues/${leagueId}`);
     } catch (err: any) {
-      console.error("Signup error", err);
-      setError(err?.message || "Failed to sign up. Please try again.");
+      console.error("Create league error", err);
+      setError(err?.message || "Failed to create league. Please try again.");
     } finally {
       setSubmitting(false);
     }
   };
-
-  const handleLogin = async (e: FormEvent) => {
-    e.preventDefault();
-    resetMessages();
-
-    if (!email || !password) {
-      setError("Please enter your email and password.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const cred = await signInWithEmailAndPassword(auth, email, password);
-
-      if (!cred.user.emailVerified) {
-        setInfo(
-          "You’re logged in, but your email isn’t verified yet. Some features may be limited until you click the link we sent."
-        );
-      }
-
-      router.push("/picks");
-    } catch (err: any) {
-      console.error("Login error", err);
-      setError(err?.message || "Failed to log in. Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const isSignup = mode === "signup";
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white flex items-center justify-center px-4 py-10">
-      <div className="w-full max-w-md bg-black/40 border border-white/10 rounded-2xl px-6 py-6 md:px-8 md:py-8 shadow-xl">
-        {/* Tabs */}
-        <div className="flex mb-6 border-b border-white/10">
-          <button
-            type="button"
-            onClick={() => {
-              setMode("signup");
-              resetMessages();
-            }}
-            className={`flex-1 pb-2 text-center text-sm font-semibold ${
-              isSignup
-                ? "text-orange-400 border-b-2 border-orange-400"
-                : "text-white/60 border-b-2 border-transparent"
-            }`}
-          >
-            Sign up
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("login");
-              resetMessages();
-            }}
-            className={`flex-1 pb-2 text-center text-sm font-semibold ${
-              !isSignup
-                ? "text-orange-400 border-b-2 border-orange-400"
-                : "text-white/60 border-b-2 border-transparent"
-            }`}
-          >
-            Log in
-          </button>
+    <main className="min-h-screen bg-[#050814] text-white px-4 py-10">
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 border border-orange-500/30 px-3 py-1 text-xs font-extrabold text-orange-300 uppercase tracking-wide">
+              <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+              Create a private league
+            </div>
+            <h1 className="text-3xl font-extrabold leading-tight">Create League</h1>
+            <p className="text-sm text-white/60 max-w-xl">
+              You’re the commish. Create a private AFL league, get one invite code, and start the banter.
+            </p>
+          </div>
+          <SportBadge sport="afl" />
         </div>
 
-        {/* Messages */}
+        {!user && !loading && (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            You need to log in before you can create a league.
+          </div>
+        )}
+
         {error && (
-          <div className="mb-4 text-xs rounded-md border border-red-500/60 bg-red-500/15 px-3 py-2 text-red-200">
+          <div className="text-sm text-red-300 border border-red-500/40 rounded-2xl bg-red-500/10 px-4 py-3">
             {error}
           </div>
         )}
+
         {info && (
-          <div className="mb-4 text-xs rounded-md border border-emerald-500/60 bg-emerald-500/15 px-3 py-2 text-emerald-200">
+          <div className="text-sm text-emerald-200 border border-emerald-500/40 rounded-2xl bg-emerald-500/10 px-4 py-3">
             {info}
           </div>
         )}
 
-        {/* SIGN UP FORM */}
-        {isSignup && (
-          <form onSubmit={handleSignUp} className="space-y-4">
-            {/* Username */}
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-lg">
+          <form onSubmit={handleCreate} className="space-y-4" autoComplete="off">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Username
-              </label>
+              <label className="text-xs font-semibold text-white/70">League name</label>
               <input
-                type="text"
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                placeholder="E.g. BlueBaggers23"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="E.g. Work Crew 2026"
+                className="w-full rounded-xl bg-black/30 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+              />
+              <p className="text-[11px] text-white/45">
+                This shows on the league page + ladder.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-white/70">Description (optional)</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                placeholder="E.g. Loser buys Friday arvo beers."
+                className="w-full rounded-xl bg-black/30 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
               />
             </div>
 
-            {/* First name & Surname */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  First name
-                </label>
+                <label className="text-xs font-semibold text-white/70">Max members (optional)</label>
                 <input
-                  type="text"
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
+                  inputMode="numeric"
+                  value={maxMembers}
+                  onChange={(e) => setMaxMembers(e.target.value)}
+                  placeholder="Leave blank = unlimited"
+                  className="w-full rounded-xl bg-black/30 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
                 />
+                <p className="text-[11px] text-white/45">
+                  If set, players can’t join once full.
+                </p>
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  Surname
-                </label>
-                <input
-                  type="text"
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={surname}
-                  onChange={(e) => setSurname(e.target.value)}
-                />
-              </div>
-            </div>
 
-            {/* DOB */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Date of birth
-              </label>
-              <input
-                type="date"
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-              />
-            </div>
-
-            {/* Suburb & State */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  Suburb
-                </label>
-                <input
-                  type="text"
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={suburb}
-                  onChange={(e) => setSuburb(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  State
-                </label>
-                <select
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={stateValue}
-                  onChange={(e) => setStateValue(e.target.value)}
-                >
-                  <option value="">Select</option>
-                  <option value="VIC">VIC</option>
-                  <option value="NSW">NSW</option>
-                  <option value="QLD">QLD</option>
-                  <option value="SA">SA</option>
-                  <option value="WA">WA</option>
-                  <option value="TAS">TAS</option>
-                  <option value="ACT">ACT</option>
-                  <option value="NT">NT</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Phone */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">Phone</label>
-              <input
-                type="tel"
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                placeholder="04xx xxx xxx"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-              />
-            </div>
-
-            {/* Gender & Favourite team */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  Gender
-                </label>
-                <select
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={gender}
-                  onChange={(e) => setGender(e.target.value)}
-                >
-                  <option value="">Prefer not to say</option>
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-white/70">
-                  Favourite AFL team
-                </label>
-                <select
-                  className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={team}
-                  onChange={(e) => setTeam(e.target.value)}
-                >
-                  <option value="">Select a team</option>
-                  <option>Adelaide Crows</option>
-                  <option>Brisbane Lions</option>
-                  <option>Carlton</option>
-                  <option>Collingwood</option>
-                  <option>Essendon</option>
-                  <option>Fremantle</option>
-                  <option>Geelong Cats</option>
-                  <option>Gold Coast Suns</option>
-                  <option>GWS Giants</option>
-                  <option>Hawthorn</option>
-                  <option>Melbourne</option>
-                  <option>North Melbourne</option>
-                  <option>Port Adelaide</option>
-                  <option>Richmond</option>
-                  <option>St Kilda</option>
-                  <option>Sydney Swans</option>
-                  <option>West Coast Eagles</option>
-                  <option>Western Bulldogs</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Email */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">Email</label>
-              <input
-                type="email"
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            {/* Password + confirm */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Password
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type={showPasswordSignup ? "text" : "password"}
-                  className="flex-1 rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordSignup((v) => !v)}
-                  className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
-                >
-                  {showPasswordSignup ? "Hide" : "Show"}
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Confirm password
-              </label>
-              <input
-                type={showPasswordSignup ? "text" : "password"}
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
-            </div>
-
-            {/* consent checkboxes */}
-            <div className="mt-2 space-y-2 text-[11px] text-white/80">
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={acceptTerms}
-                  onChange={(e) => setAcceptTerms(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
-                />
-                <span>
-                  I confirm I&apos;m 18+ and agree to the{" "}
-                  <span className="underline">Terms &amp; Conditions</span> and{" "}
-                  <span className="underline">Privacy Policy</span>.
-                </span>
-              </label>
-
-              <label className="flex items-start gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={marketingOptIn}
-                  onChange={(e) => setMarketingOptIn(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-white/40 bg-black/40"
-                />
-                <span>
-                  Send me STREAKr news, tips and prize updates. You can opt out
-                  any time.
-                </span>
-              </label>
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="mt-3 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
-            >
-              {submitting ? "Creating account…" : "Sign up"}
-            </button>
-          </form>
-        )}
-
-        {/* LOGIN FORM */}
-        {!isSignup && (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">Email</label>
-              <input
-                type="email"
-                className="w-full rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                placeholder="you@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-white/70">
-                Password
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type={showPasswordLogin ? "text" : "password"}
-                  className="flex-1 rounded-md bg-black/40 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPasswordLogin((v) => !v)}
-                  className="text-[11px] px-3 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10"
-                >
-                  {showPasswordLogin ? "Hide" : "Show"}
-                </button>
+              <div className="rounded-xl bg-black/20 border border-white/10 p-4">
+                <div className="text-[11px] uppercase tracking-wide text-white/50">
+                  What you get
+                </div>
+                <ul className="mt-2 text-sm text-white/70 list-disc pl-5 space-y-1">
+                  <li>One invite code to share</li>
+                  <li>Private ladder + league chat</li>
+                  <li>Global streak still counts</li>
+                </ul>
               </div>
             </div>
 
             <button
               type="submit"
-              disabled={submitting}
-              className="mt-2 w-full rounded-full bg-orange-500 hover:bg-orange-600 text-black font-semibold text-sm py-2.5 transition disabled:opacity-60"
+              disabled={!canSubmit}
+              className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 text-black font-extrabold text-sm px-6 py-3 transition"
             >
-              {submitting ? "Logging in…" : "Log in"}
+              {submitting ? "Creating…" : "Create league"}
             </button>
           </form>
-        )}
+        </div>
+
+        <div className="text-xs text-white/50">
+          <Link href="/leagues" className="text-orange-300 hover:text-orange-200 font-extrabold">
+            ← Back to leagues
+          </Link>
+        </div>
       </div>
     </main>
   );
