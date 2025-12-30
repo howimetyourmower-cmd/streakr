@@ -1,300 +1,340 @@
-// /app/leagues/LeaguesClient.tsx
+// /app/leagues/create/CreateLeagueClient.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  addDoc,
   collection,
   doc,
   getDoc,
-  getDocs,
-  limit,
-  query,
-  where,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  arrayUnion,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
 
-type League = {
-  id: string;
-  name: string;
-  inviteCode: string;
-  managerId: string;
-  description?: string;
-  memberCount?: number;
-  sport?: string;
-};
+type CreateState = "idle" | "creating" | "success" | "error";
 
-type MyLeagueRow = {
-  league: League;
-  uiRole: "manager" | "member";
-};
+function generateInviteCode(length = 6): string {
+  // no 0/O/1/I
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < length; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  return out;
+}
+
+function normalizeName(raw: string): string {
+  return raw.trim().replace(/\s+/g, " ");
+}
 
 function safeStr(v: any, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
 
-function normalizeLeagueFromDoc(id: string, data: any): League {
-  const managerId = safeStr(data?.managerId ?? data?.managerUid ?? data?.managerUID, "");
-  const inviteCode = safeStr(data?.inviteCode ?? data?.code ?? data?.leagueCode, "");
-
-  return {
-    id,
-    name: safeStr(data?.name, "Unnamed league"),
-    inviteCode,
-    managerId,
-    description: safeStr(data?.description, ""),
-    memberCount:
-      typeof data?.memberCount === "number"
-        ? data.memberCount
-        : Array.isArray(data?.memberIds)
-          ? data.memberIds.length
-          : 0,
-    sport: safeStr(data?.sport, "afl"),
-  };
-}
-
-function uniqByLeagueId(list: MyLeagueRow[]) {
-  const map = new Map<string, MyLeagueRow>();
-  for (const x of list) map.set(x.league.id, x);
-  return Array.from(map.values());
-}
-
-export default function LeaguesClient() {
+export default function CreateLeagueClient() {
   const router = useRouter();
   const { user } = useAuth();
 
-  const [loading, setLoading] = useState(true);
-  const [myLeagues, setMyLeagues] = useState<MyLeagueRow[]>([]);
-  const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [maxMembers, setMaxMembers] = useState<string>(""); // keep as string for input
+  const [isPublic, setIsPublic] = useState(false);
 
-  const selected = useMemo(
-    () => myLeagues.find((x) => x.league.id === selectedLeagueId) || null,
-    [myLeagues, selectedLeagueId]
-  );
+  const [state, setState] = useState<CreateState>("idle");
+  const [error, setError] = useState("");
+
+  const cleanName = useMemo(() => normalizeName(name), [name]);
+  const canSubmit =
+    !!user &&
+    state !== "creating" &&
+    cleanName.length >= 3 &&
+    cleanName.length <= 40;
 
   useEffect(() => {
-    const load = async () => {
-      if (!user) {
-        setMyLeagues([]);
-        setSelectedLeagueId("");
-        setLoading(false);
+    if (state !== "success") return;
+    const t = setTimeout(() => setState("idle"), 1200);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  const handleCreate = async (e: FormEvent) => {
+    e.preventDefault();
+    setError("");
+
+    if (!user) {
+      setError("You need to be logged in to create a room.");
+      setState("error");
+      return;
+    }
+
+    const finalName = normalizeName(name);
+    if (finalName.length < 3) {
+      setError("Room name must be at least 3 characters.");
+      setState("error");
+      return;
+    }
+    if (finalName.length > 40) {
+      setError("Room name is too long (max 40 characters).");
+      setState("error");
+      return;
+    }
+
+    let max = 0;
+    if (maxMembers.trim()) {
+      const n = Number(maxMembers);
+      if (!Number.isFinite(n) || n < 2 || n > 500) {
+        setError("Max members must be between 2 and 500 (or leave blank).");
+        setState("error");
         return;
       }
+      max = Math.floor(n);
+    }
 
-      setLoading(true);
-      setError(null);
+    setState("creating");
 
-      try {
-        const uid = user.uid;
+    try {
+      const uid = user.uid;
 
-        // ✅ Primary source: users/{uid}.leagueIds (no indexes, very reliable)
-        const userSnap = await getDoc(doc(db, "users", uid));
-        const leagueIds: string[] = Array.isArray(userSnap.data()?.leagueIds)
-          ? userSnap.data()!.leagueIds
-          : [];
+      // Use a random invite code. Collisions are very unlikely; if it ever happens, you can regenerate in admin.
+      const inviteCode = generateInviteCode(6);
 
-        const fromUserDoc: MyLeagueRow[] = await Promise.all(
-          leagueIds.slice(0, 50).map(async (leagueId) => {
-            const ls = await getDoc(doc(db, "leagues", leagueId));
-            if (!ls.exists()) return null;
+      // display name helper
+      const displayName =
+        (user as any).displayName ||
+        (user as any).username ||
+        (user as any).email ||
+        "Player";
 
-            const league = normalizeLeagueFromDoc(ls.id, ls.data());
-            const uiRole: "manager" | "member" =
-              league.managerId === uid ? "manager" : "member";
+      // Create league doc
+      const leagueRef = await addDoc(collection(db, "leagues"), {
+        name: finalName,
+        description: description.trim(),
+        sport: "afl", // AFL-only for now
+        inviteCode,
+        managerId: uid,
 
-            return { league, uiRole };
-          })
-        ).then((x) => x.filter(Boolean) as MyLeagueRow[]);
+        // membership tracking
+        memberCount: 1,
+        memberIds: [uid],
 
-        // ✅ Fallback: leagues where I’m manager (covers cases where user doc wasn’t updated)
-        const leaguesRef = collection(db, "leagues");
-        const managerQ = query(leaguesRef, where("managerId", "==", uid), limit(50));
-        const managerSnap = await getDocs(managerQ);
+        // optional settings
+        isPublic: !!isPublic,
+        ...(max > 0 ? { maxMembers: max } : {}),
 
-        const fromManagerQuery: MyLeagueRow[] = managerSnap.docs.map((d) => {
-          const league = normalizeLeagueFromDoc(d.id, d.data());
-          return { league, uiRole: "manager" };
-        });
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
 
-        const merged = uniqByLeagueId([...fromUserDoc, ...fromManagerQuery]).sort((a, b) =>
-          a.league.name.localeCompare(b.league.name)
+      // Create member subdoc for manager
+      await setDoc(doc(db, "leagues", leagueRef.id, "members", uid), {
+        uid,
+        displayName,
+        role: "manager",
+        joinedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      // Ensure user doc references this league
+      const userRef = doc(db, "users", uid);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        // create base user doc if missing
+        await setDoc(
+          userRef,
+          {
+            uid,
+            displayName,
+            leagueIds: [leagueRef.id],
+            updatedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
         );
-
-        setMyLeagues(merged);
-
-        if (merged.length > 0) {
-          setSelectedLeagueId((prev) => {
-            if (prev && merged.some((x) => x.league.id === prev)) return prev;
-            return merged[0].league.id;
-          });
-        } else {
-          setSelectedLeagueId("");
-        }
-      } catch (e) {
-        console.error(e);
-        setError("Could not load your leagues. Please try again.");
-        setMyLeagues([]);
-        setSelectedLeagueId("");
-      } finally {
-        setLoading(false);
+      } else {
+        await updateDoc(userRef, {
+          leagueIds: arrayUnion(leagueRef.id),
+          updatedAt: serverTimestamp(),
+        }).catch(async () => {
+          // If updateDoc fails (rare), fallback to setDoc merge.
+          await setDoc(
+            userRef,
+            { leagueIds: arrayUnion(leagueRef.id), updatedAt: serverTimestamp() },
+            { merge: true }
+          );
+        });
       }
-    };
 
-    load();
-  }, [user?.uid]);
+      setState("success");
+
+      // Send them straight to ladder (best “wow” moment)
+      router.push(`/leagues/${leagueRef.id}/ladder`);
+    } catch (err) {
+      console.error("Create league failed", err);
+      setError("Could not create that room right now. Please try again.");
+      setState("error");
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-6">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-orange-300">
-            <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
-            Private leagues are live
+    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-white px-4 py-8">
+      <div className="mx-auto w-full max-w-3xl space-y-5">
+        {/* Compact header */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide text-orange-200">
+                <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+                Torpy Locker Rooms
+              </div>
+              <h1 className="mt-2 text-2xl md:text-3xl font-extrabold tracking-tight">
+                Create a room
+              </h1>
+              <p className="mt-1 text-[12px] md:text-sm text-white/60">
+                You’re the commish. Create a room, get an invite code, and send it to the crew.
+              </p>
+            </div>
+
+            <Link
+              href="/leagues"
+              className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-xs px-4 py-2 transition"
+            >
+              ← Back
+            </Link>
           </div>
-          <h1 className="mt-2 text-3xl md:text-4xl font-extrabold">Leagues</h1>
-          <p className="mt-2 text-sm text-white/70 max-w-3xl">
-            Play STREAKr with your mates, work crew or fantasy league. Create a private league,
-            invite your friends with a code, and battle it out on your own ladder while still
-            counting towards the global streak leaderboard.
-          </p>
         </div>
 
-        {error && (
-          <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-            {error}
-          </p>
+        {!user && (
+          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            You need to log in before you can create a room.
+          </div>
         )}
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* LEFT: My leagues (home base) */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-xl font-bold">My leagues</h2>
-            <p className="text-sm text-white/70">
-              This is your home base. Jump into a league and hit the ladder.
-            </p>
-
-            {loading ? (
-              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
-                Loading…
-              </div>
-            ) : myLeagues.length === 0 ? (
-              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
-                No leagues yet — create one or join with a code.
-              </div>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <label className="text-xs text-white/60">Select a league</label>
-                  <select
-                    value={selectedLeagueId}
-                    onChange={(e) => setSelectedLeagueId(e.target.value)}
-                    className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                  >
-                    {myLeagues.map((x) => (
-                      <option key={x.league.id} value={x.league.id}>
-                        {x.league.name} {x.uiRole === "manager" ? "(Manager)" : ""}
-                      </option>
-                    ))}
-                  </select>
+        {/* Form card */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-6 shadow-[0_0_45px_rgba(0,0,0,0.6)]">
+          <form onSubmit={handleCreate} className="space-y-4" autoComplete="off">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Room name *
+                </label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. The Mulch Crew"
+                  maxLength={40}
+                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                />
+                <div className="flex items-center justify-between text-[11px] text-white/45">
+                  <span>3–40 characters. Keep it short for ladders.</span>
+                  <span>{safeStr(cleanName).length}/40</span>
                 </div>
+              </div>
 
-                {selected && (
-                  <div className="rounded-xl bg-black/30 border border-white/10 p-4 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold truncate">
-                          {selected.league.name} {selected.uiRole === "manager" ? "👑" : ""}
-                        </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What’s the room about? (inside jokes welcome)"
+                  rows={3}
+                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                />
+              </div>
 
-                        <div className="text-xs text-white/60 mt-1 flex items-center gap-2">
-                          <span>Invite:</span>
-                          <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-0.5">
-                            {selected.league.inviteCode || "—"}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!selected.league.inviteCode) return;
-                              navigator.clipboard.writeText(selected.league.inviteCode);
-                            }}
-                            className="text-sky-400 hover:text-sky-300"
-                          >
-                            Copy
-                          </button>
-                        </div>
-                      </div>
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Max members (optional)
+                </label>
+                <input
+                  inputMode="numeric"
+                  value={maxMembers}
+                  onChange={(e) => setMaxMembers(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="Leave blank = unlimited"
+                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                />
+                <p className="text-[11px] text-white/45">Min 2, max 500.</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Visibility
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsPublic((v) => !v)}
+                  className="w-full rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 px-4 py-3 text-left transition"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-extrabold">
+                        {isPublic ? "Public (discoverable)" : "Private (code only)"}
+                      </p>
+                      <p className="text-[11px] text-white/55 mt-0.5">
+                        {isPublic
+                          ? "Anyone can find it in future lists (when enabled)."
+                          : "Only people with your invite code can join."}
+                      </p>
                     </div>
-
-                    {/* BIG ORANGE VIEW LADDER */}
-                    <button
-                      type="button"
-                      onClick={() => router.push(`/leagues/${selected.league.id}/ladder`)}
-                      className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-base px-5 py-3 transition-colors"
+                    <span
+                      className={`h-6 w-11 rounded-full border border-white/15 p-1 transition ${
+                        isPublic ? "bg-orange-500/70" : "bg-black/30"
+                      }`}
                     >
-                      View ladder →
-                    </button>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/leagues/${selected.league.id}`)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-                      >
-                        Open league
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/leagues/${selected.league.id}/manage`)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-                      >
-                        Manage
-                      </button>
-                    </div>
+                      <span
+                        className={`block h-4 w-4 rounded-full bg-white transition ${
+                          isPublic ? "translate-x-5" : "translate-x-0"
+                        }`}
+                      />
+                    </span>
                   </div>
-                )}
-              </>
+                </button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                {error}
+              </div>
             )}
-          </div>
 
-          {/* RIGHT: Create / Join shortcuts */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-xl font-bold">Create a league</h2>
-            <p className="text-sm text-white/70">
-              You&apos;re the commish. Name your league and share one invite code with the crew.
-            </p>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="submit"
+                disabled={!canSubmit}
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black text-sm font-extrabold px-6 py-3 transition"
+              >
+                {state === "creating" ? "Creating…" : "Create room"}
+              </button>
 
-            <ul className="text-sm text-white/70 list-disc pl-5 space-y-1">
-              <li>Automatically become League Manager</li>
-              <li>Share one code to invite players</li>
-              <li>Everyone&apos;s streak still counts globally</li>
-            </ul>
+              <div className="text-[11px] text-white/45">
+                AFL-only for now. You’ll be taken straight to the ladder.
+              </div>
+            </div>
 
-            <Link
-              href="/leagues/create"
-              className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-            >
-              Create league
-            </Link>
+            {state === "success" && (
+              <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Room created ✅ Opening ladder…
+              </div>
+            )}
+          </form>
+        </div>
 
-            <Link
-              href="/leagues/join"
-              className="w-full inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
-            >
-              Join with a code
-            </Link>
-
-            <p className="text-xs text-white/50">
-              Tip: your league ladder is separate bragging rights — your global streak still lives on the main leaderboard.
-            </p>
-          </div>
+        {/* Tiny footer */}
+        <div className="text-[11px] text-white/45">
+          Prefer joining?{" "}
+          <Link href="/leagues/join" className="text-orange-300 hover:text-orange-200 font-extrabold">
+            Join with a code →
+          </Link>
         </div>
       </div>
-    </div>
+    </main>
   );
 }
