@@ -386,7 +386,7 @@ export default function AflHubPage() {
                TORPY
               </span>
 
-              <span className="block mt-2" style={{ color: COLORS.red }}>
+              <span className="block mt-1" style={{ color: COLORS.red }}>
                 How far can you kick it?
               </span>
             </h1>
