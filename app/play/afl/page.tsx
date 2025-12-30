@@ -88,46 +88,7 @@ export default function AflHubPage() {
   const picksHref = "/picks?sport=AFL";
   const encodedReturnTo = encodeURIComponent(picksHref);
 
-  // Only lock scroll while preloader is visible
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    const prevOverflow = document.body.style.overflow;
-
-    if (showPreloader) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = prevOverflow || "";
-    }
-
-    return () => {
-      document.body.style.overflow = prevOverflow || "";
-    };
-  }, [showPreloader]);
-
-  // Preloader timing (fallback)
-  useEffect(() => {
-    if (!showPreloader) return;
-
-    const fadeTimer = window.setTimeout(() => {
-      setIsPreloaderFading(true);
-    }, 2000);
-
-    const hideTimer = window.setTimeout(() => {
-      setShowPreloader(false);
-    }, 2700);
-
-    return () => {
-      window.clearTimeout(fadeTimer);
-      window.clearTimeout(hideTimer);
-    };
-  }, [showPreloader]);
-
-  const hidePreloaderNow = () => {
-    setIsPreloaderFading(true);
-    window.setTimeout(() => setShowPreloader(false), 550);
-  };
-
+  
   const formatStartDate = (iso: string) => {
     if (!iso) return { date: "", time: "" };
     const d = new Date(iso);
