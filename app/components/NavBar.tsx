@@ -13,6 +13,9 @@ type MinimalUserDoc = {
   username?: string;
 };
 
+// Fire engine red for TORPY (matches hub page)
+const FIRE_RED = "#CE2029";
+
 export default function Navbar() {
   const pathname = usePathname();
 
@@ -74,71 +77,55 @@ export default function Navbar() {
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
 
+  // Keep one place to control active/hover red
+  const linkClass = (href: string) =>
+    isActive(href) ? "text-[var(--torpy-red)]" : "hover:text-[var(--torpy-red)]";
+
   return (
-    <header className="w-full border-b border-white/10 bg-black">
+    <header
+      className="w-full border-b border-white/10 bg-black"
+      style={{ ["--torpy-red" as any]: FIRE_RED }}
+    >
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
         {/* LOGO / WORDMARK */}
         <Link href="/" className="flex items-center gap-3">
-          <span className="font-extrabold text-3xl tracking-tight text-red-500">
+          <span
+            className="font-extrabold text-3xl tracking-tight"
+            style={{
+              color: "var(--torpy-red)",
+              textShadow: "0 0 14px rgba(206,32,41,0.25)",
+            }}
+          >
             TORPY
           </span>
         </Link>
 
         {/* DESKTOP NAV */}
         <div className="hidden md:flex items-center gap-8 text-sm text-white/90">
-          <Link
-            href="/picks"
-            className={isActive("/picks") ? "text-red-400" : "hover:text-red-400"}
-          >
+          <Link href="/picks" className={linkClass("/picks")}>
             Picks
           </Link>
 
-          <Link
-            href="/leaderboards"
-            className={
-              isActive("/leaderboards")
-                ? "text-red-400"
-                : "hover:text-red-400"
-            }
-          >
+          <Link href="/leaderboards" className={linkClass("/leaderboards")}>
             Leaderboards
           </Link>
 
-          <Link
-            href="/locker-room"
-            className={
-              isActive("/locker-room")
-                ? "text-red-400"
-                : "hover:text-red-400"
-            }
-          >
+          <Link href="/locker-room" className={linkClass("/locker-room")}>
             Locker Room
           </Link>
 
           <Link
             href="/venue-locker-rooms"
-            className={
-              isActive("/venue-locker-rooms")
-                ? "text-red-400"
-                : "hover:text-red-400"
-            }
+            className={linkClass("/venue-locker-rooms")}
           >
             Venue Locker Rooms
           </Link>
 
-          <Link
-            href="/rewards"
-            className={
-              isActive("/rewards") ? "text-red-400" : "hover:text-red-400"
-            }
-          >
+          <Link href="/rewards" className={linkClass("/rewards")}>
             Rewards
           </Link>
 
-          <Link
-            href="/faq"
-            className={isActive("/faq") ? "text-red-400" : "hover:text-red-400"}
-          >
+          <Link href="/faq" className={linkClass("/faq")}>
             FAQ
           </Link>
 
@@ -186,25 +173,46 @@ export default function Navbar() {
       {menuOpen && (
         <div className="md:hidden bg-black/95 border-t border-white/10">
           <div className="mx-auto max-w-6xl px-4 py-4 flex flex-col gap-4 text-sm text-white/90">
-            <Link href="/picks" onClick={() => setMenuOpen(false)}>
+            <Link
+              href="/picks"
+              onClick={() => setMenuOpen(false)}
+              className={linkClass("/picks")}
+            >
               Picks
             </Link>
-            <Link href="/leaderboards" onClick={() => setMenuOpen(false)}>
+            <Link
+              href="/leaderboards"
+              onClick={() => setMenuOpen(false)}
+              className={linkClass("/leaderboards")}
+            >
               Leaderboards
             </Link>
-            <Link href="/locker-room" onClick={() => setMenuOpen(false)}>
+            <Link
+              href="/locker-room"
+              onClick={() => setMenuOpen(false)}
+              className={linkClass("/locker-room")}
+            >
               Locker Room
             </Link>
             <Link
               href="/venue-locker-rooms"
               onClick={() => setMenuOpen(false)}
+              className={linkClass("/venue-locker-rooms")}
             >
               Venue Locker Rooms
             </Link>
-            <Link href="/rewards" onClick={() => setMenuOpen(false)}>
+            <Link
+              href="/rewards"
+              onClick={() => setMenuOpen(false)}
+              className={linkClass("/rewards")}
+            >
               Rewards
             </Link>
-            <Link href="/faq" onClick={() => setMenuOpen(false)}>
+            <Link
+              href="/faq"
+              onClick={() => setMenuOpen(false)}
+              className={linkClass("/faq")}
+            >
               FAQ
             </Link>
 
@@ -218,7 +226,8 @@ export default function Navbar() {
                     alt={label}
                     className="h-full w-full object-cover"
                     onError={(e) => {
-                      (e.currentTarget as HTMLImageElement).style.display = "none";
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
                     }}
                   />
                   <span className="text-xs font-bold text-white/85">
@@ -231,7 +240,7 @@ export default function Navbar() {
               <Link
                 href={user ? "/profile" : "/auth"}
                 onClick={() => setMenuOpen(false)}
-                className="px-3 py-1 rounded-full border border-white/20 text-xs hover:border-red-400 hover:text-red-400 transition-colors"
+                className="px-3 py-1 rounded-full border border-white/20 text-xs transition-colors hover:border-[var(--torpy-red)] hover:text-[var(--torpy-red)]"
               >
                 {user ? "Profile" : "Login"}
               </Link>
