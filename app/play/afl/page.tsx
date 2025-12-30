@@ -392,7 +392,7 @@ export default function AflHubPage() {
               </span>
 
               <span className="block mt-2" style={{ color: COLORS.red }}>
-                How Long Can You Last?
+                How far can you kick it?
               </span>
             </h1>
 
