@@ -4,7 +4,6 @@
 export const dynamic = "force-dynamic";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -44,6 +43,67 @@ function uniqById(list: MyLeagueRow[]) {
 
 function normalizeCode(input: string) {
   return input.trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function Pill({
+  children,
+  tone = "orange",
+}: {
+  children: React.ReactNode;
+  tone?: "orange" | "sky" | "zinc" | "emerald";
+}) {
+  const cls =
+    tone === "orange"
+      ? "border-orange-500/30 bg-orange-500/10 text-orange-200"
+      : tone === "sky"
+        ? "border-sky-500/30 bg-sky-500/10 text-sky-200"
+        : tone === "emerald"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          : "border-white/10 bg-white/5 text-white/70";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${cls}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+      {children}
+    </span>
+  );
+}
+
+function Card({
+  title,
+  desc,
+  children,
+  accent = "orange",
+}: {
+  title: string;
+  desc?: string;
+  children: React.ReactNode;
+  accent?: "orange" | "sky" | "zinc" | "emerald";
+}) {
+  const top =
+    accent === "orange"
+      ? "from-orange-500/18"
+      : accent === "sky"
+        ? "from-sky-500/18"
+        : accent === "emerald"
+          ? "from-emerald-500/18"
+          : "from-white/8";
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_0_40px_rgba(0,0,0,0.55)] overflow-hidden">
+      <div className={`border-b border-white/10 bg-gradient-to-r ${top} via-transparent to-transparent px-4 py-3`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-extrabold tracking-tight md:text-lg">{title}</h2>
+            {desc ? <p className="mt-0.5 text-[12px] leading-snug text-white/65">{desc}</p> : null}
+          </div>
+        </div>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
 }
 
 export default function LeaguesClient() {
@@ -89,11 +149,8 @@ export default function LeaguesClient() {
         const managerLeagues: MyLeagueRow[] = managerSnap.docs.map((d) => {
           const data = d.data() as any;
 
-          const inviteCode =
-            data.inviteCode ?? data.code ?? data.leagueCode ?? "";
-
-          const managerId =
-            data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+          const inviteCode = data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+          const managerId = data.managerId ?? data.managerUid ?? data.managerUID ?? "";
 
           const league: League = {
             id: d.id,
@@ -122,11 +179,8 @@ export default function LeaguesClient() {
 
             const data = leagueSnap.data() as any;
 
-            const inviteCode =
-              data.inviteCode ?? data.code ?? data.leagueCode ?? "";
-
-            const managerId =
-              data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+            const inviteCode = data.inviteCode ?? data.code ?? data.leagueCode ?? "";
+            const managerId = data.managerId ?? data.managerUid ?? data.managerUID ?? "";
 
             const league: League = {
               id: leagueSnap.id,
@@ -137,15 +191,10 @@ export default function LeaguesClient() {
               memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
             };
 
-            const roleFromMember = (m.data() as any)?.role as
-              | "manager"
-              | "member"
-              | undefined;
+            const roleFromMember = (m.data() as any)?.role as "manager" | "member" | undefined;
 
             const uiRole: "manager" | "member" =
-              league.managerId === uid || roleFromMember === "manager"
-                ? "manager"
-                : "member";
+              league.managerId === uid || roleFromMember === "manager" ? "manager" : "member";
 
             return { league, uiRole };
           })
@@ -236,7 +285,6 @@ export default function LeaguesClient() {
       setJoinSuccess("You’re in. Opening league…");
       setJoinCode("");
 
-      // Navigate straight into ladder (or league page if you prefer)
       router.push(`/leagues/${leagueId}/ladder`);
     } catch (err) {
       console.error(err);
@@ -248,47 +296,73 @@ export default function LeaguesClient() {
 
   return (
     <div className="min-h-screen bg-[#050814] text-white">
-      <div className="mx-auto w-full max-w-5xl px-4 py-6 md:py-8 space-y-6">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-orange-300">
-            <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
-            Private leagues are live
+      <div className="mx-auto w-full max-w-5xl px-4 py-5 md:py-7 space-y-4">
+        {/* Compact header */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <Pill tone="orange">Private leagues live</Pill>
+                <Pill tone="zinc">Torpy</Pill>
+              </div>
+              <h1 className="mt-2 text-2xl font-extrabold tracking-tight md:text-3xl">
+                Locker Room
+              </h1>
+              <p className="mt-1 text-[12px] leading-snug text-white/65 md:text-sm">
+                Create a room, share a code, and battle your crew on a private ladder — while your streak still counts globally.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <button
+                type="button"
+                onClick={() => router.push("/leagues/new")}
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-[13px] font-extrabold text-black transition hover:bg-orange-400"
+              >
+                Create room
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.getElementById("join");
+                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-white/10"
+              >
+                Join with code
+              </button>
+            </div>
           </div>
-          <h1 className="mt-2 text-3xl md:text-4xl font-extrabold">Leagues</h1>
-          <p className="mt-2 text-sm text-white/70 max-w-3xl">
-            Play STREAKr with your mates, work crew or fantasy league. Create a private league,
-            invite your friends with a code, and battle it out on your own ladder while still
-            counting towards the global streak leaderboard.
-          </p>
+
+          {error && (
+            <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              {error}
+            </div>
+          )}
         </div>
 
-        {error && (
-          <p className="text-sm text-red-400 border border-red-500/40 rounded-md bg-red-500/10 px-3 py-2">
-            {error}
-          </p>
-        )}
-
-        {/* Top row: My leagues (left) + Create league (right) */}
+        {/* Main grid */}
         <div className="grid gap-4 md:grid-cols-2">
-          {/* LEFT: My leagues */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-xl font-bold">My leagues</h2>
-            <p className="text-sm text-white/70">
-              This is your home base. Jump into a league and hit the ladder.
-            </p>
-
+          {/* LEFT: My rooms */}
+          <Card
+            title="My rooms"
+            desc="Select a room, grab the code, and jump straight to the ladder."
+            accent="orange"
+          >
             {loading ? (
-              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
+              <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/70">
                 Loading…
               </div>
             ) : myLeagues.length === 0 ? (
-              <div className="rounded-xl bg-black/30 border border-white/10 p-4 text-sm text-white/70">
-                No leagues yet — create one or join with a code.
+              <div className="rounded-xl border border-white/10 bg-black/30 p-3 text-sm text-white/70">
+                No rooms yet — create one or join with a code.
               </div>
             ) : (
               <>
                 <div className="space-y-2">
-                  <label className="text-xs text-white/60">Select a league</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                    Room selector
+                  </label>
                   <select
                     value={selectedLeagueId}
                     onChange={(e) => setSelectedLeagueId(e.target.value)}
@@ -303,114 +377,162 @@ export default function LeaguesClient() {
                 </div>
 
                 {selected && (
-                  <div className="rounded-xl bg-black/30 border border-white/10 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
+                  <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold truncate">
-                          {selected.league.name} {selected.uiRole === "manager" ? "👑" : ""}
+                        <div className="flex items-center gap-2">
+                          <div className="truncate text-sm font-extrabold">
+                            {selected.league.name}
+                          </div>
+                          {selected.uiRole === "manager" ? (
+                            <span className="text-[11px]">👑</span>
+                          ) : null}
                         </div>
-                        <div className="text-xs text-white/60 mt-1">
-                          Invite code:{" "}
-                          <span className="font-mono bg-white/5 border border-white/10 rounded-md px-2 py-0.5">
+
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] text-white/55">Invite code</span>
+                          <span className="font-mono text-[12px] bg-white/5 border border-white/10 rounded-md px-2 py-1">
                             {selected.league.inviteCode || "—"}
+                          </span>
+                          <span className="text-[11px] text-white/45">
+                            {selected.league.memberCount ? `${selected.league.memberCount} members` : ""}
                           </span>
                         </div>
                       </div>
+
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/leagues/${selected.league.id}`)}
+                        className="shrink-0 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[12px] font-semibold text-white transition hover:bg-white/10"
+                      >
+                        Open
+                      </button>
                     </div>
 
-                    {/* BIG ORANGE VIEW LADDER */}
+                    {/* Primary CTA */}
                     <button
                       type="button"
                       onClick={() => router.push(`/leagues/${selected.league.id}/ladder`)}
-                      className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-base px-5 py-3 transition-colors"
+                      className="w-full inline-flex items-center justify-center rounded-2xl bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-[15px] px-5 py-3 transition-colors shadow-[0_10px_25px_rgba(249,115,22,0.25)]"
                     >
                       View ladder →
                     </button>
 
+                    {/* Secondary CTAs */}
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
                         onClick={() => router.push(`/leagues/${selected.league.id}`)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-[13px] px-4 py-2 transition-colors"
                       >
-                        Open league
+                        Room details
                       </button>
 
                       <button
                         type="button"
                         onClick={() => router.push(`/leagues/${selected.league.id}/manage`)}
-                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-sm px-4 py-2 transition-colors"
+                        className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-semibold text-[13px] px-4 py-2 transition-colors"
                       >
                         Manage
                       </button>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[12px] text-white/65">
+                          Share the code with your crew. Bragging rights live here.
+                        </div>
+                        <Pill tone={selected.uiRole === "manager" ? "emerald" : "zinc"}>
+                          {selected.uiRole === "manager" ? "Manager" : "Member"}
+                        </Pill>
+                      </div>
                     </div>
                   </div>
                 )}
               </>
             )}
-          </div>
+          </Card>
 
-          {/* RIGHT: Create a league */}
-          <div className="rounded-2xl bg-white/5 border border-white/10 p-5 space-y-4">
-            <h2 className="text-xl font-bold">Create a league</h2>
-            <p className="text-sm text-white/70">
-              You&apos;re the commish. Name your league, and share a single invite code with the crew.
-            </p>
-
-            <ul className="text-sm text-white/70 list-disc pl-5 space-y-1">
-              <li>Automatically become League Manager</li>
-              <li>Share one code to invite players</li>
-              <li>Everyone&apos;s streak still counts globally</li>
-            </ul>
-
-            <button
-              type="button"
-              onClick={() => router.push("/leagues/new")}
-              className="w-full inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-semibold text-sm px-4 py-2 transition-colors"
-            >
-              Create league
-            </button>
-
-            <p className="text-xs text-white/50">
-              Tip: your league ladder is separate bragging rights — your global streak still lives on the main leaderboard.
-            </p>
-          </div>
-        </div>
-
-        {/* FULL-WIDTH: Join a league */}
-        <div className="rounded-2xl bg-white/5 border border-white/10 p-5">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold">Join a league</h2>
-              <p className="text-sm text-white/70">
-                Got a code from a mate? Drop it in and you’ll appear on that league’s ladder.
-              </p>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] items-start">
-            <form onSubmit={handleJoin} className="contents">
-              <div className="space-y-2">
-                <label className="text-xs text-white/60">Invite code</label>
-                <input
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  placeholder="E.g. TM668W"
-                  className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
-                />
-                {joinError && <p className="text-xs text-red-400">{joinError}</p>}
-                {joinSuccess && <p className="text-xs text-emerald-400">{joinSuccess}</p>}
-              </div>
+          {/* RIGHT: Create room */}
+          <Card
+            title="Create a room"
+            desc="You’re the commish. One code. One ladder. Endless banter."
+            accent="sky"
+          >
+            <div className="space-y-3">
+              <ul className="text-sm text-white/70 space-y-2">
+                <li className="flex gap-2">
+                  <span className="mt-1 text-sky-300">•</span>
+                  <span>Automatically become Room Manager</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-sky-300">•</span>
+                  <span>Share a single invite code with the crew</span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="mt-1 text-sky-300">•</span>
+                  <span>Your global streak still counts</span>
+                </li>
+              </ul>
 
               <button
-                type="submit"
-                disabled={joining || !joinCode.trim()}
-                className="h-[42px] md:mt-[22px] inline-flex items-center justify-center rounded-full bg-sky-500 hover:bg-sky-400 text-black font-semibold text-sm px-6 py-2 transition-colors disabled:opacity-60"
+                type="button"
+                onClick={() => router.push("/leagues/new")}
+                className="w-full inline-flex items-center justify-center rounded-2xl bg-sky-500 hover:bg-sky-400 text-black font-extrabold text-[14px] px-5 py-3 transition-colors shadow-[0_10px_25px_rgba(56,189,248,0.20)]"
               >
-                {joining ? "Joining…" : "Join with a code"}
+                Create room
               </button>
-            </form>
-          </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/25 p-3 text-[12px] text-white/60">
+                Tip: keep the name short and savage — it looks cleaner on the ladder.
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* FULL-WIDTH: Join */}
+        <div id="join">
+          <Card
+            title="Join with a code"
+            desc="Got a code from a mate? Drop it in and you’ll land straight on the ladder."
+            accent="emerald"
+          >
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] items-start">
+              <form onSubmit={handleJoin} className="contents">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                    Invite code
+                  </label>
+                  <input
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                    placeholder="E.g. TM668W"
+                    className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60"
+                  />
+                  {joinError && <p className="text-xs text-red-400">{joinError}</p>}
+                  {joinSuccess && <p className="text-xs text-emerald-400">{joinSuccess}</p>}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={joining || !joinCode.trim()}
+                  className="h-[42px] md:mt-[22px] inline-flex items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-[13px] px-6 py-2 transition-colors disabled:opacity-60"
+                >
+                  {joining ? "Joining…" : "Join room"}
+                </button>
+              </form>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+              <div className="text-[12px] text-white/60">
+                Rooms are private ladders. Your picks still count globally.
+              </div>
+              <div className="flex gap-2">
+                <Pill tone="zinc">No gambling</Pill>
+                <Pill tone="sky">Skill game</Pill>
+              </div>
+            </div>
+          </Card>
         </div>
       </div>
     </div>
