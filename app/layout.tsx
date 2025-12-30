@@ -5,16 +5,14 @@ import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
 
 export const metadata: Metadata = {
-  title: "STREAKr",
-  description: "STREAKr – Streak prediction game",
+  title: "Torpy",
+  description: "Torpy – Streak prediction game",
 };
 
 // Force NavBar to be client-only (prevents build prerender errors if it uses client hooks)
 const NavBar = dynamic(() => import("./components/NavBar"), {
   ssr: false,
-  loading: () => (
-    <div className="h-[56px] w-full border-b border-slate-800 bg-black" />
-  ),
+  loading: () => <div className="h-[52px] w-full border-b border-white/10 bg-black" />,
 });
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -24,30 +22,29 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         {/* NAVIGATION */}
         <NavBar />
 
-        {/* GLOBAL SPONSOR BANNER – BLUE/YELLOW LIKE SPORTSBET */}
-        <div className="bg-gradient-to-r from-sky-800 via-sky-600 to-sky-700 border-b border-sky-400/30 shadow-[0_0_40px_rgba(56,189,248,0.25)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-2.5">
+        {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
+        <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_30px_rgba(56,189,248,0.18)]">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1.5 sm:py-2">
             {/* Left badge */}
-            <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-3 py-[3px] text-[10px] font-bold uppercase tracking-wide text-sky-900 shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-900" />
+            <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-2.5 py-[2px] text-[9px] font-black uppercase tracking-wide text-sky-950 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky-950" />
               Official Partner
             </div>
 
             {/* Middle text */}
-            <p className="flex-1 text-right text-[12px] font-semibold text-white md:text-[13px]">
-              Proudly supporting STREAK
-              <span className="text-yellow-300">r</span> all season long
+            <p className="flex-1 text-right text-[11px] font-semibold text-white/95 sm:text-[12px]">
+              Proudly supporting TORPY all season long
             </p>
 
             {/* Optional CTA button */}
-            <button className="hidden md:inline-flex rounded-full bg-yellow-300 px-3 py-[5px] text-[11px] font-bold text-sky-900 hover:bg-yellow-200 transition">
+            <button className="hidden md:inline-flex rounded-full bg-yellow-300 px-3 py-[4px] text-[10px] font-black text-sky-950 hover:bg-yellow-200 transition">
               Learn more
             </button>
           </div>
         </div>
 
         {/* PAGE CONTENT */}
-        <main className="bg-black w-full">{children}</main>
+        <main className="w-full bg-black">{children}</main>
       </body>
     </html>
   );
