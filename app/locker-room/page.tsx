@@ -1,5 +1,5 @@
 // /app/locker-room/page.tsx
-import LeaguesClient from "../app/leagues/LeaguesClient";
+import LeaguesClient from "../leagues/LeaguesClient";
 
 export const dynamic = "force-dynamic";
 
