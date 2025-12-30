@@ -3,335 +3,240 @@
 
 export const dynamic = "force-dynamic";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   addDoc,
+  arrayUnion,
   collection,
   doc,
-  getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
-  arrayUnion,
+  where,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
+import SportBadge from "@/components/SportBadge";
 
-type CreateState = "idle" | "creating" | "success" | "error";
+function safeTrim(v: any): string {
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function normalizeCode(raw: string): string {
+  return raw.trim().toUpperCase().replace(/\s+/g, "");
+}
 
 function generateInviteCode(length = 6): string {
   // no 0/O/1/I
   const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
   let out = "";
-  for (let i = 0; i < length; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (let i = 0; i < length; i++) {
+    out += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
   return out;
 }
 
-function normalizeName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ");
-}
-
-function safeStr(v: any, fallback = ""): string {
-  return typeof v === "string" ? v : fallback;
+async function findUniqueInviteCode(maxAttempts = 8): Promise<string> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const code = generateInviteCode(6);
+    const leaguesRef = collection(db, "leagues");
+    const qRef = query(leaguesRef, where("inviteCode", "==", code), limit(1));
+    const snap = await getDocs(qRef);
+    if (snap.empty) return code;
+  }
+  // worst-case fallback (still very unlikely)
+  return `${generateInviteCode(6)}${Math.floor(Math.random() * 9)}`;
 }
 
 export default function CreateLeagueClient() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [maxMembers, setMaxMembers] = useState<string>(""); // keep as string for input
-  const [isPublic, setIsPublic] = useState(false);
 
-  const [state, setState] = useState<CreateState>("idle");
-  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string>("");
+  const [info, setInfo] = useState<string>("");
 
-  const cleanName = useMemo(() => normalizeName(name), [name]);
-  const canSubmit =
-    !!user &&
-    state !== "creating" &&
-    cleanName.length >= 3 &&
-    cleanName.length <= 40;
-
-  useEffect(() => {
-    if (state !== "success") return;
-    const t = setTimeout(() => setState("idle"), 1200);
-    return () => clearTimeout(t);
-  }, [state]);
+  const canSubmit = useMemo(() => {
+    if (!user) return false;
+    if (loading) return false;
+    if (submitting) return false;
+    return safeTrim(name).length >= 3;
+  }, [user, loading, submitting, name]);
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
+    setInfo("");
 
     if (!user) {
-      setError("You need to be logged in to create a room.");
-      setState("error");
+      setError("You need to log in to create a league.");
       return;
     }
 
-    const finalName = normalizeName(name);
-    if (finalName.length < 3) {
-      setError("Room name must be at least 3 characters.");
-      setState("error");
-      return;
-    }
-    if (finalName.length > 40) {
-      setError("Room name is too long (max 40 characters).");
-      setState("error");
+    const cleanName = safeTrim(name);
+    if (cleanName.length < 3) {
+      setError("League name must be at least 3 characters.");
       return;
     }
 
-    let max = 0;
-    if (maxMembers.trim()) {
-      const n = Number(maxMembers);
-      if (!Number.isFinite(n) || n < 2 || n > 500) {
-        setError("Max members must be between 2 and 500 (or leave blank).");
-        setState("error");
-        return;
-      }
-      max = Math.floor(n);
-    }
-
-    setState("creating");
+    setSubmitting(true);
 
     try {
-      const uid = user.uid;
+      const inviteCode = await findUniqueInviteCode();
 
-      // Use a random invite code. Collisions are very unlikely; if it ever happens, you can regenerate in admin.
-      const inviteCode = generateInviteCode(6);
-
-      // display name helper
       const displayName =
-        (user as any).displayName ||
-        (user as any).username ||
-        (user as any).email ||
+        (user as any)?.displayName ||
+        (user as any)?.username ||
+        (user as any)?.email ||
         "Player";
 
-      // Create league doc
+      // 1) Create league doc
       const leagueRef = await addDoc(collection(db, "leagues"), {
-        name: finalName,
-        description: description.trim(),
-        sport: "afl", // AFL-only for now
-        inviteCode,
-        managerId: uid,
+        name: cleanName,
+        description: safeTrim(description),
+        inviteCode: normalizeCode(inviteCode),
+        managerId: user.uid,
+        sport: "afl",
 
-        // membership tracking
+        // optional but handy (keeps things consistent + can prevent double-count)
+        memberIds: [user.uid],
         memberCount: 1,
-        memberIds: [uid],
-
-        // optional settings
-        isPublic: !!isPublic,
-        ...(max > 0 ? { maxMembers: max } : {}),
 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
-      // Create member subdoc for manager
-      await setDoc(doc(db, "leagues", leagueRef.id, "members", uid), {
-        uid,
-        displayName,
-        role: "manager",
-        joinedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+      // 2) Create manager member subdoc
+      const memberRef = doc(db, "leagues", leagueRef.id, "members", user.uid);
+      await setDoc(
+        memberRef,
+        {
+          uid: user.uid,
+          displayName,
+          role: "manager",
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-      // Ensure user doc references this league
-      const userRef = doc(db, "users", uid);
-      const userSnap = await getDoc(userRef);
-
-      if (!userSnap.exists()) {
-        // create base user doc if missing
-        await setDoc(
-          userRef,
-          {
-            uid,
-            displayName,
-            leagueIds: [leagueRef.id],
-            updatedAt: serverTimestamp(),
-            createdAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      } else {
-        await updateDoc(userRef, {
+      // 3) Update user doc to include leagueId (so /leagues loads fast)
+      const userRef = doc(db, "users", user.uid);
+      await setDoc(
+        userRef,
+        {
           leagueIds: arrayUnion(leagueRef.id),
           updatedAt: serverTimestamp(),
-        }).catch(async () => {
-          // If updateDoc fails (rare), fallback to setDoc merge.
-          await setDoc(
-            userRef,
-            { leagueIds: arrayUnion(leagueRef.id), updatedAt: serverTimestamp() },
-            { merge: true }
-          );
-        });
-      }
+        },
+        { merge: true }
+      );
 
-      setState("success");
-
-      // Send them straight to ladder (best “wow” moment)
+      setInfo("League created. Opening ladder…");
       router.push(`/leagues/${leagueRef.id}/ladder`);
     } catch (err) {
       console.error("Create league failed", err);
-      setError("Could not create that room right now. Please try again.");
-      setState("error");
+      setError("Could not create league right now. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-white px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl space-y-5">
-        {/* Compact header */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
-          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-2 rounded-full border border-orange-500/30 bg-orange-500/10 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wide text-orange-200">
-                <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
-                Torpy Locker Rooms
-              </div>
-              <h1 className="mt-2 text-2xl md:text-3xl font-extrabold tracking-tight">
-                Create a room
-              </h1>
-              <p className="mt-1 text-[12px] md:text-sm text-white/60">
-                You’re the commish. Create a room, get an invite code, and send it to the crew.
-              </p>
+    <main className="min-h-screen bg-[#050814] text-white">
+      <div className="mx-auto w-full max-w-3xl px-4 py-8 space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 border border-orange-500/30 px-3 py-1 text-xs font-bold text-orange-300 uppercase tracking-wide">
+              <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
+              Create a league
             </div>
-
-            <Link
-              href="/leagues"
-              className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-xs px-4 py-2 transition"
-            >
-              ← Back
-            </Link>
+            <h1 className="text-3xl font-extrabold leading-tight">New League</h1>
+            <p className="text-sm text-white/60 max-w-xl">
+              Name your league, get an invite code, and bring the crew in. AFL-only for now.
+            </p>
           </div>
+          <SportBadge sport="afl" />
         </div>
 
-        {!user && (
+        {!user && !loading && (
           <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            You need to log in before you can create a room.
+            You need to log in before you can create a league.
           </div>
         )}
 
-        {/* Form card */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-6 shadow-[0_0_45px_rgba(0,0,0,0.6)]">
+        {error && (
+          <div className="text-sm text-red-300 border border-red-500/40 rounded-xl bg-red-500/10 px-4 py-3">
+            {error}
+          </div>
+        )}
+
+        {info && (
+          <div className="text-sm text-emerald-200 border border-emerald-500/40 rounded-xl bg-emerald-500/10 px-4 py-3">
+            {info}
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-white/10 bg-black/30 p-6 space-y-5">
           <form onSubmit={handleCreate} className="space-y-4" autoComplete="off">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-1.5 md:col-span-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
-                  Room name *
-                </label>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. The Mulch Crew"
-                  maxLength={40}
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                />
-                <div className="flex items-center justify-between text-[11px] text-white/45">
-                  <span>3–40 characters. Keep it short for ladders.</span>
-                  <span>{safeStr(cleanName).length}/40</span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5 md:col-span-2">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
-                  Description (optional)
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="What’s the room about? (inside jokes welcome)"
-                  rows={3}
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
-                  Max members (optional)
-                </label>
-                <input
-                  inputMode="numeric"
-                  value={maxMembers}
-                  onChange={(e) => setMaxMembers(e.target.value.replace(/[^\d]/g, ""))}
-                  placeholder="Leave blank = unlimited"
-                  className="w-full rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                />
-                <p className="text-[11px] text-white/45">Min 2, max 500.</p>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
-                  Visibility
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setIsPublic((v) => !v)}
-                  className="w-full rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 px-4 py-3 text-left transition"
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-extrabold">
-                        {isPublic ? "Public (discoverable)" : "Private (code only)"}
-                      </p>
-                      <p className="text-[11px] text-white/55 mt-0.5">
-                        {isPublic
-                          ? "Anyone can find it in future lists (when enabled)."
-                          : "Only people with your invite code can join."}
-                      </p>
-                    </div>
-                    <span
-                      className={`h-6 w-11 rounded-full border border-white/15 p-1 transition ${
-                        isPublic ? "bg-orange-500/70" : "bg-black/30"
-                      }`}
-                    >
-                      <span
-                        className={`block h-4 w-4 rounded-full bg-white transition ${
-                          isPublic ? "translate-x-5" : "translate-x-0"
-                        }`}
-                      />
-                    </span>
-                  </div>
-                </button>
-              </div>
+            <div className="space-y-1">
+              <label className="text-xs text-white/60">League name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="E.g. Work Crew Legends"
+                className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+              />
+              <p className="text-[11px] text-white/45">
+                This shows on your league page and ladder.
+              </p>
             </div>
 
-            {error && (
-              <div className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                {error}
-              </div>
-            )}
+            <div className="space-y-1">
+              <label className="text-xs text-white/60">Description (optional)</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                rows={3}
+                placeholder="E.g. Loser shouts the pub lunch."
+                className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/70"
+              />
+            </div>
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col sm:flex-row gap-2 pt-2">
               <button
                 type="submit"
                 disabled={!canSubmit}
-                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black text-sm font-extrabold px-6 py-3 transition"
+                className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black font-extrabold text-sm px-6 py-3 transition"
               >
-                {state === "creating" ? "Creating…" : "Create room"}
+                {submitting ? "Creating…" : "Create league"}
               </button>
 
-              <div className="text-[11px] text-white/45">
-                AFL-only for now. You’ll be taken straight to the ladder.
-              </div>
+              <Link
+                href="/leagues"
+                className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-sm px-6 py-3 transition"
+              >
+                Cancel
+              </Link>
             </div>
 
-            {state === "success" && (
-              <div className="rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                Room created ✅ Opening ladder…
-              </div>
-            )}
+            <div className="text-[11px] text-white/50 pt-2">
+              Creating a league generates a single invite code you can share with mates.
+              Your global streak still counts on the main leaderboard.
+            </div>
           </form>
         </div>
 
-        {/* Tiny footer */}
-        <div className="text-[11px] text-white/45">
-          Prefer joining?{" "}
-          <Link href="/leagues/join" className="text-orange-300 hover:text-orange-200 font-extrabold">
-            Join with a code →
+        <div className="text-xs text-white/50">
+          <Link href="/leagues" className="text-orange-300 hover:text-orange-200 font-extrabold">
+            ← Back to leagues
           </Link>
         </div>
       </div>
