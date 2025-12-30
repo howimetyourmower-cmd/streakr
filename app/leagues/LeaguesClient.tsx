@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   collection,
@@ -17,6 +17,8 @@ import {
   setDoc,
   updateDoc,
   where,
+  arrayUnion,
+  increment,
 } from "firebase/firestore";
 import { db } from "@/lib/firebaseClient";
 import { useAuth } from "@/hooks/useAuth";
@@ -28,6 +30,8 @@ type League = {
   managerId: string;
   description?: string;
   memberCount?: number;
+  maxMembers?: number;
+  sport?: string;
 };
 
 type MyLeagueRow = {
@@ -45,11 +49,18 @@ function normalizeCode(input: string) {
   return input.trim().toUpperCase().replace(/\s+/g, "");
 }
 
+function safeStr(v: any, fallback = ""): string {
+  return typeof v === "string" ? v : fallback;
+}
+function safeNum(v: any, fallback = 0): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
 function Pill({
   children,
   tone = "orange",
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   tone?: "orange" | "sky" | "zinc" | "emerald";
 }) {
   const cls =
@@ -79,7 +90,7 @@ function Card({
 }: {
   title: string;
   desc?: string;
-  children: React.ReactNode;
+  children: ReactNode;
   accent?: "orange" | "sky" | "zinc" | "emerald";
 }) {
   const top =
@@ -93,12 +104,18 @@ function Card({
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_0_40px_rgba(0,0,0,0.55)] overflow-hidden">
-      <div className={`border-b border-white/10 bg-gradient-to-r ${top} via-transparent to-transparent px-4 py-3`}>
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="truncate text-base font-extrabold tracking-tight md:text-lg">{title}</h2>
-            {desc ? <p className="mt-0.5 text-[12px] leading-snug text-white/65">{desc}</p> : null}
-          </div>
+      <div
+        className={`border-b border-white/10 bg-gradient-to-r ${top} via-transparent to-transparent px-4 py-3`}
+      >
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-extrabold tracking-tight md:text-lg">
+            {title}
+          </h2>
+          {desc ? (
+            <p className="mt-0.5 text-[12px] leading-snug text-white/65">
+              {desc}
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="p-4">{children}</div>
@@ -115,7 +132,7 @@ export default function LeaguesClient() {
   const [selectedLeagueId, setSelectedLeagueId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
-  // Join a league state
+  // Join a room state
   const [joinCode, setJoinCode] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -141,32 +158,50 @@ export default function LeaguesClient() {
       try {
         const uid = user.uid;
 
-        // 1) Leagues where I'm manager
+        // 1) Rooms where I'm manager
         const leaguesRef = collection(db, "leagues");
-        const managerQ = query(leaguesRef, where("managerId", "==", uid), limit(50));
+        const managerQ = query(
+          leaguesRef,
+          where("managerId", "==", uid),
+          limit(50)
+        );
         const managerSnap = await getDocs(managerQ);
 
         const managerLeagues: MyLeagueRow[] = managerSnap.docs.map((d) => {
           const data = d.data() as any;
 
-          const inviteCode = data.inviteCode ?? data.code ?? data.leagueCode ?? "";
-          const managerId = data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+          const inviteCode = safeStr(
+            data.inviteCode ?? data.code ?? data.leagueCode,
+            ""
+          );
+          const managerId = safeStr(
+            data.managerId ?? data.managerUid ?? data.managerUID,
+            ""
+          );
 
           const league: League = {
             id: d.id,
-            name: data.name ?? "Unnamed league",
+            name: safeStr(data.name, "Unnamed room"),
             inviteCode,
             managerId,
-            description: data.description ?? "",
-            memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
+            description: safeStr(data.description, ""),
+            memberCount:
+              typeof data.memberCount === "number"
+                ? data.memberCount
+                : Array.isArray(data.memberIds)
+                  ? data.memberIds.length
+                  : 0,
+            maxMembers:
+              typeof data.maxMembers === "number" ? data.maxMembers : undefined,
+            sport: safeStr(data.sport, "afl").toLowerCase(),
           };
 
           return { league, uiRole: "manager" };
         });
 
-        // 2) Leagues where I'm a member via collectionGroup members
+        // 2) Rooms where I'm a member via collectionGroup members
         const membersCG = collectionGroup(db, "members");
-        const membersQ = query(membersCG, where("uid", "==", uid), limit(100));
+        const membersQ = query(membersCG, where("uid", "==", uid), limit(150));
         const membersSnap = await getDocs(membersQ);
 
         const memberRows: MyLeagueRow[] = await Promise.all(
@@ -179,22 +214,43 @@ export default function LeaguesClient() {
 
             const data = leagueSnap.data() as any;
 
-            const inviteCode = data.inviteCode ?? data.code ?? data.leagueCode ?? "";
-            const managerId = data.managerId ?? data.managerUid ?? data.managerUID ?? "";
+            const inviteCode = safeStr(
+              data.inviteCode ?? data.code ?? data.leagueCode,
+              ""
+            );
+            const managerId = safeStr(
+              data.managerId ?? data.managerUid ?? data.managerUID,
+              ""
+            );
 
             const league: League = {
               id: leagueSnap.id,
-              name: data.name ?? "Unnamed league",
+              name: safeStr(data.name, "Unnamed room"),
               inviteCode,
               managerId,
-              description: data.description ?? "",
-              memberCount: data.memberCount ?? (data.memberIds?.length ?? 0) ?? 0,
+              description: safeStr(data.description, ""),
+              memberCount:
+                typeof data.memberCount === "number"
+                  ? data.memberCount
+                  : Array.isArray(data.memberIds)
+                    ? data.memberIds.length
+                    : 0,
+              maxMembers:
+                typeof data.maxMembers === "number"
+                  ? data.maxMembers
+                  : undefined,
+              sport: safeStr(data.sport, "afl").toLowerCase(),
             };
 
-            const roleFromMember = (m.data() as any)?.role as "manager" | "member" | undefined;
+            const roleFromMember = (m.data() as any)?.role as
+              | "manager"
+              | "member"
+              | undefined;
 
             const uiRole: "manager" | "member" =
-              league.managerId === uid || roleFromMember === "manager" ? "manager" : "member";
+              league.managerId === uid || roleFromMember === "manager"
+                ? "manager"
+                : "member";
 
             return { league, uiRole };
           })
@@ -216,7 +272,7 @@ export default function LeaguesClient() {
         }
       } catch (e) {
         console.error(e);
-        setError("Could not load your leagues. Please try again.");
+        setError("Could not load your rooms. Please try again.");
         setMyLeagues([]);
         setSelectedLeagueId("");
       } finally {
@@ -233,7 +289,7 @@ export default function LeaguesClient() {
     setJoinSuccess(null);
 
     if (!user) {
-      setJoinError("You need to be logged in to join a league.");
+      setJoinError("You need to be logged in to join a room.");
       return;
     }
 
@@ -246,49 +302,103 @@ export default function LeaguesClient() {
     setJoining(true);
 
     try {
-      // Find league by inviteCode
+      // 1) Find room by inviteCode
       const leaguesRef = collection(db, "leagues");
       const qLeagues = query(leaguesRef, where("inviteCode", "==", code), limit(1));
       const snap = await getDocs(qLeagues);
 
       if (snap.empty) {
-        setJoinError("No league found with that code.");
-        setJoining(false);
+        setJoinError("No room found with that code.");
         return;
       }
 
       const leagueDoc = snap.docs[0];
       const leagueId = leagueDoc.id;
+      const data = leagueDoc.data() as any;
 
-      const leagueData = leagueDoc.data() as any;
-      const managerId = leagueData.managerId ?? "";
-      const memberCount = Number(leagueData.memberCount ?? 0);
+      // AFL-only guard (you’re AFL-only right now)
+      const sport = safeStr(data?.sport, "afl").toLowerCase();
+      if (sport !== "afl") {
+        setJoinError("That room isn’t an AFL room.");
+        return;
+      }
 
-      // Create/merge member doc
+      const managerId = safeStr(
+        data.managerId ?? data.managerUid ?? data.managerUID,
+        ""
+      );
+
+      const memberCount = safeNum(
+        data.memberCount,
+        Array.isArray(data.memberIds) ? data.memberIds.length : 0
+      );
+      const maxMembers =
+        typeof data.maxMembers === "number" ? data.maxMembers : undefined;
+
+      if (
+        typeof maxMembers === "number" &&
+        maxMembers > 0 &&
+        memberCount >= maxMembers
+      ) {
+        setJoinError("That room is full.");
+        return;
+      }
+
+      // 2) Prevent double join / double increment
+      const leagueRef = doc(db, "leagues", leagueId);
+      const freshSnap = await getDoc(leagueRef);
+      if (!freshSnap.exists()) {
+        setJoinError("That room no longer exists.");
+        return;
+      }
+
+      const fresh = freshSnap.data() as any;
+      const memberIds: string[] = Array.isArray(fresh.memberIds) ? fresh.memberIds : [];
+      const alreadyMember = memberIds.includes(user.uid);
+
+      // 3) Write member subdoc
       const memberRef = doc(db, "leagues", leagueId, "members", user.uid);
+      const displayName =
+        (user as any).displayName ||
+        (user as any).username ||
+        (user as any).email ||
+        "Player";
+
       await setDoc(
         memberRef,
         {
           uid: user.uid,
-          displayName: (user as any).displayName || (user as any).email || "Player",
+          displayName,
           role: user.uid === managerId ? "manager" : "member",
           joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      // Bump memberCount (best-effort; won’t be perfect without transaction but OK for now)
-      await updateDoc(doc(db, "leagues", leagueId), {
-        memberCount: memberCount > 0 ? memberCount : 1,
-      }).catch(() => {});
+      // 4) Update league doc (memberIds + memberCount only if new)
+      const updates: Record<string, any> = {
+        memberIds: arrayUnion(user.uid),
+        updatedAt: serverTimestamp(),
+      };
+      if (!alreadyMember) updates.memberCount = increment(1);
 
-      setJoinSuccess("You’re in. Opening league…");
+      await updateDoc(leagueRef, updates);
+
+      // 5) Update users/{uid}.leagueIds (so “My rooms” is reliable)
+      await setDoc(
+        doc(db, "users", user.uid),
+        { leagueIds: arrayUnion(leagueId), updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+
+      setJoinSuccess("You’re in. Opening ladder…");
       setJoinCode("");
 
       router.push(`/leagues/${leagueId}/ladder`);
     } catch (err) {
       console.error(err);
-      setJoinError("Failed to join league. Please try again.");
+      setJoinError("Failed to join room. Please try again.");
     } finally {
       setJoining(false);
     }
@@ -302,8 +412,8 @@ export default function LeaguesClient() {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <Pill tone="orange">Private leagues live</Pill>
-                <Pill tone="zinc">Torpy</Pill>
+                <Pill tone="orange">Locker Rooms live</Pill>
+                <Pill tone="zinc">AFL</Pill>
               </div>
               <h1 className="mt-2 text-2xl font-extrabold tracking-tight md:text-3xl">
                 Locker Room
@@ -316,7 +426,7 @@ export default function LeaguesClient() {
             <div className="flex flex-wrap gap-2 md:justify-end">
               <button
                 type="button"
-                onClick={() => router.push("/leagues/new")}
+                onClick={() => router.push("/leagues/create")}
                 className="inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-2 text-[13px] font-extrabold text-black transition hover:bg-orange-400"
               >
                 Create room
@@ -395,7 +505,9 @@ export default function LeaguesClient() {
                             {selected.league.inviteCode || "—"}
                           </span>
                           <span className="text-[11px] text-white/45">
-                            {selected.league.memberCount ? `${selected.league.memberCount} members` : ""}
+                            {typeof selected.league.memberCount === "number"
+                              ? `${selected.league.memberCount} members`
+                              : ""}
                           </span>
                         </div>
                       </div>
@@ -477,7 +589,7 @@ export default function LeaguesClient() {
 
               <button
                 type="button"
-                onClick={() => router.push("/leagues/new")}
+                onClick={() => router.push("/leagues/create")}
                 className="w-full inline-flex items-center justify-center rounded-2xl bg-sky-500 hover:bg-sky-400 text-black font-extrabold text-[14px] px-5 py-3 transition-colors shadow-[0_10px_25px_rgba(56,189,248,0.20)]"
               >
                 Create room
