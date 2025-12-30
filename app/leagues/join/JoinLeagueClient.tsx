@@ -14,7 +14,6 @@ import {
   serverTimestamp,
   updateDoc,
   arrayUnion,
-  arrayRemove,
   increment,
   getDoc,
 } from "firebase/firestore";
@@ -47,6 +46,36 @@ function safeStr(v: any, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
 }
 
+function Pill({
+  children,
+  tone = "orange",
+}: {
+  children: React.ReactNode;
+  tone?: "orange" | "sky" | "zinc" | "emerald" | "red" | "amber";
+}) {
+  const cls =
+    tone === "orange"
+      ? "border-orange-500/30 bg-orange-500/10 text-orange-200"
+      : tone === "sky"
+        ? "border-sky-500/30 bg-sky-500/10 text-sky-200"
+        : tone === "emerald"
+          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+          : tone === "red"
+            ? "border-red-500/30 bg-red-500/10 text-red-200"
+            : tone === "amber"
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+              : "border-white/10 bg-white/5 text-white/70";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${cls}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
+      {children}
+    </span>
+  );
+}
+
 export default function JoinLeagueClient() {
   const { user } = useAuth();
   const router = useRouter();
@@ -62,7 +91,6 @@ export default function JoinLeagueClient() {
   const [error, setError] = useState<string>("");
   const [found, setFound] = useState<FoundLeague | null>(null);
 
-  // keep input synced if user opens with ?code=
   useEffect(() => {
     if (codeFromUrl) setCode(codeFromUrl);
   }, [codeFromUrl]);
@@ -77,14 +105,14 @@ export default function JoinLeagueClient() {
     setFound(null);
 
     if (!user) {
-      setError("You need to log in to join a league.");
+      setError("You need to log in to join a room.");
       setState("error");
       return;
     }
 
     const inviteCode = normalizeCode(code);
     if (!inviteCode || inviteCode.length < 4) {
-      setError("Enter your league code (usually 6 characters).");
+      setError("Enter your room code (usually 6 characters).");
       setState("error");
       return;
     }
@@ -98,26 +126,25 @@ export default function JoinLeagueClient() {
       const snap = await getDocs(qRef);
 
       if (snap.empty) {
-        setError("No league found with that code.");
+        setError("No room found with that code.");
         setState("error");
         return;
       }
 
-      // if multiple leagues share a code (shouldn't), take first
       const leagueDoc = snap.docs[0];
       const data = leagueDoc.data() as any;
 
-      // AFL-only guard (since you're going AFL-only now)
+      // AFL-only guard
       const sport = (data.sport || "afl").toString().toLowerCase();
       if (sport !== "afl") {
-        setError("That league isn’t an AFL league.");
+        setError("That room isn’t an AFL room.");
         setState("error");
         return;
       }
 
       const league: FoundLeague = {
         id: leagueDoc.id,
-        name: safeStr(data.name, "Untitled league"),
+        name: safeStr(data.name, "Untitled room"),
         inviteCode: safeStr(data.inviteCode, inviteCode),
         managerId: data.managerId ?? data.managerUid ?? data.managerID ?? undefined,
         sport,
@@ -126,7 +153,7 @@ export default function JoinLeagueClient() {
         isPublic: typeof data.isPublic === "boolean" ? data.isPublic : undefined,
       };
 
-      // capacity guard (optional but nice)
+      // capacity guard
       if (
         typeof league.maxMembers === "number" &&
         league.maxMembers > 0 &&
@@ -134,22 +161,21 @@ export default function JoinLeagueClient() {
         league.memberCount >= league.maxMembers
       ) {
         setFound(league);
-        setError("That league is full.");
+        setError("That room is full.");
         setState("error");
         return;
       }
 
       setFound(league);
 
-      // 2) Join (member doc + arrays)
+      // 2) Join
       setState("joining");
 
-      // IMPORTANT: prevent double-increment if user already a member
       const leagueRef = doc(db, "leagues", league.id);
       const leagueSnap = await getDoc(leagueRef);
 
       if (!leagueSnap.exists()) {
-        setError("That league no longer exists.");
+        setError("That room no longer exists.");
         setState("error");
         return;
       }
@@ -161,7 +187,6 @@ export default function JoinLeagueClient() {
 
       const alreadyMember = memberIds.includes(user.uid);
 
-      // member subdoc
       const memberRef = doc(db, "leagues", league.id, "members", user.uid);
       const displayName =
         (user as any).displayName ||
@@ -181,9 +206,6 @@ export default function JoinLeagueClient() {
         { merge: true }
       );
 
-      // update league doc
-      // - always ensure memberIds contains uid
-      // - only increment memberCount if they weren't already a member
       const updates: Record<string, any> = {
         memberIds: arrayUnion(user.uid),
         updatedAt: serverTimestamp(),
@@ -195,7 +217,6 @@ export default function JoinLeagueClient() {
 
       await updateDoc(leagueRef, updates);
 
-      // update user doc (optional but handy)
       const userRef = doc(db, "users", user.uid);
       await setDoc(
         userRef,
@@ -206,153 +227,175 @@ export default function JoinLeagueClient() {
         { merge: true }
       );
 
-      // best effort: if we had a weird state where memberCount was incremented but memberIds already had uid,
-      // we do nothing. (The alreadyMember guard prevents it.)
       setState("joined");
     } catch (err) {
       console.error("Failed to join league", err);
-
-      // best-effort rollback: if we set state to joining and had a found league,
-      // we won't try to "undo" docs (too risky without txn). Keep it simple.
-      setError("Could not join that league right now. Try again.");
+      setError("Could not join that room right now. Try again.");
       setState("error");
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-black via-zinc-950 to-black text-white px-6 py-10">
-      <div className="w-full max-w-3xl mx-auto space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full bg-orange-500/10 border border-orange-500/30 px-3 py-1 text-xs font-bold text-orange-300 uppercase tracking-wide">
-              <span className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
-              Join your crew
+    <main className="min-h-screen bg-[#050814] text-white">
+      <div className="mx-auto w-full max-w-3xl px-4 py-6 md:py-8 space-y-4">
+        {/* Compact header */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 md:p-5 shadow-[0_0_45px_rgba(0,0,0,0.55)]">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Pill tone="orange">Join your crew</Pill>
+                <Pill tone="zinc">Torpy</Pill>
+                <Pill tone="sky">AFL only</Pill>
+              </div>
+              <h1 className="mt-2 text-2xl md:text-3xl font-extrabold tracking-tight">
+                Join a Locker Room
+              </h1>
+              <p className="mt-1 text-[12px] leading-snug text-white/65 md:text-sm max-w-xl">
+                Paste a code from a mate and jump straight onto the ladder.
+              </p>
             </div>
-            <h1 className="text-3xl font-extrabold leading-tight">Join a League</h1>
-            <p className="text-white/60 text-sm max-w-xl">
-              Enter a code from a mate and jump straight onto the ladder. AFL-only for now.
-            </p>
+
+            <div className="shrink-0">
+              <SportBadge sport="afl" />
+            </div>
           </div>
-          <SportBadge sport="afl" />
+
+          {!user && (
+            <div className="mt-3 rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              You need to log in before you can join a room.
+            </div>
+          )}
         </div>
 
-        {!user && (
-          <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-            You need to log in before you can join a league.
-          </div>
-        )}
-
-        <div className="rounded-2xl border border-white/10 bg-zinc-900/60 p-6 space-y-5 shadow-lg">
-          <form onSubmit={handleJoin} className="space-y-3" autoComplete="off">
-            <div className="space-y-1">
-              <label className="text-xs text-white/60">League code</label>
-
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="text"
-                  inputMode="text"
-                  maxLength={8}
-                  value={code}
-                  onChange={(e) => setCode(normalizeCode(e.target.value))}
-                  placeholder="ABC123"
-                  className="flex-1 rounded-xl bg-black/40 border border-white/15 px-4 py-3 text-sm tracking-[0.32em] uppercase focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
-                />
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className="rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black text-sm font-extrabold px-6 py-3 transition"
-                >
-                  {state === "searching"
-                    ? "Finding…"
-                    : state === "joining"
-                    ? "Joining…"
-                    : "Join"}
-                </button>
-              </div>
-
-              {codeFromUrl && (
-                <p className="text-[11px] text-white/45">
-                  Code prefilled from link.
+        {/* Join panel */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.035] shadow-[0_0_40px_rgba(0,0,0,0.55)] overflow-hidden">
+          <div className="border-b border-white/10 bg-gradient-to-r from-orange-500/18 via-transparent to-transparent px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="truncate text-base font-extrabold tracking-tight md:text-lg">
+                  Enter room code
+                </h2>
+                <p className="mt-0.5 text-[12px] leading-snug text-white/65">
+                  Codes are usually 6 characters. Links can prefill via <span className="font-mono">?code=</span>.
                 </p>
+              </div>
+
+              {codeFromUrl ? <Pill tone="zinc">Prefilled</Pill> : null}
+            </div>
+          </div>
+
+          <div className="p-4 space-y-3">
+            <form onSubmit={handleJoin} className="space-y-3" autoComplete="off">
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-white/55">
+                  Room code
+                </label>
+
+                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] items-start">
+                  <input
+                    type="text"
+                    inputMode="text"
+                    maxLength={8}
+                    value={code}
+                    onChange={(e) => setCode(normalizeCode(e.target.value))}
+                    placeholder="ABC123"
+                    className="w-full rounded-xl bg-[#050816]/80 border border-white/15 px-4 py-3 text-sm tracking-[0.32em] uppercase focus:outline-none focus:ring-2 focus:ring-orange-500/70 focus:border-orange-500/70"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={!canSubmit}
+                    className="h-[46px] w-full sm:w-auto rounded-full bg-orange-500 hover:bg-orange-400 disabled:opacity-60 disabled:hover:bg-orange-500 text-black text-sm font-extrabold px-6 transition"
+                  >
+                    {state === "searching"
+                      ? "Finding…"
+                      : state === "joining"
+                        ? "Joining…"
+                        : "Join"}
+                  </button>
+                </div>
+
+                {codeFromUrl && (
+                  <p className="text-[11px] text-white/45">Code prefilled from link.</p>
+                )}
+              </div>
+
+              {error && (
+                <div className="rounded-xl border border-red-500/35 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {error}
+                </div>
               )}
-            </div>
+            </form>
 
-            {error && (
-              <p className="text-sm text-red-300 border border-red-500/40 rounded-xl bg-red-500/10 px-4 py-3">
-                {error}
-              </p>
+            {/* Found room preview */}
+            {found && state !== "error" && (
+              <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <Pill tone="sky">Room found</Pill>
+                      <Pill tone="zinc">{(found.sport || "afl").toUpperCase()}</Pill>
+                    </div>
+                    <p className="mt-2 text-lg font-extrabold truncate">{found.name}</p>
+                    <p className="mt-1 text-[12px] text-white/60">
+                      Code:{" "}
+                      <span className="font-mono text-orange-300">{found.inviteCode}</span>
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-zinc-950/70 border border-zinc-800 px-3 py-2 text-right">
+                    <p className="text-[10px] uppercase tracking-wider text-zinc-500">
+                      Players
+                    </p>
+                    <p className="text-lg font-black text-zinc-200 leading-none">
+                      {found.memberCount ?? "—"}
+                      {typeof found.maxMembers === "number" ? (
+                        <span className="text-xs text-zinc-500"> / {found.maxMembers}</span>
+                      ) : null}
+                    </p>
+                  </div>
+                </div>
+              </div>
             )}
-          </form>
 
-          {found && state !== "error" && (
-            <div className="rounded-2xl border border-white/10 bg-black/30 px-5 py-4 space-y-2">
-              <p className="text-xs uppercase tracking-wide text-white/50">
-                League found
-              </p>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-lg font-extrabold truncate">{found.name}</p>
-                  <p className="text-xs text-white/60 mt-1">
-                    Code:{" "}
-                    <span className="font-mono text-orange-300">
-                      {found.inviteCode}
-                    </span>
+            {/* Joined */}
+            {state === "joined" && found && (
+              <div className="rounded-2xl border border-emerald-500/35 bg-emerald-500/10 p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-emerald-200 font-extrabold text-[15px]">
+                    You’ve joined <span className="text-white">{found.name}</span> ✅
                   </p>
+                  <Pill tone="emerald">Welcome</Pill>
                 </div>
 
-                <div className="rounded-xl bg-zinc-950/70 border border-zinc-800 px-3 py-2 text-right">
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500">
-                    Players
-                  </p>
-                  <p className="text-lg font-black text-zinc-200">
-                    {found.memberCount ?? "—"}
-                    {typeof found.maxMembers === "number" ? (
-                      <span className="text-xs text-zinc-500">
-                        {" "}
-                        / {found.maxMembers}
-                      </span>
-                    ) : null}
-                  </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Link
+                    href={`/leagues/${found.id}`}
+                    className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-sm px-5 py-3 transition"
+                  >
+                    Go to room →
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => router.push("/leagues")}
+                    className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-sm px-5 py-3 transition"
+                  >
+                    Back to rooms
+                  </button>
                 </div>
+
+                <p className="text-[11px] text-white/60">
+                  If it doesn’t show instantly, refresh once — Firestore usually catches up fast.
+                </p>
               </div>
-            </div>
-          )}
-
-          {state === "joined" && found && (
-            <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-5 py-5 space-y-4">
-              <p className="text-emerald-200 font-extrabold text-base">
-                You’ve joined <span className="text-white">{found.name}</span> ✅
-              </p>
-
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Link
-                  href={`/leagues/${found.id}`}
-                  className="inline-flex items-center justify-center rounded-full bg-orange-500 hover:bg-orange-400 text-black font-extrabold text-sm px-5 py-3 transition"
-                >
-                  Go to league →
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => router.push("/leagues")}
-                  className="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 hover:bg-white/10 text-white font-extrabold text-sm px-5 py-3 transition"
-                >
-                  Back to leagues
-                </button>
-              </div>
-
-              <p className="text-[11px] text-white/60">
-                If it doesn’t show instantly, refresh once — Firestore usually catches up fast.
-              </p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        <div className="text-xs text-white/50">
-          <Link
-            href="/leagues"
-            className="text-orange-300 hover:text-orange-200 font-extrabold"
-          >
-            ← Back to leagues
+        {/* Footer nav */}
+        <div className="text-xs text-white/55">
+          <Link href="/leagues" className="text-orange-300 hover:text-orange-200 font-extrabold">
+            ← Back to Locker Room
           </Link>
         </div>
       </div>
