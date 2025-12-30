@@ -1,6 +1,7 @@
 // components/Navbar.tsx
 "use client";
 
+<Link href="/leagues">Locker Room</Link>
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { onAuthStateChanged, User } from "firebase/auth";
