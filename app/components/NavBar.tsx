@@ -79,8 +79,8 @@ export default function Navbar() {
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
         {/* LOGO / WORDMARK */}
         <Link href="/" className="flex items-center gap-3">
-          <span className="font-extrabold text-3xl tracking-tight text-white">
-            TORPY<span className="text-red-500">
+          <span className="font-extrabold text-3xl tracking-tight text-red-500">
+            TORPY
           </span>
         </Link>
 
