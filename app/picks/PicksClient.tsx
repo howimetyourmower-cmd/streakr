@@ -169,7 +169,10 @@ function safeSponsorKey(uid: string | null, roundNumber: number | null) {
   return `torpie:sponsorReveal:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
+function effectivePick(
+  local: LocalPick | undefined,
+  api: PickOutcome | undefined
+): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
@@ -326,7 +329,18 @@ export default function PicksPage() {
   const [slipConfirmMode, setSlipConfirmMode] = useState(false);
   const [slipToast, setSlipToast] = useState<string>("");
 
-  // NOTE: no pulsing / ping animations anywhere in this file.
+  /**
+   * IMPORTANT: Removes the “pulsing” you were seeing on the match card header.
+   * The pulsing was coming from the match image path (/matches/<gameId>.jpg) often being missing,
+   * and because the page re-renders each second (countdown), the browser was repeatedly repainting
+   * the broken-image/alt-text area.
+   *
+   * Fix:
+   * - Use a guaranteed existing image for featured cards: /public/afl.png
+   * - Keep countdown updates (for locks) without causing broken image repaints.
+   */
+  const FEATURED_MATCH_IMG = "/afl.png"; // <-- ensure this file exists in /public
+
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -512,7 +526,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // Confetti milestone (not a pulse; short celebration)
+  // Confetti milestone
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -599,7 +613,10 @@ export default function PicksPage() {
     const streakNeed = Math.max(0, ELIGIBILITY.MIN_STREAK - (myCurrentStreak || 0));
     const gamesNeed = Math.max(0, ELIGIBILITY.MIN_GAMES - gamesPlayedLocked);
 
-    const streakProg = Math.max(0, Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100));
+    const streakProg = Math.max(
+      0,
+      Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100)
+    );
     const gamesProg = Math.max(0, Math.min(100, (gamesPlayedLocked / ELIGIBILITY.MIN_GAMES) * 100));
 
     return {
@@ -641,8 +658,7 @@ export default function PicksPage() {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
+            Authorization: `Bearer ${token}` },
           body: JSON.stringify({ action: "clear", questionId: q.id }),
         });
 
@@ -799,7 +815,7 @@ export default function PicksPage() {
         match: g.match,
         venue: g.venue,
         startTime: g.startTime,
-        picks: picks.sort((a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question)),
+        picks: picks.sort((a, b) => (a.quarter - b.quarter) || a.question.localeCompare(b.question)),
       };
     },
     [localPicks, roundNumber]
@@ -887,7 +903,8 @@ export default function PicksPage() {
     setTimeout(() => setSlipToast(""), 1400);
   }, []);
 
-  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const roundLabel =
+    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   // Active match meta
   const activeGameMeta = useMemo(() => {
@@ -970,7 +987,10 @@ export default function PicksPage() {
           </div>
         </div>
 
-        <div className="mt-1 flex items-center justify-between text-[10px]" style={{ color: "rgba(0,0,0,0.60)" }}>
+        <div
+          className="mt-1 flex items-center justify-between text-[10px]"
+          style={{ color: "rgba(0,0,0,0.60)" }}
+        >
           <span>
             YES{" "}
             <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
@@ -1056,7 +1076,15 @@ export default function PicksPage() {
     );
   };
 
-  const WhitePickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
+  const WhitePickCard = ({
+    g,
+    q,
+    gameLocked,
+  }: {
+    g: ApiGame;
+    q: ApiQuestion;
+    gameLocked: boolean;
+  }) => {
     const sponsor = q.isSponsorQuestion === true;
     const sponsorName = (q.sponsorName || "Rebel Sport").trim();
     const sponsorPrize = (q.sponsorPrize || "$100 gift card").trim();
@@ -1099,7 +1127,10 @@ export default function PicksPage() {
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: "rgba(0,0,0,0.55)" }}>
+              <span
+                className="text-[11px] font-black uppercase tracking-wide"
+                style={{ color: "rgba(0,0,0,0.55)" }}
+              >
                 Q{q.quarter}
               </span>
 
@@ -1264,7 +1295,7 @@ export default function PicksPage() {
     );
   };
 
-  // Home-page style game boxes on Picks dashboard
+  // -------- Featured match boxes (NO PULSING, NO EXTRA TOP TITLE) --------
   const GameBoxHomeStyle = ({ g }: { g: ApiGame }) => {
     const lockMs = new Date(g.startTime).getTime() - nowMs;
     const gameLocked = lockMs <= 0;
@@ -1277,8 +1308,6 @@ export default function PicksPage() {
     const total = g.questions.length;
     const isLockedByUser = !!lockedGames[g.id];
 
-    const matchImg = `/matches/${encodeURIComponent(g.id)}.jpg`;
-
     return (
       <div
         className="rounded-2xl overflow-hidden border"
@@ -1288,35 +1317,32 @@ export default function PicksPage() {
           boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
         }}
       >
+        {/* Image top */}
         <button
           type="button"
           onClick={() => selectMatch(g.id)}
           className="relative w-full h-[140px] sm:h-[160px] block"
           title="Open match"
         >
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(255,46,77,0.20) 0%, rgba(0,0,0,0.85) 55%, rgba(0,0,0,0.95) 100%)",
-            }}
-          />
-
+          {/* Base image (stable file => no broken-image pulsing) */}
           <Image
-            src={matchImg}
-            alt={g.match}
+            src={FEATURED_MATCH_IMG}
+            alt=""
             fill
             sizes="(max-width: 640px) 100vw, 33vw"
-            style={{ objectFit: "cover", opacity: 0.55 }}
+            style={{ objectFit: "cover", objectPosition: "top" }}
+            priority={false}
           />
 
+          {/* Darken for legibility */}
           <div
             className="absolute inset-0"
             style={{
-              background: "linear-gradient(180deg, rgba(0,0,0,0.00) 10%, rgba(0,0,0,0.88) 100%)",
+              background: "linear-gradient(180deg, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.88) 100%)",
             }}
           />
 
+          {/* NOTE: Only ONE match title (no extra top “logo” title) */}
           <div className="absolute left-4 right-4 bottom-3">
             <div className="text-[11px] text-white/70 font-semibold">{formatAedt(g.startTime)}</div>
             <div className="mt-1 text-[18px] font-black text-white truncate">{g.match}</div>
@@ -1371,6 +1397,7 @@ export default function PicksPage() {
           </div>
         </button>
 
+        {/* White bottom panel */}
         <div
           className="px-4 py-4"
           style={{
@@ -1478,7 +1505,11 @@ export default function PicksPage() {
       commentsUnsubRef.current = null;
     }
 
-    const qRef = query(collection(db, "comments"), where("questionId", "==", commentsQuestion.id), limit(50));
+    const qRef = query(
+      collection(db, "comments"),
+      where("questionId", "==", commentsQuestion.id),
+      limit(50)
+    );
 
     commentsUnsubRef.current = onSnapshot(
       qRef,
@@ -1749,6 +1780,7 @@ export default function PicksPage() {
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
+      {/* Slip Modal */}
       <SlipModal />
 
       {/* Comments Modal */}
@@ -1859,7 +1891,9 @@ export default function PicksPage() {
 
               <div className="mt-4">
                 <div className="flex items-center justify-between text-[11px] text-white/55">
-                  <div className="uppercase tracking-widest">Latest {commentsList.length ? `(${commentsList.length})` : ""}</div>
+                  <div className="uppercase tracking-widest">
+                    Latest {commentsList.length ? `(${commentsList.length})` : ""}
+                  </div>
                   <div className="text-white/45">ESC to close</div>
                 </div>
 
@@ -1908,7 +1942,9 @@ export default function PicksPage() {
                   )}
                 </div>
 
-                <div className="mt-3 text-[11px] text-white/45">Keep it civil. Banter is good — abuse gets binned.</div>
+                <div className="mt-3 text-[11px] text-white/45">
+                  Keep it civil. Banter is good — abuse gets binned.
+                </div>
               </div>
             </div>
           </div>
@@ -2101,6 +2137,7 @@ export default function PicksPage() {
           </div>
         ) : (
           <div className="mt-6">
+            {/* Dedicated match view */}
             <div
               className="rounded-2xl border overflow-hidden"
               style={{
