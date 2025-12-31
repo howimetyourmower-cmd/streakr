@@ -334,7 +334,7 @@ export default function AflHubPage() {
       {/* ======= HERO (FULL-WIDTH IMAGE LIKE SCREENSHOT) ======= */}
       <section className="relative">
         <div className="relative w-full h-[420px] sm:h-[500px]">
-          <Image src="/mcg-hero.jpg" alt="AFL action" fill className="object-cover" priority />
+          <Image src="/afl.png" alt="AFL action" fill className="object-cover" priority />
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         </div>
