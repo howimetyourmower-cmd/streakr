@@ -183,11 +183,8 @@ export default function AflHubPage() {
     const now = Date.now();
     const sorted = [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
 
-    // Prefer upcoming first; if none, just show earliest.
     const upcoming = sorted.filter((g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60);
     const list = (upcoming.length ? upcoming : sorted).slice(0, 2);
-
-    // If no games from API, still render empty state.
     return list;
   }, [games]);
 
@@ -227,17 +224,10 @@ export default function AflHubPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Shared styles (TORPIE look)
   const darkCardStyle = {
     borderColor: "rgba(255,255,255,0.10)",
     background: `linear-gradient(180deg, ${COLORS.darkPanel} 0%, ${COLORS.darkPanel2} 100%)`,
     boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
-  } as const;
-
-  const topBarStyle = {
-    background: "rgba(255,255,255,0.92)",
-    borderColor: "rgba(0,0,0,0.08)",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.10)",
   } as const;
 
   const primaryBtn = {
@@ -252,12 +242,6 @@ export default function AflHubPage() {
     background: "rgba(255,255,255,0.96)",
     color: "rgba(0,0,0,0.88)",
     boxShadow: "0 10px 22px rgba(0,0,0,0.16)",
-  } as const;
-
-  const heroPill = {
-    borderColor: "rgba(255,255,255,0.22)",
-    background: "rgba(0,0,0,0.55)",
-    color: "rgba(255,255,255,0.92)",
   } as const;
 
   const yesBtnStyle = {
@@ -284,57 +268,10 @@ export default function AflHubPage() {
         }
       `}</style>
 
-      {/* ======= TOP BAR (WHITE) ======= */}
-      <header className="sticky top-0 z-40 border-b" style={topBarStyle}>
-        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div
-              className="h-9 w-9 rounded-xl flex items-center justify-center"
-              style={{
-                background: "rgba(0,0,0,0.06)",
-                border: "1px solid rgba(0,0,0,0.10)",
-              }}
-            >
-              <svg viewBox="0 0 120 80" className="h-6 w-6" fill="none" style={{ color: COLORS.red }}>
-                <ellipse cx="60" cy="40" rx="46" ry="30" stroke="currentColor" strokeWidth="7" />
-                <path d="M40 27c8 6 32 6 40 0M40 53c8-6 32-6 40 0" stroke="currentColor" strokeWidth="5" />
-              </svg>
-            </div>
-            <div className="leading-none">
-              <div className="text-[13px] sm:text-sm font-black tracking-tight text-black">TORPIE</div>
-              <div className="text-[10px] sm:text-[11px] font-semibold text-black/55">AFL predictions • free</div>
-            </div>
-          </Link>
-
-          <nav className="hidden sm:flex items-center gap-5 text-[12px] font-semibold text-black/70">
-            <Link className="hover:text-black" href="/about">
-              ABOUT
-            </Link>
-            <Link className="hover:text-black" href="/faq">
-              FAQ
-            </Link>
-            <Link className="hover:text-black" href="/leaderboards">
-              LEADERBOARD
-            </Link>
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <Link
-              href={picksHref}
-              onClick={requireAuthForPicks}
-              className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] sm:text-sm font-black border transition active:scale-[0.99]"
-              style={primaryBtn}
-            >
-              PLAY NOW
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* ======= HERO (FULL-WIDTH IMAGE LIKE SCREENSHOT) ======= */}
+      {/* ======= HERO (NO NAVBAR) ======= */}
       <section className="relative">
         <div className="relative w-full h-[420px] sm:h-[500px]">
-          <Image src="/afl.png" alt="AFL action" fill className="object-cover" priority />
+          <Image src="/afl1.jpg" alt="AFL action" fill className="object-cover" priority />
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         </div>
@@ -342,16 +279,10 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              <div className="inline-flex flex-wrap items-center gap-2 mb-4">
-                <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={heroPill}>
-                  AFL ONLY
-                </span>
-                <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold border" style={heroPill}>
-                  ROUND {roundNumber ?? "—"}
-                </span>
-                <span className="hidden sm:inline text-[11px] text-white/70">
-                  Free-to-play • Skill • Bragging rights
-                </span>
+              {/* Brand strip (kept minimal, no pills) */}
+              <div className="mb-4">
+                <div className="text-[13px] sm:text-sm font-black tracking-tight text-white">TORPIE</div>
+                <div className="text-[11px] sm:text-[12px] font-semibold text-white/70">AFL predictions • free</div>
               </div>
 
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
@@ -363,8 +294,7 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/75 max-w-xl">
-                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a game and your streak
-                is cooked.
+                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a game and your streak is cooked.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -374,7 +304,7 @@ export default function AflHubPage() {
                   className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
                   style={primaryBtn}
                 >
-                  JOIN NOW
+                  PLAY NOW
                 </Link>
 
                 <button
@@ -383,19 +313,15 @@ export default function AflHubPage() {
                   className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
                   style={secondaryBtn}
                 >
-                  LEARN MORE
+                  HOW TO PLAY
                 </button>
-              </div>
-
-              <div className="mt-4 text-[11px] text-white/60">
-                Core line: <span className="font-black text-white/85">“How long can you last?”</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ======= DARK CONTENT AREA (LIKE SCREENSHOT) ======= */}
+      {/* ======= DARK CONTENT AREA ======= */}
       <section className="bg-[#171A22]">
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
           {/* HOW IT WORKS */}
@@ -508,9 +434,8 @@ export default function AflHubPage() {
             </div>
           </div>
 
-          {/* FEATURED MATCHES + LIVE LEADERBOARD (3 columns like screenshot) */}
+          {/* FEATURED MATCHES + LIVE LEADERBOARD */}
           <div className="grid lg:grid-cols-3 gap-6">
-            {/* Featured matches (2 cards) */}
             <div className="lg:col-span-2">
               <div className="text-[12px] font-black text-white/75 mb-4">FEATURED MATCHES</div>
 
@@ -577,14 +502,17 @@ export default function AflHubPage() {
               )}
             </div>
 
-            {/* Live leaderboard (placeholder card + link) */}
             <div>
               <div className="text-[12px] font-black text-white/75 mb-4">LIVE LEADERBOARD</div>
 
               <div className="rounded-2xl border p-5" style={darkCardStyle}>
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div className="text-sm font-black text-white/90">Top Torpies</div>
-                  <Link href="/leaderboards" className="text-[11px] font-black hover:underline underline-offset-2" style={{ color: COLORS.red }}>
+                  <Link
+                    href="/leaderboards"
+                    className="text-[11px] font-black hover:underline underline-offset-2"
+                    style={{ color: COLORS.red }}
+                  >
                     VIEW ALL
                   </Link>
                 </div>
@@ -603,9 +531,17 @@ export default function AflHubPage() {
                     <span className="font-black text-white/90">Streak 9</span>
                   </div>
 
-                  <div className="mt-4 rounded-xl border px-4 py-3" style={{ borderColor: rgbaFromHex(COLORS.red, 0.25), background: rgbaFromHex(COLORS.red, 0.08) }}>
+                  <div
+                    className="mt-4 rounded-xl border px-4 py-3"
+                    style={{
+                      borderColor: rgbaFromHex(COLORS.red, 0.25),
+                      background: rgbaFromHex(COLORS.red, 0.08),
+                    }}
+                  >
                     <div className="text-[12px] font-black text-white/90 mb-1">Locker Rooms</div>
-                    <div className="text-[12px] text-white/65">Private comps with your mates. Ladder = current streak only.</div>
+                    <div className="text-[12px] text-white/65">
+                      Private comps with your mates. Ladder = current streak only.
+                    </div>
                   </div>
 
                   <Link
@@ -624,7 +560,7 @@ export default function AflHubPage() {
             </div>
           </div>
 
-          {/* NEXT 6 AVAILABLE PICKS (KEEP YOUR FAST JUMP UX) */}
+          {/* NEXT PICKS */}
           <div className="mt-10">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
@@ -643,7 +579,13 @@ export default function AflHubPage() {
             </div>
 
             {error ? (
-              <div className="rounded-2xl border px-5 py-4 mb-4" style={{ borderColor: rgbaFromHex(COLORS.red, 0.3), background: rgbaFromHex(COLORS.red, 0.1) }}>
+              <div
+                className="rounded-2xl border px-5 py-4 mb-4"
+                style={{
+                  borderColor: rgbaFromHex(COLORS.red, 0.3),
+                  background: rgbaFromHex(COLORS.red, 0.1),
+                }}
+              >
                 <p className="text-sm" style={{ color: "rgba(255,255,255,0.92)" }}>
                   {error}
                 </p>
@@ -696,7 +638,10 @@ export default function AflHubPage() {
                                       animation: "torpiePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
                                     }}
                                   />
-                                  <span className="relative inline-flex h-2 w-2 rounded-full" style={{ background: rgbaFromHex(COLORS.red, 0.95) }} />
+                                  <span
+                                    className="relative inline-flex h-2 w-2 rounded-full"
+                                    style={{ background: rgbaFromHex(COLORS.red, 0.95) }}
+                                  />
                                 </span>
                                 Q{q.quarter}
                               </span>
