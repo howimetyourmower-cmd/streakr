@@ -8,28 +8,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
 
-type QuestionStatus = "open" | "final" | "pending" | "void";
-
 type ApiQuestion = {
   id: string;
   gameId?: string;
   quarter: number;
   question: string;
-  status: QuestionStatus;
-
+  status: "open" | "final" | "pending" | "void";
   userPick?: "yes" | "no";
-  yesPercent?: number;
-  noPercent?: number;
-  commentCount?: number;
-
-  isSponsorQuestion?: boolean;
-  sponsorName?: string;
-  sponsorPrize?: string;
-  sponsorExcludeFromStreak?: boolean;
-
-  venue?: string;
-  startTime?: string;
-  correctPick?: boolean;
 };
 
 type ApiGame = {
@@ -47,13 +32,7 @@ type PicksApiResponse = {
 
 const COLORS = {
   bg: "#000000",
-  panel: "rgba(255,255,255,0.035)",
-  panel2: "rgba(255,255,255,0.02)",
-  stroke: "rgba(255,255,255,0.10)",
-  textDim: "rgba(255,255,255,0.70)",
-  textFaint: "rgba(255,255,255,0.50)",
   red: "#FF2E4D",
-  redSoft: "rgba(255,46,77,0.18)",
   white: "rgba(255,255,255,0.98)",
 };
 
@@ -80,7 +59,6 @@ function msToCountdown(ms: number): string {
   const h = Math.floor((total % 86400) / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-
   const pad = (x: number) => String(x).padStart(2, "0");
   if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
@@ -119,7 +97,6 @@ type TeamSlug =
 function teamNameToSlug(nameRaw: string): TeamSlug | null {
   const n = (nameRaw || "").toLowerCase().trim();
 
-  // normalize common variants
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
@@ -150,17 +127,14 @@ function splitMatch(match: string): { home: string; away: string } | null {
 }
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
-  // Most are .jpg, Sydney is .jpeg in your repo
-  return [`/aflteams/${teamSlug}-logo.jpg`, `/aflteams/${teamSlug}-logo.jpeg`, `/aflteams/${teamSlug}-logo.png`];
+  return [
+    `/aflteams/${teamSlug}-logo.png`,
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+  ];
 }
 
-function TeamLogo({
-  teamName,
-  size = 44,
-}: {
-  teamName: string;
-  size?: number;
-}) {
+function TeamLogo({ teamName, size = 46 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
 
@@ -198,21 +172,21 @@ function TeamLogo({
         width: size,
         height: size,
         borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
+        background: "rgba(255,255,255,0.06)",
       }}
       title={teamName}
     >
-      <Image
-        src={src}
-        alt={`${teamName} logo`}
-        fill
-        sizes={`${size}px`}
-        style={{ objectFit: "cover" }}
-        onError={() => {
-          // advance candidate once; prevents “pulsing” retries
-          setIdx((p) => (p + 1 >= candidates.length ? p : p + 1));
-        }}
-      />
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }} // ✅ no crop
+          onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
+          priority={false}
+        />
+      </div>
     </div>
   );
 }
@@ -267,17 +241,17 @@ export default function PicksPage() {
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   const featured = useMemo(() => {
-    const sorted = [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-    return sorted.slice(0, 3); // exactly 3 featured matches
+    const sorted = [...games].sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+    );
+    return sorted.slice(0, 3);
   }, [games]);
 
   const MatchCard = ({ g }: { g: ApiGame }) => {
     const lockMs = new Date(g.startTime).getTime() - nowMs;
-
     const m = splitMatch(g.match);
     const homeName = m?.home ?? g.match;
     const awayName = m?.away ?? "";
-
     const matchSlug = slugify(g.match);
 
     return (
@@ -292,7 +266,6 @@ export default function PicksPage() {
         }}
         title="Open match"
       >
-        {/* TOP (no Next/Image background = no missing-image pulsing) */}
         <div
           className="p-5"
           style={{
@@ -338,7 +311,6 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* WHITE BOTTOM */}
         <div
           className="px-5 py-4"
           style={{
@@ -379,11 +351,14 @@ export default function PicksPage() {
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-16">
-        {/* Header (AFL.png object top) */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <div className="relative w-[52px] h-[52px] rounded-2xl overflow-hidden border"
-              style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
+            <div
+              className="relative w-[52px] h-[52px] rounded-2xl overflow-hidden border"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+              }}
             >
               <Image src="/AFL.png" alt="AFL" fill sizes="52px" style={{ objectFit: "contain" }} />
             </div>
@@ -405,13 +380,11 @@ export default function PicksPage() {
                 ) : null}
               </div>
 
-              <p className="mt-1 text-sm" style={{ color: COLORS.textDim }}>
+              <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.70)" }}>
                 Tap a match → focus mode → lock in. No distractions.
               </p>
             </div>
           </div>
-
-          {/* removed pills (Play / How it works) */}
         </div>
 
         {err ? (
@@ -421,13 +394,9 @@ export default function PicksPage() {
         ) : null}
 
         <div className="mt-6">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <div className="text-[12px] uppercase tracking-widest text-white/55">Next Featured Matches</div>
-              <div className="mt-1 text-[14px] text-white/75">
-                Pick any amount — questions live inside the match page.
-              </div>
-            </div>
+          <div className="text-[12px] uppercase tracking-widest text-white/55">Next Featured Matches</div>
+          <div className="mt-1 text-[14px] text-white/75">
+            Pick any amount — questions live inside the match page.
           </div>
 
           {loading ? (
@@ -465,7 +434,7 @@ export default function PicksPage() {
           )}
         </div>
 
-        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: COLORS.textFaint }}>
+        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.50)" }}>
           <span className="font-black" style={{ color: COLORS.red }}>
             Torpie
           </span>{" "}
