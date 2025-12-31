@@ -33,9 +33,11 @@ const FIRE_RED = "#CE2029";
 function splitMatch(match: string) {
   const raw = (match || "").trim();
   const parts = raw.split(/\s+vs\s+/i);
-  if (parts.length >= 2) return { home: parts[0].trim(), away: parts.slice(1).join(" vs ").trim() };
+  if (parts.length >= 2)
+    return { home: parts[0].trim(), away: parts.slice(1).join(" vs ").trim() };
   const dash = raw.split(/\s*-\s*/);
-  if (dash.length >= 2) return { home: dash[0].trim(), away: dash.slice(1).join(" - ").trim() };
+  if (dash.length >= 2)
+    return { home: dash[0].trim(), away: dash.slice(1).join(" - ").trim() };
   return { home: raw || "Home", away: "Away" };
 }
 
@@ -55,6 +57,17 @@ function formatStart(iso: string) {
     timeZone: "Australia/Melbourne",
   });
   return { line: `${date} • ${time} AEDT` };
+}
+
+function teamLogoSrc(teamName: string) {
+  const slug = (teamName || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!slug) return "/teams/unknown.png";
+  return `/teams/${slug}.png`;
 }
 
 export default function HomePage() {
@@ -88,12 +101,12 @@ export default function HomePage() {
     load();
   }, []);
 
-  const featured = useMemo(() => (games || []).slice(0, 3), [games]);
+  const featured = useMemo(() => (games || []).slice(0, 4), [games]);
 
   return (
     <main className="min-h-screen bg-[#F3F4F7] text-black">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
-        {/* White page + dark contained hub card (like your reference) */}
+        {/* White page + dark contained hub card */}
         <div className="rounded-2xl overflow-hidden border border-black/10 bg-[#0B0D14] text-white shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
           {/* TOP MINI BAR (white) */}
           <div className="bg-white border-b border-black/10">
@@ -141,7 +154,7 @@ export default function HomePage() {
 
           {/* HERO BANNER */}
           <section className="relative">
-            <div className="relative h-[220px] sm:h-[260px] w-full">
+            <div className="relative h-[230px] sm:h-[280px] w-full">
               <Image
                 src="/afl1.png"
                 alt="Torpie AFL hero"
@@ -150,51 +163,54 @@ export default function HomePage() {
                 className="object-cover"
               />
               <div className="absolute inset-0 bg-black/45" />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/75 via-black/25 to-transparent" />
 
-              <div className="absolute left-6 top-1/2 -translate-y-1/2">
-                <div className="text-[11px] font-extrabold tracking-wide text-white/70 mb-2">
-                  TORPIE • {roundNumber ? `ROUND ${roundNumber}` : "AFL"}
-                </div>
+              <div className="absolute left-6 right-6 top-1/2 -translate-y-1/2">
+                <div className="flex flex-col gap-3 sm:max-w-[680px]">
+                  <div className="text-[11px] font-extrabold tracking-wide text-white/70">
+                    TORPIE • {roundNumber ? `ROUND ${roundNumber}` : "AFL"}
+                  </div>
 
-                <div className="text-3xl sm:text-4xl font-extrabold leading-[1] tracking-tight">
-                  PREDICT.
-                  <br />
-                  PLAY. <span style={{ color: FIRE_RED }}>WIN.</span>
-                </div>
+                  <div className="text-3xl sm:text-4xl font-extrabold leading-[1] tracking-tight">
+                    PREDICT.
+                    <br />
+                    PLAY. <span style={{ color: FIRE_RED }}>WIN.</span>
+                  </div>
 
-                <div className="mt-3 text-sm text-white/70 max-w-[520px]">
-                  Live AFL yes/no picks tied to each match. Pick as many as you want.
-                  One wrong call in a game and your streak is cooked.
-                </div>
+                  <div className="text-sm text-white/70">
+                    Live AFL yes/no picks tied to each match. Pick as many as you want.
+                    One wrong call in a game and your streak is cooked.
+                  </div>
 
-                <div className="mt-5 flex items-center gap-3">
-                  <Link
-                    href={playHref}
-                    onClick={(e) => {
-                      if (!user) e.preventDefault();
-                    }}
-                    className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold"
-                    style={{ background: FIRE_RED }}
-                  >
-                    PLAY NOW
-                  </Link>
-
-                  <Link
-                    href="#how-it-works"
-                    className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold bg-white/10 hover:bg-white/15 border border-white/15"
-                  >
-                    HOW TO PLAY
-                  </Link>
-
-                  {!user ? (
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
                     <Link
-                      href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
-                      className="text-xs text-white/70 hover:text-white underline underline-offset-2"
+                      href={user ? playHref : `/auth?mode=login&returnTo=${encodedReturnTo}`}
+                      className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold"
+                      style={{ background: FIRE_RED }}
                     >
-                      Login required to play
+                      PLAY NOW
                     </Link>
-                  ) : null}
+
+                    <Link
+                      href="#how-it-works"
+                      className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold bg-white/10 hover:bg-white/15 border border-white/15"
+                    >
+                      HOW TO PLAY
+                    </Link>
+
+                    {user ? (
+                      <Link
+                        href={picksHref}
+                        className="inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-extrabold bg-black/30 hover:bg-black/40 border border-white/10"
+                      >
+                        MY PICKS
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-white/70">
+                        Login required to play
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -227,109 +243,196 @@ export default function HomePage() {
               </div>
 
               <div className="rounded-md border border-white/10 bg-white/5 p-4">
-                <div className="text-sm font-extrabold">3. WIN PRIZES</div>
+                <div className="text-sm font-extrabold">3. KEEP YOUR STREAK</div>
                 <div className="text-xs text-white/70 mt-1">
                   Clean sweep per match to keep your streak alive. Any wrong = cooked.
+                  Voids don’t count.
                 </div>
               </div>
             </div>
           </section>
 
-          {/* FEATURED MATCHES + LIVE LEADERBOARD */}
+          {/* UPCOMING + FEATURED + CTA */}
           <section className="px-6 py-6">
             <div className="grid lg:grid-cols-3 gap-4">
               {/* FEATURED MATCHES */}
               <div className="lg:col-span-2">
-                <div className="text-xs font-extrabold tracking-wide text-white/60 mb-3">
-                  FEATURED MATCHES
+                <div className="flex items-end justify-between mb-3">
+                  <div className="text-xs font-extrabold tracking-wide text-white/60">
+                    FEATURED MATCHES
+                  </div>
+
+                  <Link
+                    href={user ? playHref : `/auth?mode=login&returnTo=${encodedReturnTo}`}
+                    className="text-[11px] font-extrabold text-white/70 hover:text-white underline underline-offset-2"
+                  >
+                    View all → 
+                  </Link>
                 </div>
 
                 <div className="grid md:grid-cols-2 gap-4">
-                  {(loading ? [null, null] : featured.length ? featured.slice(0, 2) : [null, null]).map(
-                    (g, idx) => {
-                      if (!g) {
-                        return (
-                          <div
-                            key={`sk-${idx}`}
-                            className="rounded-md border border-white/10 bg-white/5 overflow-hidden"
-                          >
-                            <div className="h-[110px] bg-white/5" />
-                            <div className="p-4">
-                              <div className="h-3 w-2/3 bg-white/10 rounded mb-2" />
-                              <div className="h-3 w-1/2 bg-white/10 rounded mb-4" />
-                              <div className="h-8 w-24 bg-white/10 rounded" />
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      const teams = splitMatch(g.match);
-                      const { line } = formatStart(g.startTime);
-                      const qCount = (g.questions || []).length || 12;
-
+                  {(loading
+                    ? [null, null, null, null]
+                    : featured.length
+                      ? featured.slice(0, 4)
+                      : [null, null, null, null]
+                  ).map((g, idx) => {
+                    if (!g) {
                       return (
                         <div
-                          key={g.id}
+                          key={`sk-${idx}`}
                           className="rounded-md border border-white/10 bg-white/5 overflow-hidden"
                         >
-                          <div className="relative h-[120px]">
-                            <Image
-                              src="/afl1.png"
-                              alt={g.match}
-                              fill
-                              className="object-cover opacity-90"
-                            />
-                            <div className="absolute inset-0 bg-black/55" />
-                            <div className="absolute left-4 bottom-3 right-4">
-                              <div className="text-[11px] text-white/75 font-semibold">
-                                {line}
-                              </div>
-                              <div className="text-sm font-extrabold">
-                                {teams.home} <span className="text-white/50">vs</span>{" "}
-                                {teams.away}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* ✅ “bottom section white” (the part under image) */}
+                          <div className="h-[120px] bg-white/5" />
                           <div className="p-4 bg-white text-black">
-                            <div className="text-xs font-extrabold text-black/80">
-                              {g.venue}
-                            </div>
-                            <div className="text-xs text-black/60 mt-1">
-                              {qCount} questions (pick any amount)
-                            </div>
-
-                            <div className="mt-3">
-                              <Link
-                                href={playHref}
-                                onClick={(e) => {
-                                  if (!user) e.preventDefault();
-                                }}
-                                className="inline-flex items-center justify-center rounded-md px-4 py-2 text-xs font-extrabold text-white"
-                                style={{ background: FIRE_RED }}
-                              >
-                                PLAY NOW
-                              </Link>
-                            </div>
+                            <div className="h-3 w-2/3 bg-black/10 rounded mb-2" />
+                            <div className="h-3 w-1/2 bg-black/10 rounded mb-4" />
+                            <div className="h-8 w-24 bg-black/10 rounded" />
                           </div>
                         </div>
                       );
                     }
-                  )}
+
+                    const teams = splitMatch(g.match);
+                    const { line } = formatStart(g.startTime);
+                    const qCount = (g.questions || []).length || 12;
+
+                    return (
+                      <div
+                        key={g.id}
+                        className="rounded-md border border-white/10 bg-white/5 overflow-hidden"
+                      >
+                        <div className="relative h-[120px]">
+                          <Image
+                            src="/afl1.png"
+                            alt={g.match}
+                            fill
+                            className="object-cover opacity-90"
+                          />
+                          <div className="absolute inset-0 bg-black/60" />
+                          <div className="absolute left-4 right-4 top-4">
+                            <div className="text-[11px] text-white/75 font-semibold">
+                              {line}
+                            </div>
+                          </div>
+
+                          <div className="absolute left-4 right-4 bottom-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
+                                  <Image
+                                    src={teamLogoSrc(teams.home)}
+                                    alt={teams.home}
+                                    fill
+                                    className="object-contain p-1"
+                                  />
+                                </div>
+
+                                <div className="text-sm font-extrabold">
+                                  {teams.home}{" "}
+                                  <span className="text-white/50">vs</span>{" "}
+                                  {teams.away}
+                                </div>
+
+                                <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
+                                  <Image
+                                    src={teamLogoSrc(teams.away)}
+                                    alt={teams.away}
+                                    fill
+                                    className="object-contain p-1"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* bottom section white */}
+                        <div className="p-4 bg-white text-black">
+                          <div className="text-xs font-extrabold text-black/80">
+                            {g.venue}
+                          </div>
+                          <div className="text-xs text-black/60 mt-1">
+                            {qCount} questions (pick any amount)
+                          </div>
+
+                          <div className="mt-3 flex items-center gap-2">
+                            <Link
+                              href={user ? playHref : `/auth?mode=login&returnTo=${encodedReturnTo}`}
+                              className="inline-flex items-center justify-center rounded-md px-4 py-2 text-xs font-extrabold text-white"
+                              style={{ background: FIRE_RED }}
+                            >
+                              PLAY NOW
+                            </Link>
+
+                            {user ? (
+                              <Link
+                                href={picksHref}
+                                className="inline-flex items-center justify-center rounded-md px-4 py-2 text-xs font-extrabold bg-black/5 text-black hover:bg-black/10 border border-black/10"
+                              >
+                                MY PICKS
+                              </Link>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* LIVE LEADERBOARD (placeholder for now) */}
-              <div>
-                <div className="text-xs font-extrabold tracking-wide text-white/60 mb-3">
-                  LIVE LEADERBOARD
+              {/* RIGHT COLUMN */}
+              <div className="space-y-4">
+                {/* QUICK RULES */}
+                <div className="rounded-md border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs font-extrabold tracking-wide text-white/60 mb-2">
+                    QUICK RULES
+                  </div>
+
+                  <ul className="space-y-2 text-xs text-white/75">
+                    <li className="flex gap-2">
+                      <span className="mt-[2px] h-1.5 w-1.5 rounded-full" style={{ background: FIRE_RED }} />
+                      <span>
+                        Pick any number of questions per match (0 to all).
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-[2px] h-1.5 w-1.5 rounded-full" style={{ background: FIRE_RED }} />
+                      <span>
+                        Any wrong pick in a match resets your streak to <span className="font-extrabold">0</span>.
+                      </span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-[2px] h-1.5 w-1.5 rounded-full" style={{ background: FIRE_RED }} />
+                      <span>
+                        Voids don’t hurt. Skips don’t hurt. Bounce locks picks.
+                      </span>
+                    </li>
+                  </ul>
+
+                  <div className="mt-4">
+                    <div className="text-lg font-extrabold leading-tight">
+                      “How long can you last?”
+                    </div>
+                  </div>
                 </div>
 
+                {/* LIVE LEADERBOARD (placeholder) */}
                 <div className="rounded-md border border-white/10 bg-white/5 p-4">
-                  <div className="text-sm font-extrabold mb-2">Top streaks</div>
-                  <div className="text-xs text-white/70">
-                    (Placeholder panel — we’ll wire to your leaderboard data next.)
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-extrabold tracking-wide text-white/60">
+                      LIVE LEADERBOARD
+                    </div>
+                    <Link
+                      href="/leaderboards"
+                      className="text-[11px] font-extrabold text-white/70 hover:text-white underline underline-offset-2"
+                    >
+                      View →
+                    </Link>
+                  </div>
+
+                  <div className="mt-3 text-xs text-white/70">
+                    (Placeholder panel — wire to your leaderboard data next.)
                   </div>
 
                   <div className="mt-4 space-y-2">
@@ -347,14 +450,15 @@ export default function HomePage() {
                       </div>
                     ))}
                   </div>
+                </div>
 
-                  <div className="mt-4">
-                    <Link
-                      href="/leaderboards"
-                      className="text-xs font-extrabold underline underline-offset-2 text-white/80 hover:text-white"
-                    >
-                      View full leaderboard →
-                    </Link>
+                {/* SPONSOR (placeholder) */}
+                <div className="rounded-md border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs font-extrabold tracking-wide text-white/60 mb-2">
+                    SPONSOR
+                  </div>
+                  <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3 text-xs text-white/70">
+                    Your sponsor banner goes here.
                   </div>
                 </div>
               </div>
