@@ -6,7 +6,6 @@ export const dynamic = "force-dynamic";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import Confetti from "react-confetti";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
@@ -34,6 +33,10 @@ type ApiQuestion = {
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
+
+  // Optional (previously implemented in your build). Safe optional fields:
+  isSponsorQuestion?: boolean;
+  sponsorLabel?: string;
 };
 
 type ApiGame = {
@@ -118,8 +121,9 @@ function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefine
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `torpie:picks:v10:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
-function safeLockedKey(uid: string | null, roundNumber: number | null) {
-  return `torpie:lockedPicks:v2:${uid || "anon"}:${roundNumber ?? "na"}`;
+
+function safeSponsorRevealKey(uid: string | null, roundNumber: number | null) {
+  return `torpie:sponsorReveal:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
 function splitMatch(match: string): { home: string; away: string } | null {
@@ -182,6 +186,10 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
+/**
+ * Team logos must be stable, size-consistent, and NEVER driven by text length.
+ * This uses fixed containers and object-contain.
+ */
 const TeamLogo = React.memo(function TeamLogoInner({
   teamName,
   size = 50,
@@ -275,6 +283,10 @@ function playerCandidates(playerSlug: string): string[] {
   ];
 }
 
+/**
+ * IMPORTANT: no “fallback circles” for missing player images.
+ * If the headshot is missing, this component returns null (no placeholder).
+ */
 const PlayerHeadshot = React.memo(function PlayerHeadshotInner({
   playerName,
   size = 46,
@@ -288,30 +300,7 @@ const PlayerHeadshot = React.memo(function PlayerHeadshotInner({
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
-  const initials = playerName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0]?.toUpperCase())
-    .join("");
-
-  if (dead) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl border font-black shrink-0"
-        style={{
-          width: size,
-          height: size,
-          borderColor: "rgba(0,0,0,0.10)",
-          background: "rgba(0,0,0,0.04)",
-          color: "rgba(0,0,0,0.35)",
-        }}
-        title={playerName}
-      >
-        {initials}
-      </div>
-    );
-  }
+  if (dead) return null;
 
   const src = candidates[Math.min(idx, candidates.length - 1)];
 
@@ -335,7 +324,7 @@ const PlayerHeadshot = React.memo(function PlayerHeadshotInner({
         onError={() => {
           setIdx((p) => {
             if (p + 1 < candidates.length) return p + 1;
-            setDead(true); // ✅ stop re-trying every second
+            setDead(true);
             return p;
           });
         }}
@@ -344,8 +333,39 @@ const PlayerHeadshot = React.memo(function PlayerHeadshotInner({
   );
 });
 
+function normalizeSubject(text: string): string {
+  const raw = (text || "").trim().replace(/\?+$/, "");
+  const lower = raw.toLowerCase();
+
+  // common “Will …” format: extract body after "Will "
+  let s = lower.startsWith("will ") ? raw.slice(5).trim() : raw;
+
+  // tighten some common AFL phrasing
+  s = s
+    .replace(/\bor more\b/g, "+")
+    .replace(/\b5\s*\+\s*or\s*more\b/g, "5+")
+    .replace(/\b(\d+)\s*or\s*more\b/g, "$1+")
+    .replace(/\bfirst quarter\b/g, "Q1")
+    .replace(/\b1st quarter\b/g, "Q1")
+    .replace(/\bsecond quarter\b/g, "Q2")
+    .replace(/\b2nd quarter\b/g, "Q2")
+    .replace(/\bthird quarter\b/g, "Q3")
+    .replace(/\b3rd quarter\b/g, "Q3")
+    .replace(/\bfourth quarter\b/g, "Q4")
+    .replace(/\b4th quarter\b/g, "Q4")
+    .replace(/\bfull time\b/g, "FT")
+    .replace(/\bby full time\b/g, "FT");
+
+  // keep it tidy
+  s = s.replace(/\s+/g, " ").trim();
+
+  // capitalize small “Qx / FT” bits without turning it into title case
+  // (leave as-is mostly; UI is bold anyway)
+  return s.length > 0 ? s : raw;
+}
+
 type LocalPickMap = Record<string, LocalPick>;
-type LockedGamesMap = Record<string, boolean>;
+type SponsorRevealMap = Record<string, boolean>;
 
 export default function PicksMatchSlugPage() {
   const { user } = useAuth();
@@ -363,8 +383,9 @@ export default function PicksMatchSlugPage() {
   const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
   const hasHydratedLocalRef = useRef(false);
 
-  const [lockedGames, setLockedGames] = useState<LockedGamesMap>({});
-  const hasHydratedLockedRef = useRef(false);
+  // Sponsor reveal state (tap-to-reveal cover)
+  const [sponsorRevealed, setSponsorRevealed] = useState<SponsorRevealMap>({});
+  const hasHydratedSponsorRef = useRef(false);
 
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
 
@@ -378,8 +399,6 @@ export default function PicksMatchSlugPage() {
   const [commentErr, setCommentErr] = useState("");
   const [commentPosting, setCommentPosting] = useState(false);
   const commentsUnsubRef = useRef<null | (() => void)>(null);
-
-  const [confettiOn] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -446,30 +465,30 @@ export default function PicksMatchSlugPage() {
     } catch {}
   }, [localPicks, user?.uid, roundNumber]);
 
-  // hydrate locked games
+  // hydrate sponsor reveal map
   useEffect(() => {
-    if (hasHydratedLockedRef.current) return;
+    if (hasHydratedSponsorRef.current) return;
     if (roundNumber === null) return;
     try {
-      const key = safeLockedKey(user?.uid ?? null, roundNumber);
+      const key = safeSponsorRevealKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
       if (raw) {
-        const parsed = JSON.parse(raw) as LockedGamesMap;
-        if (parsed && typeof parsed === "object") setLockedGames(parsed);
+        const parsed = JSON.parse(raw) as SponsorRevealMap;
+        if (parsed && typeof parsed === "object") setSponsorRevealed(parsed);
       }
     } catch {
     } finally {
-      hasHydratedLockedRef.current = true;
+      hasHydratedSponsorRef.current = true;
     }
   }, [user?.uid, roundNumber]);
 
   useEffect(() => {
     if (roundNumber === null) return;
     try {
-      const key = safeLockedKey(user?.uid ?? null, roundNumber);
-      localStorage.setItem(key, JSON.stringify(lockedGames));
+      const key = safeSponsorRevealKey(user?.uid ?? null, roundNumber);
+      localStorage.setItem(key, JSON.stringify(sponsorRevealed));
     } catch {}
-  }, [lockedGames, user?.uid, roundNumber]);
+  }, [sponsorRevealed, user?.uid, roundNumber]);
 
   const filteredQuestions = useMemo(() => {
     if (!activeGame) return [];
@@ -477,43 +496,56 @@ export default function PicksMatchSlugPage() {
     return activeGame.questions.filter((q) => q.status === filterTab);
   }, [activeGame, filterTab]);
 
+  function isGameLocked(game: ApiGame): boolean {
+    const lockMs = new Date(game.startTime).getTime() - nowMs;
+    return lockMs <= 0;
+  }
+
   function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
+    // Question resolution states are always locked.
     if (q.status === "final") return true;
     if (q.status === "void") return true;
     if (q.status === "pending") return true;
+
+    // Otherwise: lock at bounce (match start)
     if (gameLocked) return true;
     return false;
   }
 
-  const clearPick = useCallback(async (q: ApiQuestion) => {
-    setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
-    if (!user) return;
+  const clearPick = useCallback(
+    async (q: ApiQuestion, locked: boolean) => {
+      if (locked) return;
 
-    try {
-      const token = await user.getIdToken();
-      const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (delRes.ok) return;
+      setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
+      if (!user) return;
 
-      await fetch("/api/user-picks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ action: "clear", questionId: q.id }),
-      });
-    } catch (e) {
-      console.error("Clear pick error", e);
-    }
-  }, [user]);
+      try {
+        const token = await user.getIdToken();
+        const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (delRes.ok) return;
+
+        await fetch("/api/user-picks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ action: "clear", questionId: q.id }),
+        });
+      } catch (e) {
+        console.error("Clear pick error", e);
+      }
+    },
+    [user]
+  );
 
   const togglePick = useCallback(
     async (q: ApiQuestion, outcome: PickOutcome, locked: boolean) => {
       if (locked) return;
-      const current = effectivePick(localPicks[q.id], q.userPick);
 
+      const current = effectivePick(localPicks[q.id], q.userPick);
       if (current === outcome) {
-        await clearPick(q);
+        await clearPick(q, locked);
         return;
       }
 
@@ -558,7 +590,9 @@ export default function PicksMatchSlugPage() {
     setCommentsLoading(false);
     setCommentPosting(false);
     if (commentsUnsubRef.current) {
-      try { commentsUnsubRef.current(); } catch {}
+      try {
+        commentsUnsubRef.current();
+      } catch {}
       commentsUnsubRef.current = null;
     }
   }, []);
@@ -570,7 +604,9 @@ export default function PicksMatchSlugPage() {
     setCommentErr("");
 
     if (commentsUnsubRef.current) {
-      try { commentsUnsubRef.current(); } catch {}
+      try {
+        commentsUnsubRef.current();
+      } catch {}
       commentsUnsubRef.current = null;
     }
 
@@ -608,7 +644,9 @@ export default function PicksMatchSlugPage() {
 
     return () => {
       if (commentsUnsubRef.current) {
-        try { commentsUnsubRef.current(); } catch {}
+        try {
+          commentsUnsubRef.current();
+        } catch {}
         commentsUnsubRef.current = null;
       }
     };
@@ -621,9 +659,18 @@ export default function PicksMatchSlugPage() {
     if (!q) return;
 
     const txt = commentText.trim();
-    if (!txt) { setCommentErr("Write something first."); return; }
-    if (!user) { setCommentErr("Log in to comment."); return; }
-    if (txt.length > 240) { setCommentErr("Keep it under 240 characters."); return; }
+    if (!txt) {
+      setCommentErr("Write something first.");
+      return;
+    }
+    if (!user) {
+      setCommentErr("Log in to comment.");
+      return;
+    }
+    if (txt.length > 240) {
+      setCommentErr("Keep it under 240 characters.");
+      return;
+    }
 
     setCommentPosting(true);
     try {
@@ -661,7 +708,14 @@ export default function PicksMatchSlugPage() {
           </span>
           <span
             className="font-black"
-            style={{ color: yes === no ? "rgba(0,0,0,0.55)" : yes > no ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)" }}
+            style={{
+              color:
+                yes === no
+                  ? "rgba(0,0,0,0.55)"
+                  : yes > no
+                    ? "rgba(25,195,125,0.95)"
+                    : "rgba(255,46,77,0.95)",
+            }}
           >
             {yes === no ? "Split crowd" : yes > no ? "Majority YES" : "Majority NO"}
           </span>
@@ -694,19 +748,29 @@ export default function PicksMatchSlugPage() {
 
         <div className="mt-1 flex items-center justify-between text-[10px]" style={{ color: "rgba(0,0,0,0.60)" }}>
           <span>
-            YES <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>{Math.round(yes)}%</span>
+            YES{" "}
+            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
+              {Math.round(yes)}%
+            </span>
           </span>
 
           {aligned === null ? (
             <span style={{ color: "rgba(0,0,0,0.35)" }}>Pick to compare</span>
           ) : aligned ? (
-            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-black">With crowd</span>
+            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-black">
+              With crowd
+            </span>
           ) : (
-            <span style={{ color: COLORS.red }} className="font-black">Against crowd</span>
+            <span style={{ color: COLORS.red }} className="font-black">
+              Against crowd
+            </span>
           )}
 
           <span>
-            NO <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>{Math.round(no)}%</span>
+            NO{" "}
+            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
+              {Math.round(no)}%
+            </span>
           </span>
         </div>
       </div>
@@ -770,16 +834,29 @@ export default function PicksMatchSlugPage() {
   const VisualHeader = ({ g, q }: { g: ApiGame; q: ApiQuestion }) => {
     const playerName = extractPlayerName(q.question);
 
-    if (playerName) {
+    // Non-player questions: show BOTH team logos + bold subject headline
+    if (!playerName) {
+      const m = splitMatch(g.match);
+      const home = m?.home ?? g.match;
+      const away = m?.away ?? "AFL";
+      const subject = normalizeSubject(q.question);
+
       return (
         <div className="flex items-center gap-3">
-          <PlayerHeadshot playerName={playerName} size={46} />
+          <div className="flex items-center gap-2 shrink-0">
+            <TeamLogo teamName={home} size={46} />
+            <div className="w-8 text-center text-[12px] font-black" style={{ color: "rgba(0,0,0,0.45)" }}>
+              VS
+            </div>
+            <TeamLogo teamName={away} size={46} />
+          </div>
+
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.45)" }}>
+            <div className="text-[12px] uppercase tracking-widest truncate" style={{ color: "rgba(0,0,0,0.45)" }}>
               {g.match}
             </div>
             <div className="mt-1 text-[14px] font-black truncate" style={{ color: "rgba(0,0,0,0.92)" }}>
-              {playerName}
+              {subject}
             </div>
             <div className="mt-0.5 text-[11px] truncate" style={{ color: "rgba(0,0,0,0.55)" }}>
               {g.venue} • {formatAedt(g.startTime)}
@@ -789,21 +866,16 @@ export default function PicksMatchSlugPage() {
       );
     }
 
-    const m = splitMatch(g.match);
-    const home = m?.home ?? g.match;
-    const away = m?.away ?? "AFL";
-
+    // Player questions: show player image (no placeholder if missing) + bold player name
     return (
       <div className="flex items-center gap-3">
-        <TeamLogo teamName={home} size={46} />
-        <div className="text-[12px] font-black" style={{ color: "rgba(0,0,0,0.45)" }}>
-          vs
-        </div>
-        <TeamLogo teamName={away} size={46} />
-
+        <PlayerHeadshot playerName={playerName} size={46} />
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.45)" }}>
+          <div className="text-[12px] uppercase tracking-widest truncate" style={{ color: "rgba(0,0,0,0.45)" }}>
             {g.match}
+          </div>
+          <div className="mt-1 text-[14px] font-black truncate" style={{ color: "rgba(0,0,0,0.92)" }}>
+            {playerName}
           </div>
           <div className="mt-0.5 text-[11px] truncate" style={{ color: "rgba(0,0,0,0.55)" }}>
             {g.venue} • {formatAedt(g.startTime)}
@@ -813,12 +885,60 @@ export default function PicksMatchSlugPage() {
     );
   };
 
-  const WhitePickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
+  const SponsorRevealCover = ({
+    q,
+    onReveal,
+  }: {
+    q: ApiQuestion;
+    onReveal: () => void;
+  }) => {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onReveal();
+        }}
+        className="absolute inset-0 z-20 flex items-center justify-center px-6 text-center"
+        style={{
+          background: "linear-gradient(180deg, rgba(0,0,0,0.72), rgba(0,0,0,0.88))",
+        }}
+        aria-label="Reveal sponsor question"
+        title="Tap to reveal"
+      >
+        <div className="max-w-[320px]">
+          <div
+            className="inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-widest"
+            style={{
+              borderColor: "rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.90)",
+            }}
+          >
+            SPONSOR
+          </div>
+          <div className="mt-3 text-[16px] font-black" style={{ color: "rgba(255,255,255,0.96)" }}>
+            Tap to reveal
+          </div>
+          <div className="mt-2 text-[12px]" style={{ color: "rgba(255,255,255,0.70)" }}>
+            {q.sponsorLabel ? q.sponsorLabel : "Sponsored question"}
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const WhitePickCard = ({ g, q }: { g: ApiGame; q: ApiQuestion }) => {
     const lockMs = new Date(g.startTime).getTime() - nowMs;
+    const gameLocked = lockMs <= 0;
     const locked = isQuestionLocked(q, gameLocked);
 
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const hasPick = pick === "yes" || pick === "no";
+
+    const isSponsor = !!q.isSponsorQuestion;
+    const revealed = !!sponsorRevealed[q.id];
 
     return (
       <div
@@ -829,6 +949,22 @@ export default function PicksMatchSlugPage() {
           boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
         }}
       >
+        {/* Sponsor badge (always visible on sponsor cards) */}
+        {isSponsor ? (
+          <div className="absolute left-3 top-3 z-10">
+            <div
+              className="inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-widest"
+              style={{
+                borderColor: "rgba(255,46,77,0.35)",
+                background: "rgba(255,46,77,0.10)",
+                color: "rgba(0,0,0,0.70)",
+              }}
+            >
+              Sponsor
+            </div>
+          </div>
+        ) : null}
+
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">
             <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: "rgba(0,0,0,0.55)" }}>
@@ -838,7 +974,7 @@ export default function PicksMatchSlugPage() {
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
-                className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed"
                 style={{
                   borderColor: hasPick ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.08)",
                   background: hasPick ? "rgba(0,0,0,0.04)" : "rgba(0,0,0,0.03)",
@@ -847,7 +983,7 @@ export default function PicksMatchSlugPage() {
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  clearPick(q);
+                  clearPick(q, locked);
                 }}
                 disabled={!hasPick || locked}
                 aria-label="Clear selection"
@@ -880,6 +1016,7 @@ export default function PicksMatchSlugPage() {
             <VisualHeader g={g} q={q} />
           </div>
 
+          {/* Main question text */}
           <div className="mt-3 text-[13px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.92)" }}>
             {q.question}
           </div>
@@ -887,19 +1024,32 @@ export default function PicksMatchSlugPage() {
           <div>{renderSentimentWhite(q)}</div>
           {renderPickButtonsWhite(q, locked)}
 
+          {!locked && lockMs > 0 ? (
+            <div className="mt-3 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
+              Locks at bounce in {msToCountdown(lockMs)}
+            </div>
+          ) : (
+            <div className="mt-3 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
+              Locked at bounce
+            </div>
+          )}
+
+          {/* Locked overlay (no flashing, just a subtle wash) */}
           {locked ? (
             <div
               className="pointer-events-none absolute inset-0"
               style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.40), rgba(255,255,255,0.06))" }}
             />
           ) : null}
-
-          {!locked && lockMs > 0 ? (
-            <div className="mt-3 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
-              Locks in {msToCountdown(lockMs)}
-            </div>
-          ) : null}
         </div>
+
+        {/* Sponsor tap-to-reveal cover (must exist on sponsor questions) */}
+        {isSponsor && !revealed ? (
+          <SponsorRevealCover
+            q={q}
+            onReveal={() => setSponsorRevealed((prev) => ({ ...prev, [q.id]: true }))}
+          />
+        ) : null}
       </div>
     );
   };
@@ -909,6 +1059,7 @@ export default function PicksMatchSlugPage() {
 
   const stickyMeta = useMemo(() => {
     if (!activeGame) return { selected: 0, total: 0, gameLocked: false, lockMs: 0 };
+
     const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
     const gameLocked = lockMs <= 0;
 
@@ -951,13 +1102,13 @@ export default function PicksMatchSlugPage() {
   }
 
   const m = splitMatch(activeGame.match);
-  const home = m?.home ?? activeGame.match;
+  const home = m?.home ?? activeGame.match; // home always left
   const away = m?.away ?? "AFL";
+
+  const gameLocked = isGameLocked(activeGame);
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      {confettiOn ? <Confetti recycle={false} numberOfPieces={220} gravity={0.22} /> : null}
-
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-28">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -976,7 +1127,7 @@ export default function PicksMatchSlugPage() {
 
             <div className="mt-4 flex items-center gap-3">
               <TeamLogo teamName={home} size={50} />
-              <div className="text-white/60 font-black">vs</div>
+              <div className="w-10 text-center text-white/60 font-black">VS</div>
               <TeamLogo teamName={away} size={50} />
 
               {roundLabel ? (
@@ -1024,13 +1175,12 @@ export default function PicksMatchSlugPage() {
         </div>
 
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredQuestions.map((q) => {
-            const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
-            const gameLocked = lockMs <= 0;
-            return <WhitePickCard key={q.id} g={activeGame} q={q} gameLocked={gameLocked} />;
-          })}
+          {filteredQuestions.map((q) => (
+            <WhitePickCard key={q.id} g={activeGame} q={q} />
+          ))}
         </div>
 
+        {/* Bottom “mini strip” for this match: NO LOCK-IN BUTTON (auto-lock at bounce) */}
         <div
           className="fixed left-0 right-0 bottom-0 z-[60]"
           style={{
@@ -1053,23 +1203,20 @@ export default function PicksMatchSlugPage() {
                   {stickyMeta.selected} of {stickyMeta.total}
                 </div>
                 <div className="mt-1 text-[11px] text-white/55">
-                  {stickyMeta.gameLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(stickyMeta.lockMs)}`}
+                  {stickyMeta.gameLocked ? "Locked at bounce" : `Locks at bounce in ${msToCountdown(stickyMeta.lockMs)}`}
                 </div>
               </div>
 
-              <button
-                type="button"
-                disabled={stickyMeta.selected <= 0 || stickyMeta.gameLocked || !!lockedGames[activeGame.id]}
-                className="rounded-2xl border px-6 py-4 text-[13px] font-black disabled:opacity-50 disabled:cursor-not-allowed"
+              <div
+                className="rounded-2xl border px-5 py-3 text-[12px] font-black"
                 style={{
-                  borderColor: "rgba(255,46,77,0.55)",
-                  background: "rgba(255,46,77,0.18)",
-                  color: "rgba(255,255,255,0.95)",
-                  boxShadow: "0 10px 30px rgba(255,46,77,0.18)",
+                  borderColor: gameLocked ? "rgba(255,255,255,0.10)" : "rgba(255,46,77,0.35)",
+                  background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,46,77,0.10)",
+                  color: "rgba(255,255,255,0.92)",
                 }}
               >
-                LOCK IN PICKS
-              </button>
+                {gameLocked ? "LIVE / LOCKED" : "AUTO-LOCKS AT BOUNCE"}
+              </div>
             </div>
           </div>
         </div>
@@ -1081,6 +1228,123 @@ export default function PicksMatchSlugPage() {
           — One slip and it’s back to zero.
         </div>
       </div>
+
+      {/* Comments modal (kept from your build) */}
+      {commentsOpen && commentsQuestion ? (
+        <div className="fixed inset-0 z-[80]">
+          <div
+            className="absolute inset-0"
+            style={{ background: "rgba(0,0,0,0.72)" }}
+            onClick={closeComments}
+          />
+          <div className="absolute left-0 right-0 bottom-0 sm:top-1/2 sm:-translate-y-1/2 mx-auto w-full sm:max-w-xl">
+            <div
+              className="m-3 rounded-2xl border overflow-hidden"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(10,10,10,0.98)",
+                boxShadow: "0 24px 70px rgba(0,0,0,0.85)",
+              }}
+            >
+              <div className="p-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[12px] text-white/55 uppercase tracking-widest">Comments</div>
+                  <div className="mt-1 text-[14px] font-black text-white truncate">
+                    {commentsQuestion.question}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeComments}
+                  className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.12)",
+                    background: "rgba(255,255,255,0.04)",
+                    color: "rgba(255,255,255,0.90)",
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="px-4 pb-4">
+                <div className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+                  <div className="text-[11px] uppercase tracking-widest text-white/55">
+                    {commentsGame?.match || "Match"} • Q{commentsQuestion.quarter}
+                  </div>
+
+                  <div className="mt-3 max-h-[320px] overflow-auto pr-1">
+                    {commentsLoading ? (
+                      <div className="text-white/65 text-[12px]">Loading…</div>
+                    ) : commentErr ? (
+                      <div className="text-[12px]" style={{ color: COLORS.red }}>
+                        {commentErr}
+                      </div>
+                    ) : commentsList.length === 0 ? (
+                      <div className="text-white/55 text-[12px]">No comments yet.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {commentsList.map((c) => (
+                          <div key={c.id} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                            <div className="text-[11px] text-white/60">
+                              <span className="font-black text-white/80">
+                                {c.displayName || "Anon"}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-[12px] text-white/85 whitespace-pre-wrap">{c.body}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="text-[11px] uppercase tracking-widest text-white/55">Add a comment</div>
+                    <textarea
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      rows={3}
+                      className="mt-2 w-full rounded-2xl border px-3 py-2 text-[12px] outline-none"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.10)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "rgba(255,255,255,0.92)",
+                      }}
+                      placeholder="Keep it sharp…"
+                    />
+                    {commentErr ? (
+                      <div className="mt-2 text-[12px]" style={{ color: COLORS.red }}>
+                        {commentErr}
+                      </div>
+                    ) : null}
+
+                    <div className="mt-3 flex items-center justify-between gap-3">
+                      <div className="text-[11px] text-white/45">{commentText.trim().length}/240</div>
+                      <button
+                        type="button"
+                        onClick={postComment}
+                        disabled={commentPosting}
+                        className="rounded-2xl border px-5 py-3 text-[12px] font-black disabled:opacity-55 disabled:cursor-not-allowed active:scale-[0.99]"
+                        style={{
+                          borderColor: "rgba(255,46,77,0.55)",
+                          background: "rgba(255,46,77,0.18)",
+                          color: "rgba(255,255,255,0.95)",
+                        }}
+                      >
+                        {commentPosting ? "Posting…" : "Post"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-4 pb-4 text-center text-[11px] text-white/45">
+                Be funny. Don’t be a flog.
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
