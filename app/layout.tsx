@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import dynamic from "next/dynamic";
 
 export const metadata: Metadata = {
-  title: "Torpy",
-  description: "Torpy – Streak prediction game",
+  title: "Torpie",
+  description: "Torpie – Streak prediction game",
 };
 
 // Force NavBar to be client-only (prevents build prerender errors if it uses client hooks)
@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <NavBar />
 
         {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
-        <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_30px_rgba(56,189,248,0.18)]">
+        <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_40px_rgba(56,189,248,0.18)]">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1.5 sm:py-2">
             {/* Left badge */}
             <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-2.5 py-[2px] text-[9px] font-black uppercase tracking-wide text-sky-950 shadow-sm">
