@@ -37,10 +37,9 @@ type ApiQuestion = {
   commentCount?: number;
   isSponsorQuestion?: boolean;
 
-  // Monetisation polish (optional fields from API if you add later)
-  sponsorName?: string; // e.g. "Rebel Sport"
-  sponsorPrize?: string; // e.g. "$100 gift card"
-  sponsorExcludeFromStreak?: boolean; // if you add later; we treat sponsor as bonus UI anyway
+  sponsorName?: string;
+  sponsorPrize?: string;
+  sponsorExcludeFromStreak?: boolean;
 
   venue?: string;
   startTime?: string;
@@ -87,30 +86,30 @@ type CommentRow = {
   createdAt?: any;
 };
 
+/** ✅ TORPIE palette: Black / Fire Engine Red / White */
 const COLORS = {
-  bg: "#000000",
-
-  panel: "rgba(255,255,255,0.035)",
+  bg: "#05060A",
+  panel: "rgba(255,255,255,0.04)",
   panel2: "rgba(255,255,255,0.02)",
 
-  stroke: "rgba(255,255,255,0.10)",
-  stroke2: "rgba(255,255,255,0.14)",
+  stroke: "rgba(255,255,255,0.12)",
+  stroke2: "rgba(255,255,255,0.18)",
 
-  textDim: "rgba(255,255,255,0.70)",
-  textFaint: "rgba(255,255,255,0.50)",
+  textDim: "rgba(255,255,255,0.72)",
+  textFaint: "rgba(255,255,255,0.52)",
 
-  // ✅ Brand accent changed from ORANGE -> RED (keep key names to avoid refactors)
-  orange: "#FF2E4D",
-  orangeSoft: "rgba(255,46,77,0.28)",
-  orangeSoft2: "rgba(255,46,77,0.18)",
+  red: "#CE2029",
+  redSoft: "rgba(206,32,41,0.28)",
+  redSoft2: "rgba(206,32,41,0.18)",
+  redDeep: "#8B0F16",
 
   good: "rgba(25,195,125,0.95)",
-  bad: "rgba(255,46,77,0.95)",
+  bad: "rgba(206,32,41,0.95)",
   cyan: "rgba(0,229,255,0.95)",
+
   white: "rgba(255,255,255,0.98)",
 
-  // Sponsor “pop” updated to red spectrum
-  sponsorBgA: "rgba(255,46,77,0.95)",
+  sponsorBgA: "rgba(206,32,41,0.95)",
   sponsorBgB: "rgba(255,96,120,0.92)",
   sponsorInk: "rgba(0,0,0,0.92)",
 };
@@ -157,17 +156,14 @@ function msToCountdown(ms: number): string {
 function majorityLabel(yes: number, no: number): { label: string; color: string } {
   if (yes === no) return { label: "Split crowd", color: "rgba(255,255,255,0.70)" };
   if (yes > no) return { label: "Majority is YES", color: "rgba(25,195,125,0.95)" };
-  return { label: "Majority is NO", color: "rgba(255,46,77,0.95)" };
+  return { label: "Majority is NO", color: COLORS.bad };
 }
 
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
-  return `streakr:picks:v7:${uid || "anon"}:${roundNumber ?? "na"}`;
+  return `torpy:picks:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function effectivePick(
-  local: LocalPick | undefined,
-  api: PickOutcome | undefined
-): PickOutcome | undefined {
+function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
@@ -205,7 +201,6 @@ function extractTeamCode(qText: string): "Syd" | "Car" | "GC" | "Gee" | "Generic
   if (raw === "gc") return "GC";
   if (raw === "gee") return "Gee";
 
-  // fallback heuristics
   if (t.includes("(syd)") || t.includes(" sydney ")) return "Syd";
   if (t.includes("(car)") || t.includes(" carlton ")) return "Car";
   if (t.includes("(gc)") || t.includes(" gold coast ")) return "GC";
@@ -221,14 +216,19 @@ function extractPlayerName(qText: string): string | null {
   const t = (qText || "").trim();
   if (!t.toLowerCase().startsWith("will ")) return null;
   const rest = t.slice(5);
+
   const parenIdx = rest.indexOf("(");
   if (parenIdx > 0) return rest.slice(0, parenIdx).trim();
+
   const haveIdx = rest.toLowerCase().indexOf(" have ");
   if (haveIdx > 0) return rest.slice(0, haveIdx).trim();
+
   const kickIdx = rest.toLowerCase().indexOf(" kick ");
   if (kickIdx > 0) return rest.slice(0, kickIdx).trim();
+
   const scoreIdx = rest.toLowerCase().indexOf(" score ");
   if (scoreIdx > 0) return rest.slice(0, scoreIdx).trim();
+
   return null;
 }
 
@@ -241,6 +241,8 @@ export default function PicksPage() {
   const [games, setGames] = useState<ApiGame[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string>("");
+
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
   const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
 
@@ -258,6 +260,10 @@ export default function PicksPage() {
   // ✅ Sponsor reveal state (per-user, per-round, per-question)
   const [sponsorRevealed, setSponsorRevealed] = useState<Record<string, boolean>>({});
   const hasHydratedSponsorRef = useRef(false);
+
+  // “Lock in” CTA feedback (UI-only)
+  const [lockToast, setLockToast] = useState<null | { title: string; body: string }>(null);
+  const lockToastRef = useRef<any>(null);
 
   // Comments modal
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -302,8 +308,15 @@ export default function PicksPage() {
       const data = (await res.json()) as PicksApiResponse;
       const nextRound = typeof data.roundNumber === "number" ? data.roundNumber : null;
 
+      const nextGames = Array.isArray(data.games) ? data.games : [];
       setRoundNumber(nextRound);
-      setGames(Array.isArray(data.games) ? data.games : []);
+      setGames(nextGames);
+
+      // default active game
+      setActiveGameId((prev) => {
+        if (prev && nextGames.some((g) => g.id === prev)) return prev;
+        return nextGames[0]?.id ?? null;
+      });
     } catch (e) {
       console.error(e);
       setErr("Could not load picks right now.");
@@ -349,7 +362,7 @@ export default function PicksPage() {
     if (roundNumber === null) return;
 
     try {
-      const key = `streakr:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
+      const key = `torpy:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
       const raw = localStorage.getItem(key);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, boolean>;
@@ -365,7 +378,7 @@ export default function PicksPage() {
   useEffect(() => {
     if (roundNumber === null) return;
     try {
-      const key = `streakr:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
+      const key = `torpy:sponsorReveal:v1:${user?.uid ?? "anon"}:${roundNumber}`;
       localStorage.setItem(key, JSON.stringify(sponsorRevealed));
     } catch {}
   }, [sponsorRevealed, user?.uid, roundNumber]);
@@ -441,13 +454,30 @@ export default function PicksPage() {
     }
   }, [myCurrentStreak]);
 
+  const activeGame = useMemo(() => {
+    if (!activeGameId) return games[0] ?? null;
+    return games.find((g) => g.id === activeGameId) ?? games[0] ?? null;
+  }, [games, activeGameId]);
+
+  const activeGameLockMs = useMemo(() => {
+    if (!activeGame?.startTime) return 0;
+    return new Date(activeGame.startTime).getTime() - nowMs;
+  }, [activeGame?.startTime, nowMs]);
+
+  const activeGameLocked = useMemo(() => {
+    if (!activeGame) return false;
+    return activeGameLockMs <= 0;
+  }, [activeGame, activeGameLockMs]);
+
+  const activeQuestions = useMemo(() => (activeGame?.questions ?? []).slice(), [activeGame]);
+
   const allQuestions = useMemo(() => {
     const out: ApiQuestion[] = [];
     games.forEach((g) => g.questions.forEach((q) => out.push(q)));
     return out;
   }, [games]);
 
-  const picksMade = useMemo(() => {
+  const picksMadeAll = useMemo(() => {
     let c = 0;
     allQuestions.forEach((q) => {
       const pick = effectivePick(localPicks[q.id], q.userPick);
@@ -456,7 +486,17 @@ export default function PicksPage() {
     return c;
   }, [allQuestions, localPicks]);
 
-  const totalPickable = useMemo(() => allQuestions.length, [allQuestions]);
+  const picksMadeActive = useMemo(() => {
+    if (!activeGame) return 0;
+    let c = 0;
+    activeGame.questions.forEach((q) => {
+      const pick = effectivePick(localPicks[q.id], q.userPick);
+      if (pick === "yes" || pick === "no") c += 1;
+    });
+    return c;
+  }, [activeGame, localPicks]);
+
+  const totalPickableActive = useMemo(() => activeGame?.questions?.length ?? 0, [activeGame]);
 
   const accuracyPct = useMemo(() => {
     let settledPicked = 0;
@@ -515,10 +555,7 @@ export default function PicksPage() {
     const streakNeed = Math.max(0, ELIGIBILITY.MIN_STREAK - (myCurrentStreak || 0));
     const gamesNeed = Math.max(0, ELIGIBILITY.MIN_GAMES - gamesPlayedLocked);
 
-    const streakProg = Math.max(
-      0,
-      Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100)
-    );
+    const streakProg = Math.max(0, Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100));
     const gamesProg = Math.max(0, Math.min(100, (gamesPlayedLocked / ELIGIBILITY.MIN_GAMES) * 100));
 
     return {
@@ -535,9 +572,9 @@ export default function PicksPage() {
   // ✅ FINAL questions must be locked (cannot change selection)
   function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
     if (q.status === "final") return true;
-    if (q.status === "void") return true; // also lock; void is informational
+    if (q.status === "void") return true;
     if (q.status === "pending") return true;
-    if (gameLocked) return true; // game started/locked
+    if (gameLocked) return true;
     return false;
   }
 
@@ -618,8 +655,33 @@ export default function PicksPage() {
     [user, roundNumber, localPicks, clearPick]
   );
 
+  const clearAllActive = useCallback(async () => {
+    if (!activeGame) return;
+
+    // clear local immediately
+    setLocalPicks((prev) => {
+      const next = { ...prev };
+      for (const q of activeGame.questions) next[q.id] = "none";
+      return next;
+    });
+
+    // best-effort API clears (only if logged in)
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      await Promise.all(
+        activeGame.questions.map((q) =>
+          fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch(() => null)
+        )
+      );
+    } catch {}
+  }, [activeGame, user]);
+
   const shareStreak = useCallback(async () => {
-    const txt = `STREAKr — I’m on a streak of ${myCurrentStreak}. How long can you last?`;
+    const txt = `TORPIE — I’m on a streak of ${myCurrentStreak}. How long can you last?`;
     try {
       if (navigator.share) {
         await navigator.share({ text: txt });
@@ -634,14 +696,37 @@ export default function PicksPage() {
     }
   }, [myCurrentStreak]);
 
-  const myVsLeaderPct = useMemo(() => {
-    const denom = Math.max(1, Math.max(myCurrentStreak, leaderStreak));
-    const mine = (myCurrentStreak / denom) * 100;
-    const lead = (leaderStreak / denom) * 100;
-    return { mine, lead };
-  }, [myCurrentStreak, leaderStreak]);
+  const showLockToast = useCallback((title: string, body: string) => {
+    setLockToast({ title, body });
+    if (lockToastRef.current) window.clearTimeout(lockToastRef.current);
+    lockToastRef.current = window.setTimeout(() => setLockToast(null), 1800);
+  }, []);
+
+  // Sponsor reveal action
+  const revealSponsor = useCallback((questionId: string) => {
+    setSponsorRevealed((prev) => ({ ...prev, [questionId]: true }));
+  }, []);
 
   const topLockText = nextLockMs > 0 ? msToCountdown(nextLockMs) : "—";
+
+  const roundLabel = useMemo(() => {
+    if (roundNumber === null) return "";
+    if (roundNumber === 0) return "Opening Round";
+    return `Round ${roundNumber}`;
+  }, [roundNumber]);
+
+  // “Potential streak” increases as you toggle picks (active game focus)
+  const potentialGain = useMemo(() => picksMadeActive, [picksMadeActive]);
+  const potentialStreak = useMemo(() => Math.max(0, (myCurrentStreak || 0) + potentialGain), [
+    myCurrentStreak,
+    potentialGain,
+  ]);
+
+  const lockButtonLabel = useMemo(() => {
+    const n = picksMadeActive;
+    if (n <= 0) return "LOCK IN PICKS";
+    return `LOCK IN ${n} PICK${n === 1 ? "" : "S"}`;
+  }, [picksMadeActive]);
 
   // Comments: open/close
   const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
@@ -694,11 +779,7 @@ export default function PicksPage() {
       commentsUnsubRef.current = null;
     }
 
-    const qRef = query(
-      collection(db, "comments"),
-      where("questionId", "==", commentsQuestion.id),
-      limit(50)
-    );
+    const qRef = query(collection(db, "comments"), where("questionId", "==", commentsQuestion.id), limit(50));
 
     commentsUnsubRef.current = onSnapshot(
       qRef,
@@ -797,7 +878,6 @@ export default function PicksPage() {
   }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
 
   const renderStatusPill = (q: ApiQuestion) => {
-    // ✅ NO pulsing, no animation.
     const base =
       "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide border";
 
@@ -811,10 +891,7 @@ export default function PicksPage() {
             color: "rgba(0,229,255,0.92)",
           }}
         >
-          <span
-            className="inline-flex h-1.5 w-1.5 rounded-full"
-            style={{ background: "rgba(0,229,255,0.92)" }}
-          />
+          <span className="inline-flex h-1.5 w-1.5 rounded-full" style={{ background: "rgba(0,229,255,0.92)" }} />
           LIVE
         </span>
       );
@@ -873,9 +950,9 @@ export default function PicksPage() {
       <span
         className={base}
         style={{
-          borderColor: isCorrect ? "rgba(25,195,125,0.45)" : "rgba(255,46,77,0.45)",
-          background: isCorrect ? "rgba(25,195,125,0.10)" : "rgba(255,46,77,0.10)",
-          color: isCorrect ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)",
+          borderColor: isCorrect ? "rgba(25,195,125,0.45)" : "rgba(206,32,41,0.45)",
+          background: isCorrect ? "rgba(25,195,125,0.10)" : "rgba(206,32,41,0.10)",
+          color: isCorrect ? "rgba(25,195,125,0.95)" : "rgba(206,32,41,0.95)",
         }}
       >
         {isCorrect ? "Correct" : "Wrong"}
@@ -883,7 +960,7 @@ export default function PicksPage() {
     );
   };
 
-  const renderSentiment = (q: ApiQuestion) => {
+  const renderCrowdCompact = (q: ApiQuestion) => {
     const yes = clampPct(q.yesPercent);
     const no = clampPct(q.noPercent);
 
@@ -893,14 +970,11 @@ export default function PicksPage() {
 
     const majority = majorityLabel(yes, no);
 
-    const pick = effectivePick(localPicks[q.id], q.userPick);
-    const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
-
     return (
       <div className="mt-2">
-        <div className="flex items-center justify-between text-[10px] text-white/60">
+        <div className="flex items-center justify-between text-[10px] text-white/55">
           <span className="uppercase tracking-widest">Crowd</span>
-          <span style={{ color: majority.color }} className="font-bold">
+          <span style={{ color: majority.color }} className="font-black">
             {majority.label}
           </span>
         </div>
@@ -924,7 +998,7 @@ export default function PicksPage() {
               className="h-full"
               style={{
                 width: `${noW}%`,
-                background: `linear-gradient(90deg, rgba(255,46,77,0.20), rgba(255,46,77,0.85))`,
+                background: `linear-gradient(90deg, rgba(206,32,41,0.20), rgba(206,32,41,0.85))`,
               }}
             />
           </div>
@@ -932,30 +1006,17 @@ export default function PicksPage() {
 
         <div className="mt-1 flex items-center justify-between text-[10px] text-white/55">
           <span>
-            YES <span className="font-bold text-white/80">{Math.round(yes)}%</span>
+            YES <span className="font-black text-white/80">{Math.round(yes)}%</span>
           </span>
-
-          {aligned === null ? (
-            <span className="text-white/40">Pick to compare</span>
-          ) : aligned ? (
-            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-bold">
-              With crowd
-            </span>
-          ) : (
-            <span style={{ color: COLORS.orange }} className="font-bold">
-              Against crowd
-            </span>
-          )}
-
           <span>
-            NO <span className="font-bold text-white/80">{Math.round(no)}%</span>
+            NO <span className="font-black text-white/80">{Math.round(no)}%</span>
           </span>
         </div>
       </div>
     );
   };
 
-  const renderPickButtons = (q: ApiQuestion, locked: boolean) => {
+  const renderPickButtonsSweat = (q: ApiQuestion, locked: boolean) => {
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const isYesSelected = pick === "yes";
     const isNoSelected = pick === "no";
@@ -964,17 +1025,17 @@ export default function PicksPage() {
       "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
 
     const selectedStyle = {
-      borderColor: "rgba(255,46,77,0.65)",
-      background: `linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,96,120,0.88))`,
-      boxShadow: "0 0 26px rgba(255,46,77,0.20), inset 0 0 0 1px rgba(255,255,255,0.12)",
+      borderColor: "rgba(206,32,41,0.65)",
+      background: `linear-gradient(180deg, rgba(206,32,41,0.98), rgba(255,96,120,0.88))`,
+      boxShadow: "0 0 26px rgba(206,32,41,0.20), inset 0 0 0 1px rgba(255,255,255,0.10)",
       color: "rgba(0,0,0,0.92)",
     } as const;
 
     const neutralStyle = {
-      borderColor: "rgba(255,255,255,0.12)",
+      borderColor: "rgba(255,255,255,0.14)",
       background: "rgba(255,255,255,0.04)",
       boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.05)",
-      color: "rgba(255,255,255,0.88)",
+      color: "rgba(255,255,255,0.90)",
     } as const;
 
     const lockedStyle = {
@@ -1012,29 +1073,122 @@ export default function PicksPage() {
     );
   };
 
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const StrategyLadder = ({ base, gain }: { base: number; gain: number }) => {
+    const maxGain = 15;
+    const clampedGain = Math.max(0, Math.min(maxGain, gain));
+    const top = base + maxGain;
+    const current = base;
+    const potential = base + clampedGain;
 
-  // Sponsor reveal action
-  const revealSponsor = useCallback((questionId: string) => {
-    setSponsorRevealed((prev) => ({ ...prev, [questionId]: true }));
-  }, []);
+    const steps = Array.from({ length: maxGain + 1 }, (_, i) => top - i); // top down
+    const highlightTop = steps.indexOf(potential);
+    const highlightCurrent = steps.indexOf(current);
 
-  // Chalkboard-inspired card
-  const PickCard = ({
-    g,
-    q,
-    gameLocked,
-  }: {
-    g: ApiGame;
-    q: ApiQuestion;
-    gameLocked: boolean;
-  }) => {
+    return (
+      <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+        <div className="px-4 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+          <div className="text-[11px] uppercase tracking-widest text-white/55">Streak ladder</div>
+          <div className="mt-1 text-[13px] text-white/80">
+            <span className="font-black" style={{ color: COLORS.white }}>
+              +{clampedGain}
+            </span>{" "}
+            if all correct
+          </div>
+        </div>
+
+        <div className="p-4">
+          <div className="relative">
+            {/* center red line */}
+            <div
+              className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[6px] rounded-full"
+              style={{
+                background: `linear-gradient(180deg, rgba(206,32,41,0.15), rgba(206,32,41,0.95), rgba(206,32,41,0.15))`,
+                boxShadow: "0 0 26px rgba(206,32,41,0.18)",
+              }}
+            />
+
+            <div className="flex flex-col gap-2">
+              {steps.map((n, idx) => {
+                const isPotential = idx === highlightTop;
+                const isCurrent = idx === highlightCurrent;
+
+                return (
+                  <div key={n} className="relative flex items-center justify-between gap-3">
+                    <div className="w-10 text-right text-[12px] font-black" style={{ color: isPotential ? COLORS.white : "rgba(255,255,255,0.55)" }}>
+                      {n}
+                    </div>
+
+                    <div className="flex-1" />
+
+                    <div className="w-10 text-left text-[12px] font-black" style={{ color: isPotential ? COLORS.white : "rgba(255,255,255,0.55)" }}>
+                      {n}
+                    </div>
+
+                    {(isCurrent || isPotential) && (
+                      <div
+                        className="absolute left-1/2 -translate-x-1/2"
+                        style={{
+                          width: 34,
+                          height: 22,
+                          borderRadius: 999,
+                          border: "1px solid rgba(255,255,255,0.16)",
+                          background: isPotential
+                            ? "rgba(255,255,255,0.92)"
+                            : "rgba(255,255,255,0.07)",
+                          color: isPotential ? "rgba(0,0,0,0.92)" : "rgba(255,255,255,0.88)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 10,
+                          fontWeight: 900,
+                          boxShadow: isPotential ? "0 10px 26px rgba(0,0,0,0.22)" : "none",
+                        }}
+                      >
+                        {isPotential ? "POT" : "NOW"}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.25)" }}>
+              <div className="text-[10px] uppercase tracking-widest text-white/55">Current</div>
+              <div className="mt-0.5 text-[16px] font-black" style={{ color: COLORS.white }}>
+                {base}
+              </div>
+            </div>
+            <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(206,32,41,0.25)", background: "rgba(206,32,41,0.10)" }}>
+              <div className="text-[10px] uppercase tracking-widest" style={{ color: "rgba(255,255,255,0.70)" }}>
+                Potential
+              </div>
+              <div className="mt-0.5 text-[16px] font-black" style={{ color: COLORS.white }}>
+                {potential}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 text-[11px] text-white/55">
+            Reminder: <span className="font-black text-white/80">1 miss</span> resets your entire streak to{" "}
+            <span className="font-black" style={{ color: COLORS.red }}>
+              0
+            </span>
+            .
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Single “premium” card: clean, addictive, fast to pick
+  const PickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
     const sponsor = q.isSponsorQuestion === true;
     const sponsorName = (q.sponsorName || "Rebel Sport").trim();
     const sponsorPrize = (q.sponsorPrize || "$100 gift card").trim();
 
-    const teamCode = extractTeamCode(q.question); // Syd/Car/GC/Gee/Generic
+    const teamCode = extractTeamCode(q.question);
     const jerseySrc = `/jerseys/${teamCode}.jpg`;
 
     const playerName = extractPlayerName(q.question) || "AFL Player";
@@ -1045,55 +1199,45 @@ export default function PicksPage() {
     const hasPick = pick === "yes" || pick === "no";
 
     const revealed = sponsor ? !!sponsorRevealed[q.id] : true;
-    const interactionLocked = locked || (sponsor && !revealed); // can’t pick until revealed for sponsor
+    const interactionLocked = locked || (sponsor && !revealed);
 
-    // RED outline on every card
-    const baseBorder = sponsor ? "rgba(255,46,77,0.90)" : COLORS.orangeSoft;
+    const baseBorder = sponsor ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.10)";
+    const bg = sponsor
+      ? `linear-gradient(180deg, rgba(206,32,41,0.92), rgba(139,15,22,0.75))`
+      : `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 55%, rgba(0,0,0,0.40) 100%)`;
 
-    // Sponsor background: FULL RED so it pops
-    const cardBg = sponsor
-      ? "linear-gradient(180deg, rgba(255,96,120,0.98) 0%, rgba(255,46,77,0.98) 55%, rgba(255,46,77,0.92) 100%)"
-      : "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.55) 100%)";
-
-    const glow = sponsor
-      ? "0 0 40px rgba(255,46,77,0.28)"
-      : q.status === "final" && q.correctPick === false
-      ? "0 0 22px rgba(255,46,77,0.12)"
-      : q.status === "final" && q.correctPick === true
-      ? "0 0 22px rgba(25,195,125,0.10)"
-      : "0 0 22px rgba(255,46,77,0.06)";
-
-    const topAccent = sponsor
-      ? "linear-gradient(90deg, rgba(0,0,0,0.25), rgba(0,0,0,0.00))"
-      : "linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.06))";
+    const glow = hasPick
+      ? "0 0 34px rgba(206,32,41,0.12)"
+      : "0 0 22px rgba(0,0,0,0.35)";
 
     const ink = sponsor ? COLORS.sponsorInk : "rgba(255,255,255,0.92)";
-    const dimInk = sponsor ? "rgba(0,0,0,0.70)" : "rgba(255,255,255,0.70)";
-    const faintInk = sponsor ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.55)";
+    const faintInk = sponsor ? "rgba(0,0,0,0.60)" : "rgba(255,255,255,0.55)";
 
     return (
       <div
-        className="group relative rounded-2xl border overflow-hidden"
+        className="relative rounded-2xl border overflow-hidden"
         style={{
           borderColor: baseBorder,
-          background: cardBg,
+          background: bg,
           boxShadow: glow,
         }}
       >
-        {/* top accent strip */}
-        <div className="h-1 w-full" style={{ background: topAccent }} />
+        {/* subtle top strip */}
+        <div
+          className="h-1 w-full"
+          style={{
+            background: sponsor
+              ? "linear-gradient(90deg, rgba(255,255,255,0.18), rgba(255,255,255,0.00))"
+              : "linear-gradient(90deg, rgba(206,32,41,0.30), rgba(206,32,41,0.00))",
+          }}
+        />
 
         <div className="p-4">
-          {/* Header row */}
+          {/* compact header row */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               {renderStatusPill(q)}
-              <span
-                className="text-[11px] font-black uppercase tracking-wide"
-                style={{ color: dimInk }}
-              >
-                Q{q.quarter}
-              </span>
+              <span className="text-[11px] font-black uppercase tracking-wide text-white/60">Q{q.quarter}</span>
 
               {sponsor ? (
                 <span
@@ -1101,7 +1245,7 @@ export default function PicksPage() {
                   style={{
                     borderColor: "rgba(0,0,0,0.22)",
                     background: "rgba(0,0,0,0.10)",
-                    color: "rgba(0,0,0,0.85)",
+                    color: "rgba(0,0,0,0.88)",
                   }}
                 >
                   SPONSORED
@@ -1110,26 +1254,14 @@ export default function PicksPage() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
-              {/* Clear */}
+              {/* clear */}
               <button
                 type="button"
                 className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
                 style={{
-                  borderColor: sponsor
-                    ? "rgba(0,0,0,0.22)"
-                    : hasPick
-                    ? "rgba(255,255,255,0.18)"
-                    : "rgba(255,255,255,0.10)",
-                  background: sponsor
-                    ? "rgba(0,0,0,0.10)"
-                    : hasPick
-                    ? "rgba(255,255,255,0.07)"
-                    : "rgba(255,255,255,0.04)",
-                  color: sponsor
-                    ? "rgba(0,0,0,0.85)"
-                    : hasPick
-                    ? "rgba(255,255,255,0.92)"
-                    : "rgba(255,255,255,0.45)",
+                  borderColor: sponsor ? "rgba(0,0,0,0.22)" : hasPick ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.10)",
+                  background: sponsor ? "rgba(0,0,0,0.10)" : hasPick ? "rgba(255,255,255,0.07)" : "rgba(255,255,255,0.04)",
+                  color: sponsor ? "rgba(0,0,0,0.88)" : hasPick ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.45)",
                 }}
                 onClick={(e) => {
                   e.preventDefault();
@@ -1137,26 +1269,20 @@ export default function PicksPage() {
                   clearPick(q);
                 }}
                 disabled={!hasPick || interactionLocked}
-                title={
-                  interactionLocked
-                    ? "Locked"
-                    : hasPick
-                    ? "Clear selection"
-                    : "No selection to clear"
-                }
+                title={interactionLocked ? "Locked" : hasPick ? "Clear selection" : "No selection to clear"}
                 aria-label="Clear selection"
               >
                 ✕
               </button>
 
-              {/* Comments */}
+              {/* comments */}
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-black border transition active:scale-[0.99]"
                 style={{
                   borderColor: sponsor ? "rgba(0,0,0,0.22)" : "rgba(255,255,255,0.12)",
                   background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(255,255,255,0.04)",
-                  color: sponsor ? "rgba(0,0,0,0.88)" : "rgba(255,255,255,0.90)",
+                  color: sponsor ? "rgba(0,0,0,0.90)" : "rgba(255,255,255,0.90)",
                 }}
                 onClick={(e) => {
                   e.preventDefault();
@@ -1170,63 +1296,7 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Jersey / Player area (hide until sponsor reveal) */}
-          {!sponsor || revealed ? (
-            <div
-              className="mt-3 rounded-2xl border p-3"
-              style={{
-                borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-                background: sponsor
-                  ? "rgba(0,0,0,0.10)"
-                  : "linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))",
-              }}
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
-                    Player
-                  </div>
-                  <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
-                    {playerName}
-                  </div>
-                  <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
-                    {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
-                  </div>
-                </div>
-
-                <div
-                  className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
-                  style={{
-                    borderColor: sponsor ? "rgba(0,0,0,0.18)" : COLORS.orangeSoft2,
-                    background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.35)",
-                  }}
-                  title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
-                >
-                  <Image
-                    src={jerseySrc}
-                    alt={`${teamCode} jersey`}
-                    fill
-                    sizes="54px"
-                    style={{ objectFit: "cover" }}
-                  />
-                </div>
-              </div>
-
-              <div className="mt-2 text-[11px] truncate" style={{ color: faintInk }}>
-                {q.status === "open"
-                  ? "Live"
-                  : q.status === "pending"
-                  ? "Locked"
-                  : q.status === "final"
-                  ? "Final"
-                  : q.status === "void"
-                  ? "Void"
-                  : "—"}
-              </div>
-            </div>
-          ) : null}
-
-          {/* ✅ Sponsor Cover (forces exposure + click to reveal) */}
+          {/* sponsor cover */}
           {sponsor && !revealed ? (
             <div
               className="mt-3 rounded-2xl border p-4"
@@ -1235,10 +1305,7 @@ export default function PicksPage() {
                 background: "rgba(0,0,0,0.12)",
               }}
             >
-              <div
-                className="text-[11px] font-black uppercase tracking-widest"
-                style={{ color: "rgba(0,0,0,0.75)" }}
-              >
+              <div className="text-[11px] font-black uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.75)" }}>
                 Question proudly sponsored by
               </div>
 
@@ -1247,12 +1314,11 @@ export default function PicksPage() {
               </div>
 
               <div className="mt-2 text-[13px] font-semibold" style={{ color: "rgba(0,0,0,0.80)" }}>
-                Get this correct to go in the draw to win a{" "}
-                <span className="font-black">{sponsorPrize}</span>.
+                Get this correct to go in the draw to win a <span className="font-black">{sponsorPrize}</span>.
               </div>
 
               <div className="mt-1 text-[12px]" style={{ color: "rgba(0,0,0,0.65)" }}>
-                1 winner only. Sponsor question is counted in your streak.
+                Sponsor question counts in your streak.
               </div>
 
               <button
@@ -1271,25 +1337,60 @@ export default function PicksPage() {
             </div>
           ) : (
             <>
-              {/* Question */}
+              {/* player strip */}
+              <div
+                className="mt-3 rounded-2xl border p-3"
+                style={{
+                  borderColor: sponsor ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.10)",
+                  background: sponsor ? "rgba(0,0,0,0.10)" : "rgba(0,0,0,0.25)",
+                }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-widest" style={{ color: faintInk }}>
+                      Player
+                    </div>
+                    <div className="mt-1 text-[15px] font-black truncate" style={{ color: ink }}>
+                      {playerName}
+                    </div>
+                    <div className="mt-1 text-[11px] truncate" style={{ color: faintInk }}>
+                      {g.match} • {teamCode !== "Generic" ? teamCode.toUpperCase() : "—"}
+                    </div>
+                  </div>
+
+                  <div
+                    className="relative h-[54px] w-[54px] rounded-2xl border overflow-hidden shrink-0"
+                    style={{
+                      borderColor: sponsor ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.12)",
+                      background: sponsor ? "rgba(0,0,0,0.14)" : "rgba(255,255,255,0.06)",
+                    }}
+                    title={teamCode === "Generic" ? "Generic jersey" : `${teamCode} jersey`}
+                  >
+                    <Image src={jerseySrc} alt={`${teamCode} jersey`} fill sizes="54px" style={{ objectFit: "cover" }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* question */}
               <div className="mt-3 text-[13px] font-semibold leading-snug" style={{ color: ink }}>
                 {q.question}
               </div>
 
-              {/* Crowd */}
-              <div style={{ color: sponsor ? "rgba(0,0,0,0.92)" : "inherit" }}>{renderSentiment(q)}</div>
+              {/* crowd */}
+              <div style={{ color: sponsor ? "rgba(0,0,0,0.92)" : "inherit" }}>{renderCrowdCompact(q)}</div>
 
-              {renderPickButtons(q, interactionLocked)}
+              {/* pick buttons */}
+              {renderPickButtonsSweat(q, interactionLocked)}
             </>
           )}
 
-          {/* Lock overlay */}
+          {/* lock overlay */}
           {locked ? (
             <div
               className="pointer-events-none absolute inset-0"
               style={{
                 background: sponsor
-                  ? "linear-gradient(180deg, rgba(255,46,77,0.02), rgba(0,0,0,0.20))"
+                  ? "linear-gradient(180deg, rgba(206,32,41,0.02), rgba(0,0,0,0.22))"
                   : "linear-gradient(180deg, rgba(0,0,0,0.10), rgba(0,0,0,0.55))",
               }}
             />
@@ -1301,194 +1402,596 @@ export default function PicksPage() {
 
   const pageTitle = "Picks";
 
+  // Sticky header “the sweat”
+  const StickyHeader = () => {
+    const match = activeGame?.match ?? "Match Picks";
+    const subtitle = activeGame
+      ? `${activeGame.venue} • ${formatAedt(activeGame.startTime)}`
+      : "Loading…";
+
+    const locksText = !activeGame
+      ? "—"
+      : activeGameLocked
+      ? "Locked"
+      : `Locks in ${msToCountdown(activeGameLockMs)}`;
+
+    return (
+      <div
+        className="sticky top-0 z-[60] border-b"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background:
+            `linear-gradient(180deg, rgba(5,6,10,0.95) 0%, rgba(5,6,10,0.88) 70%, rgba(5,6,10,0.70) 100%)`,
+          backdropFilter: "blur(10px)",
+        }}
+      >
+        <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <div
+                  className="h-9 w-9 rounded-xl border flex items-center justify-center font-black"
+                  style={{
+                    borderColor: "rgba(206,32,41,0.35)",
+                    background: "rgba(206,32,41,0.10)",
+                    color: COLORS.white,
+                    boxShadow: "0 0 26px rgba(206,32,41,0.10)",
+                  }}
+                  title="Potential streak"
+                >
+                  {potentialStreak}
+                </div>
+
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-widest text-white/55">Potential streak</div>
+                  <div className="text-[14px] font-black text-white truncate">{match}</div>
+                </div>
+              </div>
+              <div className="mt-1 text-[12px] text-white/60 truncate">{subtitle}</div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <span
+                className="hidden sm:inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.90)",
+                }}
+              >
+                {locksText}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => shareStreak()}
+                className="hidden sm:inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+                title="Share"
+              >
+                Share
+              </button>
+
+              <Link
+                href="/leaderboards"
+                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(206,32,41,0.30)",
+                  background: "rgba(206,32,41,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+                title="Leaderboards"
+              >
+                Ladder
+              </Link>
+            </div>
+          </div>
+
+          {/* game selector chips */}
+          <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+            {games.length === 0 ? (
+              <div className="text-[12px] text-white/55">No games</div>
+            ) : (
+              games.map((g) => {
+                const isActive = g.id === activeGameId;
+                const lockMs = new Date(g.startTime).getTime() - nowMs;
+                const locked = lockMs <= 0;
+
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => setActiveGameId(g.id)}
+                    className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                    style={{
+                      borderColor: isActive ? "rgba(206,32,41,0.55)" : "rgba(255,255,255,0.12)",
+                      background: isActive ? "rgba(206,32,41,0.16)" : "rgba(255,255,255,0.04)",
+                      color: isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.82)",
+                      boxShadow: isActive ? "0 0 24px rgba(206,32,41,0.12)" : "none",
+                    }}
+                    title={g.match}
+                  >
+                    <span className="whitespace-nowrap">{g.match}</span>
+                    <span className="ml-2 text-[10px] font-black" style={{ color: locked ? "rgba(255,255,255,0.60)" : "rgba(0,229,255,0.92)" }}>
+                      {locked ? "LOCKED" : "LIVE"}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const LockInBarMobile = () => {
+    // Only show on small screens
+    return (
+      <div className="fixed inset-x-0 bottom-0 z-[70] sm:hidden">
+        <div
+          className="mx-auto w-full max-w-6xl px-4 pb-4"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(5,6,10,0.00) 0%, rgba(5,6,10,0.75) 30%, rgba(5,6,10,0.92) 100%)",
+          }}
+        >
+          <div className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)", backdropFilter: "blur(10px)" }}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-widest text-white/55">Selected</div>
+                <div className="text-[14px] font-black text-white truncate">
+                  {picksMadeActive}/{totalPickableActive} picks • <span style={{ color: COLORS.red }}>+{potentialGain}</span> if all correct
+                </div>
+                <div className="mt-1 text-[11px] text-white/55">
+                  Reminder: <span className="font-black text-white/80">1 miss</span> resets your streak to{" "}
+                  <span className="font-black" style={{ color: COLORS.red }}>
+                    0
+                  </span>
+                  .
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!user) {
+                    showLockToast("Log in to play", "Create a free account to save picks + appear on ladders.");
+                    return;
+                  }
+                  if (!activeGame) return;
+                  if (picksMadeActive <= 0) {
+                    showLockToast("Pick something", "Tap YES/NO on any question.");
+                    return;
+                  }
+                  showLockToast("Locked in ✅", "Your picks are saved instantly.");
+                }}
+                className="shrink-0 rounded-xl border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(206,32,41,0.55)",
+                  background: `linear-gradient(180deg, rgba(206,32,41,0.95), rgba(139,15,22,0.85))`,
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 16px 40px rgba(206,32,41,0.18)",
+                  opacity: activeGameLocked ? 0.55 : 1,
+                }}
+                disabled={activeGameLocked}
+                title={activeGameLocked ? "Game locked" : "Lock in picks"}
+              >
+                {lockButtonLabel}
+              </button>
+            </div>
+
+            <div className="mt-2 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => clearAllActive()}
+                className="text-[12px] font-black underline underline-offset-2"
+                style={{ color: "rgba(255,255,255,0.70)" }}
+                disabled={activeGameLocked || picksMadeActive <= 0}
+                title="Clear all picks for this match"
+              >
+                Clear all
+              </button>
+
+              <div className="text-[12px] font-black" style={{ color: "rgba(0,229,255,0.92)" }}>
+                Next lock: {topLockText}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Comments Modal (unchanged core, slight branding copy)
+  const CommentsModal = () => {
+    if (!commentsOpen || !commentsQuestion) return null;
+
+    return (
+      <div
+        className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+        onMouseDown={(e) => {
+          if (e.target === e.currentTarget) closeComments();
+        }}
+        style={{
+          background: "rgba(0,0,0,0.70)",
+          backdropFilter: "blur(8px)",
+        }}
+      >
+        <div
+          className="w-full max-w-2xl rounded-2xl border overflow-hidden"
+          style={{
+            borderColor: "rgba(206,32,41,0.30)",
+            background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
+            boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
+          }}
+        >
+          <div
+            className="px-5 py-4 border-b"
+            style={{
+              borderColor: "rgba(206,32,41,0.20)",
+              background: "rgba(255,255,255,0.03)",
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-widest text-white/55">Locker room</div>
+                <div className="mt-1 text-[14px] font-extrabold text-white truncate">
+                  {commentsGame?.match ?? "Game"} • Quarter {commentsQuestion.quarter}
+                </div>
+                <div className="mt-1 text-[13px] text-white/80">{commentsQuestion.question}</div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeComments}
+                className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(255,255,255,0.16)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.90)",
+                }}
+                aria-label="Close comments"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          <div className="px-5 py-4">
+            {!user ? (
+              <div
+                className="rounded-xl border p-3 text-[12px] text-white/80"
+                style={{
+                  borderColor: "rgba(206,32,41,0.35)",
+                  background: "rgba(206,32,41,0.10)",
+                }}
+              >
+                Log in to post. You can still read the chirps.
+              </div>
+            ) : null}
+
+            <div className="mt-3 flex gap-2">
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder={user ? "Say something (max 240 chars)..." : "Log in to comment..."}
+                disabled={!user || commentPosting}
+                className="flex-1 rounded-xl border px-4 py-3 text-[13px] outline-none"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    postComment();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={postComment}
+                disabled={!user || commentPosting}
+                className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  borderColor: "rgba(0,229,255,0.30)",
+                  background: "rgba(0,229,255,0.10)",
+                  color: "rgba(0,229,255,0.95)",
+                }}
+              >
+                {commentPosting ? "Posting…" : "Post"}
+              </button>
+            </div>
+
+            {commentErr ? (
+              <div className="mt-2 text-[12px]" style={{ color: COLORS.bad }}>
+                {commentErr}
+              </div>
+            ) : null}
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-[11px] text-white/55">
+                <div className="uppercase tracking-widest">Latest {commentsList.length ? `(${commentsList.length})` : ""}</div>
+                <div className="text-white/45">ESC to close</div>
+              </div>
+
+              <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
+                {commentsLoading ? (
+                  <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                    Loading…
+                  </div>
+                ) : commentsList.length === 0 ? (
+                  <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                    No comments yet. Be the first to chirp.
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {commentsList.map((c) => (
+                      <div key={c.id} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[12px] font-black text-white/90 truncate">{c.displayName || c.username || "Anonymous"}</div>
+                          <div className="text-[11px] text-white/45 shrink-0">{formatCommentTime(c.createdAt)}</div>
+                        </div>
+                        <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">{c.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-3 text-[11px] text-white/45">Keep it civil. Banter is good — abuse gets binned.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Sidebar “strategy”
+  const StrategySidebar = () => {
+    const leaderDiff =
+      myCurrentStreak > leaderStreak ? "You’re leading" : myCurrentStreak === leaderStreak ? "Tied" : `Need ${leaderStreak - myCurrentStreak} to catch`;
+
+    return (
+      <div className="lg:sticky lg:top-[92px] space-y-3">
+        <div
+          className="rounded-2xl border overflow-hidden"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: `linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))`,
+            boxShadow: "0 18px 55px rgba(0,0,0,0.60)",
+          }}
+        >
+          <div className="px-4 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="text-[11px] uppercase tracking-widest text-white/55">Strategy</div>
+            <div className="mt-1 text-[14px] font-black text-white">The Ladder</div>
+          </div>
+
+          <div className="p-4">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.25)" }}>
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Your streak</div>
+                <div className="mt-1 text-[22px] font-black" style={{ color: COLORS.white }}>
+                  {myCurrentStreak}
+                </div>
+                <div className="mt-1 text-[11px] text-white/55">{leaderDiff}</div>
+              </div>
+
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(0,229,255,0.18)", background: "rgba(0,229,255,0.06)" }}>
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Leader</div>
+                <div className="mt-1 text-[22px] font-black" style={{ color: "rgba(0,229,255,0.95)" }}>
+                  {leaderStreak}
+                </div>
+                <div className="mt-1 text-[11px] text-white/55">Overall top</div>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Picks</div>
+                <div className="mt-1 text-[16px] font-black text-white">{picksMadeAll}</div>
+              </div>
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Accuracy</div>
+                <div className="mt-1 text-[16px] font-black" style={{ color: COLORS.good }}>
+                  {accuracyPct}%
+                </div>
+              </div>
+              <div className="rounded-xl border px-3 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                <div className="text-[10px] uppercase tracking-widest text-white/55">Next lock</div>
+                <div className="mt-1 text-[13px] font-black" style={{ color: "rgba(0,229,255,0.92)" }}>
+                  {topLockText}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!user) {
+                    showLockToast("Log in to play", "Create a free account to save picks + appear on ladders.");
+                    return;
+                  }
+                  if (!activeGame) return;
+                  if (picksMadeActive <= 0) {
+                    showLockToast("Pick something", "Tap YES/NO on any question.");
+                    return;
+                  }
+                  showLockToast("Locked in ✅", "Your picks are saved instantly.");
+                }}
+                className="flex-1 rounded-xl border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(206,32,41,0.55)",
+                  background: `linear-gradient(180deg, rgba(206,32,41,0.95), rgba(139,15,22,0.85))`,
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 16px 40px rgba(206,32,41,0.18)",
+                  opacity: activeGameLocked ? 0.55 : 1,
+                }}
+                disabled={activeGameLocked}
+                title={activeGameLocked ? "Game locked" : "Lock in picks"}
+              >
+                {lockButtonLabel}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => clearAllActive()}
+                className="rounded-xl border px-4 py-3 text-[13px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.04)",
+                  color: "rgba(255,255,255,0.85)",
+                  opacity: activeGameLocked ? 0.55 : 1,
+                }}
+                disabled={activeGameLocked || picksMadeActive <= 0}
+                title="Clear all picks for this match"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="mt-2 text-[11px] text-white/55">
+              Reminder: <span className="font-black text-white/80">1 miss</span> resets your entire streak to{" "}
+              <span className="font-black" style={{ color: COLORS.red }}>
+                0
+              </span>
+              .
+            </div>
+          </div>
+        </div>
+
+        <StrategyLadder base={myCurrentStreak || 0} gain={potentialGain} />
+
+        {/* Eligibility (compact) */}
+        <div className="rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+          <div className="px-4 py-3 border-b" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+            <div className="text-[11px] uppercase tracking-widest text-white/55">Round eligibility</div>
+            <div className="mt-1 text-[13px] text-white/80">
+              Need <span className="font-black" style={{ color: COLORS.red }}>{ELIGIBILITY.MIN_STREAK}+</span> streak and{" "}
+              <span className="font-black" style={{ color: COLORS.red }}>{ELIGIBILITY.MIN_GAMES}</span> locked games.
+            </div>
+          </div>
+
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[12px] font-black text-white/85">Streak target</div>
+              <div
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: eligibility.streakOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
+                  background: eligibility.streakOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
+                  color: eligibility.streakOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
+                }}
+              >
+                {eligibility.streakOk ? "✅ Met" : `Need ${eligibility.streakNeed}`}
+              </div>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div
+                className="h-full"
+                style={{
+                  width: `${eligibility.streakProg}%`,
+                  background: `linear-gradient(90deg, rgba(206,32,41,0.25), rgba(206,32,41,0.95))`,
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[12px] font-black text-white/85">Games played</div>
+              <div
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: eligibility.gamesOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
+                  background: eligibility.gamesOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
+                  color: eligibility.gamesOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
+                }}
+              >
+                {eligibility.gamesOk ? "✅ Met" : `Need ${eligibility.gamesNeed}`}
+              </div>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div
+                className="h-full"
+                style={{
+                  width: `${eligibility.gamesProg}%`,
+                  background: `linear-gradient(90deg, rgba(206,32,41,0.25), rgba(206,32,41,0.95))`,
+                }}
+              />
+            </div>
+
+            <div className="text-[11px] text-white/55">
+              Status:{" "}
+              <span className="font-black" style={{ color: eligibility.eligibleNow ? COLORS.good : "rgba(255,255,255,0.85)" }}>
+                {eligibility.eligibleNow ? "Eligible (so far)" : "Not eligible yet"}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
-      {/* Comments Modal */}
-      {commentsOpen && commentsQuestion ? (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeComments();
-          }}
-          style={{
-            background: "rgba(0,0,0,0.70)",
-            backdropFilter: "blur(8px)",
-          }}
-        >
-          <div
-            className="w-full max-w-2xl rounded-2xl border overflow-hidden"
-            style={{
-              borderColor: COLORS.orangeSoft,
-              background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
-              boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
-            }}
-          >
+      <style>{`
+        @keyframes torpyGlow {
+          0% { box-shadow: 0 0 0 rgba(206,32,41,0.0); }
+          50% { box-shadow: 0 0 34px rgba(206,32,41,0.22); }
+          100% { box-shadow: 0 0 0 rgba(206,32,41,0.0); }
+        }
+      `}</style>
+
+      {/* Sticky header (The Sweat) */}
+      <StickyHeader />
+
+      {/* Toast */}
+      {lockToast ? (
+        <div className="fixed inset-x-0 top-[78px] z-[90] px-4 sm:px-6">
+          <div className="w-full max-w-6xl mx-auto">
             <div
-              className="px-5 py-4 border-b"
+              className="rounded-2xl border px-4 py-3"
               style={{
-                borderColor: "rgba(255,46,77,0.20)",
-                background: "rgba(255,255,255,0.03)",
+                borderColor: "rgba(206,32,41,0.25)",
+                background: "rgba(0,0,0,0.55)",
+                backdropFilter: "blur(10px)",
+                boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
               }}
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55">Comments</div>
-                  <div className="mt-1 text-[14px] font-extrabold text-white truncate">
-                    {commentsGame?.match ?? "Game"} • Quarter {commentsQuestion.quarter}
-                  </div>
-                  <div className="mt-1 text-[13px] text-white/80">{commentsQuestion.question}</div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeComments}
-                  className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.16)",
-                    background: "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.90)",
-                  }}
-                  aria-label="Close comments"
-                  title="Close"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            <div className="px-5 py-4">
-              {!user ? (
-                <div
-                  className="rounded-xl border p-3 text-[12px] text-white/80"
-                  style={{
-                    borderColor: "rgba(255,46,77,0.35)",
-                    background: "rgba(255,46,77,0.10)",
-                  }}
-                >
-                  Log in to post comments. You can still read the chat.
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder={user ? "Say something (max 240 chars)..." : "Log in to comment..."}
-                  disabled={!user || commentPosting}
-                  className="flex-1 rounded-xl border px-4 py-3 text-[13px] outline-none"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.12)",
-                    background: "rgba(255,255,255,0.04)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      postComment();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={postComment}
-                  disabled={!user || commentPosting}
-                  className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{
-                    borderColor: "rgba(0,229,255,0.30)",
-                    background: "rgba(0,229,255,0.10)",
-                    color: "rgba(0,229,255,0.95)",
-                  }}
-                >
-                  {commentPosting ? "Posting…" : "Post"}
-                </button>
-              </div>
-
-              {commentErr ? (
-                <div className="mt-2 text-[12px]" style={{ color: COLORS.bad }}>
-                  {commentErr}
-                </div>
-              ) : null}
-
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-[11px] text-white/55">
-                  <div className="uppercase tracking-widest">
-                    Latest {commentsList.length ? `(${commentsList.length})` : ""}
-                  </div>
-                  <div className="text-white/45">ESC to close</div>
-                </div>
-
-                <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
-                  {commentsLoading ? (
-                    <div
-                      className="rounded-xl border p-3 text-[12px] text-white/70"
-                      style={{
-                        borderColor: "rgba(255,255,255,0.10)",
-                        background: "rgba(255,255,255,0.03)",
-                      }}
-                    >
-                      Loading comments…
-                    </div>
-                  ) : commentsList.length === 0 ? (
-                    <div
-                      className="rounded-xl border p-3 text-[12px] text-white/70"
-                      style={{
-                        borderColor: "rgba(255,255,255,0.10)",
-                        background: "rgba(255,255,255,0.03)",
-                      }}
-                    >
-                      No comments yet. Be the first to chirp.
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {commentsList.map((c) => (
-                        <div
-                          key={c.id}
-                          className="rounded-xl border p-3"
-                          style={{
-                            borderColor: "rgba(255,255,255,0.10)",
-                            background: "rgba(255,255,255,0.03)",
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-[12px] font-black text-white/90 truncate">
-                              {c.displayName || c.username || "Anonymous"}
-                            </div>
-                            <div className="text-[11px] text-white/45 shrink-0">
-                              {formatCommentTime(c.createdAt)}
-                            </div>
-                          </div>
-                          <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">
-                            {c.body}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-3 text-[11px] text-white/45">
-                  Keep it civil. Banter is good — abuse gets binned.
-                </div>
+              <div className="text-[13px] font-black text-white">{lockToast.title}</div>
+              <div className="mt-0.5 text-[12px]" style={{ color: "rgba(255,255,255,0.70)" }}>
+                {lockToast.body}
               </div>
             </div>
           </div>
         </div>
       ) : null}
 
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">
-        {/* Header */}
+      {/* Comments Modal */}
+      <CommentsModal />
+
+      {/* Page content */}
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-5 pb-24 sm:pb-10">
+        {/* Top line / title */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-3xl sm:text-4xl font-black">{pageTitle}</h1>
+              <h1 className="text-2xl sm:text-3xl font-black">{pageTitle}</h1>
               {roundLabel ? (
                 <span
-                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  className="mt-0.5 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                   style={{
-                    borderColor: COLORS.orangeSoft,
-                    background: "rgba(255,46,77,0.10)",
+                    borderColor: "rgba(206,32,41,0.35)",
+                    background: "rgba(206,32,41,0.10)",
                     color: "rgba(255,255,255,0.92)",
                   }}
                 >
@@ -1496,8 +1999,9 @@ export default function PicksPage() {
                 </span>
               ) : null}
             </div>
-            <p className="mt-1 text-sm text-white/60">
-              Pick any questions you want. Finalised questions are locked.
+
+            <p className="mt-1 text-[13px]" style={{ color: COLORS.textDim }}>
+              Pick <span className="font-black text-white">0, 1, 5 or all</span> — your call. Use ✕ to clear.
             </p>
           </div>
 
@@ -1508,367 +2012,11 @@ export default function PicksPage() {
               style={{
                 borderColor: "rgba(255,255,255,0.12)",
                 background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.88)",
               }}
             >
-              How to play STREAKr
+              How to play
             </Link>
-          </div>
-        </div>
-
-        {/* Top dashboard */}
-        <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <div
-            className="rounded-2xl border p-4"
-            style={{
-              borderColor: COLORS.orangeSoft,
-              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[11px] uppercase tracking-widest text-white/55">Your streak</p>
-                <p className="text-4xl font-black mt-1" style={{ color: COLORS.orange }}>
-                  {myCurrentStreak}
-                </p>
-              </div>
-
-              <div className="text-right">
-                <p className="text-[11px] uppercase tracking-widest text-white/55">Leader</p>
-                <p className="text-3xl font-black mt-1" style={{ color: COLORS.cyan }}>
-                  {leaderStreak}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 space-y-2">
-              <div
-                className="h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${myVsLeaderPct.mine}%`,
-                    background: `linear-gradient(90deg, ${COLORS.orange}, rgba(255,46,77,0.18))`,
-                  }}
-                />
-              </div>
-
-              <div
-                className="h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${myVsLeaderPct.lead}%`,
-                    background: `linear-gradient(90deg, ${COLORS.cyan}, rgba(0,229,255,0.18))`,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={shareStreak}
-                className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.05)",
-                }}
-              >
-                Share my streak
-              </button>
-
-              <div className="text-right text-[11px] text-white/55">
-                <div>Current</div>
-                <div className="font-bold text-white/80">
-                  {myCurrentStreak > leaderStreak
-                    ? "You’re leading"
-                    : myCurrentStreak === leaderStreak
-                    ? "Tied"
-                    : `Need ${leaderStreak - myCurrentStreak} to catch`}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-4"
-            style={{
-              borderColor: COLORS.orangeSoft,
-              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
-            }}
-          >
-            <p className="text-[11px] uppercase tracking-widest text-white/55">Dashboard</p>
-
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <p className="text-[10px] uppercase tracking-wide text-white/55">Picks</p>
-                <p className="text-xl font-black mt-1 text-white">
-                  {picksMade}/{totalPickable}
-                </p>
-              </div>
-
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <p className="text-[10px] uppercase tracking-wide text-white/55">Accuracy</p>
-                <p className="text-xl font-black mt-1" style={{ color: "rgba(25,195,125,0.95)" }}>
-                  {accuracyPct}%
-                </p>
-              </div>
-
-              <div
-                className="rounded-xl border px-3 py-3"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <p className="text-[10px] uppercase tracking-wide text-white/55">Next lock</p>
-                <p className="text-[13px] font-black mt-2" style={{ color: COLORS.cyan }}>
-                  {topLockText}
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 text-[11px] text-white/55">
-              {user
-                ? "Pick what you like — no pressure to do them all."
-                : "Log in to save picks + appear on leaderboards."}
-            </div>
-          </div>
-
-          <div
-            className="rounded-2xl border p-4"
-            style={{
-              borderColor: COLORS.orangeSoft,
-              background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
-              boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
-            }}
-          >
-            <p className="text-[11px] uppercase tracking-widest text-white/55">Quick</p>
-
-            <div className="mt-3 flex flex-col gap-2">
-              <Link
-                href="/leaderboards"
-                className="rounded-xl border px-4 py-3 text-[12px] font-black transition hover:translate-y-[-1px] active:scale-[0.99]"
-                style={{
-                  borderColor: "rgba(0,229,255,0.24)",
-                  background: "rgba(0,229,255,0.07)",
-                  color: "rgba(0,229,255,0.95)",
-                }}
-              >
-                View Leaderboards →
-              </Link>
-
-              <Link
-                href="/how-to-play"
-                className="rounded-xl border px-4 py-3 text-[12px] font-black transition hover:translate-y-[-1px] active:scale-[0.99]"
-                style={{
-                  borderColor: "rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.04)",
-                  color: "rgba(255,255,255,0.88)",
-                }}
-              >
-                How it works →
-              </Link>
-
-              <div
-                className="rounded-xl border px-4 py-3 text-[11px] text-white/65"
-                style={{
-                  borderColor: COLORS.orangeSoft,
-                  background: "rgba(255,46,77,0.10)",
-                }}
-              >
-                <span className="font-black" style={{ color: COLORS.orange }}>
-                  Tip:
-                </span>{" "}
-                Sponsor questions count towards Streak — reveal them to enter the draw.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Phase 2: Eligibility panel (under dashboard items) */}
-        <div
-          className="mt-3 rounded-2xl border p-4"
-          style={{
-            borderColor: COLORS.orangeSoft,
-            background: `linear-gradient(180deg, rgba(255,46,77,0.08) 0%, rgba(255,255,255,0.03) 45%, rgba(0,0,0,0.35) 100%)`,
-            boxShadow: "0 18px 55px rgba(0,0,0,0.80)",
-          }}
-        >
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor: eligibility.eligibleNow ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
-                    background: eligibility.eligibleNow ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
-                    color: eligibility.eligibleNow ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.85)",
-                  }}
-                >
-                  {eligibility.eligibleNow ? "Eligible (so far)" : "Not eligible yet"}
-                </div>
-
-                <span className="text-[11px] uppercase tracking-widest text-white/55">
-                  To Win The Round - Eligibility Checklist
-                </span>
-              </div>
-
-              <div className="mt-2 text-[13px] text-white/80">
-                To be in the mix: hit{" "}
-                <span className="font-black" style={{ color: COLORS.orange }}>
-                  streak {ELIGIBILITY.MIN_STREAK}+
-                </span>{" "}
-                and get picks into{" "}
-                <span className="font-black" style={{ color: COLORS.orange }}>
-                  {ELIGIBILITY.MIN_GAMES} locked games
-                </span>
-                .
-              </div>
-
-              <div className="mt-2 text-[11px] text-white/55">
-                Hybrid rule: your progress updates as games lock + results finalise.
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 md:justify-end">
-              <div
-                className="rounded-xl border px-4 py-3"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                <div className="text-[10px] uppercase tracking-widest text-white/55">Need</div>
-                <div className="mt-1 text-[12px] font-black text-white/90">
-                  {eligibility.eligibleNow
-                    ? "Nothing — you’re live 🔥"
-                    : `${eligibility.streakNeed > 0 ? `${eligibility.streakNeed} streak` : "Streak ok"}, ${
-                        eligibility.gamesNeed > 0 ? `${eligibility.gamesNeed} games` : "Games ok"
-                      }`}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Streak progress */}
-            <div
-              className="rounded-2xl border p-4"
-              style={{
-                borderColor: eligibility.streakOk ? "rgba(25,195,125,0.30)" : "rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest text-white/55">Streak target</div>
-                  <div className="mt-1 text-[18px] font-black">
-                    <span style={{ color: COLORS.orange }}>{myCurrentStreak}</span>
-                    <span className="text-white/55"> / {ELIGIBILITY.MIN_STREAK}</span>
-                  </div>
-                </div>
-
-                <div
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor: eligibility.streakOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
-                    background: eligibility.streakOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
-                    color: eligibility.streakOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
-                  }}
-                >
-                  {eligibility.streakOk ? "✅ Met" : "⏳ Building"}
-                </div>
-              </div>
-
-              <div
-                className="mt-3 h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${eligibility.streakProg}%`,
-                    background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.95))`,
-                  }}
-                />
-              </div>
-
-              <div className="mt-2 text-[11px] text-white/55">
-                {eligibility.streakOk
-                  ? "Keep it alive — one slip and it snaps."
-                  : `Get to ${ELIGIBILITY.MIN_STREAK} to qualify.`}
-              </div>
-            </div>
-
-            {/* Games played progress (locked games only) */}
-            <div
-              className="rounded-2xl border p-4"
-              style={{
-                borderColor: eligibility.gamesOk ? "rgba(25,195,125,0.30)" : "rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest text-white/55">Games played</div>
-                  <div className="mt-1 text-[18px] font-black">
-                    <span style={{ color: COLORS.orange }}>{gamesPlayedLocked}</span>
-                    <span className="text-white/55"> / {ELIGIBILITY.MIN_GAMES}</span>
-                  </div>
-                </div>
-
-                <div
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor: eligibility.gamesOk ? "rgba(25,195,125,0.45)" : "rgba(255,255,255,0.12)",
-                    background: eligibility.gamesOk ? "rgba(25,195,125,0.10)" : "rgba(255,255,255,0.04)",
-                    color: eligibility.gamesOk ? "rgba(25,195,125,0.95)" : "rgba(255,255,255,0.80)",
-                  }}
-                >
-                  {eligibility.gamesOk ? "✅ Met" : "⏳ Get involved"}
-                </div>
-              </div>
-
-              <div
-                className="mt-3 h-2 rounded-full overflow-hidden"
-                style={{ background: "rgba(255,255,255,0.06)" }}
-              >
-                <div
-                  className="h-full"
-                  style={{
-                    width: `${eligibility.gamesProg}%`,
-                    background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.95))`,
-                  }}
-                />
-              </div>
-
-              <div className="mt-2 text-[11px] text-white/55">
-                Counts once a game is{" "}
-                <span className="font-black" style={{ color: COLORS.cyan }}>
-                  locked
-                </span>{" "}
-                (started). One pick in the game is enough.
-              </div>
-            </div>
           </div>
         </div>
 
@@ -1878,133 +2026,172 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* Games */}
-        <div className="mt-6 flex flex-col gap-6">
-          {loading ? (
+        {/* Main split layout */}
+        <div className="mt-5 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4">
+          {/* Left: The picks grid */}
+          <div>
+            {/* “match header card” */}
             <div
-              className="rounded-2xl border p-4"
+              className="rounded-3xl border overflow-hidden"
               style={{
-                borderColor: COLORS.orangeSoft,
-                background: "rgba(255,255,255,0.03)",
+                borderColor: "rgba(255,255,255,0.10)",
+                background: `linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 45%, rgba(0,0,0,0.35) 100%)`,
+                boxShadow: "0 18px 55px rgba(0,0,0,0.65)",
               }}
             >
-              <div className="h-4 w-44 rounded bg-white/10" />
-              <div className="mt-3 h-3 w-80 rounded bg-white/10" />
-              <div className="mt-5 h-24 rounded bg-white/5" />
-            </div>
-          ) : games.length === 0 ? (
-            <div
-              className="rounded-2xl border p-4 text-sm text-white/70"
-              style={{
-                borderColor: COLORS.orangeSoft,
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
-              No games found.
-            </div>
-          ) : (
-            games.map((g) => {
-              const lockMs = new Date(g.startTime).getTime() - nowMs;
-              const gameLocked = lockMs <= 0;
+              <div className="relative h-[150px] sm:h-[190px]">
+                <Image
+                  src="/afl1.png"
+                  alt="Torpie picks"
+                  fill
+                  priority
+                  className="object-cover opacity-80"
+                  sizes="(max-width: 768px) 100vw, 70vw"
+                />
+                <div className="absolute inset-0 bg-black/50" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
 
-              const gamePicked = g.questions.reduce((acc, q) => {
-                const p = effectivePick(localPicks[q.id], q.userPick);
-                return acc + (p === "yes" || p === "no" ? 1 : 0);
-              }, 0);
-
-              const gameTotal = g.questions.length;
-              const progressPct = gameTotal > 0 ? (gamePicked / gameTotal) * 100 : 0;
-
-              return (
-                <div
-                  key={g.id}
-                  className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: COLORS.orangeSoft,
-                    background: "rgba(255,255,255,0.02)",
-                  }}
-                >
-                  {/* Game header */}
-                  <div
-                    className="px-4 py-4 border-b"
-                    style={{
-                      borderColor: "rgba(255,46,77,0.20)",
-                      background:
-                        "linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)",
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-lg sm:text-xl font-black truncate" style={{ color: COLORS.white }}>
-                          {g.match}
-                        </div>
-                        <div className="mt-0.5 text-[12px] text-white/70 truncate">
-                          {g.venue} • {formatAedt(g.startTime)}
-                        </div>
+                <div className="absolute inset-x-0 bottom-0 p-4 sm:p-5">
+                  <div className="flex items-end justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-[11px] uppercase tracking-widest text-white/55">Current match</div>
+                      <div className="mt-1 text-[18px] sm:text-[22px] font-black text-white truncate">
+                        {activeGame?.match ?? "Loading…"}
                       </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span
-                          className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                          style={{
-                            borderColor: "rgba(255,255,255,0.12)",
-                            background: "rgba(255,255,255,0.04)",
-                            color: "rgba(255,255,255,0.90)",
-                          }}
-                        >
-                          Picks: {gamePicked}/{gameTotal}
-                        </span>
-
-                        <span
-                          className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                          style={{
-                            borderColor: gameLocked ? "rgba(255,255,255,0.12)" : COLORS.orangeSoft2,
-                            background: gameLocked ? "rgba(255,255,255,0.04)" : "rgba(255,46,77,0.10)",
-                            color: "rgba(255,255,255,0.90)",
-                          }}
-                        >
-                          {gameLocked ? "Locked" : `Locks in ${msToCountdown(lockMs)}`}
-                        </span>
+                      <div className="mt-1 text-[12px] text-white/70 truncate">
+                        {activeGame ? `${picksMadeActive} picked • ${activeGameLocked ? "Locked" : `Locks in ${msToCountdown(activeGameLockMs)}`}` : "—"}
                       </div>
                     </div>
 
-                    <div className="mt-3">
-                      <div
-                        className="h-2 rounded-full overflow-hidden"
-                        style={{ background: "rgba(255,255,255,0.06)" }}
-                      >
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${progressPct}%`,
-                            background: `linear-gradient(90deg, rgba(255,46,77,0.25), rgba(255,46,77,0.85))`,
-                          }}
-                        />
+                    <div className="hidden sm:flex flex-col items-end">
+                      <div className="text-[11px] uppercase tracking-widest text-white/55">Potential</div>
+                      <div className="mt-1 text-[24px] font-black" style={{ color: COLORS.white }}>
+                        {potentialStreak}
                       </div>
+                      <div className="text-[11px] text-white/70">+{potentialGain} if all correct</div>
                     </div>
                   </div>
 
-                  {/* Grid */}
-                  <div className="p-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {g.questions.map((q) => (
-                        <PickCard key={q.id} g={g} q={q} gameLocked={gameLocked} />
-                      ))}
-                    </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-white/60">
+                    <span className="inline-flex items-center rounded-full px-3 py-1 border" style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)" }}>
+                      {activeGame?.venue ?? "—"}
+                    </span>
+                    <span className="inline-flex items-center rounded-full px-3 py-1 border" style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.04)" }}>
+                      {activeGame?.startTime ? formatAedt(activeGame.startTime) : "—"}
+                    </span>
+                    <span className="inline-flex items-center rounded-full px-3 py-1 border" style={{ borderColor: "rgba(206,32,41,0.25)", background: "rgba(206,32,41,0.10)" }}>
+                      Reminder: 1 miss = streak to <span className="ml-1 font-black" style={{ color: COLORS.red }}>0</span>
+                    </span>
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
+              </div>
 
-        <div className="mt-10 pb-8 text-center text-[11px] text-white/45">
-          <span className="font-black" style={{ color: COLORS.orange }}>
-            STREAKr
-          </span>{" "}
-          — Back yourself. One slip and it’s back to zero.
+              {/* quick actions row */}
+              <div className="p-4 sm:p-5 border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[12px] font-black text-white/85">
+                      {picksMadeActive}/{totalPickableActive} selected
+                    </div>
+                    <div className="text-[12px] text-white/55">•</div>
+                    <div className="text-[12px] font-black" style={{ color: COLORS.red }}>
+                      +{potentialGain} streak if all correct
+                    </div>
+                  </div>
+
+                  <div className="hidden sm:flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => clearAllActive()}
+                      className="rounded-xl border px-4 py-2 text-[12px] font-black transition active:scale-[0.99]"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.12)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "rgba(255,255,255,0.85)",
+                        opacity: activeGameLocked ? 0.55 : 1,
+                      }}
+                      disabled={activeGameLocked || picksMadeActive <= 0}
+                    >
+                      Clear all
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!user) {
+                          showLockToast("Log in to play", "Create a free account to save picks + appear on ladders.");
+                          return;
+                        }
+                        if (!activeGame) return;
+                        if (picksMadeActive <= 0) {
+                          showLockToast("Pick something", "Tap YES/NO on any question.");
+                          return;
+                        }
+                        showLockToast("Locked in ✅", "Your picks are saved instantly.");
+                      }}
+                      className="rounded-xl border px-5 py-2 text-[12px] font-black transition active:scale-[0.99]"
+                      style={{
+                        borderColor: "rgba(206,32,41,0.55)",
+                        background: `linear-gradient(180deg, rgba(206,32,41,0.95), rgba(139,15,22,0.85))`,
+                        color: "rgba(255,255,255,0.98)",
+                        boxShadow: "0 16px 40px rgba(206,32,41,0.16)",
+                        opacity: activeGameLocked ? 0.55 : 1,
+                        animation: picksMadeActive > 0 && !activeGameLocked ? "torpyGlow 1.6s ease-in-out infinite" : "none",
+                      }}
+                      disabled={activeGameLocked}
+                    >
+                      {lockButtonLabel}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2 text-[11px]" style={{ color: COLORS.textFaint }}>
+                  Picks save instantly as you tap. “Lock in” is just a confidence button 😈
+                </div>
+              </div>
+            </div>
+
+            {/* Questions grid */}
+            <div className="mt-4">
+              {loading ? (
+                <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                  <div className="h-4 w-48 rounded bg-white/10" />
+                  <div className="mt-3 h-3 w-80 rounded bg-white/10" />
+                  <div className="mt-5 h-24 rounded bg-white/5" />
+                </div>
+              ) : !activeGame ? (
+                <div className="rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                  No games found.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {activeQuestions.map((q) => (
+                    <PickCard key={q.id} g={activeGame} q={q} gameLocked={activeGameLocked} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 text-[11px] text-white/45">
+              <span className="font-black" style={{ color: COLORS.red }}>
+                TORPIE
+              </span>{" "}
+              — Back yourself. One slip and it’s back to zero.
+            </div>
+          </div>
+
+          {/* Right: Strategy sidebar (desktop/tablet large) */}
+          <div className="hidden lg:block">
+            <StrategySidebar />
+          </div>
         </div>
       </div>
+
+      {/* Mobile lock bar */}
+      <LockInBarMobile />
+
+      {/* Footer spacing on desktop */}
+      <div className="hidden sm:block h-6" />
     </div>
   );
 }
