@@ -169,10 +169,7 @@ function safeSponsorKey(uid: string | null, roundNumber: number | null) {
   return `torpie:sponsorReveal:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function effectivePick(
-  local: LocalPick | undefined,
-  api: PickOutcome | undefined
-): PickOutcome | undefined {
+function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
   if (local === "none") return undefined;
   if (local === "yes" || local === "no") return local;
   return api;
@@ -329,6 +326,7 @@ export default function PicksPage() {
   const [slipConfirmMode, setSlipConfirmMode] = useState(false);
   const [slipToast, setSlipToast] = useState<string>("");
 
+  // NOTE: no pulsing / ping animations anywhere in this file.
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -514,7 +512,7 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, [loadLeader]);
 
-  // Confetti milestone
+  // Confetti milestone (not a pulse; short celebration)
   useEffect(() => {
     const s = myCurrentStreak || 0;
     const milestone = Math.floor(s / 5) * 5;
@@ -601,10 +599,7 @@ export default function PicksPage() {
     const streakNeed = Math.max(0, ELIGIBILITY.MIN_STREAK - (myCurrentStreak || 0));
     const gamesNeed = Math.max(0, ELIGIBILITY.MIN_GAMES - gamesPlayedLocked);
 
-    const streakProg = Math.max(
-      0,
-      Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100)
-    );
+    const streakProg = Math.max(0, Math.min(100, ((myCurrentStreak || 0) / ELIGIBILITY.MIN_STREAK) * 100));
     const gamesProg = Math.max(0, Math.min(100, (gamesPlayedLocked / ELIGIBILITY.MIN_GAMES) * 100));
 
     return {
@@ -804,7 +799,7 @@ export default function PicksPage() {
         match: g.match,
         venue: g.venue,
         startTime: g.startTime,
-        picks: picks.sort((a, b) => (a.quarter - b.quarter) || a.question.localeCompare(b.question)),
+        picks: picks.sort((a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question)),
       };
     },
     [localPicks, roundNumber]
@@ -892,8 +887,7 @@ export default function PicksPage() {
     setTimeout(() => setSlipToast(""), 1400);
   }, []);
 
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   // Active match meta
   const activeGameMeta = useMemo(() => {
@@ -926,7 +920,7 @@ export default function PicksPage() {
     return qs.filter((q) => q.status === filterTab);
   }, [activeGame, filterTab]);
 
-  // ---- WHITE CARD UI HELPERS (same as previous) ----
+  // ---- WHITE CARD UI HELPERS ----
   const renderSentimentWhite = (q: ApiQuestion) => {
     const yes = clampPct(q.yesPercent);
     const no = clampPct(q.noPercent);
@@ -1062,15 +1056,7 @@ export default function PicksPage() {
     );
   };
 
-  const WhitePickCard = ({
-    g,
-    q,
-    gameLocked,
-  }: {
-    g: ApiGame;
-    q: ApiQuestion;
-    gameLocked: boolean;
-  }) => {
+  const WhitePickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
     const sponsor = q.isSponsorQuestion === true;
     const sponsorName = (q.sponsorName || "Rebel Sport").trim();
     const sponsorPrize = (q.sponsorPrize || "$100 gift card").trim();
@@ -1278,8 +1264,7 @@ export default function PicksPage() {
     );
   };
 
-  // -------- NEW: Home-page style game boxes on Picks dashboard --------
-  // This matches your screenshot: image top, white lower panel, red Play Now button.
+  // Home-page style game boxes on Picks dashboard
   const GameBoxHomeStyle = ({ g }: { g: ApiGame }) => {
     const lockMs = new Date(g.startTime).getTime() - nowMs;
     const gameLocked = lockMs <= 0;
@@ -1292,9 +1277,6 @@ export default function PicksPage() {
     const total = g.questions.length;
     const isLockedByUser = !!lockedGames[g.id];
 
-    // If you want real match images like your home page cards, drop files here:
-    // /public/matches/<gameId>.jpg
-    // If missing, the gradient background still looks good.
     const matchImg = `/matches/${encodeURIComponent(g.id)}.jpg`;
 
     return (
@@ -1306,7 +1288,6 @@ export default function PicksPage() {
           boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
         }}
       >
-        {/* Image top */}
         <button
           type="button"
           onClick={() => selectMatch(g.id)}
@@ -1327,7 +1308,6 @@ export default function PicksPage() {
             fill
             sizes="(max-width: 640px) 100vw, 33vw"
             style={{ objectFit: "cover", opacity: 0.55 }}
-            onError={() => {}}
           />
 
           <div
@@ -1338,9 +1318,7 @@ export default function PicksPage() {
           />
 
           <div className="absolute left-4 right-4 bottom-3">
-            <div className="text-[11px] text-white/70 font-semibold">
-              {formatAedt(g.startTime)}
-            </div>
+            <div className="text-[11px] text-white/70 font-semibold">{formatAedt(g.startTime)}</div>
             <div className="mt-1 text-[18px] font-black text-white truncate">{g.match}</div>
 
             <div className="mt-2 flex items-center gap-2">
@@ -1393,7 +1371,6 @@ export default function PicksPage() {
           </div>
         </button>
 
-        {/* White bottom panel */}
         <div
           className="px-4 py-4"
           style={{
@@ -1501,11 +1478,7 @@ export default function PicksPage() {
       commentsUnsubRef.current = null;
     }
 
-    const qRef = query(
-      collection(db, "comments"),
-      where("questionId", "==", commentsQuestion.id),
-      limit(50)
-    );
+    const qRef = query(collection(db, "comments"), where("questionId", "==", commentsQuestion.id), limit(50));
 
     commentsUnsubRef.current = onSnapshot(
       qRef,
@@ -1776,7 +1749,6 @@ export default function PicksPage() {
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn && <Confetti recycle={false} numberOfPieces={220} gravity={0.22} />}
 
-      {/* Slip Modal */}
       <SlipModal />
 
       {/* Comments Modal */}
@@ -1936,9 +1908,7 @@ export default function PicksPage() {
                   )}
                 </div>
 
-                <div className="mt-3 text-[11px] text-white/45">
-                  Keep it civil. Banter is good — abuse gets binned.
-                </div>
+                <div className="mt-3 text-[11px] text-white/45">Keep it civil. Banter is good — abuse gets binned.</div>
               </div>
             </div>
           </div>
@@ -2079,18 +2049,13 @@ export default function PicksPage() {
         {/* MAIN */}
         {!activeGame ? (
           <div className="mt-6">
-            {/* Section label (like home page) */}
             <div className="flex items-end justify-between gap-3">
               <div>
                 <div className="text-[12px] uppercase tracking-widest text-white/55">Featured Matches</div>
-                <div className="mt-1 text-[14px] text-white/75">
-                  Pick any amount — questions live inside Picks.
-                </div>
+                <div className="mt-1 text-[14px] text-white/75">Pick any amount — questions live inside Picks.</div>
               </div>
 
-              <div className="text-[12px] text-white/45 hidden sm:block">
-                Tap a card to tunnel in.
-              </div>
+              <div className="text-[12px] text-white/45 hidden sm:block">Tap a card to tunnel in.</div>
             </div>
 
             {loading ? (
@@ -2136,7 +2101,6 @@ export default function PicksPage() {
           </div>
         ) : (
           <div className="mt-6">
-            {/* Dedicated match view (kept as-is from your last build) */}
             <div
               className="rounded-2xl border overflow-hidden"
               style={{
@@ -2208,7 +2172,6 @@ export default function PicksPage() {
                           {activeGameMeta.gameLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(activeGameMeta.lockMs)}`}
                         </span>
 
-                        {/* Quick slip button in header */}
                         {activeGameMeta.selected > 0 ? (
                           <button
                             type="button"
@@ -2227,7 +2190,6 @@ export default function PicksPage() {
                           </button>
                         ) : null}
 
-                        {/* Lock flow (confirmation modal) */}
                         {activeGameMeta.selected > 0 && !activeGameMeta.gameLocked ? (
                           <button
                             type="button"
