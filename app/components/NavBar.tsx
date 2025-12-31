@@ -14,7 +14,6 @@ type MinimalUserDoc = {
   username?: string;
 };
 
-// Torpie red
 const TORPIE_RED = "#CE2029";
 
 export default function Navbar() {
@@ -35,14 +34,21 @@ export default function Navbar() {
       return;
     }
 
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
-      if (!snap.exists()) return;
-      const d = snap.data() as any;
-      setProfileDoc({
-        avatarUrl: d.avatarUrl ?? "",
-        username: d.username ?? "",
-      });
-    });
+    const load = async () => {
+      try {
+        const snap = await getDoc(doc(db, "users", user.uid));
+        if (!snap.exists()) return;
+        const d = snap.data() as any;
+        setProfileDoc({
+          avatarUrl: d.avatarUrl ?? "",
+          username: d.username ?? "",
+        });
+      } catch (e) {
+        console.error("Navbar: Failed to load user profile", e);
+      }
+    };
+
+    load();
   }, [user]);
 
   const currentAvatarSrc = useMemo(() => {
@@ -76,17 +82,17 @@ export default function Navbar() {
       className="w-full border-b border-black/10 bg-white"
       style={{ ["--torpie-red" as any]: TORPIE_RED }}
     >
-      <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        {/* LOGO */}
+      <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2">
+        {/* BIG, READABLE LOGO (LEFT) */}
         <Link href="/" className="flex items-center">
-          <div className="relative h-[44px] w-[180px] sm:h-[52px] sm:w-[220px]">
+          <div className="relative h-[56px] w-[260px] sm:h-[64px] sm:w-[300px]">
             <Image
               src="/Torpielogo.png"
               alt="Torpie"
               fill
               priority
-              className="object-contain"
-              sizes="220px"
+              className="object-contain object-left"
+              sizes="300px"
             />
           </div>
         </Link>
@@ -163,24 +169,45 @@ export default function Navbar() {
               ["/venue-locker-rooms", "Venue Locker Rooms"],
               ["/rewards", "Rewards"],
               ["/faq", "FAQ"],
-            ].map(([href, label]) => (
+            ].map(([href, txt]) => (
               <Link
                 key={href}
                 href={href}
                 onClick={() => setMenuOpen(false)}
                 className={linkClass(href)}
               >
-                {label}
+                {txt}
               </Link>
             ))}
 
-            <Link
-              href={user ? "/profile" : "/auth"}
-              onClick={() => setMenuOpen(false)}
-              className="mt-2 inline-flex items-center justify-center rounded-full border border-black/20 px-4 py-2 text-xs hover:border-[var(--torpie-red)] hover:text-[var(--torpie-red)]"
-            >
-              {user ? "Profile" : "Login"}
-            </Link>
+            <div className="mt-2 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-full overflow-hidden border border-black/15 bg-black/5 flex items-center justify-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={currentAvatarSrc}
+                    alt={label}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.display =
+                        "none";
+                    }}
+                  />
+                  <span className="text-xs font-bold">{avatarInitial}</span>
+                </div>
+                <span className="text-xs max-w-[160px] truncate text-black">
+                  {label}
+                </span>
+              </div>
+
+              <Link
+                href={user ? "/profile" : "/auth"}
+                onClick={() => setMenuOpen(false)}
+                className="inline-flex items-center justify-center rounded-full border border-black/20 px-4 py-2 text-xs hover:border-[var(--torpie-red)] hover:text-[var(--torpie-red)]"
+              >
+                {user ? "Profile" : "Login"}
+              </Link>
+            </div>
           </div>
         </div>
       )}
