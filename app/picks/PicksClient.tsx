@@ -28,6 +28,8 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  currentStreak?: number; // ✅ real streak from API
+  leaderScore?: number; // optional (wire later)
 };
 
 const COLORS = {
@@ -98,28 +100,15 @@ type TeamSlug =
 function teamNameToSlug(nameRaw: string): TeamSlug | null {
   const n = (nameRaw || "").toLowerCase().trim();
 
-  if (
-    n.includes("greater western sydney") ||
-    n === "gws" ||
-    n.includes("giants")
-  )
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants"))
     return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (
-    n.includes("western bulldogs") ||
-    n.includes("bulldogs") ||
-    n.includes("footscray")
-  )
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
     return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos"))
-    return "northmelbourne";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (
-    n.includes("st kilda") ||
-    n.includes("saints") ||
-    n.replace(/\s/g, "") === "stkilda"
-  )
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
     return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
@@ -148,6 +137,15 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
     `/aflteams/${teamSlug}-logo.png`,
+  ];
+}
+
+function homeTeamImageCandidates(teamSlug: TeamSlug): string[] {
+  return [
+    `/afl/grounds/${teamSlug}.jpg`,
+    `/afl/grounds/${teamSlug}.jpeg`,
+    `/afl/grounds/${teamSlug}.png`,
+    `/afl1.png`,
   ];
 }
 
@@ -243,23 +241,75 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-function CheckIcon({ size = 18 }: { size?: number }) {
+function CheckIcon({ size = 18, color = COLORS.green }: { size?: number; color?: string }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-    >
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
         d="M20 6L9 17l-5-5"
-        stroke={COLORS.green}
+        stroke={color}
         strokeWidth="2.6"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function ProgressTick({ on }: { on: boolean }) {
+  return (
+    <div
+      className="inline-flex items-center justify-center rounded-full border"
+      style={{
+        width: 22,
+        height: 22,
+        borderColor: on ? "rgba(45,255,122,0.55)" : "rgba(255,255,255,0.22)",
+        background: on ? "rgba(45,255,122,0.12)" : "rgba(255,255,255,0.06)",
+      }}
+      aria-label={on ? "picked" : "not picked"}
+    >
+      {on ? <CheckIcon size={16} /> : null}
+    </div>
+  );
+}
+
+function HomeTeamBg({
+  homeTeamName,
+  overlay = true,
+}: {
+  homeTeamName: string;
+  overlay?: boolean;
+}) {
+  const slug = teamNameToSlug(homeTeamName);
+  const [idx, setIdx] = useState(0);
+  const candidates = slug ? homeTeamImageCandidates(slug) : ["/afl1.png"];
+
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <>
+      <div className="absolute inset-0">
+        <Image
+          src={src}
+          alt=""
+          fill
+          priority={false}
+          sizes="(max-width: 1024px) 100vw, 1024px"
+          style={{ objectFit: "cover" }}
+          className="opacity-30"
+          onError={() => setIdx((p) => Math.min(p + 1, candidates.length - 1))}
+        />
+      </div>
+
+      {overlay ? (
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.80) 70%, rgba(0,0,0,0.92) 100%)",
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -270,6 +320,13 @@ export default function PicksPage() {
   const [games, setGames] = useState<ApiGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+
+  // ✅ real values from API (with safe fallbacks)
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
+  const [leaderScore, setLeaderScore] = useState<number | null>(null);
+
+  // How to play modal
+  const [howOpen, setHowOpen] = useState(false);
 
   // updates every second for countdown
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -298,8 +355,15 @@ export default function PicksPage() {
       if (!res.ok) throw new Error(await res.text());
 
       const data = (await res.json()) as PicksApiResponse;
+
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
       setGames(Array.isArray(data.games) ? data.games : []);
+
+      // ✅ real streak
+      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+
+      // optional leader score
+      setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
     } catch (e) {
       console.error(e);
       setErr("Could not load picks right now.");
@@ -321,20 +385,15 @@ export default function PicksPage() {
     );
   }, [games]);
 
-  // Dashboard metrics (safe + derived from picks)
+  // ✅ picks-per-game logic (real)
   const gamesPicked = useMemo(() => {
     return games.filter((g) =>
       (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
     ).length;
   }, [games]);
 
-  // Until you wire real streak/leader APIs, set sensible display defaults:
-  const currentStreak = 5; // requested
-  const leaderScore = 0; // placeholder (wire later)
+  // Eligible meaning: show label + progress ticks; (you can change rule later)
   const eligible = gamesPicked > 0;
-
-  // "3 games picked" display requested — show computed if available, else show 3 as a nice demo
-  const gamesPickedDisplay = gamesPicked > 0 ? gamesPicked : 3;
 
   const nextUp = useMemo(() => {
     const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
@@ -360,58 +419,53 @@ export default function PicksPage() {
         }}
         title="Open match"
       >
-        <div
-          className="p-5"
-          style={{
-            background:
-              "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
-          }}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[11px] text-white/70 font-semibold">
-              {formatAedt(g.startTime)}
+        {/* ✅ image for each home team (background) */}
+        <div className="relative p-5" style={{ minHeight: 190 }}>
+          <HomeTeamBg homeTeamName={homeName} />
+
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] text-white/70 font-semibold">
+                {formatAedt(g.startTime)}
+              </div>
+              <div className="text-[11px] text-white/55 font-semibold truncate max-w-[55%] text-right">
+                {g.venue}
+              </div>
             </div>
-            <div className="text-[11px] text-white/55 font-semibold truncate max-w-[55%] text-right">
-              {g.venue}
+
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <TeamLogo teamName={homeName} size={48} />
+              <div className="text-white/60 font-black text-[12px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={48} />
             </div>
-          </div>
 
-          {/* Logos row */}
-          <div className="mt-4 flex items-center justify-center gap-3">
-            <TeamLogo teamName={homeName} size={48} />
-            <div className="text-white/60 font-black text-[12px]">vs</div>
-            <TeamLogo teamName={awayName || "AFL"} size={48} />
-          </div>
-
-          {/* Match name on its own line (fixes truncation/ugly alignment) */}
-          <div className="mt-3 text-center">
-            <div className="text-[18px] font-black text-white leading-tight">
-              {g.match}
+            <div className="mt-3 text-center">
+              <div className="text-[18px] font-black text-white leading-tight">{g.match}</div>
             </div>
-          </div>
 
-          <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-              style={{
-                borderColor: "rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.05)",
-                color: "rgba(255,255,255,0.92)",
-              }}
-            >
-              12 questions available
-            </span>
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                12 questions available
+              </span>
 
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-              style={{
-                borderColor: "rgba(255,46,77,0.28)",
-                background: "rgba(255,46,77,0.10)",
-                color: "rgba(255,255,255,0.92)",
-              }}
-            >
-              {lockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
-            </span>
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.28)",
+                  background: "rgba(255,46,77,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {lockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -465,56 +519,55 @@ export default function PicksPage() {
           textDecoration: "none",
         }}
       >
-        <div
-          className="p-6 sm:p-7"
-          style={{
-            background:
-              "radial-gradient(1200px 500px at 20% 0%, rgba(255,46,77,0.22), transparent 55%), radial-gradient(900px 450px at 100% 30%, rgba(255,46,77,0.12), transparent 50%), linear-gradient(180deg, rgba(255,255,255,0.05), rgba(0,0,0,0.55))",
-          }}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div
-              className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
-              style={{
-                borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,46,77,0.12)",
-                color: "rgba(255,255,255,0.92)",
-              }}
-            >
-              NEXT UP
+        <div className="relative p-6 sm:p-7" style={{ minHeight: 250 }}>
+          {/* ✅ home team image in hero */}
+          <HomeTeamBg homeTeamName={homeName} />
+
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div
+                className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.35)",
+                  background: "rgba(255,46,77,0.12)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                NEXT UP
+              </div>
+
+              <div className="text-[11px] text-white/70 font-semibold">
+                {lockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              </div>
             </div>
 
-            <div className="text-[11px] text-white/70 font-semibold">
-              {lockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+            <div className="mt-4 flex items-center justify-center gap-4">
+              <TeamLogo teamName={homeName} size={56} />
+              <div className="text-white/70 font-black text-[13px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={56} />
             </div>
-          </div>
 
-          <div className="mt-4 flex items-center justify-center gap-4">
-            <TeamLogo teamName={homeName} size={56} />
-            <div className="text-white/70 font-black text-[13px]">vs</div>
-            <TeamLogo teamName={awayName || "AFL"} size={56} />
-          </div>
-
-          <div className="mt-4 text-center">
-            <div className="text-3xl sm:text-4xl font-black text-white leading-tight">
-              {g.match}
+            <div className="mt-4 text-center">
+              <div className="text-3xl sm:text-4xl font-black text-white leading-tight">
+                {g.match}
+              </div>
+              <div className="mt-2 text-sm text-white/70 font-semibold">
+                {formatAedt(g.startTime)} • {g.venue}
+              </div>
             </div>
-            <div className="mt-2 text-sm text-white/70 font-semibold">
-              {formatAedt(g.startTime)} • {g.venue}
-            </div>
-          </div>
 
-          <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
-            <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-              style={{
-                borderColor: "rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.05)",
-                color: "rgba(255,255,255,0.92)",
-              }}
-            >
-              12 questions available
-            </span>
+            <div className="mt-5 flex items-center justify-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.05)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                12 questions available
+              </span>
+            </div>
           </div>
         </div>
       </Link>
@@ -542,9 +595,10 @@ export default function PicksPage() {
                 </span>
               ) : null}
             </div>
-            {/* removed the "Tap a match..." line as requested */}
+            {/* ✅ removed the "Tap a match..." line (as requested) */}
           </div>
 
+          {/* ✅ How to play works (modal) */}
           <button
             type="button"
             className="rounded-full px-4 py-2 text-[12px] font-black border"
@@ -553,11 +607,7 @@ export default function PicksPage() {
               background: "rgba(255,255,255,0.06)",
               color: "rgba(255,255,255,0.92)",
             }}
-            onClick={() => {
-              // you can wire your existing how-to-play modal handler here later
-              // for now, keep the button present for UX
-              window.dispatchEvent(new CustomEvent("torpie:howtoplay"));
-            }}
+            onClick={() => setHowOpen(true)}
           >
             How to play
           </button>
@@ -577,16 +627,15 @@ export default function PicksPage() {
         ) : null}
 
         {/* Dashboard */}
-        <div className="mt-6 rounded-3xl border p-5 sm:p-6"
+        <div
+          className="mt-6 rounded-3xl border p-5 sm:p-6"
           style={{
             borderColor: "rgba(255,255,255,0.12)",
             background: "rgba(255,255,255,0.04)",
           }}
         >
           <div className="flex items-center justify-between">
-            <div className="text-[12px] uppercase tracking-widest text-white/60">
-              Dashboard
-            </div>
+            <div className="text-[12px] uppercase tracking-widest text-white/60">Dashboard</div>
           </div>
 
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -607,15 +656,14 @@ export default function PicksPage() {
                   style={{
                     borderColor: "rgba(255,255,255,0.14)",
                     background: "rgba(255,255,255,0.06)",
-                    color: COLORS.white, // all white as requested
                   }}
                 >
-                  <span className="text-[18px] font-black text-white">
-                    {currentStreak}
-                  </span>
+                  <span className="text-[18px] font-black text-white">{currentStreak}</span>
                 </div>
                 <div className="text-white">
-                  <div className="text-[14px] font-black text-white">Streak at {currentStreak}</div>
+                  <div className="text-[14px] font-black text-white">
+                    Streak at {currentStreak}
+                  </div>
                   <div className="text-[11px] text-white/70 font-semibold">
                     Keep it alive. One wrong pick breaks the streak.
                   </div>
@@ -640,16 +688,15 @@ export default function PicksPage() {
                   style={{
                     borderColor: "rgba(255,255,255,0.14)",
                     background: "rgba(255,255,255,0.06)",
-                    color: COLORS.white, // all white as requested
                   }}
                 >
                   <span className="text-[18px] font-black text-white">
-                    {leaderScore || "—"}
+                    {leaderScore === null ? "—" : leaderScore}
                   </span>
                 </div>
                 <div className="text-white">
                   <div className="text-[14px] font-black text-white">
-                    Leader at {leaderScore || "—"}
+                    Leader at {leaderScore === null ? "—" : leaderScore}
                   </div>
                   <div className="text-[11px] text-white/70 font-semibold">
                     Wire this to leaderboard API later.
@@ -676,7 +723,6 @@ export default function PicksPage() {
                   style={{
                     borderColor: "rgba(255,255,255,0.14)",
                     background: "rgba(255,255,255,0.06)",
-                    color: COLORS.white, // all white as requested
                   }}
                 >
                   {eligible ? <CheckIcon /> : <span className="text-white font-black">—</span>}
@@ -686,12 +732,14 @@ export default function PicksPage() {
                   <div className="text-[14px] font-black text-white">
                     {eligible ? "Eligible" : "Not yet"}
                   </div>
-                  <div className="text-[11px] text-white/70 font-semibold">
-                    <span className="inline-flex items-center gap-1">
-                      <CheckIcon size={16} />
-                      <span className="text-white">
-                        {gamesPickedDisplay} games picked
-                      </span>
+
+                  {/* ✅ 3 ticks grey → green progressively */}
+                  <div className="mt-1 flex items-center gap-2">
+                    <ProgressTick on={gamesPicked >= 1} />
+                    <ProgressTick on={gamesPicked >= 2} />
+                    <ProgressTick on={gamesPicked >= 3} />
+                    <span className="text-[11px] font-semibold text-white/80 ml-2">
+                      {gamesPicked} games picked
                     </span>
                   </div>
                 </div>
@@ -706,9 +754,7 @@ export default function PicksPage() {
 
         {/* Matches */}
         <div className="mt-8">
-          <div className="text-[12px] uppercase tracking-widest text-white/55">
-            Scheduled matches
-          </div>
+          <div className="text-[12px] uppercase tracking-widest text-white/55">Scheduled matches</div>
           <div className="mt-1 text-[14px] text-white/75">
             Pick any amount — questions live inside the match page.
           </div>
@@ -724,7 +770,7 @@ export default function PicksPage() {
                     background: "rgba(255,255,255,0.03)",
                   }}
                 >
-                  <div className="h-[170px] bg-white/5" />
+                  <div className="h-[190px] bg-white/5" />
                   <div className="h-[120px]" style={{ background: "rgba(255,255,255,0.92)" }} />
                 </div>
               ))}
@@ -748,13 +794,100 @@ export default function PicksPage() {
           )}
         </div>
 
-        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.50)" }}>
-          <span className="font-black" style={{ color: COLORS.red }}>
-            Torpie
-          </span>{" "}
-          — no lock-in button. Picks lock automatically.
+        {/* ✅ footer */}
+        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+          TORPIE © 2026
         </div>
       </div>
+
+      {/* ✅ How to play modal (working) */}
+      {howOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center px-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="absolute inset-0"
+            style={{ background: "rgba(0,0,0,0.75)" }}
+            onClick={() => setHowOpen(false)}
+          />
+
+          <div
+            className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(10,10,10,0.96)",
+              boxShadow: "0 30px 90px rgba(0,0,0,0.75)",
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xl font-black">How to play</div>
+                <div className="text-white/70 text-sm mt-1">
+                  Quick rules so it’s crystal clear.
+                </div>
+              </div>
+
+              <button
+                className="rounded-full px-3 py-2 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+                onClick={() => setHowOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm text-white/85">
+              <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+                <div className="font-black">1) Pick any amount</div>
+                <div className="text-white/70 mt-1">
+                  You can pick 0, 1, 5 or all 12 questions — up to you.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+                <div className="font-black">2) Locks at bounce</div>
+                <div className="text-white/70 mt-1">
+                  No lock-in button. Picks lock automatically when the game starts.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+                <div className="font-black">3) Streak rules</div>
+                <div className="text-white/70 mt-1">
+                  Keep your streak alive — one wrong pick breaks it.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+                <div className="font-black">4) Track your progress</div>
+                <div className="text-white/70 mt-1">
+                  The 3 ticks go green as you make picks in 1, 2, then 3 games.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                className="rounded-2xl px-5 py-3 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.35)",
+                  background: "rgba(255,46,77,0.14)",
+                  color: "rgba(255,255,255,0.95)",
+                }}
+                onClick={() => setHowOpen(false)}
+              >
+                Let’s go
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
