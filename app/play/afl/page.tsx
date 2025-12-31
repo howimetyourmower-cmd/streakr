@@ -281,8 +281,8 @@ export default function AflHubPage() {
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
               <div className="mb-4">
-                <div className="text-[13px] sm:text-sm font-black tracking-tight text-white">TORPIE</div>
-                <div className="text-[11px] sm:text-[12px] font-semibold text-white/70">AFL predictions • free</div>
+                <div className="text-[13px] sm:text-sm font-black tracking-tight text-white"></div>
+                <div className="text-[11px] sm:text-[12px] font-semibold text-white/70"></div>
               </div>
 
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
