@@ -260,13 +260,14 @@ export default function AflHubPage() {
 
   return (
     <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <style>{`
-        @keyframes torpiePing {
-          0% { transform: scale(1); opacity: .55; }
-          80% { transform: scale(1.6); opacity: 0; }
-          100% { transform: scale(1.6); opacity: 0; }
-        }
-      `}</style>
+     <style>{`
+  @keyframes torpiePing {
+    0% { transform: scale(1); opacity: .55; }
+    80% { transform: scale(1.6); opacity: 0; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+`}</style>
+
 
       {/* ======= HERO (NO NAVBAR) ======= */}
       <section className="relative">
