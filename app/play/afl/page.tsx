@@ -277,7 +277,7 @@ export default function AflHubPage() {
                   }}
                 >
                   <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red }} />
-                  OFFICIAL PARTNER
+
                 </span>
               </div>
 
