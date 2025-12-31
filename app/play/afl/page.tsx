@@ -267,18 +267,7 @@ export default function AflHubPage() {
               <div className="absolute inset-0 bg-black/40" />
               <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
 
-              <div className="absolute top-4 left-4">
-                <span
-                  className="inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-black border"
-                  style={{
-                    borderColor: "rgba(0,0,0,0.15)",
-                    background: "rgba(255,255,255,0.92)",
-                    color: "rgba(0,0,0,0.86)",
-                  }}
-             
-              </div>
-
-              <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
+               <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
                 <div className="text-[11px] font-extrabold tracking-wide text-white/70 mb-2">
                   TORPY • AFL {roundNumber ? `• ROUND ${roundNumber}` : ""}
                 </div>
@@ -395,7 +384,7 @@ export default function AflHubPage() {
                     style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
                   >
                     <div className="relative h-[130px]">
-                      <Image src="/afl1.png" alt={g.match} fill className="object-cover opacity-90" />
+                      <Image src="/afl1.png" alt={g.match} fill className="object-cover object-top opacity-90" />
                       <div className="absolute inset-0 bg-black/55" />
                       <div className="absolute left-4 right-4 bottom-3">
                         <div className="text-[11px] text-white/75 font-semibold">
