@@ -13,7 +13,6 @@ import { db } from "@/lib/firebaseClient";
 import {
   addDoc,
   collection,
-  doc,
   limit,
   onSnapshot,
   query,
@@ -37,11 +36,6 @@ type ApiQuestion = {
   noPercent?: number;
   commentCount?: number;
 
-  isSponsorQuestion?: boolean;
-  sponsorName?: string;
-  sponsorPrize?: string;
-  sponsorExcludeFromStreak?: boolean;
-
   correctPick?: boolean;
 };
 
@@ -61,31 +55,18 @@ type PicksApiResponse = {
 type CommentRow = {
   id: string;
   questionId: string;
-  gameId?: string | null;
-  roundNumber?: number | null;
   userId?: string | null;
   displayName?: string | null;
-  username?: string | null;
   body: string;
   createdAt?: any;
 };
 
 const COLORS = {
   bg: "#000000",
-  panel: "rgba(255,255,255,0.035)",
-  panel2: "rgba(255,255,255,0.02)",
-  stroke: "rgba(255,255,255,0.10)",
-  textDim: "rgba(255,255,255,0.70)",
-  textFaint: "rgba(255,255,255,0.50)",
-
   red: "#FF2E4D",
-  redSoft: "rgba(255,46,77,0.18)",
-  redSoft2: "rgba(255,46,77,0.10)",
-
-  good: "rgba(25,195,125,0.95)",
+  white: "rgba(255,255,255,0.98)",
   bad: "rgba(255,46,77,0.95)",
   cyan: "rgba(0,229,255,0.95)",
-  white: "rgba(255,255,255,0.98)",
 };
 
 type FilterTab = "all" | "open" | "pending" | "final" | "void";
@@ -123,7 +104,6 @@ function msToCountdown(ms: number): string {
   const h = Math.floor((total % 86400) / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-
   const pad = (x: number) => String(x).padStart(2, "0");
   if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
@@ -149,57 +129,14 @@ function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefine
 function safeLocalKey(uid: string | null, roundNumber: number | null) {
   return `torpie:picks:v10:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
-
 function safeLockedKey(uid: string | null, roundNumber: number | null) {
   return `torpie:lockedPicks:v2:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-function formatCommentTime(createdAt: any): string {
-  try {
-    if (createdAt?.toDate) {
-      const d = createdAt.toDate() as Date;
-      return d.toLocaleString("en-AU", {
-        day: "2-digit",
-        month: "short",
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-      });
-    }
-    return "";
-  } catch {
-    return "";
-  }
-}
-
-/** Player detection: must start with "Will <Player Name> ..." */
-function extractPlayerName(qText: string): string | null {
-  const t = (qText || "").trim();
-  if (!t.toLowerCase().startsWith("will ")) return null;
-  const rest = t.slice(5);
-
-  const parenIdx = rest.indexOf("(");
-  const clip1 = parenIdx > 0 ? rest.slice(0, parenIdx) : rest;
-
-  // stop at common verbs
-  const stops = [" have ", " kick ", " score ", " get ", " record ", " take ", " make ", " hit ", " win "];
-  let cut = clip1;
-  const lower = clip1.toLowerCase();
-  for (const s of stops) {
-    const i = lower.indexOf(s);
-    if (i > 0) {
-      cut = clip1.slice(0, i);
-      break;
-    }
-  }
-
-  const name = cut.trim();
-  if (!name) return null;
-
-  // basic sanity: at least two words for a player
-  if (name.split(" ").filter(Boolean).length < 2) return null;
-
-  return name;
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
 }
 
 type TeamSlug =
@@ -248,17 +185,15 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   return null;
 }
 
-function splitMatch(match: string): { home: string; away: string } | null {
-  const m = (match || "").split(/\s+vs\s+/i);
-  if (m.length !== 2) return null;
-  return { home: m[0].trim(), away: m[1].trim() };
-}
-
 function logoCandidates(teamSlug: TeamSlug): string[] {
-  return [`/aflteams/${teamSlug}-logo.jpg`, `/aflteams/${teamSlug}-logo.jpeg`, `/aflteams/${teamSlug}-logo.png`];
+  return [
+    `/aflteams/${teamSlug}-logo.png`,
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+  ];
 }
 
-function TeamLogo({ teamName, size = 44 }: { teamName: string; size?: number }) {
+function TeamLogo({ teamName, size = 50 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
 
@@ -296,45 +231,110 @@ function TeamLogo({ teamName, size = 44 }: { teamName: string; size?: number }) 
         width: size,
         height: size,
         borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
+        background: "rgba(255,255,255,0.06)",
       }}
       title={teamName}
     >
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }} // ✅ no crop
+          onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Player detection: supports "Will <Name> (Xxx) ..." AND plain "Will <Name> ..." */
+function extractPlayerName(qText: string): string | null {
+  const t = (qText || "").trim();
+  if (!t.toLowerCase().startsWith("will ")) return null;
+
+  const rest = t.slice(5);
+
+  // stop at first "(" if present (your format: "Will Charlie Curnow (Syd) ...")
+  const parenIdx = rest.indexOf("(");
+  const candidate = (parenIdx > 0 ? rest.slice(0, parenIdx) : rest).trim();
+
+  // also stop at common verbs as backup
+  const stops = [" have ", " kick ", " score ", " get ", " record ", " take ", " make ", " hit ", " win "];
+  let cut = candidate;
+  const lower = candidate.toLowerCase();
+  for (const s of stops) {
+    const i = lower.indexOf(s);
+    if (i > 0) {
+      cut = candidate.slice(0, i).trim();
+      break;
+    }
+  }
+
+  const name = cut.trim();
+  if (!name) return null;
+  if (name.split(" ").filter(Boolean).length < 2) return null;
+  return name;
+}
+
+function playerCandidates(playerSlug: string): string[] {
+  return [
+    `/players/${playerSlug}.png`,
+    `/players/${playerSlug}.jpg`,
+    `/players/${playerSlug}.jpeg`,
+    `/players/${playerSlug}.webp`,
+  ];
+}
+
+function PlayerHeadshot({ playerName, size = 46 }: { playerName: string; size?: number }) {
+  const playerSlug = slugify(playerName);
+  const candidates = playerCandidates(playerSlug);
+  const [idx, setIdx] = useState(0);
+
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden shrink-0"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(0,0,0,0.10)",
+        background: "rgba(0,0,0,0.04)",
+      }}
+      title={playerName}
+    >
       <Image
         src={src}
-        alt={`${teamName} logo`}
+        alt={playerName}
         fill
         sizes={`${size}px`}
         style={{ objectFit: "cover" }}
         onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
       />
+      {/* If all candidates fail, you’ll still see a clean placeholder */}
+      <div
+        className="absolute inset-0 flex items-center justify-center text-[11px] font-black"
+        style={{
+          color: "rgba(0,0,0,0.35)",
+          opacity: idx >= candidates.length - 1 ? 1 : 0,
+          transition: "opacity 120ms ease",
+        }}
+      >
+        {playerName
+          .split(" ")
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((x) => x[0]?.toUpperCase())
+          .join("")}
+      </div>
     </div>
   );
 }
 
 type LocalPickMap = Record<string, LocalPick>;
 type LockedGamesMap = Record<string, boolean>;
-
-type ShareSlipPayload = {
-  v: 1;
-  roundNumber: number | null;
-  gameId: string;
-  match: string;
-  venue?: string;
-  startTime?: string;
-  picks: Array<{
-    questionId: string;
-    quarter: number;
-    question: string;
-    outcome: PickOutcome;
-  }>;
-};
-
-function base64UrlEncode(obj: any): string {
-  const json = JSON.stringify(obj);
-  const b64 = typeof window !== "undefined" ? window.btoa(unescape(encodeURIComponent(json))) : "";
-  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
 
 export default function PicksMatchSlugPage() {
   const { user } = useAuth();
@@ -357,7 +357,7 @@ export default function PicksMatchSlugPage() {
 
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
 
-  // comments
+  // comments (unchanged)
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
   const [commentsGame, setCommentsGame] = useState<ApiGame | null>(null);
@@ -368,13 +368,6 @@ export default function PicksMatchSlugPage() {
   const [commentPosting, setCommentPosting] = useState(false);
   const commentsUnsubRef = useRef<null | (() => void)>(null);
 
-  // lock modal
-  const [slipOpen, setSlipOpen] = useState(false);
-  const [slipPayload, setSlipPayload] = useState<ShareSlipPayload | null>(null);
-  const [slipConfirmMode, setSlipConfirmMode] = useState(false);
-  const [slipToast, setSlipToast] = useState("");
-
-  // confetti (only for milestones if you later want it)
   const [confettiOn] = useState(false);
 
   useEffect(() => {
@@ -414,15 +407,13 @@ export default function PicksMatchSlugPage() {
   }, [loadPicks]);
 
   const activeGame = useMemo(() => {
-    const g = games.find((x) => slugify(x.match) === matchSlug) ?? null;
-    return g;
+    return games.find((x) => slugify(x.match) === matchSlug) ?? null;
   }, [games, matchSlug]);
 
   // hydrate local picks
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
-
     try {
       const key = safeLocalKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
@@ -430,8 +421,7 @@ export default function PicksMatchSlugPage() {
         const parsed = JSON.parse(raw) as LocalPickMap;
         if (parsed && typeof parsed === "object") setLocalPicks(parsed);
       }
-    } catch (e) {
-      console.warn("Failed to hydrate local picks", e);
+    } catch {
     } finally {
       hasHydratedLocalRef.current = true;
     }
@@ -449,7 +439,6 @@ export default function PicksMatchSlugPage() {
   useEffect(() => {
     if (hasHydratedLockedRef.current) return;
     if (roundNumber === null) return;
-
     try {
       const key = safeLockedKey(user?.uid ?? null, roundNumber);
       const raw = localStorage.getItem(key);
@@ -457,8 +446,7 @@ export default function PicksMatchSlugPage() {
         const parsed = JSON.parse(raw) as LockedGamesMap;
         if (parsed && typeof parsed === "object") setLockedGames(parsed);
       }
-    } catch (e) {
-      console.warn("Failed to hydrate locked picks", e);
+    } catch {
     } finally {
       hasHydratedLockedRef.current = true;
     }
@@ -474,9 +462,8 @@ export default function PicksMatchSlugPage() {
 
   const filteredQuestions = useMemo(() => {
     if (!activeGame) return [];
-    const qs = activeGame.questions.slice();
-    if (filterTab === "all") return qs;
-    return qs.filter((q) => q.status === filterTab);
+    if (filterTab === "all") return activeGame.questions.slice();
+    return activeGame.questions.filter((q) => q.status === filterTab);
   }, [activeGame, filterTab]);
 
   function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
@@ -487,40 +474,31 @@ export default function PicksMatchSlugPage() {
     return false;
   }
 
-  const clearPick = useCallback(
-    async (q: ApiQuestion) => {
-      setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
+  const clearPick = useCallback(async (q: ApiQuestion) => {
+    setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
+    if (!user) return;
 
-      if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (delRes.ok) return;
 
-      try {
-        const token = await user.getIdToken();
-
-        const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (delRes.ok) return;
-
-        const postRes = await fetch("/api/user-picks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ action: "clear", questionId: q.id }),
-        });
-
-        if (!postRes.ok) console.error("Failed to clear pick:", await postRes.text());
-      } catch (e) {
-        console.error("Clear pick error", e);
-      }
-    },
-    [user]
-  );
+      await fetch("/api/user-picks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: "clear", questionId: q.id }),
+      });
+    } catch (e) {
+      console.error("Clear pick error", e);
+    }
+  }, [user]);
 
   const togglePick = useCallback(
     async (q: ApiQuestion, outcome: PickOutcome, locked: boolean) => {
       if (locked) return;
-
       const current = effectivePick(localPicks[q.id], q.userPick);
 
       if (current === outcome) {
@@ -529,25 +507,20 @@ export default function PicksMatchSlugPage() {
       }
 
       setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
-
       if (!user) return;
 
       try {
         const token = await user.getIdToken();
-        const body = {
-          questionId: q.id,
-          outcome,
-          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
-          gameId: q.gameId ?? activeGame?.id ?? null,
-        };
-
-        const res = await fetch("/api/user-picks", {
+        await fetch("/api/user-picks", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            questionId: q.id,
+            outcome,
+            roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+            gameId: q.gameId ?? activeGame?.id ?? null,
+          }),
         });
-
-        if (!res.ok) console.error("Failed to save pick:", await res.text());
       } catch (e) {
         console.error("Pick save error", e);
       }
@@ -555,55 +528,6 @@ export default function PicksMatchSlugPage() {
     [user, roundNumber, localPicks, clearPick, activeGame?.id]
   );
 
-  const buildSlipForGame = useCallback(
-    (g: ApiGame): ShareSlipPayload | null => {
-      const picks: ShareSlipPayload["picks"] = [];
-      for (const q of g.questions) {
-        const pick = effectivePick(localPicks[q.id], q.userPick);
-        if (pick !== "yes" && pick !== "no") continue;
-        picks.push({
-          questionId: q.id,
-          quarter: q.quarter,
-          question: q.question,
-          outcome: pick,
-        });
-      }
-      if (picks.length === 0) return null;
-
-      return {
-        v: 1,
-        roundNumber,
-        gameId: g.id,
-        match: g.match,
-        venue: g.venue,
-        startTime: g.startTime,
-        picks: picks.sort((a, b) => (a.quarter - b.quarter) || a.question.localeCompare(b.question)),
-      };
-    },
-    [localPicks, roundNumber]
-  );
-
-  const openSlip = useCallback((payload: ShareSlipPayload, confirm: boolean) => {
-    setSlipPayload(payload);
-    setSlipConfirmMode(confirm);
-    setSlipOpen(true);
-    setSlipToast("");
-  }, []);
-
-  const closeSlip = useCallback(() => {
-    setSlipOpen(false);
-    setSlipPayload(null);
-    setSlipConfirmMode(false);
-    setSlipToast("");
-  }, []);
-
-  const lockInPicksForGame = useCallback((gameId: string) => {
-    setLockedGames((prev) => ({ ...prev, [gameId]: true }));
-    setSlipToast("Picks locked ✅");
-    setTimeout(() => setSlipToast(""), 1400);
-  }, []);
-
-  // comments open/close
   const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
     setCommentsGame(g);
     setCommentsQuestion(q);
@@ -623,9 +547,7 @@ export default function PicksMatchSlugPage() {
     setCommentsLoading(false);
     setCommentPosting(false);
     if (commentsUnsubRef.current) {
-      try {
-        commentsUnsubRef.current();
-      } catch {}
+      try { commentsUnsubRef.current(); } catch {}
       commentsUnsubRef.current = null;
     }
   }, []);
@@ -637,13 +559,15 @@ export default function PicksMatchSlugPage() {
     setCommentErr("");
 
     if (commentsUnsubRef.current) {
-      try {
-        commentsUnsubRef.current();
-      } catch {}
+      try { commentsUnsubRef.current(); } catch {}
       commentsUnsubRef.current = null;
     }
 
-    const qRef = query(collection(db, "comments"), where("questionId", "==", commentsQuestion.id), limit(50));
+    const qRef = query(
+      collection(db, "comments"),
+      where("questionId", "==", commentsQuestion.id),
+      limit(50)
+    );
 
     commentsUnsubRef.current = onSnapshot(
       qRef,
@@ -651,16 +575,12 @@ export default function PicksMatchSlugPage() {
         const rows: CommentRow[] = snap.docs
           .map((d) => {
             const data = d.data() as any;
-            const body = typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
             return {
               id: d.id,
               questionId: data?.questionId ?? commentsQuestion.id,
-              gameId: data?.gameId ?? null,
-              roundNumber: typeof data?.roundNumber === "number" ? data.roundNumber : null,
               userId: data?.userId ?? null,
               displayName: data?.displayName ?? null,
-              username: data?.username ?? null,
-              body,
+              body: typeof data?.body === "string" ? data.body : "",
               createdAt: data?.createdAt,
             };
           })
@@ -669,8 +589,7 @@ export default function PicksMatchSlugPage() {
         setCommentsList(rows);
         setCommentsLoading(false);
       },
-      (e) => {
-        console.warn("comments snapshot error", e);
+      () => {
         setCommentErr("Could not load comments.");
         setCommentsLoading(false);
       }
@@ -678,9 +597,7 @@ export default function PicksMatchSlugPage() {
 
     return () => {
       if (commentsUnsubRef.current) {
-        try {
-          commentsUnsubRef.current();
-        } catch {}
+        try { commentsUnsubRef.current(); } catch {}
         commentsUnsubRef.current = null;
       }
     };
@@ -693,24 +610,13 @@ export default function PicksMatchSlugPage() {
     if (!q) return;
 
     const txt = commentText.trim();
-    if (!txt) {
-      setCommentErr("Write something first.");
-      return;
-    }
-
-    if (!user) {
-      setCommentErr("Log in to comment.");
-      return;
-    }
-
-    if (txt.length > 240) {
-      setCommentErr("Keep it under 240 characters.");
-      return;
-    }
+    if (!txt) { setCommentErr("Write something first."); return; }
+    if (!user) { setCommentErr("Log in to comment."); return; }
+    if (txt.length > 240) { setCommentErr("Keep it under 240 characters."); return; }
 
     setCommentPosting(true);
     try {
-      const payload: any = {
+      await addDoc(collection(db, "comments"), {
         questionId: q.id,
         gameId: q.gameId ?? commentsGame?.id ?? null,
         roundNumber: typeof roundNumber === "number" ? roundNumber : null,
@@ -718,12 +624,9 @@ export default function PicksMatchSlugPage() {
         displayName: user.displayName ?? null,
         body: txt,
         createdAt: serverTimestamp(),
-      };
-
-      await addDoc(collection(db, "comments"), payload);
+      });
       setCommentText("");
-    } catch (e) {
-      console.error("postComment error", e);
+    } catch {
       setCommentErr("Could not post comment.");
     } finally {
       setCommentPosting(false);
@@ -865,21 +768,12 @@ export default function PicksMatchSlugPage() {
   };
 
   const VisualHeader = ({ g, q }: { g: ApiGame; q: ApiQuestion }) => {
-    // If player question -> show player headshot (auto from question)
     const playerName = extractPlayerName(q.question);
+
     if (playerName) {
-      const playerSlug = slugify(playerName);
-      const src = `/players/${playerSlug}.jpg`;
       return (
         <div className="flex items-center gap-3">
-          <div
-            className="relative h-[46px] w-[46px] rounded-2xl border overflow-hidden shrink-0"
-            style={{ borderColor: "rgba(0,0,0,0.10)", background: "rgba(0,0,0,0.04)" }}
-            title={playerName}
-          >
-            <Image src={src} alt={playerName} fill sizes="46px" style={{ objectFit: "cover" }} />
-          </div>
-
+          <PlayerHeadshot playerName={playerName} size={46} />
           <div className="min-w-0 flex-1">
             <div className="text-[12px] uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.45)" }}>
               {g.match}
@@ -895,7 +789,6 @@ export default function PicksMatchSlugPage() {
       );
     }
 
-    // Otherwise show two AFL team logos side-by-side from match string
     const m = splitMatch(g.match);
     const home = m?.home ?? g.match;
     const away = m?.away ?? "AFL";
@@ -938,11 +831,9 @@ export default function PicksMatchSlugPage() {
       >
         <div className="p-4">
           <div className="flex items-start justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: "rgba(0,0,0,0.55)" }}>
-                Q{q.quarter}
-              </span>
-            </div>
+            <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: "rgba(0,0,0,0.55)" }}>
+              Q{q.quarter}
+            </span>
 
             <div className="flex items-center gap-2 shrink-0">
               <button
@@ -1013,154 +904,9 @@ export default function PicksMatchSlugPage() {
     );
   };
 
-  const SlipModal = () => {
-    if (!slipOpen || !slipPayload) return null;
-    const isConfirm = slipConfirmMode;
-
-    const lockText = isConfirm
-      ? "MISS ONE: Streak resets to 0."
-      : "Reminder: 1 miss resets your entire streak to 0.";
-
-    const shareLink = (() => {
-      try {
-        const encoded = base64UrlEncode(slipPayload);
-        const url = new URL(window.location.href);
-        url.searchParams.set("slip", encoded);
-        return url.toString();
-      } catch {
-        return "";
-      }
-    })();
-
-    return (
-      <div
-        className="fixed inset-0 z-[90] flex items-center justify-center p-4"
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) closeSlip();
-        }}
-        style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(10px)" }}
-      >
-        <div
-          className="w-full max-w-2xl rounded-2xl border overflow-hidden"
-          style={{
-            borderColor: COLORS.redSoft,
-            background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
-            boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
-          }}
-        >
-          <div className="px-5 py-4 border-b" style={{ borderColor: "rgba(255,46,77,0.20)", background: "rgba(255,255,255,0.03)" }}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-widest text-white/55">
-                  {isConfirm ? "Confirm Your Path" : "Your Slip"}
-                </div>
-                <div className="mt-1 text-[16px] font-extrabold text-white truncate">{slipPayload.match}</div>
-                <div className="mt-1 text-[12px] text-white/70 truncate">
-                  {slipPayload.venue ?? "—"} • {slipPayload.startTime ? formatAedt(slipPayload.startTime) : "—"}
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeSlip}
-                className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-                style={{ borderColor: "rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)" }}
-                aria-label="Close slip"
-                title="Close"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          <div className="px-5 py-4">
-            <div className="rounded-xl border p-3 text-[12px]" style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.90)" }}>
-              <span className="font-black">{isConfirm ? "The stakes:" : "Reminder:"}</span> {lockText}
-            </div>
-
-            <div className="mt-4 space-y-2 max-h-[52vh] overflow-auto pr-1">
-              {slipPayload.picks.map((p) => (
-                <div key={p.questionId} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase tracking-widest text-white/55">Quarter {p.quarter}</div>
-                      <div className="mt-1 text-[13px] text-white/90">{p.question}</div>
-                    </div>
-
-                    <span
-                      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border shrink-0"
-                      style={{
-                        borderColor: p.outcome === "yes" ? "rgba(25,195,125,0.35)" : "rgba(255,46,77,0.35)",
-                        background: p.outcome === "yes" ? "rgba(25,195,125,0.10)" : "rgba(255,46,77,0.10)",
-                        color: p.outcome === "yes" ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)",
-                      }}
-                    >
-                      {p.outcome.toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-              <div className="text-[11px] text-white/55">
-                {slipPayload.picks.length} picks • Share link available
-              </div>
-
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(shareLink);
-                      setSlipToast("Copied link ✅");
-                      setTimeout(() => setSlipToast(""), 1200);
-                    } catch {
-                      setSlipToast("Copy failed");
-                      setTimeout(() => setSlipToast(""), 1200);
-                    }
-                  }}
-                  className="rounded-xl border px-4 py-3 text-[12px] font-black active:scale-[0.99]"
-                  style={{ borderColor: "rgba(0,229,255,0.30)", background: "rgba(0,229,255,0.10)", color: "rgba(0,229,255,0.95)" }}
-                >
-                  Copy link
-                </button>
-
-                {isConfirm ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      lockInPicksForGame(slipPayload.gameId);
-                      setSlipConfirmMode(false);
-                      setSlipToast("Locked ✅");
-                      setTimeout(() => setSlipToast(""), 1200);
-                      closeSlip();
-                    }}
-                    className="rounded-xl border px-5 py-3 text-[12px] font-black active:scale-[0.99]"
-                    style={{ borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)", color: "rgba(255,255,255,0.95)" }}
-                    title="Confirm lock in"
-                  >
-                    I’M ALL IN
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            {slipToast ? (
-              <div className="mt-3 text-[12px] font-black" style={{ color: COLORS.cyan }}>
-                {slipToast}
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  // “Sticky footer” (your prompt) — minimal + fast
   const stickyMeta = useMemo(() => {
     if (!activeGame) return { selected: 0, total: 0, gameLocked: false, lockMs: 0 };
     const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
@@ -1212,126 +958,7 @@ export default function PicksMatchSlugPage() {
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       {confettiOn ? <Confetti recycle={false} numberOfPieces={220} gravity={0.22} /> : null}
 
-      <SlipModal />
-
-      {/* Comments modal (kept) */}
-      {commentsOpen && commentsQuestion ? (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeComments();
-          }}
-          style={{ background: "rgba(0,0,0,0.70)", backdropFilter: "blur(8px)" }}
-        >
-          <div
-            className="w-full max-w-2xl rounded-2xl border overflow-hidden"
-            style={{
-              borderColor: COLORS.redSoft,
-              background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
-              boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
-            }}
-          >
-            <div className="px-5 py-4 border-b" style={{ borderColor: "rgba(255,46,77,0.20)", background: "rgba(255,255,255,0.03)" }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55">Comments</div>
-                  <div className="mt-1 text-[14px] font-extrabold text-white truncate">
-                    {commentsGame?.match ?? "Game"} • Quarter {commentsQuestion.quarter}
-                  </div>
-                  <div className="mt-1 text-[13px] text-white/80">{commentsQuestion.question}</div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={closeComments}
-                  className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-                  style={{ borderColor: "rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)" }}
-                  aria-label="Close comments"
-                  title="Close"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            <div className="px-5 py-4">
-              {!user ? (
-                <div className="rounded-xl border p-3 text-[12px] text-white/80" style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)" }}>
-                  Log in to post comments. You can still read the chat.
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex gap-2">
-                <input
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  placeholder={user ? "Say something (max 240 chars)..." : "Log in to comment..."}
-                  disabled={!user || commentPosting}
-                  className="flex-1 rounded-xl border px-4 py-3 text-[13px] outline-none"
-                  style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.92)" }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      postComment();
-                    }
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={postComment}
-                  disabled={!user || commentPosting}
-                  className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ borderColor: "rgba(0,229,255,0.30)", background: "rgba(0,229,255,0.10)", color: "rgba(0,229,255,0.95)" }}
-                >
-                  {commentPosting ? "Posting…" : "Post"}
-                </button>
-              </div>
-
-              {commentErr ? (
-                <div className="mt-2 text-[12px]" style={{ color: COLORS.bad }}>
-                  {commentErr}
-                </div>
-              ) : null}
-
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-[11px] text-white/55">
-                  <div className="uppercase tracking-widest">Latest {commentsList.length ? `(${commentsList.length})` : ""}</div>
-                  <div className="text-white/45">ESC to close</div>
-                </div>
-
-                <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
-                  {commentsLoading ? (
-                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
-                      Loading comments…
-                    </div>
-                  ) : commentsList.length === 0 ? (
-                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
-                      No comments yet. Be the first to chirp.
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {commentsList.map((c) => (
-                        <div key={c.id} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-[12px] font-black text-white/90 truncate">{c.displayName || c.username || "Anonymous"}</div>
-                            <div className="text-[11px] text-white/45 shrink-0">{formatCommentTime(c.createdAt)}</div>
-                          </div>
-                          <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">{c.body}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-3 text-[11px] text-white/45">Keep it civil. Banter is good — abuse gets binned.</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-28">
-        {/* Focus header */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <button
@@ -1388,7 +1015,6 @@ export default function PicksMatchSlugPage() {
           </div>
         </div>
 
-        {/* Cards */}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredQuestions.map((q) => {
             const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
@@ -1397,11 +1023,11 @@ export default function PicksMatchSlugPage() {
           })}
         </div>
 
-        {/* Sticky footer */}
         <div
           className="fixed left-0 right-0 bottom-0 z-[60]"
           style={{
-            background: "linear-gradient(180deg, rgba(0,0,0,0.00), rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.98) 100%)",
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.00), rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.98) 100%)",
           }}
         >
           <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pb-4 pt-10">
@@ -1426,12 +1052,7 @@ export default function PicksMatchSlugPage() {
               <button
                 type="button"
                 disabled={stickyMeta.selected <= 0 || stickyMeta.gameLocked || !!lockedGames[activeGame.id]}
-                onClick={() => {
-                  const payload = buildSlipForGame(activeGame);
-                  if (!payload) return;
-                  openSlip(payload, true);
-                }}
-                className="rounded-2xl border px-6 py-4 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                className="rounded-2xl border px-6 py-4 text-[13px] font-black disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{
                   borderColor: "rgba(255,46,77,0.55)",
                   background: "rgba(255,46,77,0.18)",
