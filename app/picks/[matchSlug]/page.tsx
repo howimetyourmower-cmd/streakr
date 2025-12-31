@@ -5,8 +5,21 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { useRouter, useSearchParams, useParams } from "next/navigation";
+import Link from "next/link";
+import Confetti from "react-confetti";
+import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import {
+  addDoc,
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  where,
+} from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
@@ -29,8 +42,6 @@ type ApiQuestion = {
   sponsorPrize?: string;
   sponsorExcludeFromStreak?: boolean;
 
-  venue?: string;
-  startTime?: string;
   correctPick?: boolean;
 };
 
@@ -47,24 +58,46 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
+type CommentRow = {
+  id: string;
+  questionId: string;
+  gameId?: string | null;
+  roundNumber?: number | null;
+  userId?: string | null;
+  displayName?: string | null;
+  username?: string | null;
+  body: string;
+  createdAt?: any;
+};
+
 const COLORS = {
   bg: "#000000",
+  panel: "rgba(255,255,255,0.035)",
+  panel2: "rgba(255,255,255,0.02)",
   stroke: "rgba(255,255,255,0.10)",
   textDim: "rgba(255,255,255,0.70)",
   textFaint: "rgba(255,255,255,0.50)",
+
   red: "#FF2E4D",
   redSoft: "rgba(255,46,77,0.18)",
   redSoft2: "rgba(255,46,77,0.10)",
+
   good: "rgba(25,195,125,0.95)",
+  bad: "rgba(255,46,77,0.95)",
+  cyan: "rgba(0,229,255,0.95)",
   white: "rgba(255,255,255,0.98)",
 };
 
-function safeLocalKey(uid: string | null, roundNumber: number | null) {
-  return `torpie:picks:v9:${uid || "anon"}:${roundNumber ?? "na"}`;
-}
+type FilterTab = "all" | "open" | "pending" | "final" | "void";
 
-function safeLockedKey(uid: string | null, roundNumber: number | null) {
-  return `torpie:lockedPicks:v1:${uid || "anon"}:${roundNumber ?? "na"}`;
+function slugify(text: string): string {
+  return (text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 function formatAedt(dateIso: string): string {
@@ -90,9 +123,21 @@ function msToCountdown(ms: number): string {
   const h = Math.floor((total % 86400) / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
+
   const pad = (x: number) => String(x).padStart(2, "0");
   if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+function clampPct(n: number | undefined): number {
+  if (typeof n !== "number" || Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function majorityLabel(yes: number, no: number): { label: string; color: string } {
+  if (yes === no) return { label: "Split crowd", color: "rgba(0,0,0,0.55)" };
+  if (yes > no) return { label: "Majority YES", color: "rgba(25,195,125,0.95)" };
+  return { label: "Majority NO", color: "rgba(255,46,77,0.95)" };
 }
 
 function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
@@ -101,180 +146,236 @@ function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefine
   return api;
 }
 
-function slugify(s: string): string {
-  return (s || "")
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+function safeLocalKey(uid: string | null, roundNumber: number | null) {
+  return `torpie:picks:v10:${uid || "anon"}:${roundNumber ?? "na"}`;
 }
 
-/**
- * Player detection:
- * - If question starts with "Will " → extract likely player name then slugify → /public/players/<slug>.jpg
- * Example: "Will Charlie Curnow kick a goal?" → /players/charlie-curnow.jpg
- */
+function safeLockedKey(uid: string | null, roundNumber: number | null) {
+  return `torpie:lockedPicks:v2:${uid || "anon"}:${roundNumber ?? "na"}`;
+}
+
+function formatCommentTime(createdAt: any): string {
+  try {
+    if (createdAt?.toDate) {
+      const d = createdAt.toDate() as Date;
+      return d.toLocaleString("en-AU", {
+        day: "2-digit",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/** Player detection: must start with "Will <Player Name> ..." */
 function extractPlayerName(qText: string): string | null {
   const t = (qText || "").trim();
   if (!t.toLowerCase().startsWith("will ")) return null;
-
   const rest = t.slice(5);
 
-  const cutPoints = [
-    rest.indexOf("("),
-    rest.toLowerCase().indexOf(" have "),
-    rest.toLowerCase().indexOf(" kick "),
-    rest.toLowerCase().indexOf(" score "),
-    rest.toLowerCase().indexOf(" get "),
-    rest.toLowerCase().indexOf(" record "),
-  ].filter((x) => x > 0);
+  const parenIdx = rest.indexOf("(");
+  const clip1 = parenIdx > 0 ? rest.slice(0, parenIdx) : rest;
 
-  if (cutPoints.length) {
-    const idx = Math.min(...cutPoints);
-    return rest.slice(0, idx).trim();
+  // stop at common verbs
+  const stops = [" have ", " kick ", " score ", " get ", " record ", " take ", " make ", " hit ", " win "];
+  let cut = clip1;
+  const lower = clip1.toLowerCase();
+  for (const s of stops) {
+    const i = lower.indexOf(s);
+    if (i > 0) {
+      cut = clip1.slice(0, i);
+      break;
+    }
   }
 
-  // fallback: first 2 words (best-effort)
-  const parts = rest.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return `${parts[0]} ${parts[1]}`.trim();
+  const name = cut.trim();
+  if (!name) return null;
+
+  // basic sanity: at least two words for a player
+  if (name.split(" ").filter(Boolean).length < 2) return null;
+
+  return name;
+}
+
+type TeamSlug =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "goldcoast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "northmelbourne"
+  | "portadelaide"
+  | "richmond"
+  | "stkilda"
+  | "sydney"
+  | "westcoast"
+  | "westernbulldogs";
+
+function teamNameToSlug(nameRaw: string): TeamSlug | null {
+  const n = (nameRaw || "").toLowerCase().trim();
+
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
+  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+
+  if (n.includes("adelaide")) return "adelaide";
+  if (n.includes("brisbane")) return "brisbane";
+  if (n.includes("carlton")) return "carlton";
+  if (n.includes("collingwood")) return "collingwood";
+  if (n.includes("essendon")) return "essendon";
+  if (n.includes("fremantle")) return "fremantle";
+  if (n.includes("geelong")) return "geelong";
+  if (n.includes("hawthorn")) return "hawthorn";
+  if (n.includes("melbourne")) return "melbourne";
+  if (n.includes("richmond")) return "richmond";
+  if (n.includes("sydney") || n.includes("swans")) return "sydney";
+
   return null;
 }
 
-function parseTeamsFromMatch(match: string): { home: string | null; away: string | null } {
-  const raw = (match || "").trim();
-  const parts = raw.split(/\s+vs\s+|\s+v\s+/i);
-  if (parts.length >= 2) return { home: parts[0]?.trim() || null, away: parts[1]?.trim() || null };
-  return { home: null, away: null };
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
 }
 
-/**
- * Exact mapping to YOUR /public/aflteams filenames.
- * (Based on your screenshot)
- */
-function teamToFileKey(name: string): string {
-  const n = (name || "").trim().toLowerCase();
-
-  const map: Record<string, string> = {
-    "adelaide": "adelaide",
-    "adelaide crows": "adelaide",
-
-    "brisbane": "brisbane",
-    "brisbane lions": "brisbane",
-
-    "carlton": "carlton",
-    "carlton blues": "carlton",
-
-    "collingwood": "collingwood",
-
-    "essendon": "essendon",
-
-    "fremantle": "fremantle",
-    "fremantle dockers": "fremantle",
-
-    "geelong": "geelong",
-    "geelong cats": "geelong",
-
-    "gold coast": "goldcoast",
-    "gold coast suns": "goldcoast",
-
-    "gws": "gws",
-    "giants": "gws",
-    "greater western sydney": "gws",
-
-    "hawthorn": "hawthorn",
-
-    "melbourne": "melbourne",
-
-    "north melbourne": "northmelbourne",
-    "kangaroos": "northmelbourne",
-
-    "port adelaide": "portadelaide",
-
-    "richmond": "richmond",
-
-    "st kilda": "stkilda",
-    "saints": "stkilda",
-
-    "sydney": "sydney",
-    "sydney swans": "sydney",
-
-    "west coast": "westcoast",
-    "west coast eagles": "westcoast",
-
-    "western bulldogs": "westernbulldogs",
-    "bulldogs": "westernbulldogs",
-  };
-
-  if (map[n]) return map[n];
-
-  // fallback: smash spaces
-  return n.replace(/\s+/g, "");
+function logoCandidates(teamSlug: TeamSlug): string[] {
+  return [`/aflteams/${teamSlug}-logo.jpg`, `/aflteams/${teamSlug}-logo.jpeg`, `/aflteams/${teamSlug}-logo.png`];
 }
 
-type LocalPickMap = Record<string, LocalPick>;
-type LockedGamesMap = Record<string, boolean>;
+function TeamLogo({ teamName, size = 44 }: { teamName: string; size?: number }) {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
 
-type SlipPick = {
-  questionId: string;
-  quarter: number;
-  question: string;
-  outcome: PickOutcome;
-};
+  if (!slug) {
+    const initials = teamName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((x) => x[0]?.toUpperCase())
+      .join("");
+    return (
+      <div
+        className="flex items-center justify-center rounded-2xl border font-black"
+        style={{
+          width: size,
+          height: size,
+          borderColor: "rgba(255,255,255,0.12)",
+          background: "rgba(255,255,255,0.04)",
+          color: "rgba(255,255,255,0.85)",
+        }}
+        title={teamName}
+      >
+        {initials || "AFL"}
+      </div>
+    );
+  }
 
-function TeamLogo({
-  teamName,
-  fileKey,
-}: {
-  teamName: string;
-  fileKey: string;
-}) {
-  // Try jpg first, then jpeg (needed for your sydney-logo.jpeg)
-  const [useJpeg, setUseJpeg] = useState(false);
-  const src = useJpeg ? `/aflteams/${fileKey}-logo.jpeg` : `/aflteams/${fileKey}-logo.jpg`;
+  const candidates = logoCandidates(slug);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
 
   return (
     <div
-      className="relative h-[52px] w-[52px] rounded-2xl overflow-hidden border"
-      style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}
+      className="relative rounded-2xl border overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(255,255,255,0.12)",
+        background: "rgba(255,255,255,0.04)",
+      }}
       title={teamName}
     >
       <Image
         src={src}
         alt={`${teamName} logo`}
         fill
-        sizes="52px"
+        sizes={`${size}px`}
         style={{ objectFit: "cover" }}
-        onError={() => {
-          // if jpg fails, try jpeg once
-          if (!useJpeg) setUseJpeg(true);
-        }}
+        onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
       />
     </div>
   );
 }
 
+type LocalPickMap = Record<string, LocalPick>;
+type LockedGamesMap = Record<string, boolean>;
+
+type ShareSlipPayload = {
+  v: 1;
+  roundNumber: number | null;
+  gameId: string;
+  match: string;
+  venue?: string;
+  startTime?: string;
+  picks: Array<{
+    questionId: string;
+    quarter: number;
+    question: string;
+    outcome: PickOutcome;
+  }>;
+};
+
+function base64UrlEncode(obj: any): string {
+  const json = JSON.stringify(obj);
+  const b64 = typeof window !== "undefined" ? window.btoa(unescape(encodeURIComponent(json))) : "";
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 export default function PicksMatchSlugPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const params = useParams<{ matchSlug: string }>();
+  const matchSlug = (params?.matchSlug || "").toString();
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [games, setGames] = useState<ApiGame[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
   const [localPicks, setLocalPicks] = useState<LocalPickMap>({});
-  const [lockedGames, setLockedGames] = useState<LockedGamesMap>({});
-
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
-
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [toast, setToast] = useState("");
-
   const hasHydratedLocalRef = useRef(false);
+
+  const [lockedGames, setLockedGames] = useState<LockedGamesMap>({});
   const hasHydratedLockedRef = useRef(false);
+
+  const [filterTab, setFilterTab] = useState<FilterTab>("all");
+
+  // comments
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
+  const [commentsGame, setCommentsGame] = useState<ApiGame | null>(null);
+  const [commentsList, setCommentsList] = useState<CommentRow[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [commentErr, setCommentErr] = useState("");
+  const [commentPosting, setCommentPosting] = useState(false);
+  const commentsUnsubRef = useRef<null | (() => void)>(null);
+
+  // lock modal
+  const [slipOpen, setSlipOpen] = useState(false);
+  const [slipPayload, setSlipPayload] = useState<ShareSlipPayload | null>(null);
+  const [slipConfirmMode, setSlipConfirmMode] = useState(false);
+  const [slipToast, setSlipToast] = useState("");
+
+  // confetti (only for milestones if you later want it)
+  const [confettiOn] = useState(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -294,7 +395,7 @@ export default function PicksMatchSlugPage() {
         } catch {}
       }
 
-      const res = await fetch("/api/picks", { headers: { ...authHeader }, cache: "no-store" });
+      const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
 
       const data = (await res.json()) as PicksApiResponse;
@@ -312,7 +413,12 @@ export default function PicksMatchSlugPage() {
     loadPicks();
   }, [loadPicks]);
 
-  // Hydrate local picks
+  const activeGame = useMemo(() => {
+    const g = games.find((x) => slugify(x.match) === matchSlug) ?? null;
+    return g;
+  }, [games, matchSlug]);
+
+  // hydrate local picks
   useEffect(() => {
     if (hasHydratedLocalRef.current) return;
     if (roundNumber === null) return;
@@ -339,7 +445,7 @@ export default function PicksMatchSlugPage() {
     } catch {}
   }, [localPicks, user?.uid, roundNumber]);
 
-  // Hydrate locked games
+  // hydrate locked games
   useEffect(() => {
     if (hasHydratedLockedRef.current) return;
     if (roundNumber === null) return;
@@ -352,7 +458,7 @@ export default function PicksMatchSlugPage() {
         if (parsed && typeof parsed === "object") setLockedGames(parsed);
       }
     } catch (e) {
-      console.warn("Failed to hydrate locked games", e);
+      console.warn("Failed to hydrate locked picks", e);
     } finally {
       hasHydratedLockedRef.current = true;
     }
@@ -366,205 +472,600 @@ export default function PicksMatchSlugPage() {
     } catch {}
   }, [lockedGames, user?.uid, roundNumber]);
 
-  const gameIdFromQuery = searchParams.get("game");
-
-  const activeGame = useMemo(() => {
-    if (!games.length) return null;
-
-    if (gameIdFromQuery) {
-      const byId = games.find((g) => g.id === gameIdFromQuery);
-      if (byId) return byId;
-    }
-
-    const slug = (params?.matchSlug || "").toString();
-    const bySlug = games.find((g) => slugify(g.match) === slug);
-    return bySlug ?? null;
-  }, [games, gameIdFromQuery, params]);
-
-  const lockMs = useMemo(() => {
-    if (!activeGame) return 0;
-    return new Date(activeGame.startTime).getTime() - nowMs;
-  }, [activeGame, nowMs]);
-
-  const gameLockedByTime = lockMs <= 0;
-  const gameLockedByUser = activeGame ? !!lockedGames[activeGame.id] : false;
-  const interactionLocked = gameLockedByTime || gameLockedByUser;
-
-  const selectedPicks = useMemo(() => {
-    if (!activeGame) return 0;
-    return activeGame.questions.reduce((acc, q) => {
-      const p = effectivePick(localPicks[q.id], q.userPick);
-      return acc + (p === "yes" || p === "no" ? 1 : 0);
-    }, 0);
-  }, [activeGame, localPicks]);
-
-  const slipPicks = useMemo((): SlipPick[] => {
+  const filteredQuestions = useMemo(() => {
     if (!activeGame) return [];
-    const out: SlipPick[] = [];
-    for (const q of activeGame.questions) {
-      const p = effectivePick(localPicks[q.id], q.userPick);
-      if (p !== "yes" && p !== "no") continue;
-      out.push({ questionId: q.id, quarter: q.quarter, question: q.question, outcome: p });
-    }
-    return out.sort((a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question));
-  }, [activeGame, localPicks]);
+    const qs = activeGame.questions.slice();
+    if (filterTab === "all") return qs;
+    return qs.filter((q) => q.status === filterTab);
+  }, [activeGame, filterTab]);
 
-  const togglePick = useCallback(
-    async (q: ApiQuestion, outcome: PickOutcome) => {
-      if (interactionLocked) return;
+  function isQuestionLocked(q: ApiQuestion, gameLocked: boolean) {
+    if (q.status === "final") return true;
+    if (q.status === "void") return true;
+    if (q.status === "pending") return true;
+    if (gameLocked) return true;
+    return false;
+  }
 
-      const current = effectivePick(localPicks[q.id], q.userPick);
-      const next: LocalPick = current === outcome ? "none" : outcome;
-
-      setLocalPicks((prev) => ({ ...prev, [q.id]: next }));
+  const clearPick = useCallback(
+    async (q: ApiQuestion) => {
+      setLocalPicks((prev) => ({ ...prev, [q.id]: "none" }));
 
       if (!user) return;
 
       try {
         const token = await user.getIdToken();
 
-        if (next === "none") {
-          const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
-            method: "DELETE",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (delRes.ok) return;
+        const delRes = await fetch(`/api/user-picks?questionId=${encodeURIComponent(q.id)}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-          await fetch("/api/user-picks", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ action: "clear", questionId: q.id }),
-          });
-          return;
-        }
+        if (delRes.ok) return;
 
-        await fetch("/api/user-picks", {
+        const postRes = await fetch("/api/user-picks", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            questionId: q.id,
-            outcome: next,
-            roundNumber: typeof roundNumber === "number" ? roundNumber : null,
-            gameId: q.gameId ?? activeGame?.id ?? null,
-          }),
+          body: JSON.stringify({ action: "clear", questionId: q.id }),
         });
+
+        if (!postRes.ok) console.error("Failed to clear pick:", await postRes.text());
+      } catch (e) {
+        console.error("Clear pick error", e);
+      }
+    },
+    [user]
+  );
+
+  const togglePick = useCallback(
+    async (q: ApiQuestion, outcome: PickOutcome, locked: boolean) => {
+      if (locked) return;
+
+      const current = effectivePick(localPicks[q.id], q.userPick);
+
+      if (current === outcome) {
+        await clearPick(q);
+        return;
+      }
+
+      setLocalPicks((prev) => ({ ...prev, [q.id]: outcome }));
+
+      if (!user) return;
+
+      try {
+        const token = await user.getIdToken();
+        const body = {
+          questionId: q.id,
+          outcome,
+          roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+          gameId: q.gameId ?? activeGame?.id ?? null,
+        };
+
+        const res = await fetch("/api/user-picks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) console.error("Failed to save pick:", await res.text());
       } catch (e) {
         console.error("Pick save error", e);
       }
     },
-    [interactionLocked, localPicks, user, roundNumber, activeGame]
+    [user, roundNumber, localPicks, clearPick, activeGame?.id]
   );
 
-  const openConfirm = useCallback(() => {
-    if (!activeGame) return;
-    if (interactionLocked) return;
-    if (selectedPicks <= 0) return;
-    setConfirmOpen(true);
-    setToast("");
-  }, [activeGame, interactionLocked, selectedPicks]);
+  const buildSlipForGame = useCallback(
+    (g: ApiGame): ShareSlipPayload | null => {
+      const picks: ShareSlipPayload["picks"] = [];
+      for (const q of g.questions) {
+        const pick = effectivePick(localPicks[q.id], q.userPick);
+        if (pick !== "yes" && pick !== "no") continue;
+        picks.push({
+          questionId: q.id,
+          quarter: q.quarter,
+          question: q.question,
+          outcome: pick,
+        });
+      }
+      if (picks.length === 0) return null;
 
-  const closeConfirm = useCallback(() => setConfirmOpen(false), []);
+      return {
+        v: 1,
+        roundNumber,
+        gameId: g.id,
+        match: g.match,
+        venue: g.venue,
+        startTime: g.startTime,
+        picks: picks.sort((a, b) => (a.quarter - b.quarter) || a.question.localeCompare(b.question)),
+      };
+    },
+    [localPicks, roundNumber]
+  );
 
-  const lockInPicks = useCallback(() => {
-    if (!activeGame) return;
-    if (selectedPicks <= 0) return;
+  const openSlip = useCallback((payload: ShareSlipPayload, confirm: boolean) => {
+    setSlipPayload(payload);
+    setSlipConfirmMode(confirm);
+    setSlipOpen(true);
+    setSlipToast("");
+  }, []);
 
-    setLockedGames((prev) => ({ ...prev, [activeGame.id]: true }));
-    setConfirmOpen(false);
-    setToast("PICKED & LOCKED ✅");
+  const closeSlip = useCallback(() => {
+    setSlipOpen(false);
+    setSlipPayload(null);
+    setSlipConfirmMode(false);
+    setSlipToast("");
+  }, []);
 
-    window.setTimeout(() => setToast(""), 1400);
+  const lockInPicksForGame = useCallback((gameId: string) => {
+    setLockedGames((prev) => ({ ...prev, [gameId]: true }));
+    setSlipToast("Picks locked ✅");
+    setTimeout(() => setSlipToast(""), 1400);
+  }, []);
 
-    window.setTimeout(() => {
-      router.push("/picks");
-    }, 650);
-  }, [activeGame, selectedPicks, router]);
+  // comments open/close
+  const openComments = useCallback((g: ApiGame, q: ApiQuestion) => {
+    setCommentsGame(g);
+    setCommentsQuestion(q);
+    setCommentsOpen(true);
+    setCommentText("");
+    setCommentErr("");
+    setCommentsList([]);
+  }, []);
 
-  // Header visual: player image if any "Will {Player}" question exists, else show team logos side-by-side
-  const headerVisual = useMemo(() => {
-    if (!activeGame) return { type: "none" as const };
+  const closeComments = useCallback(() => {
+    setCommentsOpen(false);
+    setCommentsQuestion(null);
+    setCommentsGame(null);
+    setCommentsList([]);
+    setCommentText("");
+    setCommentErr("");
+    setCommentsLoading(false);
+    setCommentPosting(false);
+    if (commentsUnsubRef.current) {
+      try {
+        commentsUnsubRef.current();
+      } catch {}
+      commentsUnsubRef.current = null;
+    }
+  }, []);
 
-    const firstPlayerQ = activeGame.questions.find((q) => !!extractPlayerName(q.question));
-    if (firstPlayerQ) {
-      const playerName = extractPlayerName(firstPlayerQ.question)!;
-      const playerSlug = slugify(playerName);
-      const src = `/players/${playerSlug}.jpg`;
-      return { type: "player" as const, playerName, src };
+  useEffect(() => {
+    if (!commentsOpen || !commentsQuestion) return;
+
+    setCommentsLoading(true);
+    setCommentErr("");
+
+    if (commentsUnsubRef.current) {
+      try {
+        commentsUnsubRef.current();
+      } catch {}
+      commentsUnsubRef.current = null;
     }
 
-    const teams = parseTeamsFromMatch(activeGame.match);
-    const homeKey = teams.home ? teamToFileKey(teams.home) : null;
-    const awayKey = teams.away ? teamToFileKey(teams.away) : null;
+    const qRef = query(collection(db, "comments"), where("questionId", "==", commentsQuestion.id), limit(50));
 
-    return {
-      type: "teams" as const,
-      homeName: teams.home,
-      awayName: teams.away,
-      homeKey,
-      awayKey,
+    commentsUnsubRef.current = onSnapshot(
+      qRef,
+      (snap) => {
+        const rows: CommentRow[] = snap.docs
+          .map((d) => {
+            const data = d.data() as any;
+            const body = typeof data?.body === "string" ? data.body : typeof data?.text === "string" ? data.text : "";
+            return {
+              id: d.id,
+              questionId: data?.questionId ?? commentsQuestion.id,
+              gameId: data?.gameId ?? null,
+              roundNumber: typeof data?.roundNumber === "number" ? data.roundNumber : null,
+              userId: data?.userId ?? null,
+              displayName: data?.displayName ?? null,
+              username: data?.username ?? null,
+              body,
+              createdAt: data?.createdAt,
+            };
+          })
+          .sort((a, b) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+
+        setCommentsList(rows);
+        setCommentsLoading(false);
+      },
+      (e) => {
+        console.warn("comments snapshot error", e);
+        setCommentErr("Could not load comments.");
+        setCommentsLoading(false);
+      }
+    );
+
+    return () => {
+      if (commentsUnsubRef.current) {
+        try {
+          commentsUnsubRef.current();
+        } catch {}
+        commentsUnsubRef.current = null;
+      }
     };
-  }, [activeGame]);
+  }, [commentsOpen, commentsQuestion]);
 
-  const matchHero = useMemo(() => {
-    if (!activeGame) return "";
-    return `/matches/${encodeURIComponent(activeGame.id)}.jpg`;
-  }, [activeGame]);
+  const postComment = useCallback(async () => {
+    setCommentErr("");
 
-  const ConfirmModal = () => {
-    if (!confirmOpen || !activeGame) return null;
+    const q = commentsQuestion;
+    if (!q) return;
 
-    const nextStreakAdd = slipPicks.length;
-    const roundLabel =
-      roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+    const txt = commentText.trim();
+    if (!txt) {
+      setCommentErr("Write something first.");
+      return;
+    }
+
+    if (!user) {
+      setCommentErr("Log in to comment.");
+      return;
+    }
+
+    if (txt.length > 240) {
+      setCommentErr("Keep it under 240 characters.");
+      return;
+    }
+
+    setCommentPosting(true);
+    try {
+      const payload: any = {
+        questionId: q.id,
+        gameId: q.gameId ?? commentsGame?.id ?? null,
+        roundNumber: typeof roundNumber === "number" ? roundNumber : null,
+        userId: user.uid,
+        displayName: user.displayName ?? null,
+        body: txt,
+        createdAt: serverTimestamp(),
+      };
+
+      await addDoc(collection(db, "comments"), payload);
+      setCommentText("");
+    } catch (e) {
+      console.error("postComment error", e);
+      setCommentErr("Could not post comment.");
+    } finally {
+      setCommentPosting(false);
+    }
+  }, [commentText, commentsQuestion, commentsGame, user, roundNumber]);
+
+  const renderSentimentWhite = (q: ApiQuestion) => {
+    const yes = clampPct(q.yesPercent);
+    const no = clampPct(q.noPercent);
+
+    const total = yes + no;
+    const yesW = total <= 0 ? 50 : (yes / total) * 100;
+    const noW = 100 - yesW;
+
+    const majority = majorityLabel(yes, no);
+    const pick = effectivePick(localPicks[q.id], q.userPick);
+    const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
+
+    return (
+      <div className="mt-2">
+        <div className="flex items-center justify-between text-[10px]">
+          <span className="uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.55)" }}>
+            Crowd
+          </span>
+          <span style={{ color: majority.color }} className="font-black">
+            {majority.label}
+          </span>
+        </div>
+
+        <div
+          className="mt-1 h-[7px] rounded-full overflow-hidden border"
+          style={{
+            borderColor: "rgba(0,0,0,0.10)",
+            background: "rgba(0,0,0,0.05)",
+          }}
+        >
+          <div className="h-full flex">
+            <div
+              className="h-full"
+              style={{
+                width: `${yesW}%`,
+                background: `linear-gradient(90deg, rgba(25,195,125,0.85), rgba(25,195,125,0.20))`,
+              }}
+            />
+            <div
+              className="h-full"
+              style={{
+                width: `${noW}%`,
+                background: `linear-gradient(90deg, rgba(255,46,77,0.20), rgba(255,46,77,0.85))`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="mt-1 flex items-center justify-between text-[10px]" style={{ color: "rgba(0,0,0,0.60)" }}>
+          <span>
+            YES{" "}
+            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
+              {Math.round(yes)}%
+            </span>
+          </span>
+
+          {aligned === null ? (
+            <span style={{ color: "rgba(0,0,0,0.35)" }}>Pick to compare</span>
+          ) : aligned ? (
+            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-black">
+              With crowd
+            </span>
+          ) : (
+            <span style={{ color: COLORS.red }} className="font-black">
+              Against crowd
+            </span>
+          )}
+
+          <span>
+            NO{" "}
+            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
+              {Math.round(no)}%
+            </span>
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  const renderPickButtonsWhite = (q: ApiQuestion, locked: boolean) => {
+    const pick = effectivePick(localPicks[q.id], q.userPick);
+    const isYesSelected = pick === "yes";
+    const isNoSelected = pick === "no";
+
+    const btnBase =
+      "flex-1 rounded-xl px-4 py-2.5 text-[12px] font-black tracking-wide border transition active:scale-[0.99] disabled:opacity-55 disabled:cursor-not-allowed";
+
+    const selectedStyle = {
+      borderColor: "rgba(255,46,77,0.65)",
+      background: `linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,96,120,0.88))`,
+      boxShadow: "0 0 22px rgba(255,46,77,0.18)",
+      color: "rgba(255,255,255,0.98)",
+    } as const;
+
+    const neutralStyle = {
+      borderColor: "rgba(0,0,0,0.12)",
+      background: "rgba(0,0,0,0.04)",
+      boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.03)",
+      color: "rgba(0,0,0,0.85)",
+    } as const;
+
+    const lockedStyle = {
+      borderColor: "rgba(0,0,0,0.10)",
+      background: "rgba(0,0,0,0.03)",
+      color: "rgba(0,0,0,0.45)",
+    } as const;
+
+    return (
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          disabled={locked}
+          onClick={() => togglePick(q, "yes", locked)}
+          className={btnBase}
+          style={locked ? lockedStyle : isYesSelected ? selectedStyle : neutralStyle}
+          aria-pressed={isYesSelected}
+        >
+          YES
+        </button>
+
+        <button
+          type="button"
+          disabled={locked}
+          onClick={() => togglePick(q, "no", locked)}
+          className={btnBase}
+          style={locked ? lockedStyle : isNoSelected ? selectedStyle : neutralStyle}
+          aria-pressed={isNoSelected}
+        >
+          NO
+        </button>
+      </div>
+    );
+  };
+
+  const VisualHeader = ({ g, q }: { g: ApiGame; q: ApiQuestion }) => {
+    // If player question -> show player headshot (auto from question)
+    const playerName = extractPlayerName(q.question);
+    if (playerName) {
+      const playerSlug = slugify(playerName);
+      const src = `/players/${playerSlug}.jpg`;
+      return (
+        <div className="flex items-center gap-3">
+          <div
+            className="relative h-[46px] w-[46px] rounded-2xl border overflow-hidden shrink-0"
+            style={{ borderColor: "rgba(0,0,0,0.10)", background: "rgba(0,0,0,0.04)" }}
+            title={playerName}
+          >
+            <Image src={src} alt={playerName} fill sizes="46px" style={{ objectFit: "cover" }} />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.45)" }}>
+              {g.match}
+            </div>
+            <div className="mt-1 text-[14px] font-black truncate" style={{ color: "rgba(0,0,0,0.92)" }}>
+              {playerName}
+            </div>
+            <div className="mt-0.5 text-[11px] truncate" style={{ color: "rgba(0,0,0,0.55)" }}>
+              {g.venue} • {formatAedt(g.startTime)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Otherwise show two AFL team logos side-by-side from match string
+    const m = splitMatch(g.match);
+    const home = m?.home ?? g.match;
+    const away = m?.away ?? "AFL";
+
+    return (
+      <div className="flex items-center gap-3">
+        <TeamLogo teamName={home} size={46} />
+        <div className="text-[12px] font-black" style={{ color: "rgba(0,0,0,0.45)" }}>
+          vs
+        </div>
+        <TeamLogo teamName={away} size={46} />
+
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.45)" }}>
+            {g.match}
+          </div>
+          <div className="mt-0.5 text-[11px] truncate" style={{ color: "rgba(0,0,0,0.55)" }}>
+            {g.venue} • {formatAedt(g.startTime)}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const WhitePickCard = ({ g, q, gameLocked }: { g: ApiGame; q: ApiQuestion; gameLocked: boolean }) => {
+    const lockMs = new Date(g.startTime).getTime() - nowMs;
+    const locked = isQuestionLocked(q, gameLocked);
+
+    const pick = effectivePick(localPicks[q.id], q.userPick);
+    const hasPick = pick === "yes" || pick === "no";
+
+    return (
+      <div
+        className="relative rounded-2xl border overflow-hidden"
+        style={{
+          borderColor: "rgba(0,0,0,0.08)",
+          background: "rgba(255,255,255,0.98)",
+          boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+        }}
+      >
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[11px] font-black uppercase tracking-wide" style={{ color: "rgba(0,0,0,0.55)" }}>
+                Q{q.quarter}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black transition active:scale-[0.99]"
+                style={{
+                  borderColor: hasPick ? "rgba(0,0,0,0.14)" : "rgba(0,0,0,0.08)",
+                  background: hasPick ? "rgba(0,0,0,0.04)" : "rgba(0,0,0,0.03)",
+                  color: hasPick ? "rgba(0,0,0,0.85)" : "rgba(0,0,0,0.40)",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  clearPick(q);
+                }}
+                disabled={!hasPick || locked}
+                aria-label="Clear selection"
+                title={locked ? "Locked" : "Clear"}
+              >
+                ✕
+              </button>
+
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-black border transition active:scale-[0.99]"
+                style={{
+                  borderColor: "rgba(0,0,0,0.10)",
+                  background: "rgba(0,0,0,0.03)",
+                  color: "rgba(0,0,0,0.85)",
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openComments(g, q);
+                }}
+                title="Open comments"
+              >
+                💬 {q.commentCount ?? 0}
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <VisualHeader g={g} q={q} />
+          </div>
+
+          <div className="mt-3 text-[13px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.92)" }}>
+            {q.question}
+          </div>
+
+          <div>{renderSentimentWhite(q)}</div>
+          {renderPickButtonsWhite(q, locked)}
+
+          {locked ? (
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.40), rgba(255,255,255,0.06))" }}
+            />
+          ) : null}
+
+          {!locked && lockMs > 0 ? (
+            <div className="mt-3 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.55)" }}>
+              Locks in {msToCountdown(lockMs)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const SlipModal = () => {
+    if (!slipOpen || !slipPayload) return null;
+    const isConfirm = slipConfirmMode;
+
+    const lockText = isConfirm
+      ? "MISS ONE: Streak resets to 0."
+      : "Reminder: 1 miss resets your entire streak to 0.";
+
+    const shareLink = (() => {
+      try {
+        const encoded = base64UrlEncode(slipPayload);
+        const url = new URL(window.location.href);
+        url.searchParams.set("slip", encoded);
+        return url.toString();
+      } catch {
+        return "";
+      }
+    })();
 
     return (
       <div
         className="fixed inset-0 z-[90] flex items-center justify-center p-4"
         onMouseDown={(e) => {
-          if (e.target === e.currentTarget) closeConfirm();
+          if (e.target === e.currentTarget) closeSlip();
         }}
-        style={{ background: "rgba(0,0,0,0.74)", backdropFilter: "blur(10px)" }}
+        style={{ background: "rgba(0,0,0,0.72)", backdropFilter: "blur(10px)" }}
       >
         <div
           className="w-full max-w-2xl rounded-2xl border overflow-hidden"
           style={{
             borderColor: COLORS.redSoft,
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)",
-            boxShadow: "0 24px 80px rgba(0,0,0,0.85)",
+            background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
+            boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
           }}
         >
-          <div
-            className="px-5 py-4 border-b"
-            style={{
-              borderColor: "rgba(255,46,77,0.20)",
-              background: "rgba(255,255,255,0.03)",
-            }}
-          >
+          <div className="px-5 py-4 border-b" style={{ borderColor: "rgba(255,46,77,0.20)", background: "rgba(255,255,255,0.03)" }}>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-widest text-white/55">
-                  Confirm Your Path
+                  {isConfirm ? "Confirm Your Path" : "Your Slip"}
                 </div>
-                <div className="mt-1 text-[16px] font-extrabold text-white truncate">
-                  {activeGame.match}
-                </div>
+                <div className="mt-1 text-[16px] font-extrabold text-white truncate">{slipPayload.match}</div>
                 <div className="mt-1 text-[12px] text-white/70 truncate">
-                  {roundLabel ? `${roundLabel} • ` : ""}
-                  {activeGame.venue} • {formatAedt(activeGame.startTime)}
+                  {slipPayload.venue ?? "—"} • {slipPayload.startTime ? formatAedt(slipPayload.startTime) : "—"}
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={closeConfirm}
+                onClick={closeSlip}
                 className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-                style={{
-                  borderColor: "rgba(255,255,255,0.16)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "rgba(255,255,255,0.90)",
-                }}
-                aria-label="Close confirm"
+                style={{ borderColor: "rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)" }}
+                aria-label="Close slip"
                 title="Close"
               >
                 ✕
@@ -573,51 +1074,25 @@ export default function PicksMatchSlugPage() {
           </div>
 
           <div className="px-5 py-4">
-            <div
-              className="rounded-xl border p-3 text-[12px]"
-              style={{
-                borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,46,77,0.10)",
-                color: "rgba(255,255,255,0.90)",
-              }}
-            >
-              <span className="font-black">The Stakes:</span> WIN = streak becomes{" "}
-              <span className="font-black">Current + {nextStreakAdd}</span>. MISS ONE ={" "}
-              <span className="font-black">streak resets to 0</span>.
+            <div className="rounded-xl border p-3 text-[12px]" style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.90)" }}>
+              <span className="font-black">{isConfirm ? "The stakes:" : "Reminder:"}</span> {lockText}
             </div>
 
             <div className="mt-4 space-y-2 max-h-[52vh] overflow-auto pr-1">
-              {slipPicks.map((p) => (
-                <div
-                  key={p.questionId}
-                  className="rounded-xl border p-3"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.03)",
-                  }}
-                >
+              {slipPayload.picks.map((p) => (
+                <div key={p.questionId} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[10px] uppercase tracking-widest text-white/55">
-                        Q{p.quarter}
-                      </div>
+                      <div className="text-[10px] uppercase tracking-widest text-white/55">Quarter {p.quarter}</div>
                       <div className="mt-1 text-[13px] text-white/90">{p.question}</div>
                     </div>
+
                     <span
                       className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border shrink-0"
                       style={{
-                        borderColor:
-                          p.outcome === "yes"
-                            ? "rgba(25,195,125,0.35)"
-                            : "rgba(255,46,77,0.35)",
-                        background:
-                          p.outcome === "yes"
-                            ? "rgba(25,195,125,0.10)"
-                            : "rgba(255,46,77,0.10)",
-                        color:
-                          p.outcome === "yes"
-                            ? "rgba(25,195,125,0.95)"
-                            : "rgba(255,46,77,0.95)",
+                        borderColor: p.outcome === "yes" ? "rgba(25,195,125,0.35)" : "rgba(255,46,77,0.35)",
+                        background: p.outcome === "yes" ? "rgba(25,195,125,0.10)" : "rgba(255,46,77,0.10)",
+                        color: p.outcome === "yes" ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)",
                       }}
                     >
                       {p.outcome.toUpperCase()}
@@ -628,46 +1103,82 @@ export default function PicksMatchSlugPage() {
             </div>
 
             <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-between">
-              <div className="text-[11px] text-white/55">{slipPicks.length} picks selected</div>
-              <button
-                type="button"
-                onClick={lockInPicks}
-                className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{
-                  borderColor: "rgba(255,46,77,0.55)",
-                  background: "rgba(255,46,77,0.18)",
-                  color: "rgba(255,255,255,0.95)",
-                  boxShadow: "0 14px 40px rgba(255,46,77,0.15)",
-                }}
-              >
-                I’M ALL IN
-              </button>
+              <div className="text-[11px] text-white/55">
+                {slipPayload.picks.length} picks • Share link available
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(shareLink);
+                      setSlipToast("Copied link ✅");
+                      setTimeout(() => setSlipToast(""), 1200);
+                    } catch {
+                      setSlipToast("Copy failed");
+                      setTimeout(() => setSlipToast(""), 1200);
+                    }
+                  }}
+                  className="rounded-xl border px-4 py-3 text-[12px] font-black active:scale-[0.99]"
+                  style={{ borderColor: "rgba(0,229,255,0.30)", background: "rgba(0,229,255,0.10)", color: "rgba(0,229,255,0.95)" }}
+                >
+                  Copy link
+                </button>
+
+                {isConfirm ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      lockInPicksForGame(slipPayload.gameId);
+                      setSlipConfirmMode(false);
+                      setSlipToast("Locked ✅");
+                      setTimeout(() => setSlipToast(""), 1200);
+                      closeSlip();
+                    }}
+                    className="rounded-xl border px-5 py-3 text-[12px] font-black active:scale-[0.99]"
+                    style={{ borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)", color: "rgba(255,255,255,0.95)" }}
+                    title="Confirm lock in"
+                  >
+                    I’M ALL IN
+                  </button>
+                ) : null}
+              </div>
             </div>
+
+            {slipToast ? (
+              <div className="mt-3 text-[12px] font-black" style={{ color: COLORS.cyan }}>
+                {slipToast}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
     );
   };
 
-  if (loading && !activeGame) {
+  const roundLabel =
+    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+
+  // “Sticky footer” (your prompt) — minimal + fast
+  const stickyMeta = useMemo(() => {
+    if (!activeGame) return { selected: 0, total: 0, gameLocked: false, lockMs: 0 };
+    const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
+    const gameLocked = lockMs <= 0;
+
+    const selected = activeGame.questions.reduce((acc, q) => {
+      const p = effectivePick(localPicks[q.id], q.userPick);
+      return acc + (p === "yes" || p === "no" ? 1 : 0);
+    }, 0);
+
+    return { selected, total: activeGame.questions.length, gameLocked, lockMs };
+  }, [activeGame, nowMs, localPicks]);
+
+  if (loading) {
     return (
       <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-        <div className="w-full max-w-2xl mx-auto px-4 py-6">
-          <div className="h-7 w-44 bg-white/10 rounded" />
-          <div className="mt-3 h-4 w-72 bg-white/10 rounded" />
-          <div className="mt-6 space-y-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-2xl border p-4"
-                style={{ borderColor: COLORS.stroke, background: "rgba(255,255,255,0.03)" }}
-              >
-                <div className="h-4 w-24 bg-white/10 rounded" />
-                <div className="mt-2 h-5 w-full bg-white/10 rounded" />
-                <div className="mt-3 h-10 w-full bg-white/10 rounded" />
-              </div>
-            ))}
-          </div>
+        <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8">
+          <div className="text-white/70">Loading match…</div>
         </div>
       </div>
     );
@@ -676,297 +1187,269 @@ export default function PicksMatchSlugPage() {
   if (err || !activeGame) {
     return (
       <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-        <div className="w-full max-w-2xl mx-auto px-4 py-8">
-          <button
-            type="button"
-            onClick={() => router.push("/picks")}
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-            style={{
-              borderColor: "rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.04)",
-              color: "rgba(255,255,255,0.90)",
-            }}
-          >
-            ← Back
-          </button>
-
-          <div className="mt-4 text-[16px] font-black" style={{ color: COLORS.red }}>
-            {err || "Match not found."}
-          </div>
-          <div className="mt-2 text-[13px] text-white/65">
-            Try going back and opening the match again.
+        <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-8">
+          <div className="text-white/80 font-black text-[18px]">Couldn’t find that match.</div>
+          <div className="mt-2 text-white/60">{err || "It may not exist yet."}</div>
+          <div className="mt-4">
+            <Link
+              href="/picks"
+              className="inline-flex items-center rounded-full border px-4 py-2 text-[12px] font-black"
+              style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}
+            >
+              ← Back to Picks
+            </Link>
           </div>
         </div>
       </div>
     );
   }
 
+  const m = splitMatch(activeGame.match);
+  const home = m?.home ?? activeGame.match;
+  const away = m?.away ?? "AFL";
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <ConfirmModal />
+      {confettiOn ? <Confetti recycle={false} numberOfPieces={220} gravity={0.22} /> : null}
 
-      <div className="w-full max-w-2xl mx-auto px-4 pt-5 pb-28">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            onClick={() => router.push("/picks")}
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+      <SlipModal />
+
+      {/* Comments modal (kept) */}
+      {commentsOpen && commentsQuestion ? (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center p-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeComments();
+          }}
+          style={{ background: "rgba(0,0,0,0.70)", backdropFilter: "blur(8px)" }}
+        >
+          <div
+            className="w-full max-w-2xl rounded-2xl border overflow-hidden"
             style={{
-              borderColor: "rgba(255,255,255,0.12)",
-              background: "rgba(255,255,255,0.04)",
-              color: "rgba(255,255,255,0.90)",
+              borderColor: COLORS.redSoft,
+              background: `linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.03) 100%)`,
+              boxShadow: "0 24px 80px rgba(0,0,0,0.80)",
             }}
           >
-            ← Dashboard
-          </button>
-
-          <div className="text-[11px] text-white/55 font-semibold">
-            {interactionLocked ? "LOCKED" : lockMs > 0 ? `Locks in ${msToCountdown(lockMs)}` : "LIVE / Locked"}
-          </div>
-        </div>
-
-        {/* Hero */}
-        <div
-          className="mt-4 rounded-2xl border overflow-hidden"
-          style={{
-            borderColor: COLORS.stroke,
-            background: "rgba(255,255,255,0.03)",
-            boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
-          }}
-        >
-          <div className="relative h-[170px]">
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
-              }}
-            />
-            <Image
-              src={matchHero}
-              alt={activeGame.match}
-              fill
-              sizes="(max-width: 768px) 100vw, 768px"
-              style={{ objectFit: "cover", opacity: 0.55 }}
-              onError={() => {}}
-            />
-            <div
-              className="absolute inset-0"
-              style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.88) 100%)" }}
-            />
-
-            <div className="absolute left-4 right-4 bottom-3">
-              <div className="text-[11px] text-white/65 font-semibold">{formatAedt(activeGame.startTime)}</div>
-              <div className="mt-1 text-[22px] font-black text-white truncate">{activeGame.match}</div>
-              <div className="mt-1 text-[12px] text-white/65 truncate">{activeGame.venue}</div>
-            </div>
-          </div>
-
-          {/* Visual strip */}
-          <div className="px-4 py-3 border-t" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
-            {headerVisual.type === "player" ? (
-              <div className="flex items-center gap-3">
-                <div
-                  className="relative h-[52px] w-[52px] rounded-2xl overflow-hidden border"
-                  style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}
-                  title={headerVisual.playerName}
-                >
-                  <Image src={headerVisual.src} alt={headerVisual.playerName} fill sizes="52px" style={{ objectFit: "cover" }} />
-                </div>
+            <div className="px-5 py-4 border-b" style={{ borderColor: "rgba(255,46,77,0.20)", background: "rgba(255,255,255,0.03)" }}>
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55">Featured player</div>
-                  <div className="mt-0.5 text-[14px] font-black text-white truncate">{headerVisual.playerName}</div>
-                </div>
-              </div>
-            ) : headerVisual.type === "teams" ? (
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {headerVisual.homeName && headerVisual.homeKey ? (
-                    <TeamLogo teamName={headerVisual.homeName} fileKey={headerVisual.homeKey} />
-                  ) : (
-                    <div className="h-[52px] w-[52px] rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }} />
-                  )}
-
-                  <div className="text-[12px] font-black text-white/80">vs</div>
-
-                  {headerVisual.awayName && headerVisual.awayKey ? (
-                    <TeamLogo teamName={headerVisual.awayName} fileKey={headerVisual.awayKey} />
-                  ) : (
-                    <div className="h-[52px] w-[52px] rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }} />
-                  )}
-                </div>
-
-                <div className="text-right">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55">Focus Mode</div>
-                  <div className="mt-0.5 text-[12px] font-black text-white/85">All-or-nothing streak</div>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        {/* Stat cards */}
-        <div className="mt-5 space-y-3">
-          {activeGame.questions.map((q) => {
-            const pick = effectivePick(localPicks[q.id], q.userPick);
-            const yesSelected = pick === "yes";
-            const noSelected = pick === "no";
-
-            const playerName = extractPlayerName(q.question);
-            const playerSrc = playerName ? `/players/${slugify(playerName)}.jpg` : null;
-
-            const isSettled = q.status === "final" || q.status === "void" || q.status === "pending";
-            const locked = interactionLocked || isSettled;
-
-            return (
-              <div
-                key={q.id}
-                className="rounded-2xl border p-4"
-                style={{
-                  borderColor: yesSelected || noSelected ? "rgba(255,46,77,0.45)" : "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                  boxShadow: yesSelected || noSelected ? "0 0 0 1px rgba(255,46,77,0.18)" : "none",
-                }}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex items-center gap-3">
-                    {/* Auto player image */}
-                    {playerSrc ? (
-                      <div
-                        className="relative h-[44px] w-[44px] rounded-2xl overflow-hidden border shrink-0"
-                        style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)" }}
-                        title={playerName || ""}
-                      >
-                        <Image src={playerSrc} alt={playerName || "Player"} fill sizes="44px" style={{ objectFit: "cover" }} />
-                      </div>
-                    ) : (
-                      <div
-                        className="h-[44px] w-[44px] rounded-2xl border shrink-0"
-                        style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.02)" }}
-                        aria-hidden="true"
-                      />
-                    )}
-
-                    <div className="min-w-0">
-                      <div className="text-[11px] uppercase tracking-widest text-white/55">Q{q.quarter}</div>
-                      <div className="mt-1 text-[14px] font-black text-white/95 break-words">{q.question}</div>
-                      <div className="mt-1 text-[11px] text-white/55">
-                        Status: <span className="font-black text-white/75">{q.status.toUpperCase()}</span>
-                        {locked ? <span className="ml-2 text-white/45">• Locked</span> : null}
-                      </div>
-                    </div>
+                  <div className="text-[11px] uppercase tracking-widest text-white/55">Comments</div>
+                  <div className="mt-1 text-[14px] font-extrabold text-white truncate">
+                    {commentsGame?.match ?? "Game"} • Quarter {commentsQuestion.quarter}
                   </div>
-
-                  {/* Clear (X) */}
-                  <button
-                    type="button"
-                    disabled={locked || (!yesSelected && !noSelected)}
-                    onClick={() => togglePick(q, yesSelected ? "yes" : "no")}
-                    className="inline-flex items-center justify-center rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.14)",
-                      background: "rgba(255,255,255,0.05)",
-                      color: "rgba(255,255,255,0.85)",
-                    }}
-                    title="Clear pick"
-                    aria-label="Clear pick"
-                  >
-                    ✕
-                  </button>
+                  <div className="mt-1 text-[13px] text-white/80">{commentsQuestion.question}</div>
                 </div>
 
-                {/* YES/NO */}
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() => togglePick(q, "yes")}
-                    className="flex-1 rounded-xl px-4 py-3 text-[13px] font-black tracking-wide border active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      borderColor: yesSelected ? "rgba(255,46,77,0.65)" : "rgba(255,255,255,0.12)",
-                      background: yesSelected
-                        ? "linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,96,120,0.88))"
-                        : "rgba(255,255,255,0.04)",
-                      color: yesSelected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.90)",
-                      boxShadow: yesSelected ? "0 0 18px rgba(255,46,77,0.18)" : "none",
-                    }}
-                    aria-pressed={yesSelected}
-                  >
-                    YES
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={locked}
-                    onClick={() => togglePick(q, "no")}
-                    className="flex-1 rounded-xl px-4 py-3 text-[13px] font-black tracking-wide border active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
-                    style={{
-                      borderColor: noSelected ? "rgba(255,46,77,0.65)" : "rgba(255,255,255,0.12)",
-                      background: noSelected
-                        ? "linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,96,120,0.88))"
-                        : "rgba(255,255,255,0.04)",
-                      color: noSelected ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.90)",
-                      boxShadow: noSelected ? "0 0 18px rgba(255,46,77,0.18)" : "none",
-                    }}
-                    aria-pressed={noSelected}
-                  >
-                    NO
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Sticky footer */}
-      <div
-        className="fixed left-0 right-0 bottom-0 z-[70] border-t"
-        style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(0,0,0,0.78)",
-          backdropFilter: "blur(10px)",
-        }}
-      >
-        <div className="w-full max-w-2xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-widest" style={{ color: COLORS.textFaint }}>
-                Picks Selected
-              </div>
-              <div className="mt-1 text-[16px] font-black" style={{ color: COLORS.white }}>
-                {selectedPicks} of {activeGame.questions.length}
-              </div>
-              <div className="mt-1 text-[12px]" style={{ color: COLORS.textDim }}>
-                Potential Streak:{" "}
-                <span className="font-black" style={{ color: COLORS.red }}>
-                  +{selectedPicks}
-                </span>
+                <button
+                  type="button"
+                  onClick={closeComments}
+                  className="rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+                  style={{ borderColor: "rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.90)" }}
+                  aria-label="Close comments"
+                  title="Close"
+                >
+                  ✕
+                </button>
               </div>
             </div>
 
+            <div className="px-5 py-4">
+              {!user ? (
+                <div className="rounded-xl border p-3 text-[12px] text-white/80" style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)" }}>
+                  Log in to post comments. You can still read the chat.
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex gap-2">
+                <input
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  placeholder={user ? "Say something (max 240 chars)..." : "Log in to comment..."}
+                  disabled={!user || commentPosting}
+                  className="flex-1 rounded-xl border px-4 py-3 text-[13px] outline-none"
+                  style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.92)" }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      postComment();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={postComment}
+                  disabled={!user || commentPosting}
+                  className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ borderColor: "rgba(0,229,255,0.30)", background: "rgba(0,229,255,0.10)", color: "rgba(0,229,255,0.95)" }}
+                >
+                  {commentPosting ? "Posting…" : "Post"}
+                </button>
+              </div>
+
+              {commentErr ? (
+                <div className="mt-2 text-[12px]" style={{ color: COLORS.bad }}>
+                  {commentErr}
+                </div>
+              ) : null}
+
+              <div className="mt-4">
+                <div className="flex items-center justify-between text-[11px] text-white/55">
+                  <div className="uppercase tracking-widest">Latest {commentsList.length ? `(${commentsList.length})` : ""}</div>
+                  <div className="text-white/45">ESC to close</div>
+                </div>
+
+                <div className="mt-2 max-h-[52vh] overflow-auto pr-1">
+                  {commentsLoading ? (
+                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                      Loading comments…
+                    </div>
+                  ) : commentsList.length === 0 ? (
+                    <div className="rounded-xl border p-3 text-[12px] text-white/70" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                      No comments yet. Be the first to chirp.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {commentsList.map((c) => (
+                        <div key={c.id} className="rounded-xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-[12px] font-black text-white/90 truncate">{c.displayName || c.username || "Anonymous"}</div>
+                            <div className="text-[11px] text-white/45 shrink-0">{formatCommentTime(c.createdAt)}</div>
+                          </div>
+                          <div className="mt-1 text-[13px] text-white/85 whitespace-pre-wrap break-words">{c.body}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 text-[11px] text-white/45">Keep it civil. Banter is good — abuse gets binned.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-28">
+        {/* Focus header */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
             <button
               type="button"
-              disabled={interactionLocked || selectedPicks <= 0}
-              onClick={openConfirm}
-              className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] disabled:opacity-45 disabled:cursor-not-allowed"
-              style={{
-                borderColor: "rgba(255,46,77,0.55)",
-                background: interactionLocked ? "rgba(255,255,255,0.04)" : "rgba(255,46,77,0.18)",
-                color: "rgba(255,255,255,0.95)",
-                boxShadow: interactionLocked ? "none" : "0 14px 40px rgba(255,46,77,0.12)",
-              }}
-              title={interactionLocked ? "Locked" : "Lock in picks"}
+              onClick={() => router.push("/picks")}
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
+              style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.90)" }}
             >
-              {interactionLocked ? "LOCKED" : "LOCK IN PICKS"}
+              ← Back
             </button>
-          </div>
 
-          {toast ? (
-            <div className="mt-2 text-[12px] font-black" style={{ color: COLORS.good }}>
-              {toast}
+            <div className="mt-4 flex items-center gap-3">
+              <TeamLogo teamName={home} size={50} />
+              <div className="text-white/60 font-black">vs</div>
+              <TeamLogo teamName={away} size={50} />
+
+              {roundLabel ? (
+                <span
+                  className="ml-2 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.92)" }}
+                >
+                  {roundLabel}
+                </span>
+              ) : null}
             </div>
-          ) : null}
+
+            <div className="mt-3 text-[22px] sm:text-[26px] font-black truncate" style={{ color: COLORS.white }}>
+              {activeGame.match}
+            </div>
+            <div className="mt-1 text-[12px] text-white/70 truncate">
+              {activeGame.venue} • {formatAedt(activeGame.startTime)}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {(["all", "open", "pending", "final", "void"] as FilterTab[]).map((t) => {
+                const active = filterTab === t;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setFilterTab(t)}
+                    className="rounded-full border px-4 py-2 text-[12px] font-black active:scale-[0.99]"
+                    style={{
+                      borderColor: active ? "rgba(255,46,77,0.45)" : "rgba(255,255,255,0.12)",
+                      background: active ? "rgba(255,46,77,0.12)" : "rgba(255,255,255,0.04)",
+                      color: active ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.85)",
+                    }}
+                  >
+                    {t.toUpperCase()}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Cards */}
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredQuestions.map((q) => {
+            const lockMs = new Date(activeGame.startTime).getTime() - nowMs;
+            const gameLocked = lockMs <= 0;
+            return <WhitePickCard key={q.id} g={activeGame} q={q} gameLocked={gameLocked} />;
+          })}
+        </div>
+
+        {/* Sticky footer */}
+        <div
+          className="fixed left-0 right-0 bottom-0 z-[60]"
+          style={{
+            background: "linear-gradient(180deg, rgba(0,0,0,0.00), rgba(0,0,0,0.92) 35%, rgba(0,0,0,0.98) 100%)",
+          }}
+        >
+          <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pb-4 pt-10">
+            <div
+              className="rounded-2xl border p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+                boxShadow: "0 18px 55px rgba(0,0,0,0.85)",
+              }}
+            >
+              <div className="text-white/85">
+                <div className="text-[11px] uppercase tracking-widest text-white/55">Picks Selected</div>
+                <div className="mt-1 text-[16px] font-black">
+                  {stickyMeta.selected} of {stickyMeta.total}
+                </div>
+                <div className="mt-1 text-[11px] text-white/55">
+                  {stickyMeta.gameLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(stickyMeta.lockMs)}`}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={stickyMeta.selected <= 0 || stickyMeta.gameLocked || !!lockedGames[activeGame.id]}
+                onClick={() => {
+                  const payload = buildSlipForGame(activeGame);
+                  if (!payload) return;
+                  openSlip(payload, true);
+                }}
+                className="rounded-2xl border px-6 py-4 text-[13px] font-black active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  borderColor: "rgba(255,46,77,0.55)",
+                  background: "rgba(255,46,77,0.18)",
+                  color: "rgba(255,255,255,0.95)",
+                  boxShadow: "0 10px 30px rgba(255,46,77,0.18)",
+                }}
+              >
+                LOCK IN PICKS
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-10 pb-8 text-center text-[11px] text-white/45">
+          <span className="font-black" style={{ color: COLORS.red }}>
+            Torpie
+          </span>{" "}
+          — One slip and it’s back to zero.
         </div>
       </div>
     </div>
