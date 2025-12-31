@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import Confetti from "react-confetti";
@@ -30,13 +30,10 @@ type ApiQuestion = {
   quarter: number;
   question: string;
   status: QuestionStatus;
-
   userPick?: PickOutcome;
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
-
-  correctPick?: boolean;
 };
 
 type ApiGame = {
@@ -65,8 +62,6 @@ const COLORS = {
   bg: "#000000",
   red: "#FF2E4D",
   white: "rgba(255,255,255,0.98)",
-  bad: "rgba(255,46,77,0.95)",
-  cyan: "rgba(0,229,255,0.95)",
 };
 
 type FilterTab = "all" | "open" | "pending" | "final" | "void";
@@ -112,12 +107,6 @@ function msToCountdown(ms: number): string {
 function clampPct(n: number | undefined): number {
   if (typeof n !== "number" || Number.isNaN(n)) return 0;
   return Math.max(0, Math.min(100, n));
-}
-
-function majorityLabel(yes: number, no: number): { label: string; color: string } {
-  if (yes === no) return { label: "Split crowd", color: "rgba(0,0,0,0.55)" };
-  if (yes > no) return { label: "Majority YES", color: "rgba(25,195,125,0.95)" };
-  return { label: "Majority NO", color: "rgba(255,46,77,0.95)" };
 }
 
 function effectivePick(local: LocalPick | undefined, api: PickOutcome | undefined): PickOutcome | undefined {
@@ -187,18 +176,25 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
   return [
-    `/aflteams/${teamSlug}-logo.png`,
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
   ];
 }
 
-function TeamLogo({ teamName, size = 50 }: { teamName: string; size?: number }) {
+const TeamLogo = React.memo(function TeamLogoInner({
+  teamName,
+  size = 50,
+}: {
+  teamName: string;
+  size?: number;
+}) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
 
-  if (!slug) {
-    const initials = teamName
+  if (!slug || dead) {
+    const initials = (teamName || "AFL")
       .split(" ")
       .filter(Boolean)
       .slice(0, 2)
@@ -211,8 +207,8 @@ function TeamLogo({ teamName, size = 50 }: { teamName: string; size?: number }) 
           width: size,
           height: size,
           borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          color: "rgba(255,255,255,0.85)",
+          background: "rgba(255,255,255,0.06)",
+          color: "rgba(255,255,255,0.75)",
         }}
         title={teamName}
       >
@@ -241,38 +237,30 @@ function TeamLogo({ teamName, size = 50 }: { teamName: string; size?: number }) 
           alt={`${teamName} logo`}
           fill
           sizes={`${size}px`}
-          style={{ objectFit: "contain" }} // ✅ no crop
-          onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
         />
       </div>
     </div>
   );
-}
+});
 
-/** Player detection: supports "Will <Name> (Xxx) ..." AND plain "Will <Name> ..." */
+/** Player detection: "Will Charlie Curnow (Syd) ..." */
 function extractPlayerName(qText: string): string | null {
   const t = (qText || "").trim();
   if (!t.toLowerCase().startsWith("will ")) return null;
 
   const rest = t.slice(5);
-
-  // stop at first "(" if present (your format: "Will Charlie Curnow (Syd) ...")
   const parenIdx = rest.indexOf("(");
   const candidate = (parenIdx > 0 ? rest.slice(0, parenIdx) : rest).trim();
 
-  // also stop at common verbs as backup
-  const stops = [" have ", " kick ", " score ", " get ", " record ", " take ", " make ", " hit ", " win "];
-  let cut = candidate;
-  const lower = candidate.toLowerCase();
-  for (const s of stops) {
-    const i = lower.indexOf(s);
-    if (i > 0) {
-      cut = candidate.slice(0, i).trim();
-      break;
-    }
-  }
-
-  const name = cut.trim();
+  const name = candidate.trim();
   if (!name) return null;
   if (name.split(" ").filter(Boolean).length < 2) return null;
   return name;
@@ -280,17 +268,50 @@ function extractPlayerName(qText: string): string | null {
 
 function playerCandidates(playerSlug: string): string[] {
   return [
-    `/players/${playerSlug}.png`,
     `/players/${playerSlug}.jpg`,
     `/players/${playerSlug}.jpeg`,
+    `/players/${playerSlug}.png`,
     `/players/${playerSlug}.webp`,
   ];
 }
 
-function PlayerHeadshot({ playerName, size = 46 }: { playerName: string; size?: number }) {
+const PlayerHeadshot = React.memo(function PlayerHeadshotInner({
+  playerName,
+  size = 46,
+}: {
+  playerName: string;
+  size?: number;
+}) {
   const playerSlug = slugify(playerName);
   const candidates = playerCandidates(playerSlug);
+
   const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const initials = playerName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  if (dead) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-2xl border font-black shrink-0"
+        style={{
+          width: size,
+          height: size,
+          borderColor: "rgba(0,0,0,0.10)",
+          background: "rgba(0,0,0,0.04)",
+          color: "rgba(0,0,0,0.35)",
+        }}
+        title={playerName}
+      >
+        {initials}
+      </div>
+    );
+  }
 
   const src = candidates[Math.min(idx, candidates.length - 1)];
 
@@ -311,27 +332,17 @@ function PlayerHeadshot({ playerName, size = 46 }: { playerName: string; size?: 
         fill
         sizes={`${size}px`}
         style={{ objectFit: "cover" }}
-        onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
-      />
-      {/* If all candidates fail, you’ll still see a clean placeholder */}
-      <div
-        className="absolute inset-0 flex items-center justify-center text-[11px] font-black"
-        style={{
-          color: "rgba(0,0,0,0.35)",
-          opacity: idx >= candidates.length - 1 ? 1 : 0,
-          transition: "opacity 120ms ease",
+        onError={() => {
+          setIdx((p) => {
+            if (p + 1 < candidates.length) return p + 1;
+            setDead(true); // ✅ stop re-trying every second
+            return p;
+          });
         }}
-      >
-        {playerName
-          .split(" ")
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((x) => x[0]?.toUpperCase())
-          .join("")}
-      </div>
+      />
     </div>
   );
-}
+});
 
 type LocalPickMap = Record<string, LocalPick>;
 type LockedGamesMap = Record<string, boolean>;
@@ -357,7 +368,7 @@ export default function PicksMatchSlugPage() {
 
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
 
-  // comments (unchanged)
+  // comments
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentsQuestion, setCommentsQuestion] = useState<ApiQuestion | null>(null);
   const [commentsGame, setCommentsGame] = useState<ApiGame | null>(null);
@@ -636,12 +647,9 @@ export default function PicksMatchSlugPage() {
   const renderSentimentWhite = (q: ApiQuestion) => {
     const yes = clampPct(q.yesPercent);
     const no = clampPct(q.noPercent);
-
     const total = yes + no;
     const yesW = total <= 0 ? 50 : (yes / total) * 100;
-    const noW = 100 - yesW;
 
-    const majority = majorityLabel(yes, no);
     const pick = effectivePick(localPicks[q.id], q.userPick);
     const aligned = pick === "yes" ? yes >= no : pick === "no" ? no > yes : null;
 
@@ -651,8 +659,11 @@ export default function PicksMatchSlugPage() {
           <span className="uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.55)" }}>
             Crowd
           </span>
-          <span style={{ color: majority.color }} className="font-black">
-            {majority.label}
+          <span
+            className="font-black"
+            style={{ color: yes === no ? "rgba(0,0,0,0.55)" : yes > no ? "rgba(25,195,125,0.95)" : "rgba(255,46,77,0.95)" }}
+          >
+            {yes === no ? "Split crowd" : yes > no ? "Majority YES" : "Majority NO"}
           </span>
         </div>
 
@@ -674,7 +685,7 @@ export default function PicksMatchSlugPage() {
             <div
               className="h-full"
               style={{
-                width: `${noW}%`,
+                width: `${100 - yesW}%`,
                 background: `linear-gradient(90deg, rgba(255,46,77,0.20), rgba(255,46,77,0.85))`,
               }}
             />
@@ -683,29 +694,19 @@ export default function PicksMatchSlugPage() {
 
         <div className="mt-1 flex items-center justify-between text-[10px]" style={{ color: "rgba(0,0,0,0.60)" }}>
           <span>
-            YES{" "}
-            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
-              {Math.round(yes)}%
-            </span>
+            YES <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>{Math.round(yes)}%</span>
           </span>
 
           {aligned === null ? (
             <span style={{ color: "rgba(0,0,0,0.35)" }}>Pick to compare</span>
           ) : aligned ? (
-            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-black">
-              With crowd
-            </span>
+            <span style={{ color: "rgba(25,195,125,0.95)" }} className="font-black">With crowd</span>
           ) : (
-            <span style={{ color: COLORS.red }} className="font-black">
-              Against crowd
-            </span>
+            <span style={{ color: COLORS.red }} className="font-black">Against crowd</span>
           )}
 
           <span>
-            NO{" "}
-            <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>
-              {Math.round(no)}%
-            </span>
+            NO <span className="font-black" style={{ color: "rgba(0,0,0,0.85)" }}>{Math.round(no)}%</span>
           </span>
         </div>
       </div>
@@ -730,7 +731,6 @@ export default function PicksMatchSlugPage() {
     const neutralStyle = {
       borderColor: "rgba(0,0,0,0.12)",
       background: "rgba(0,0,0,0.04)",
-      boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.03)",
       color: "rgba(0,0,0,0.85)",
     } as const;
 
@@ -965,7 +965,11 @@ export default function PicksMatchSlugPage() {
               type="button"
               onClick={() => router.push("/picks")}
               className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-black active:scale-[0.99]"
-              style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.90)" }}
+              style={{
+                borderColor: "rgba(255,255,255,0.12)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.90)",
+              }}
             >
               ← Back
             </button>
@@ -978,7 +982,11 @@ export default function PicksMatchSlugPage() {
               {roundLabel ? (
                 <span
                   className="ml-2 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.92)" }}
+                  style={{
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.10)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
                 >
                   {roundLabel}
                 </span>
