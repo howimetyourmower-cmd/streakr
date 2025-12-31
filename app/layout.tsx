@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
             {/* Middle text */}
             <p className="flex-1 text-right text-[11px] font-semibold text-white/95 sm:text-[12px]">
-              Proudly supporting TORPY all season long
+              Proudly supporting TORPIE all season long
             </p>
 
             {/* Optional CTA button */}
