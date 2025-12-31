@@ -263,7 +263,7 @@ export default function AflHubPage() {
           {/* HERO */}
           <section className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px]">
-              <Image src="/afl1.png" alt="AFL hero" fill priority className="object-cover opacity-95" />
+              <Image src="/afl1.png" alt="AFL hero" fill priority className="object-cover object-top opacity-95" />
               <div className="absolute inset-0 bg-black/40" />
               <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
 
