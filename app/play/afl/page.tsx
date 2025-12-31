@@ -260,20 +260,19 @@ export default function AflHubPage() {
 
   return (
     <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-     <style>{`
-  @keyframes torpiePing {
-    0% { transform: scale(1); opacity: .55; }
-    80% { transform: scale(1.6); opacity: 0; }
-    100% { transform: scale(1.6); opacity: 0; }
-  }
-`}</style>
-
+      {/* IMPORTANT: CSS MUST BE A TEMPLATE STRING (BACKTICKS) */}
+      <style>{`
+        @keyframes torpiePing {
+          0% { transform: scale(1); opacity: .55; }
+          80% { transform: scale(1.6); opacity: 0; }
+          100% { transform: scale(1.6); opacity: 0; }
+        }
+      `}</style>
 
       {/* ======= HERO (NO NAVBAR) ======= */}
       <section className="relative">
         <div className="relative w-full h-[420px] sm:h-[500px]">
-          <Image src="/afl1.png"
-            " alt="AFL action" fill className="object-cover" priority />
+          <Image src="/afl1.png" alt="AFL action" fill className="object-cover" priority />
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         </div>
@@ -281,7 +280,6 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              {/* Brand strip (kept minimal, no pills) */}
               <div className="mb-4">
                 <div className="text-[13px] sm:text-sm font-black tracking-tight text-white">TORPIE</div>
                 <div className="text-[11px] sm:text-[12px] font-semibold text-white/70">AFL predictions • free</div>
@@ -296,7 +294,8 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/75 max-w-xl">
-                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a game and your streak is cooked.
+                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a game and your streak is
+                cooked.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -317,6 +316,10 @@ export default function AflHubPage() {
                 >
                   HOW TO PLAY
                 </button>
+              </div>
+
+              <div className="mt-4 text-[11px] text-white/50">
+                Round {roundNumber ?? "—"} • Free-to-play • Skill • Bragging rights
               </div>
             </div>
           </div>
@@ -348,12 +351,7 @@ export default function AflHubPage() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
-                      <path
-                        d="M20 12a8 8 0 1 1-2.2-5.5"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
+                      <path d="M20 12a8 8 0 1 1-2.2-5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </div>
                   <div className="text-sm font-black">1. PICK OUTCOMES</div>
@@ -384,12 +382,7 @@ export default function AflHubPage() {
                         strokeLinecap="round"
                         strokeLinejoin="round"
                       />
-                      <path
-                        d="M21 12a9 9 0 1 1-3.2-6.8"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
+                      <path d="M21 12a9 9 0 1 1-3.2-6.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     </svg>
                   </div>
                   <div className="text-sm font-black">2. PLAY LIVE</div>
@@ -462,7 +455,7 @@ export default function AflHubPage() {
                       <div key={g.id} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
                         <div className="relative h-28">
                           <Image
-                            src="/mcg-hero.jpg"
+                            src="/afl1.png"
                             alt="Match hero"
                             fill
                             className="object-cover opacity-70"
@@ -541,9 +534,7 @@ export default function AflHubPage() {
                     }}
                   >
                     <div className="text-[12px] font-black text-white/90 mb-1">Locker Rooms</div>
-                    <div className="text-[12px] text-white/65">
-                      Private comps with your mates. Ladder = current streak only.
-                    </div>
+                    <div className="text-[12px] text-white/65">Private comps with your mates. Ladder = current streak only.</div>
                   </div>
 
                   <Link
