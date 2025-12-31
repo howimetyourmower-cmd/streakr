@@ -276,9 +276,7 @@ export default function AflHubPage() {
                     color: "rgba(0,0,0,0.86)",
                   }}
                 >
-                  <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red }} />
-
-                </span>
+                                </span>
               </div>
 
               <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
