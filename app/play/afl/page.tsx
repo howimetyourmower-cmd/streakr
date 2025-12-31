@@ -53,18 +53,15 @@ type PreviewFocusPayload = {
 
 const PREVIEW_FOCUS_KEY = "torpy_preview_focus_v1";
 
-/** ✅ TORPIE palette */
+/** ✅ TORPY palette */
 const COLORS = {
-  pageBg: "#F3F4F7",
+  pageBg: "#FFFFFF",
   card: "#0B0D14",
   card2: "#070911",
   red: "#CE2029",
   redDeep: "#8B0F16",
-  white: "#FFFFFF",
-  black: "#000000",
 };
 
-/** Helpers */
 function normaliseStatus(val: any): QuestionStatus {
   const s = String(val ?? "").toLowerCase().trim();
   if (s === "open") return "open";
@@ -107,7 +104,6 @@ export default function AflHubPage() {
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // ✅ Keep this as Picks page (your current flow)
   const picksHref = "/picks?sport=AFL";
   const encodedReturnTo = encodeURIComponent(picksHref);
 
@@ -144,26 +140,21 @@ export default function AflHubPage() {
         const data: PicksApiResponse = await res.json();
 
         setGames(data.games || []);
-
         if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
 
         const flat: QuestionRow[] = (data.games || []).flatMap((g) =>
-          (g.questions || []).map((q) => {
-            const status = normaliseStatus(q.status);
-            return {
-              id: q.id,
-              match: g.match,
-              venue: g.venue,
-              startTime: g.startTime,
-              quarter: q.quarter,
-              question: q.question,
-              status,
-            };
-          })
+          (g.questions || []).map((q) => ({
+            id: q.id,
+            match: g.match,
+            venue: g.venue,
+            startTime: g.startTime,
+            quarter: q.quarter,
+            question: q.question,
+            status: normaliseStatus(q.status),
+          }))
         );
 
         const openOnly = flat.filter((q) => q.status === "open");
-
         openOnly.sort((a, b) => {
           const da = new Date(a.startTime).getTime();
           const db = new Date(b.startTime).getTime();
@@ -215,7 +206,6 @@ export default function AflHubPage() {
     }
   };
 
-  // Shared styles
   const darkCardStyle = {
     borderColor: "rgba(255,255,255,0.10)",
     background: `linear-gradient(180deg, ${COLORS.card} 0%, ${COLORS.card2} 100%)`,
@@ -225,14 +215,14 @@ export default function AflHubPage() {
   const cardHoverBorder = rgbaFromHex(COLORS.red, 0.32);
 
   const primaryCtaStyle = {
-    borderColor: rgbaFromHex(COLORS.red, 0.6),
+    borderColor: rgbaFromHex(COLORS.red, 0.55),
     background: COLORS.red,
     color: "rgba(255,255,255,0.98)",
     boxShadow: `0 14px 30px ${rgbaFromHex(COLORS.red, 0.18)}`,
   } as const;
 
   const secondaryCtaStyle = {
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(0,0,0,0.14)",
     background: "rgba(255,255,255,0.92)",
     color: "rgba(0,0,0,0.86)",
   } as const;
@@ -257,61 +247,19 @@ export default function AflHubPage() {
   return (
     <main className="min-h-screen" style={{ backgroundColor: COLORS.pageBg, color: "#111827" }}>
       <style>{`
-        @keyframes torpiePing {
+        @keyframes torpyPing {
           0% { transform: scale(1); opacity: .55; }
           80% { transform: scale(1.6); opacity: 0; }
           100% { transform: scale(1.6); opacity: 0; }
         }
       `}</style>
 
+      {/* ✅ IMPORTANT:
+          You already have your global Navbar + sponsor strip from layout.
+          So this page now ONLY renders the centered "hub" (no extra internal nav).
+      */}
       <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
-        {/* ✅ White page container + dark "hub" card (like your reference) */}
         <div className="rounded-2xl overflow-hidden border border-black/10 bg-[#0B0D14] text-white shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
-          {/* ✅ White top bar with BIG readable logo */}
-          <div className="bg-white border-b border-black/10">
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3">
-              <Link href="/" className="flex items-center gap-3">
-                <div className="relative h-12 w-[220px] sm:h-14 sm:w-[260px]">
-                  <Image
-                    src="/Torpielogo.png"
-                    alt="Torpie"
-                    fill
-                    className="object-contain"
-                    priority
-                  />
-                </div>
-              </Link>
-
-              <div className="hidden sm:flex items-center gap-5 text-xs font-extrabold text-black/70">
-                <Link href="#how-to-play" className="hover:text-black">
-                  HOW IT WORKS
-                </Link>
-                <Link href="/faq" className="hover:text-black">
-                  FAQ
-                </Link>
-                <Link href="/leaderboards" className="hover:text-black">
-                  LEADERBOARD
-                </Link>
-
-                {!user ? (
-                  <Link
-                    href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
-                    className="rounded-md px-3 py-2 border border-black/15 text-black hover:border-black/30"
-                  >
-                    LOGIN
-                  </Link>
-                ) : (
-                  <Link
-                    href="/profile"
-                    className="rounded-md px-3 py-2 border border-black/15 text-black hover:border-black/30"
-                  >
-                    PROFILE
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-
           {/* HERO */}
           <section className="relative">
             <div className="relative w-full h-[260px] sm:h-[320px]">
@@ -335,7 +283,7 @@ export default function AflHubPage() {
 
               <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
                 <div className="text-[11px] font-extrabold tracking-wide text-white/70 mb-2">
-                  TORPIE • {roundNumber ? `ROUND ${roundNumber}` : "AFL"}
+                  TORPY • AFL {roundNumber ? `• ROUND ${roundNumber}` : ""}
                 </div>
 
                 <h1 className="text-4xl sm:text-5xl font-extrabold leading-[0.95] tracking-tight">
@@ -366,10 +314,6 @@ export default function AflHubPage() {
                   >
                     HOW TO PLAY
                   </Link>
-
-                  {!user ? (
-                    <span className="text-xs text-white/70">Login required to play</span>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -407,7 +351,7 @@ export default function AflHubPage() {
             </div>
           </section>
 
-          {/* FEATURED MATCHES (cards stay dark top image, BUT bottom section forced white) */}
+          {/* FEATURED MATCHES (WHITE BOTTOM OF EACH CARD) */}
           <section className="px-6 py-8">
             <div className="flex items-end justify-between gap-4 mb-4">
               <div>
@@ -466,7 +410,7 @@ export default function AflHubPage() {
                       </div>
                     </div>
 
-                    {/* ✅ THIS IS THE BIT YOU WANTED WHITE */}
+                    {/* ✅ WHITE BOTTOM SECTION */}
                     <div className="p-4 bg-white text-black">
                       <div className="text-xs font-extrabold text-black/80">{g.venue}</div>
                       <div className="text-xs text-black/55 mt-1">
@@ -495,7 +439,7 @@ export default function AflHubPage() {
             </div>
           </section>
 
-          {/* NEXT PICKS (kept dark) */}
+          {/* NEXT PICKS */}
           <section className="px-6 pb-10">
             <div className="mb-5">
               <h2 className="text-xl sm:text-2xl font-extrabold">
@@ -587,7 +531,7 @@ export default function AflHubPage() {
                                 className="absolute inline-flex h-full w-full rounded-full"
                                 style={{
                                   background: rgbaFromHex(COLORS.red, 0.85),
-                                  animation: "torpiePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
+                                  animation: "torpyPing 1.6s cubic-bezier(0,0,0.2,1) infinite",
                                 }}
                               />
                               <span
@@ -657,7 +601,7 @@ export default function AflHubPage() {
           </section>
 
           <div className="border-t border-white/10 px-6 py-4 text-[11px] text-white/55">
-            Torpie is free-to-play. Skill-based. No gambling.
+            Torpy is free-to-play. Skill-based. No gambling.
           </div>
         </div>
       </div>
@@ -679,7 +623,7 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-sm text-white/65 mb-4">
-              You need a free Torpie account to make picks and appear on the leaderboard.
+              You need a free Torpy account to make picks and appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
