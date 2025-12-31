@@ -126,8 +126,6 @@ function splitMatch(match: string): { home: string; away: string } | null {
 }
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
-  // IMPORTANT: keep the real files first if you know them.
-  // We'll still fall back, but we STOP once all fail so it won't flash on countdown re-renders.
   return [
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
@@ -171,6 +169,12 @@ const TeamLogo = React.memo(function TeamLogoInner({
   }
 
   if (dead) {
+    const initials = teamName
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((x) => x[0]?.toUpperCase())
+      .join("");
     return (
       <div
         className="flex items-center justify-center rounded-2xl border font-black"
@@ -183,12 +187,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
         }}
         title={teamName}
       >
-        {teamName
-          .split(" ")
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((x) => x[0]?.toUpperCase())
-          .join("") || "AFL"}
+        {initials || "AFL"}
       </div>
     );
   }
@@ -217,7 +216,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
           onError={() => {
             setIdx((p) => {
               if (p + 1 < candidates.length) return p + 1;
-              setDead(true); // ✅ stop rendering Image → no more flashing
+              setDead(true);
               return p;
             });
           }}
@@ -235,7 +234,6 @@ export default function PicksPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  // still updates every second (for lock countdown) – but logos won’t flash anymore
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -276,7 +274,6 @@ export default function PicksPage() {
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  // ✅ show ALL games (no slice to 3)
   const sortedGames = useMemo(() => {
     return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }, [games]);
@@ -415,7 +412,7 @@ export default function PicksPage() {
               </div>
 
               <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.70)" }}>
-                Tap a match → focus mode → lock in. No distractions.
+                Tap a match → focus mode. Picks lock automatically at bounce.
               </p>
             </div>
           </div>
@@ -429,9 +426,7 @@ export default function PicksPage() {
 
         <div className="mt-6">
           <div className="text-[12px] uppercase tracking-widest text-white/55">Next Featured Matches</div>
-          <div className="mt-1 text-[14px] text-white/75">
-            Pick any amount — questions live inside the match page.
-          </div>
+          <div className="mt-1 text-[14px] text-white/75">Pick any amount — questions live inside the match page.</div>
 
           {loading ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -472,7 +467,7 @@ export default function PicksPage() {
           <span className="font-black" style={{ color: COLORS.red }}>
             Torpie
           </span>{" "}
-          — Dashboard → Match page → Lock.
+          — Dashboard → Match page → Auto-lock.
         </div>
       </div>
     </div>
