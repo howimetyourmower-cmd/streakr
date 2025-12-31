@@ -78,7 +78,7 @@ function rgbaFromHex(hex: string, alpha: number): string {
 
 /** ✅ TORPIE palette: Black / Fire Engine Red / White */
 const COLORS = {
-  bg: "#05060A",
+  bg: "#05060A", // true torpy black
   darkPanel: "#0B0D14",
   darkPanel2: "#070911",
 
@@ -181,9 +181,13 @@ export default function AflHubPage() {
 
   const featuredMatches = useMemo(() => {
     const now = Date.now();
-    const sorted = [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    const sorted = [...games].sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+    );
 
-    const upcoming = sorted.filter((g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60);
+    const upcoming = sorted.filter(
+      (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
+    );
     const list = (upcoming.length ? upcoming : sorted).slice(0, 2);
     return list;
   }, [games]);
@@ -232,7 +236,10 @@ export default function AflHubPage() {
 
   const primaryBtn = {
     borderColor: rgbaFromHex(COLORS.red, 0.65),
-    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.98)}, ${rgbaFromHex(COLORS.redDeep, 0.96)})`,
+    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.98)}, ${rgbaFromHex(
+      COLORS.redDeep,
+      0.96
+    )})`,
     color: "rgba(255,255,255,0.98)",
     boxShadow: `0 0 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
   } as const;
@@ -253,7 +260,10 @@ export default function AflHubPage() {
 
   const noBtnStyle = {
     borderColor: rgbaFromHex(COLORS.red, 0.78),
-    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.96)}, ${rgbaFromHex(COLORS.redDeep, 0.92)})`,
+    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.96)}, ${rgbaFromHex(
+      COLORS.redDeep,
+      0.92
+    )})`,
     color: "rgba(255,255,255,0.98)",
     boxShadow: `0 0 18px ${rgbaFromHex(COLORS.red, 0.14)}`,
   } as const;
@@ -280,11 +290,6 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              <div className="mb-4">
-                <div className="text-[13px] sm:text-sm font-black tracking-tight text-white"></div>
-                <div className="text-[11px] sm:text-[12px] font-semibold text-white/70"></div>
-              </div>
-
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
                 <span className="block">PREDICT.</span>
                 <span className="block">PLAY.</span>
@@ -294,8 +299,8 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/75 max-w-xl">
-                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a game and your streak is
-                cooked.
+                Live AFL yes/no picks tied to each match. Pick as many as you want. One wrong call in a
+                game and your streak is cooked.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -326,8 +331,8 @@ export default function AflHubPage() {
         </div>
       </section>
 
-      {/* ======= DARK CONTENT AREA ======= */}
-      <section className="bg-[#171A22]">
+      {/* ======= DARK CONTENT AREA (NOW TRUE BLACK) ======= */}
+      <section style={{ backgroundColor: COLORS.bg }}>
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
           {/* HOW IT WORKS */}
           <div ref={howRef} className="mb-10">
@@ -402,12 +407,7 @@ export default function AflHubPage() {
                     }}
                   >
                     <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" style={{ color: "rgba(255,255,255,0.92)" }}>
-                      <path
-                        d="M8 21h8M12 17v4"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                      />
+                      <path d="M8 21h8M12 17v4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
                       <path
                         d="M7 4h10l-1 9a4 4 0 0 1-8 0L7 4Z"
                         stroke="currentColor"
@@ -458,15 +458,17 @@ export default function AflHubPage() {
                             src="/afl1.png"
                             alt="Match hero"
                             fill
-                            className="object-cover opacity-70"
+                            className="object-cover opacity-80"
                             sizes="(max-width: 640px) 100vw, 50vw"
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
+                          {/* Stronger overlay so it reads on true black */}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/55 to-transparent" />
+                          <div className="absolute inset-0 bg-black/15" />
                           <div className="absolute left-4 bottom-3 right-4">
                             <div className="text-xs text-white/70">
                               {date} • {time} AEDT
                             </div>
-                            <div className="text-sm font-black text-white/90">{g.match}</div>
+                            <div className="text-sm font-black text-white/95">{g.match}</div>
                           </div>
                         </div>
 
@@ -492,7 +494,9 @@ export default function AflHubPage() {
               ) : (
                 <div className="rounded-2xl border p-5" style={darkCardStyle}>
                   <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
-                  <div className="text-[12px] text-white/55">Once rounds are seeded, featured matches show here automatically.</div>
+                  <div className="text-[12px] text-white/55">
+                    Once rounds are seeded, featured matches show here automatically.
+                  </div>
                 </div>
               )}
             </div>
@@ -534,7 +538,9 @@ export default function AflHubPage() {
                     }}
                   >
                     <div className="text-[12px] font-black text-white/90 mb-1">Locker Rooms</div>
-                    <div className="text-[12px] text-white/65">Private comps with your mates. Ladder = current streak only.</div>
+                    <div className="text-[12px] text-white/65">
+                      Private comps with your mates. Ladder = current streak only.
+                    </div>
                   </div>
 
                   <Link
@@ -587,7 +593,9 @@ export default function AflHubPage() {
 
             {!loading && previewQuestions.length === 0 && !error ? (
               <div className="rounded-2xl border px-6 py-6 text-center" style={darkCardStyle}>
-                <p className="text-sm text-white/65 mb-4">No open questions right now. Check back closer to bounce.</p>
+                <p className="text-sm text-white/65 mb-4">
+                  No open questions right now. Check back closer to bounce.
+                </p>
                 <Link
                   href={picksHref}
                   onClick={requireAuthForPicks}
