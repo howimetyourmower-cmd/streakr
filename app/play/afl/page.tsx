@@ -275,8 +275,7 @@ export default function AflHubPage() {
                     background: "rgba(255,255,255,0.92)",
                     color: "rgba(0,0,0,0.86)",
                   }}
-                >
-                                </span>
+             
               </div>
 
               <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
