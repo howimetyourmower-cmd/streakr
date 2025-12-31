@@ -87,19 +87,6 @@ function splitMatch(match: string) {
   return { home: raw || "Home", away: "Away" };
 }
 
-function teamLogoSrc(teamName: string) {
-  // expects /public/teams/<slug>.png or .jpg etc
-  const slug = (teamName || "")
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!slug) return "/teams/unknown.png";
-  // use png by convention
-  return `/teams/${slug}.png`;
-}
-
 function formatStartLine(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -131,7 +118,6 @@ const COLORS = {
 export default function AflHubPage() {
   const { user } = useAuth();
   const router = useRouter();
-
   const howRef = useRef<HTMLDivElement | null>(null);
 
   const [games, setGames] = useState<ApiGame[]>([]);
@@ -155,7 +141,6 @@ export default function AflHubPage() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
-
         if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
 
         const g = Array.isArray(data.games) ? data.games : [];
@@ -177,7 +162,6 @@ export default function AflHubPage() {
         );
 
         const openOnly = flat.filter((q) => q.status === "open");
-
         openOnly.sort((a, b) => {
           const da = new Date(a.startTime).getTime();
           const db = new Date(b.startTime).getTime();
@@ -206,8 +190,7 @@ export default function AflHubPage() {
     const upcoming = sorted.filter(
       (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
     );
-    const list = (upcoming.length ? upcoming : sorted).slice(0, 2);
-    return list;
+    return (upcoming.length ? upcoming : sorted).slice(0, 2);
   }, [games]);
 
   const previewQuestions = useMemo(() => openQuestions.slice(0, 6), [openQuestions]);
@@ -246,7 +229,7 @@ export default function AflHubPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Shared styles (TORPIE look)
+  // Shared styles
   const darkCardStyle = {
     borderColor: "rgba(255,255,255,0.10)",
     background: `linear-gradient(180deg, ${COLORS.darkPanel} 0%, ${COLORS.darkPanel2} 100%)`,
@@ -263,17 +246,10 @@ export default function AflHubPage() {
     boxShadow: `0 0 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
   } as const;
 
-  const secondaryBtn = {
-    borderColor: "rgba(255,255,255,0.85)",
-    background: "rgba(255,255,255,0.96)",
-    color: "rgba(0,0,0,0.88)",
-    boxShadow: "0 10px 22px rgba(0,0,0,0.16)",
-  } as const;
-
-  const heroPill = {
-    borderColor: "rgba(255,255,255,0.22)",
-    background: "rgba(0,0,0,0.55)",
-    color: "rgba(255,255,255,0.92)",
+  const pillStyle = {
+    borderColor: "rgba(255,255,255,0.18)",
+    background: "rgba(0,0,0,0.28)",
+    color: "rgba(255,255,255,0.90)",
   } as const;
 
   const yesBtnStyle = {
@@ -303,54 +279,47 @@ export default function AflHubPage() {
         }
       `}</style>
 
-      {/* ======= HERO (NO SECOND NAV BAR) ======= */}
+      {/* ======= HERO (NO LOGO, NO EXTRA PILLS) ======= */}
       <section className="relative">
-        <div className="relative w-full h-[460px] sm:h-[560px]">
-          <Image src="/mcg-hero.jpg" alt="AFL action" fill className="object-cover" priority />
+        <div className="relative w-full h-[520px] sm:h-[600px]">
+          <Image
+            src="/afl1.png"
+            alt="AFL hero"
+            fill
+            priority
+            className="object-cover object-top"
+          />
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
         </div>
 
-        {/* Minimal floating brand row (NOT a full nav bar) */}
+        {/* Only the PLAY + HOW IT WORKS pill row (no logo) */}
         <div className="absolute left-0 right-0 top-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-            <div className="inline-flex items-center gap-2 rounded-2xl border px-3 py-2 backdrop-blur-md"
+            <div
+              className="inline-flex items-center gap-3 rounded-2xl border px-3 py-2 backdrop-blur-md"
               style={{
                 borderColor: "rgba(255,255,255,0.16)",
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <Link href="/" className="flex items-center gap-2">
-                <div className="relative h-7 w-28 sm:h-8 sm:w-32">
-                  <Image src="/Torpielogo.png" alt="Torpie" fill className="object-contain" priority />
-                </div>
+              <Link
+                href={picksHref}
+                onClick={requireAuthForPicks}
+                className="inline-flex items-center justify-center rounded-full px-5 py-2 text-[12px] font-black border transition active:scale-[0.99]"
+                style={primaryBtn}
+              >
+                PLAY
               </Link>
 
-              <span className="hidden sm:inline text-[11px] text-white/60">AFL • free-to-play • skill</span>
-
-              <div className="ml-2 flex items-center gap-2">
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                  style={primaryBtn}
-                >
-                  PLAY
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={scrollToHow}
-                  className="hidden sm:inline-flex items-center justify-center rounded-full px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.18)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                >
-                  HOW IT WORKS
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={scrollToHow}
+                className="inline-flex items-center justify-center rounded-full px-5 py-2 text-[12px] font-black border transition active:scale-[0.99]"
+                style={pillStyle}
+              >
+                HOW IT WORKS
+              </button>
             </div>
           </div>
         </div>
@@ -358,24 +327,6 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              <div className="inline-flex flex-wrap items-center gap-2 mb-4">
-                <span
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={heroPill}
-                >
-                  AFL ONLY
-                </span>
-                <span
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-semibold border"
-                  style={heroPill}
-                >
-                  ROUND {roundNumber ?? "—"}
-                </span>
-                <span className="hidden sm:inline text-[11px] text-white/70">
-                  Free-to-play • Bragging rights
-                </span>
-              </div>
-
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
                 <span className="block">PREDICT.</span>
                 <span className="block">PLAY.</span>
@@ -393,7 +344,7 @@ export default function AflHubPage() {
                 <Link
                   href={picksHref}
                   onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
+                  className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
                   style={primaryBtn}
                 >
                   PLAY NOW
@@ -402,40 +353,153 @@ export default function AflHubPage() {
                 <button
                   type="button"
                   onClick={scrollToHow}
-                  className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={secondaryBtn}
+                  className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.25)",
+                    background: "rgba(255,255,255,0.08)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
                 >
                   LEARN MORE
                 </button>
-
-                {user ? (
-                  <Link
-                    href="/profile"
-                    className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.05)",
-                      color: "rgba(255,255,255,0.92)",
-                    }}
-                  >
-                    PROFILE
-                  </Link>
-                ) : null}
-              </div>
-
-              <div className="mt-4 text-[11px] text-white/60">
-                Core line: <span className="font-black text-white/85">“How long can you last?”</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* ======= DARK CONTENT AREA ======= */}
+      {/* ======= CONTENT ======= */}
       <section className="bg-[#171A22]">
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          {/* SHOW SOME PICKS AVAILABLE (TOP, BEFORE HOW IT WORKS) */}
+          {/* HOW IT WORKS (MOVED DIRECTLY UNDER HERO IMAGE) */}
+          <div ref={howRef} className="mb-10">
+            <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
+
+            <div className="grid sm:grid-cols-3 gap-4">
+              <div className="rounded-2xl border p-5" style={darkCardStyle}>
+                <div className="text-sm font-black mb-2">1. PICK OUTCOMES</div>
+                <p className="text-sm text-white/65 leading-relaxed">
+                  Tap <span className="font-black text-white/85">YES</span> or{" "}
+                  <span className="font-black" style={{ color: COLORS.red }}>
+                    NO
+                  </span>{" "}
+                  on any question. Pick 0, 1, 5 or all 12 — your call.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border p-5" style={darkCardStyle}>
+                <div className="text-sm font-black mb-2">2. PLAY LIVE</div>
+                <p className="text-sm text-white/65 leading-relaxed">
+                  Picks lock at bounce. Live questions drop during the match.
+                  Clear a pick any time before lock.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border p-5" style={darkCardStyle}>
+                <div className="text-sm font-black mb-2">3. KEEP YOUR STREAK</div>
+                <p className="text-sm text-white/65 leading-relaxed">
+                  Clean sweep per match to keep your streak alive. Any wrong = cooked. Voids don’t count.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* FEATURED MATCHES (MOVED UNDER HOW IT WORKS) */}
           <div className="mb-10">
+            <div className="flex items-end justify-between gap-3 mb-4">
+              <div className="text-[12px] font-black text-white/75">FEATURED MATCHES</div>
+              <Link
+                href={picksHref}
+                onClick={requireAuthForPicks}
+                className="text-[12px] font-black hover:underline underline-offset-2"
+                style={{ color: COLORS.red }}
+              >
+                GO TO PICKS →
+              </Link>
+            </div>
+
+            {loading ? (
+              <div className="grid sm:grid-cols-2 gap-4">
+                {[1, 2].map((i) => (
+                  <div key={i} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
+                    <div className="h-28 bg-white/5 animate-pulse" />
+                    <div className="p-5 bg-white">
+                      <div className="h-4 w-3/4 bg-black/10 rounded animate-pulse mb-2" />
+                      <div className="h-3 w-1/2 bg-black/10 rounded animate-pulse mb-4" />
+                      <div className="h-9 w-28 bg-black/10 rounded animate-pulse" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : featuredMatches.length ? (
+              <div className="grid sm:grid-cols-2 gap-4">
+                {featuredMatches.map((g) => {
+                  const line = formatStartLine(g.startTime);
+                  const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
+
+                  return (
+                    <div
+                      key={g.id}
+                      className="rounded-2xl border overflow-hidden"
+                      style={{
+                        borderColor: "rgba(255,255,255,0.10)",
+                        boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
+                      }}
+                    >
+                      {/* Image section (dark) */}
+                      <div className="relative h-32">
+                        <Image
+                          src="/afl.png"
+                          alt="Match hero"
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 640px) 100vw, 50vw"
+                        />
+                        <div className="absolute inset-0 bg-black/55" />
+                        <div className="absolute left-4 bottom-3 right-4">
+                          <div className="text-xs text-white/75 font-semibold">{line}</div>
+                          <div className="text-sm font-black text-white/95">{g.match}</div>
+                        </div>
+                      </div>
+
+                      {/* Bottom section (WHITE) */}
+                      <div className="p-5 bg-white text-black">
+                        <div className="text-sm font-extrabold text-black/85">{g.venue}</div>
+                        <div className="text-[12px] text-black/55 mt-1">
+                          {qCount} questions (pick any amount)
+                        </div>
+
+                        <div className="mt-4">
+                          <Link
+                            href={picksHref}
+                            onClick={requireAuthForPicks}
+                            className="inline-flex items-center justify-center rounded-md px-4 py-2 text-[12px] font-black border"
+                            style={{
+                              borderColor: rgbaFromHex(COLORS.red, 0.7),
+                              background: COLORS.red,
+                              color: "white",
+                            }}
+                          >
+                            PLAY NOW
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-2xl border p-5" style={darkCardStyle}>
+                <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
+                <div className="text-[12px] text-white/55">
+                  Once rounds are seeded, featured matches show here automatically.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* PICKS AVAILABLE RIGHT NOW (KEEP IT, NOW BELOW FEATURED) */}
+          <div className="mb-2">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
                 <div className="text-[12px] font-black text-white/75">PICKS AVAILABLE RIGHT NOW</div>
@@ -492,97 +556,68 @@ export default function AflHubPage() {
                       <div className="h-3 bg-white/5 rounded w-1/2" />
                     </div>
                   ))
-                : previewQuestions.map((q) => {
-                    const line = formatStartLine(q.startTime);
-                    const teams = splitMatch(q.match);
-
-                    return (
-                      <div key={q.id} className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
-                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
-                              <span
-                                className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
-                                style={{
-                                  borderColor: rgbaFromHex(COLORS.red, 0.35),
-                                  background: rgbaFromHex(COLORS.red, 0.08),
-                                  color: "rgba(255,255,255,0.92)",
-                                }}
-                              >
-                                <span className="relative flex h-2 w-2">
-                                  <span
-                                    className="absolute inline-flex h-full w-full rounded-full"
-                                    style={{
-                                      background: rgbaFromHex(COLORS.red, 0.85),
-                                      animation: "torpiePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
-                                    }}
-                                  />
-                                  <span
-                                    className="relative inline-flex h-2 w-2 rounded-full"
-                                    style={{ background: rgbaFromHex(COLORS.red, 0.95) }}
-                                  />
-                                </span>
-                                Q{q.quarter}
+                : previewQuestions.map((q) => (
+                    <div key={q.id} className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
+                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
+                            <span
+                              className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
+                              style={{
+                                borderColor: rgbaFromHex(COLORS.red, 0.35),
+                                background: rgbaFromHex(COLORS.red, 0.08),
+                                color: "rgba(255,255,255,0.92)",
+                              }}
+                            >
+                              <span className="relative flex h-2 w-2">
+                                <span
+                                  className="absolute inline-flex h-full w-full rounded-full"
+                                  style={{
+                                    background: rgbaFromHex(COLORS.red, 0.85),
+                                    animation: "torpiePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
+                                  }}
+                                />
+                                <span
+                                  className="relative inline-flex h-2 w-2 rounded-full"
+                                  style={{ background: rgbaFromHex(COLORS.red, 0.95) }}
+                                />
                               </span>
+                              Q{q.quarter}
+                            </span>
 
-                              <span className="text-white/35">•</span>
-                              <span className="font-semibold text-white/70">{line}</span>
-                              <span className="text-white/35">•</span>
-                              <span className="text-white/70">{q.venue}</span>
-                            </div>
-
-                            <div className="flex flex-wrap items-center gap-3 mb-2">
-                              <div className="flex items-center gap-2">
-                                <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
-                                  <Image
-                                    src={teamLogoSrc(teams.home)}
-                                    alt={teams.home}
-                                    fill
-                                    className="object-contain p-1"
-                                  />
-                                </div>
-                                <div className="text-xs sm:text-sm font-black text-white/85">
-                                  {teams.home} <span className="text-white/45">vs</span> {teams.away}
-                                </div>
-                                <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
-                                  <Image
-                                    src={teamLogoSrc(teams.away)}
-                                    alt={teams.away}
-                                    fill
-                                    className="object-contain p-1"
-                                  />
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="text-sm sm:text-base font-semibold text-white/90">
-                              {q.question}
-                            </div>
+                            <span className="text-white/35">•</span>
+                            <span className="font-semibold text-white/70">{formatStartLine(q.startTime)}</span>
+                            <span className="text-white/35">•</span>
+                            <span className="text-white/70">{q.venue}</span>
                           </div>
 
-                          <div className="flex items-center gap-3 lg:ml-6 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
-                              className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                              style={yesBtnStyle}
-                            >
-                              YES
-                            </button>
+                          <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
 
-                            <button
-                              type="button"
-                              onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
-                              className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                              style={noBtnStyle}
-                            >
-                              NO
-                            </button>
-                          </div>
+                          <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
+                        </div>
+
+                        <div className="flex items-center gap-3 lg:ml-6 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
+                            className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
+                            style={yesBtnStyle}
+                          >
+                            YES
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
+                            className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
+                            style={noBtnStyle}
+                          >
+                            NO
+                          </button>
                         </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
             </div>
 
             {!loading && openQuestions.length > 0 ? (
@@ -601,264 +636,6 @@ export default function AflHubPage() {
                 </Link>
               </div>
             ) : null}
-          </div>
-
-          {/* HOW IT WORKS */}
-          <div ref={howRef} className="mb-10">
-            <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
-
-            <div className="grid sm:grid-cols-3 gap-4">
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="h-10 w-10 rounded-xl flex items-center justify-center border"
-                    style={{
-                      borderColor: rgbaFromHex(COLORS.red, 0.4),
-                      background: rgbaFromHex(COLORS.red, 0.12),
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" style={{ color: "rgba(255,255,255,0.92)" }}>
-                      <path
-                        d="M7 12.5l2.3 2.3L17 7.1"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M20 12a8 8 0 1 1-2.2-5.5"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </div>
-                  <div className="text-sm font-black">1. PICK OUTCOMES</div>
-                </div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Tap <span className="font-black text-white/85">YES</span> or{" "}
-                  <span className="font-black" style={{ color: COLORS.red }}>
-                    NO
-                  </span>{" "}
-                  on any question. Pick 0, 1, 5 or all 12 — your call.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="h-10 w-10 rounded-xl flex items-center justify-center border"
-                    style={{
-                      borderColor: rgbaFromHex(COLORS.red, 0.4),
-                      background: rgbaFromHex(COLORS.red, 0.12),
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" style={{ color: "rgba(255,255,255,0.92)" }}>
-                      <path
-                        d="M12 6v6l4 2"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M21 12a9 9 0 1 1-3.2-6.8"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </div>
-                  <div className="text-sm font-black">2. PLAY LIVE</div>
-                </div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Picks lock at bounce. Live questions drop during the match. Clear a pick any time before lock.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="flex items-center gap-3 mb-3">
-                  <div
-                    className="h-10 w-10 rounded-xl flex items-center justify-center border"
-                    style={{
-                      borderColor: rgbaFromHex(COLORS.red, 0.4),
-                      background: rgbaFromHex(COLORS.red, 0.12),
-                    }}
-                  >
-                    <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" style={{ color: "rgba(255,255,255,0.92)" }}>
-                      <path
-                        d="M8 21h8M12 17v4"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                      />
-                      <path
-                        d="M7 4h10l-1 9a4 4 0 0 1-8 0L7 4Z"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                  <div className="text-sm font-black">3. KEEP YOUR STREAK</div>
-                </div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Clean sweep per match to keep your streak alive. Any wrong = cooked. Voids don’t count.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* FEATURED MATCHES + LIVE LEADERBOARD */}
-          <div className="grid lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <div className="text-[12px] font-black text-white/75 mb-4">FEATURED MATCHES</div>
-
-              {loading ? (
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {[1, 2].map((i) => (
-                    <div key={i} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
-                      <div className="h-24 bg-white/5 animate-pulse" />
-                      <div className="p-5">
-                        <div className="h-4 w-3/4 bg-white/10 rounded animate-pulse mb-2" />
-                        <div className="h-3 w-1/2 bg-white/5 rounded animate-pulse" />
-                        <div className="mt-4 h-9 w-28 bg-white/10 rounded animate-pulse" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : featuredMatches.length ? (
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {featuredMatches.map((g) => {
-                    const line = formatStartLine(g.startTime);
-                    const teams = splitMatch(g.match);
-                    const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
-
-                    return (
-                      <div key={g.id} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
-                        <div className="relative h-28">
-                          <Image
-                            src="/mcg-hero.jpg"
-                            alt="Match hero"
-                            fill
-                            className="object-cover opacity-70"
-                            sizes="(max-width: 640px) 100vw, 50vw"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
-                          <div className="absolute left-4 right-4 top-4">
-                            <div className="text-xs text-white/70">{line}</div>
-                          </div>
-
-                          <div className="absolute left-4 bottom-3 right-4">
-                            <div className="flex items-center gap-2">
-                              <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
-                                <Image
-                                  src={teamLogoSrc(teams.home)}
-                                  alt={teams.home}
-                                  fill
-                                  className="object-contain p-1"
-                                />
-                              </div>
-                              <div className="text-sm font-black text-white/90">
-                                {teams.home} <span className="text-white/45">vs</span> {teams.away}
-                              </div>
-                              <div className="relative h-9 w-9 rounded-md overflow-hidden border border-white/15 bg-white/5">
-                                <Image
-                                  src={teamLogoSrc(teams.away)}
-                                  alt={teams.away}
-                                  fill
-                                  className="object-contain p-1"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="p-5">
-                          <div className="text-sm text-white/70 mb-1">{g.venue}</div>
-                          <div className="text-[11px] text-white/50 mb-4">
-                            {qCount} questions (pick any amount)
-                          </div>
-
-                          <Link
-                            href={picksHref}
-                            onClick={requireAuthForPicks}
-                            className="inline-flex items-center justify-center rounded-md px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                            style={primaryBtn}
-                          >
-                            PLAY NOW
-                          </Link>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                  <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
-                  <div className="text-[12px] text-white/55">
-                    Once rounds are seeded, featured matches show here automatically.
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <div className="text-[12px] font-black text-white/75 mb-4">LIVE LEADERBOARD</div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="flex items-center justify-between gap-3 mb-4">
-                  <div className="text-sm font-black text-white/90">Top Torpies</div>
-                  <Link
-                    href="/leaderboards"
-                    className="text-[11px] font-black hover:underline underline-offset-2"
-                    style={{ color: COLORS.red }}
-                  >
-                    VIEW ALL
-                  </Link>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-[12px]">
-                    <span className="text-white/70">1. TessieMoonKing</span>
-                    <span className="font-black text-white/90">Streak 12</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[12px]">
-                    <span className="text-white/70">2. TorpieMaster</span>
-                    <span className="font-black text-white/90">Streak 10</span>
-                  </div>
-                  <div className="flex items-center justify-between text-[12px]">
-                    <span className="text-white/70">3. BigSledger</span>
-                    <span className="font-black text-white/90">Streak 9</span>
-                  </div>
-
-                  <div
-                    className="mt-4 rounded-xl border px-4 py-3"
-                    style={{
-                      borderColor: rgbaFromHex(COLORS.red, 0.25),
-                      background: rgbaFromHex(COLORS.red, 0.08),
-                    }}
-                  >
-                    <div className="text-[12px] font-black text-white/90 mb-1">Locker Rooms</div>
-                    <div className="text-[12px] text-white/65">
-                      Private comps with your mates. Ladder = current streak only.
-                    </div>
-                  </div>
-
-                  <Link
-                    href="/locker-rooms"
-                    className="mt-3 inline-flex items-center justify-center w-full rounded-md px-4 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.05)",
-                      color: "rgba(255,255,255,0.92)",
-                    }}
-                  >
-                    GO TO LOCKER ROOMS
-                  </Link>
-                </div>
-              </div>
-            </div>
           </div>
 
           {/* FOOTER */}
