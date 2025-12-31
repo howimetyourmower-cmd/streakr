@@ -76,17 +76,6 @@ function rgbaFromHex(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-function splitMatch(match: string) {
-  const raw = (match || "").trim();
-  const parts = raw.split(/\s+vs\s+/i);
-  if (parts.length >= 2)
-    return { home: parts[0].trim(), away: parts.slice(1).join(" vs ").trim() };
-  const dash = raw.split(/\s*-\s*/);
-  if (dash.length >= 2)
-    return { home: dash[0].trim(), away: dash.slice(1).join(" - ").trim() };
-  return { home: raw || "Home", away: "Away" };
-}
-
 function formatStartLine(iso: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -112,7 +101,6 @@ const COLORS = {
   darkPanel2: "#070911",
   red: "#CE2029",
   redDeep: "#8B0F16",
-  white: "#FFFFFF",
 };
 
 export default function AflHubPage() {
@@ -124,7 +112,6 @@ export default function AflHubPage() {
   const [openQuestions, setOpenQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
@@ -141,7 +128,6 @@ export default function AflHubPage() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
-        if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
 
         const g = Array.isArray(data.games) ? data.games : [];
         setGames(g);
@@ -190,7 +176,7 @@ export default function AflHubPage() {
     const upcoming = sorted.filter(
       (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
     );
-    return (upcoming.length ? upcoming : sorted).slice(0, 2);
+    return (upcoming.length ? upcoming : sorted).slice(0, 3);
   }, [games]);
 
   const previewQuestions = useMemo(() => openQuestions.slice(0, 6), [openQuestions]);
@@ -246,12 +232,6 @@ export default function AflHubPage() {
     boxShadow: `0 0 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
   } as const;
 
-  const pillStyle = {
-    borderColor: "rgba(255,255,255,0.18)",
-    background: "rgba(0,0,0,0.28)",
-    color: "rgba(255,255,255,0.90)",
-  } as const;
-
   const yesBtnStyle = {
     borderColor: "rgba(255,255,255,0.40)",
     background: "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78))",
@@ -279,7 +259,7 @@ export default function AflHubPage() {
         }
       `}</style>
 
-      {/* ======= HERO (NO LOGO, NO EXTRA PILLS) ======= */}
+      {/* ======= HERO ======= */}
       <section className="relative">
         <div className="relative w-full h-[520px] sm:h-[600px]">
           <Image
@@ -291,37 +271,6 @@ export default function AflHubPage() {
           />
           <div className="absolute inset-0 bg-black/35" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
-        </div>
-
-        {/* Only the PLAY + HOW IT WORKS pill row (no logo) */}
-        <div className="absolute left-0 right-0 top-0">
-          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 pt-4">
-            <div
-              className="inline-flex items-center gap-3 rounded-2xl border px-3 py-2 backdrop-blur-md"
-              style={{
-                borderColor: "rgba(255,255,255,0.16)",
-                background: "rgba(0,0,0,0.35)",
-              }}
-            >
-              <Link
-                href={picksHref}
-                onClick={requireAuthForPicks}
-                className="inline-flex items-center justify-center rounded-full px-5 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                style={primaryBtn}
-              >
-                PLAY
-              </Link>
-
-              <button
-                type="button"
-                onClick={scrollToHow}
-                className="inline-flex items-center justify-center rounded-full px-5 py-2 text-[12px] font-black border transition active:scale-[0.99]"
-                style={pillStyle}
-              >
-                HOW IT WORKS
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="absolute inset-0">
@@ -371,7 +320,7 @@ export default function AflHubPage() {
       {/* ======= CONTENT ======= */}
       <section className="bg-[#171A22]">
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          {/* HOW IT WORKS (MOVED DIRECTLY UNDER HERO IMAGE) */}
+          {/* HOW IT WORKS */}
           <div ref={howRef} className="mb-10">
             <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
 
@@ -404,10 +353,10 @@ export default function AflHubPage() {
             </div>
           </div>
 
-          {/* FEATURED MATCHES (MOVED UNDER HOW IT WORKS) */}
+          {/* NEXT FEATURED MATCHES (3 cards) */}
           <div className="mb-10">
             <div className="flex items-end justify-between gap-3 mb-4">
-              <div className="text-[12px] font-black text-white/75">FEATURED MATCHES</div>
+              <div className="text-[12px] font-black text-white/75">NEXT FEATURED MATCHES</div>
               <Link
                 href={picksHref}
                 onClick={requireAuthForPicks}
@@ -419,8 +368,8 @@ export default function AflHubPage() {
             </div>
 
             {loading ? (
-              <div className="grid sm:grid-cols-2 gap-4">
-                {[1, 2].map((i) => (
+              <div className="grid md:grid-cols-3 gap-4">
+                {[1, 2, 3].map((i) => (
                   <div key={i} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
                     <div className="h-28 bg-white/5 animate-pulse" />
                     <div className="p-5 bg-white">
@@ -432,7 +381,7 @@ export default function AflHubPage() {
                 ))}
               </div>
             ) : featuredMatches.length ? (
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid md:grid-cols-3 gap-4">
                 {featuredMatches.map((g) => {
                   const line = formatStartLine(g.startTime);
                   const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
@@ -446,14 +395,14 @@ export default function AflHubPage() {
                         boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
                       }}
                     >
-                      {/* Image section (dark) */}
+                      {/* Image section */}
                       <div className="relative h-32">
                         <Image
                           src="/afl.png"
                           alt="Match hero"
                           fill
-                          className="object-cover"
-                          sizes="(max-width: 640px) 100vw, 50vw"
+                          className="object-cover object-top"
+                          sizes="(max-width: 768px) 100vw, 33vw"
                         />
                         <div className="absolute inset-0 bg-black/55" />
                         <div className="absolute left-4 bottom-3 right-4">
@@ -498,7 +447,7 @@ export default function AflHubPage() {
             )}
           </div>
 
-          {/* PICKS AVAILABLE RIGHT NOW (KEEP IT, NOW BELOW FEATURED) */}
+          {/* PICKS AVAILABLE RIGHT NOW */}
           <div className="mb-2">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
@@ -592,7 +541,6 @@ export default function AflHubPage() {
                           </div>
 
                           <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
-
                           <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
                         </div>
 
