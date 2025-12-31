@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
@@ -33,7 +33,6 @@ type PicksApiResponse = {
 const COLORS = {
   bg: "#000000",
   red: "#FF2E4D",
-  white: "rgba(255,255,255,0.98)",
 };
 
 function formatAedt(dateIso: string): string {
@@ -127,16 +126,25 @@ function splitMatch(match: string): { home: string; away: string } | null {
 }
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
+  // IMPORTANT: keep the real files first if you know them.
+  // We'll still fall back, but we STOP once all fail so it won't flash on countdown re-renders.
   return [
-    `/aflteams/${teamSlug}-logo.png`,
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
   ];
 }
 
-function TeamLogo({ teamName, size = 46 }: { teamName: string; size?: number }) {
+const TeamLogo = React.memo(function TeamLogoInner({
+  teamName,
+  size = 46,
+}: {
+  teamName: string;
+  size?: number;
+}) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
 
   if (!slug) {
     const initials = teamName
@@ -162,6 +170,29 @@ function TeamLogo({ teamName, size = 46 }: { teamName: string; size?: number }) 
     );
   }
 
+  if (dead) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-2xl border font-black"
+        style={{
+          width: size,
+          height: size,
+          borderColor: "rgba(255,255,255,0.12)",
+          background: "rgba(255,255,255,0.06)",
+          color: "rgba(255,255,255,0.70)",
+        }}
+        title={teamName}
+      >
+        {teamName
+          .split(" ")
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((x) => x[0]?.toUpperCase())
+          .join("") || "AFL"}
+      </div>
+    );
+  }
+
   const candidates = logoCandidates(slug);
   const src = candidates[Math.min(idx, candidates.length - 1)];
 
@@ -182,14 +213,19 @@ function TeamLogo({ teamName, size = 46 }: { teamName: string; size?: number }) 
           alt={`${teamName} logo`}
           fill
           sizes={`${size}px`}
-          style={{ objectFit: "contain" }} // ✅ no crop
-          onError={() => setIdx((p) => (p + 1 >= candidates.length ? p : p + 1))}
-          priority={false}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true); // ✅ stop rendering Image → no more flashing
+              return p;
+            });
+          }}
         />
       </div>
     </div>
   );
-}
+});
 
 export default function PicksPage() {
   const { user } = useAuth();
@@ -199,8 +235,8 @@ export default function PicksPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
+  // still updates every second (for lock countdown) – but logos won’t flash anymore
   const [nowMs, setNowMs] = useState(() => Date.now());
-
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -240,11 +276,9 @@ export default function PicksPage() {
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  const featured = useMemo(() => {
-    const sorted = [...games].sort(
-      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    );
-    return sorted.slice(0, 3);
+  // ✅ show ALL games (no slice to 3)
+  const sortedGames = useMemo(() => {
+    return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }, [games]);
 
   const MatchCard = ({ g }: { g: ApiGame }) => {
@@ -401,7 +435,7 @@ export default function PicksPage() {
 
           {loading ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Array.from({ length: 3 }).map((_, i) => (
+              {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
                   className="rounded-2xl border overflow-hidden"
@@ -415,7 +449,7 @@ export default function PicksPage() {
                 </div>
               ))}
             </div>
-          ) : featured.length === 0 ? (
+          ) : sortedGames.length === 0 ? (
             <div
               className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
               style={{
@@ -427,7 +461,7 @@ export default function PicksPage() {
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {featured.map((g) => (
+              {sortedGames.map((g) => (
                 <MatchCard key={g.id} g={g} />
               ))}
             </div>
