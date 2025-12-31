@@ -1,9 +1,9 @@
-// components/Navbar.tsx
+// /components/Navbar.tsx
 "use client";
 
-<Link href="/leagues">Locker Room</Link>
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseClient";
@@ -14,7 +14,7 @@ type MinimalUserDoc = {
   username?: string;
 };
 
-// Fire engine red for TORPY (matches hub page)
+// Fire engine red (matches Torpie palette)
 const FIRE_RED = "#CE2029";
 
 export default function Navbar() {
@@ -73,32 +73,33 @@ export default function Navbar() {
   }, [profileDoc?.username, user?.displayName, user?.email]);
 
   const label =
-    profileDoc?.username || user?.displayName || (user?.email ?? "Player");
+    profileDoc?.username || user?.displayName || (user?.email ?? "Torpie");
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
 
   // Keep one place to control active/hover red
   const linkClass = (href: string) =>
-    isActive(href) ? "text-[var(--torpy-red)]" : "hover:text-[var(--torpy-red)]";
+    isActive(href) ? "text-[var(--torpie-red)]" : "hover:text-[var(--torpie-red)]";
 
   return (
     <header
       className="w-full border-b border-white/10 bg-black"
-      style={{ ["--torpy-red" as any]: FIRE_RED }}
+      style={{ ["--torpie-red" as any]: FIRE_RED }}
     >
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
-        {/* LOGO / WORDMARK */}
+        {/* LOGO */}
         <Link href="/" className="flex items-center gap-3">
-          <span
-            className="font-extrabold text-3xl tracking-tight"
-            style={{
-              color: "var(--torpy-red)",
-              textShadow: "0 0 14px rgba(206,32,41,0.25)",
-            }}
-          >
-            TORPY
-          </span>
+          <div className="relative h-9 w-[132px] sm:h-10 sm:w-[150px]">
+            <Image
+              src="/Torpielogo.png"
+              alt="Torpie"
+              fill
+              priority
+              className="object-contain"
+              sizes="150px"
+            />
+          </div>
         </Link>
 
         {/* DESKTOP NAV */}
@@ -181,6 +182,7 @@ export default function Navbar() {
             >
               Picks
             </Link>
+
             <Link
               href="/leaderboards"
               onClick={() => setMenuOpen(false)}
@@ -188,6 +190,7 @@ export default function Navbar() {
             >
               Leaderboards
             </Link>
+
             <Link
               href="/locker-room"
               onClick={() => setMenuOpen(false)}
@@ -195,6 +198,7 @@ export default function Navbar() {
             >
               Locker Room
             </Link>
+
             <Link
               href="/venue-locker-rooms"
               onClick={() => setMenuOpen(false)}
@@ -202,6 +206,7 @@ export default function Navbar() {
             >
               Venue Locker Rooms
             </Link>
+
             <Link
               href="/rewards"
               onClick={() => setMenuOpen(false)}
@@ -209,6 +214,7 @@ export default function Navbar() {
             >
               Rewards
             </Link>
+
             <Link
               href="/faq"
               onClick={() => setMenuOpen(false)}
@@ -241,7 +247,7 @@ export default function Navbar() {
               <Link
                 href={user ? "/profile" : "/auth"}
                 onClick={() => setMenuOpen(false)}
-                className="px-3 py-1 rounded-full border border-white/20 text-xs transition-colors hover:border-[var(--torpy-red)] hover:text-[var(--torpy-red)]"
+                className="px-3 py-1 rounded-full border border-white/20 text-xs transition-colors hover:border-[var(--torpie-red)] hover:text-[var(--torpie-red)]"
               >
                 {user ? "Profile" : "Login"}
               </Link>
