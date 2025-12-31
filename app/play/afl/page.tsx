@@ -3,22 +3,40 @@
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState, MouseEvent } from "react";
 import Image from "next/image";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDoc,
+  serverTimestamp,
+} from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type PickOutcome = "yes" | "no";
+type LocalPick = PickOutcome | "none";
 
 type ApiQuestion = {
   id: string;
+  gameId?: string;
   quarter: number;
   question: string;
   status: any; // API may send "Open"/"Final" etc
   match: string;
   venue: string;
   startTime: string;
+
+  // Optional UI enrichers (safe if absent)
+  playerName?: string;
+  playerImage?: string; // /players/Charlie Curnow.jpg etc
+  homeTeam?: string;
+  awayTeam?: string;
+  homeLogo?: string; // /teams/Carlton.png
+  awayLogo?: string;
 };
 
 type ApiGame = {
@@ -27,6 +45,12 @@ type ApiGame = {
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
+  // Optional
+  heroImage?: string; // /matches/sydney-v-carlton.jpg
+  homeTeam?: string;
+  awayTeam?: string;
+  homeLogo?: string;
+  awayLogo?: string;
 };
 
 type PicksApiResponse = {
@@ -34,610 +58,1118 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-type QuestionRow = {
-  id: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
+type MatchLockState = {
+  locked: boolean;
+  lockedAt?: string;
+  picks: Record<string, PickOutcome>;
 };
 
-type PreviewFocusPayload = {
-  sport: "AFL";
-  questionId: string;
-  intendedPick: "yes" | "no";
-  createdAt: number;
-};
+const LS_PREFIX = "torpy:afl";
+const LS_LOCKS_KEY = `${LS_PREFIX}:locks`; // per user id is appended
+const LS_DRAFT_KEY = `${LS_PREFIX}:draft`; // per user id is appended
 
-const PREVIEW_FOCUS_KEY = "torpy_preview_focus_v1";
-
-/** ✅ TORPY palette */
-const COLORS = {
-  pageBg: "#FFFFFF",
-  card: "#0B0D14",
-  card2: "#070911",
-  red: "#CE2029",
-  redDeep: "#8B0F16",
-};
-
-function normaliseStatus(val: any): QuestionStatus {
-  const s = String(val ?? "").toLowerCase().trim();
+function normalizeStatus(v: any): QuestionStatus {
+  const s = String(v ?? "").toLowerCase();
   if (s === "open") return "open";
   if (s === "final") return "final";
   if (s === "pending") return "pending";
   if (s === "void") return "void";
+  // tolerate older values
+  if (s.includes("open")) return "open";
+  if (s.includes("final")) return "final";
+  if (s.includes("pend")) return "pending";
+  if (s.includes("void")) return "void";
   return "open";
 }
 
-function rgbaFromHex(hex: string, alpha: number): string {
-  const h = (hex || "").replace("#", "").trim();
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  if (full.length !== 6) return `rgba(255,255,255,${alpha})`;
-
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-
-  const a = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
-  return `rgba(${r},${g},${b},${a})`;
+function formatAest(dtIso: string): string {
+  try {
+    const d = new Date(dtIso);
+    return d.toLocaleString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+  } catch {
+    return dtIso;
+  }
 }
 
-function splitMatch(match: string) {
-  const raw = (match || "").trim();
-  const parts = raw.split(/\s+vs\s+/i);
-  if (parts.length >= 2) return { home: parts[0].trim(), away: parts.slice(1).join(" vs ").trim() };
-  const dash = raw.split(/\s*-\s*/);
-  if (dash.length >= 2) return { home: dash[0].trim(), away: dash.slice(1).join(" - ").trim() };
-  return { home: raw || "Home", away: "Away" };
+function minutesToKickoff(dtIso: string): number | null {
+  try {
+    const t = new Date(dtIso).getTime();
+    const now = Date.now();
+    return Math.round((t - now) / 60000);
+  } catch {
+    return null;
+  }
 }
 
-export default function AflHubPage() {
-  const { user } = useAuth();
+function safeBase64UrlEncode(obj: any): string {
+  const json = JSON.stringify(obj);
+  const b64 = typeof window !== "undefined" ? window.btoa(unescape(encodeURIComponent(json))) : "";
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function safeBase64UrlDecode<T>(s: string): T | null {
+  try {
+    const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4);
+    const json = decodeURIComponent(escape(window.atob(b64)));
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
+function buildShareText(args: {
+  match: string;
+  venue: string;
+  startTime: string;
+  picks: Array<{ question: string; pick: PickOutcome; quarter: number }>;
+}): string {
+  const lines: string[] = [];
+  lines.push(`TORPY PICKS`);
+  lines.push(`${args.match}`);
+  lines.push(`${args.venue}`);
+  lines.push(`${formatAest(args.startTime)}`);
+  lines.push("");
+  lines.push(`My Parlay (${args.picks.length}):`);
+  for (const p of args.picks) {
+    const tag = p.pick === "yes" ? "YES" : "NO";
+    lines.push(`Q${p.quarter}: ${tag} — ${p.question}`);
+  }
+  lines.push("");
+  lines.push(`1 wrong = 0. How long can you last?`);
+  return lines.join("\n");
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fallback
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      ta.style.top = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function readUserProfileStreak(userId: string): Promise<number | null> {
+  try {
+    const snap = await getDoc(doc(db, "users", userId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as any;
+    const n = Number(data?.currentStreak ?? data?.streak ?? data?.aflStreak);
+    if (Number.isFinite(n)) return n;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export default function PlayAflPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const { user, loading } = useAuth();
 
-  const [games, setGames] = useState<ApiGame[]>([]);
-  const [questions, setQuestions] = useState<QuestionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [roundNumber, setRoundNumber] = useState<number | null>(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [apiLoading, setApiLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [payload, setPayload] = useState<PicksApiResponse | null>(null);
 
-  const picksHref = "/picks?sport=AFL";
-  const encodedReturnTo = encodeURIComponent(picksHref);
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null);
 
-  const formatStartDate = (iso: string) => {
-    if (!iso) return { date: "", time: "" };
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  // Draft picks (per match)
+  const [draftByGame, setDraftByGame] = useState<Record<string, Record<string, LocalPick>>>({});
+  // Locks (per match)
+  const [locksByGame, setLocksByGame] = useState<Record<string, MatchLockState>>({});
 
-    return {
-      date: d.toLocaleDateString("en-AU", {
-        weekday: "short",
-        day: "2-digit",
-        month: "short",
-        timeZone: "Australia/Melbourne",
-      }),
-      time: d.toLocaleTimeString("en-AU", {
-        hour: "numeric",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "Australia/Melbourne",
-      }),
-    };
-  };
+  // Confirmation modal
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareReadOnly, setShareReadOnly] = useState(false);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
+  const [currentStreak, setCurrentStreak] = useState<number | null>(null);
+
+  const modalRef = useRef<HTMLDivElement | null>(null);
+
+  const userKey = useMemo(() => {
+    const uid = user?.uid ?? "anon";
+    return uid;
+  }, [user?.uid]);
+
+  const locksStorageKey = useMemo(() => `${LS_LOCKS_KEY}:${userKey}`, [userKey]);
+  const draftStorageKey = useMemo(() => `${LS_DRAFT_KEY}:${userKey}`, [userKey]);
+
+  // Load API
   useEffect(() => {
-    const load = async () => {
+    let alive = true;
+
+    async function run() {
+      setApiLoading(true);
+      setApiError(null);
+
       try {
-        setError("");
-        setLoading(true);
+        // Keep this path stable: you already use this page as /play/afl
+        // If your existing API route differs, just update the URL here.
+        const res = await fetch("/api/play/afl", { cache: "no-store" });
+        if (!res.ok) {
+          throw new Error(`Failed to load AFL games (${res.status})`);
+        }
+        const data = (await res.json()) as PicksApiResponse;
 
-        const res = await fetch("/api/picks?sport=AFL", { cache: "no-store" });
-        if (!res.ok) throw new Error("API error");
+        // Normalize gameId on questions for safety
+        const games = (data.games ?? []).map((g) => ({
+          ...g,
+          questions: (g.questions ?? []).map((q) => ({
+            ...q,
+            gameId: q.gameId ?? g.id,
+          })),
+        }));
 
-        const data: PicksApiResponse = await res.json();
-
-        setGames(data.games || []);
-        if (typeof data.roundNumber === "number") setRoundNumber(data.roundNumber);
-
-        const flat: QuestionRow[] = (data.games || []).flatMap((g) =>
-          (g.questions || []).map((q) => ({
-            id: q.id,
-            match: g.match,
-            venue: g.venue,
-            startTime: g.startTime,
-            quarter: q.quarter,
-            question: q.question,
-            status: normaliseStatus(q.status),
-          }))
-        );
-
-        const openOnly = flat.filter((q) => q.status === "open");
-        openOnly.sort((a, b) => {
-          const da = new Date(a.startTime).getTime();
-          const db = new Date(b.startTime).getTime();
-          if (da !== db) return da - db;
-          return a.quarter - b.quarter;
-        });
-
-        setQuestions(openOnly);
-      } catch (e) {
-        console.error(e);
-        setError("Failed to load preview questions.");
+        if (!alive) return;
+        setPayload({ ...data, games });
+      } catch (e: any) {
+        if (!alive) return;
+        setApiError(e?.message ?? "Failed to load games.");
       } finally {
-        setLoading(false);
+        if (!alive) return;
+        setApiLoading(false);
       }
-    };
-
-    load();
-  }, []);
-
-  const previewQuestions = useMemo(() => questions.slice(0, 6), [questions]);
-  const featuredGames = useMemo(() => (games || []).slice(0, 3), [games]);
-
-  const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
     }
 
+    run();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Load streak (optional)
+  useEffect(() => {
+    let alive = true;
+    async function run() {
+      if (!user?.uid) {
+        setCurrentStreak(null);
+        return;
+      }
+      const s = await readUserProfileStreak(user.uid);
+      if (!alive) return;
+      setCurrentStreak(s);
+    }
+    run();
+    return () => {
+      alive = false;
+    };
+  }, [user?.uid]);
+
+  // Load local draft + locks
+  useEffect(() => {
     try {
-      const payload: PreviewFocusPayload = {
-        sport: "AFL",
-        questionId,
-        intendedPick,
-        createdAt: Date.now(),
-      };
-      window.localStorage.setItem(PREVIEW_FOCUS_KEY, JSON.stringify(payload));
+      const rawLocks = localStorage.getItem(locksStorageKey);
+      if (rawLocks) {
+        const parsed = JSON.parse(rawLocks) as Record<string, MatchLockState>;
+        setLocksByGame(parsed ?? {});
+      }
     } catch {
       // ignore
     }
-
-    router.push(picksHref);
-  };
-
-  const onClickGoToPicks = (e: MouseEvent) => {
-    if (!user) {
-      e.preventDefault();
-      setShowAuthModal(true);
-      return;
+    try {
+      const rawDraft = localStorage.getItem(draftStorageKey);
+      if (rawDraft) {
+        const parsed = JSON.parse(rawDraft) as Record<string, Record<string, LocalPick>>;
+        setDraftByGame(parsed ?? {});
+      }
+    } catch {
+      // ignore
     }
-  };
+  }, [locksStorageKey, draftStorageKey]);
 
-  const darkCardStyle = {
-    borderColor: "rgba(255,255,255,0.10)",
-    background: `linear-gradient(180deg, ${COLORS.card} 0%, ${COLORS.card2} 100%)`,
-    boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
-  } as const;
+  // Persist draft + locks
+  useEffect(() => {
+    try {
+      localStorage.setItem(locksStorageKey, JSON.stringify(locksByGame));
+    } catch {
+      // ignore
+    }
+  }, [locksByGame, locksStorageKey]);
 
-  const cardHoverBorder = rgbaFromHex(COLORS.red, 0.32);
+  useEffect(() => {
+    try {
+      localStorage.setItem(draftStorageKey, JSON.stringify(draftByGame));
+    } catch {
+      // ignore
+    }
+  }, [draftByGame, draftStorageKey]);
 
-  const primaryCtaStyle = {
-    borderColor: rgbaFromHex(COLORS.red, 0.55),
-    background: COLORS.red,
-    color: "rgba(255,255,255,0.98)",
-    boxShadow: `0 14px 30px ${rgbaFromHex(COLORS.red, 0.18)}`,
-  } as const;
+  // Handle share param (?parlay=...)
+  useEffect(() => {
+    const parlayParam = searchParams?.get("parlay");
+    if (!parlayParam) return;
 
-  const secondaryCtaStyle = {
-    borderColor: "rgba(0,0,0,0.14)",
-    background: "rgba(255,255,255,0.92)",
-    color: "rgba(0,0,0,0.86)",
-  } as const;
+    const decoded = safeBase64UrlDecode<{
+      gameId: string;
+      match: string;
+      venue: string;
+      startTime: string;
+      picks: Array<{ questionId: string; question: string; pick: PickOutcome; quarter: number }>;
+    }>(parlayParam);
 
-  const yesBtnStyle = {
-    borderColor: "rgba(0,0,0,0.16)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(255,255,255,0.84))",
-    color: "rgba(0,0,0,0.92)",
-    boxShadow: "0 10px 22px rgba(0,0,0,0.08)",
-  } as const;
+    if (!decoded?.gameId) return;
 
-  const noBtnStyle = {
-    borderColor: rgbaFromHex(COLORS.red, 0.85),
-    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.98)}, ${rgbaFromHex(
-      COLORS.redDeep,
-      0.92
-    )})`,
-    color: "rgba(255,255,255,0.98)",
-    boxShadow: `0 12px 26px ${rgbaFromHex(COLORS.red, 0.14)}`,
-  } as const;
+    // Ensure game is selected for context
+    setSelectedGameId(decoded.gameId);
+
+    // Set a read-only share modal state
+    setShareReadOnly(true);
+    setShareOpen(true);
+
+    // Also load into draft display (read-only mode uses decoded picks)
+    // We won't overwrite existing user drafts if they already have them.
+    // If user is anonymous/visiting, this lets them view the parlay cleanly.
+    setDraftByGame((prev) => {
+      const existing = prev?.[decoded.gameId];
+      if (existing && Object.keys(existing).length > 0) return prev;
+      const next = { ...(prev ?? {}) };
+      next[decoded.gameId] = {};
+      for (const p of decoded.picks ?? []) next[decoded.gameId][p.questionId] = p.pick;
+      return next;
+    });
+  }, [searchParams]);
+
+  const games = payload?.games ?? [];
+
+  const selectedGame = useMemo(() => {
+    if (!selectedGameId) return null;
+    return games.find((g) => g.id === selectedGameId) ?? null;
+  }, [games, selectedGameId]);
+
+  const draftForSelected = useMemo(() => {
+    if (!selectedGameId) return {};
+    return draftByGame[selectedGameId] ?? {};
+  }, [draftByGame, selectedGameId]);
+
+  const lockedForSelected = useMemo(() => {
+    if (!selectedGameId) return null;
+    return locksByGame[selectedGameId] ?? null;
+  }, [locksByGame, selectedGameId]);
+
+  const selectedPicksList = useMemo(() => {
+    if (!selectedGame) return [];
+    const out: Array<{ questionId: string; question: string; quarter: number; pick: PickOutcome }> = [];
+    const draft = draftForSelected ?? {};
+    for (const q of selectedGame.questions ?? []) {
+      const lp = draft[q.id];
+      if (lp === "yes" || lp === "no") {
+        out.push({ questionId: q.id, question: q.question, quarter: q.quarter, pick: lp });
+      }
+    }
+    return out;
+  }, [selectedGame, draftForSelected]);
+
+  const picksCount = selectedPicksList.length;
+
+  function setPick(gameId: string, questionId: string, pick: LocalPick) {
+    setDraftByGame((prev) => {
+      const next = { ...(prev ?? {}) };
+      const g = { ...(next[gameId] ?? {}) };
+      g[questionId] = pick;
+      next[gameId] = g;
+      return next;
+    });
+  }
+
+  function clearAllPicks(gameId: string) {
+    setDraftByGame((prev) => {
+      const next = { ...(prev ?? {}) };
+      next[gameId] = {};
+      return next;
+    });
+  }
+
+  function openConfirm() {
+    if (!selectedGameId || !selectedGame) return;
+    if (lockedForSelected?.locked) return;
+    setConfirmOpen(true);
+    setShareReadOnly(false);
+  }
+
+  function closeAllModals() {
+    setConfirmOpen(false);
+    setShareOpen(false);
+    setShareReadOnly(false);
+  }
+
+  async function confirmLock() {
+    if (!selectedGame || !selectedGameId) return;
+    if (lockedForSelected?.locked) return;
+
+    // If not logged in, we still allow locking locally (so UX works)
+    // but we skip Firestore writes.
+    const uid = user?.uid ?? null;
+
+    const lockPayload: MatchLockState = {
+      locked: true,
+      lockedAt: new Date().toISOString(),
+      picks: {},
+    };
+    for (const p of selectedPicksList) {
+      lockPayload.picks[p.questionId] = p.pick;
+    }
+
+    setLocksByGame((prev) => ({
+      ...(prev ?? {}),
+      [selectedGameId]: lockPayload,
+    }));
+
+    // Write to Firestore (best-effort)
+    if (uid) {
+      try {
+        const picksCol = collection(db, "picks");
+        // store as one doc per lock (clean + auditable)
+        await addDoc(picksCol, {
+          userId: uid,
+          sport: "AFL",
+          gameId: selectedGameId,
+          match: selectedGame.match,
+          venue: selectedGame.venue,
+          startTime: selectedGame.startTime,
+          picks: selectedPicksList.map((p) => ({
+            questionId: p.questionId,
+            pick: p.pick,
+            quarter: p.quarter,
+            question: p.question,
+          })),
+          createdAt: serverTimestamp(),
+        });
+      } catch {
+        // if Firestore fails, user still has local lock (so no rage quit)
+      }
+    }
+
+    setConfirmOpen(false);
+    setShareOpen(true);
+    setShareReadOnly(false);
+  }
+
+  function buildShareUrl(game: ApiGame) {
+    const picks = selectedPicksList.map((p) => ({
+      questionId: p.questionId,
+      question: p.question,
+      pick: p.pick,
+      quarter: p.quarter,
+    }));
+
+    const parlay = {
+      gameId: game.id,
+      match: game.match,
+      venue: game.venue,
+      startTime: game.startTime,
+      picks,
+    };
+
+    const encoded = safeBase64UrlEncode(parlay);
+    const url = new URL(window.location.href);
+    url.searchParams.set("parlay", encoded);
+    return url.toString();
+  }
+
+  async function shareParlay() {
+    if (!selectedGame) return;
+
+    const text = buildShareText({
+      match: selectedGame.match,
+      venue: selectedGame.venue,
+      startTime: selectedGame.startTime,
+      picks: selectedPicksList.map((p) => ({
+        question: p.question,
+        pick: p.pick,
+        quarter: p.quarter,
+      })),
+    });
+
+    const url = buildShareUrl(selectedGame);
+
+    // Try native share first
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Torpy Parlay",
+          text,
+          url,
+        });
+        setShareToast("Shared ✅");
+        setTimeout(() => setShareToast(null), 1800);
+        return;
+      }
+    } catch {
+      // ignore; fall through
+    }
+
+    const ok = await copyToClipboard(`${text}\n\n${url}`);
+    setShareToast(ok ? "Copied ✅" : "Copy failed");
+    setTimeout(() => setShareToast(null), 1800);
+  }
+
+  // Close modal with ESC
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") closeAllModals();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const showMatchView = !!selectedGame;
 
   return (
-    <main className="min-h-screen" style={{ backgroundColor: COLORS.pageBg, color: "#111827" }}>
-      <style>{`
-        @keyframes torpyPing {
-          0% { transform: scale(1); opacity: .55; }
-          80% { transform: scale(1.6); opacity: 0; }
-          100% { transform: scale(1.6); opacity: 0; }
-        }
-      `}</style>
-
-      {/* ✅ IMPORTANT:
-          You already have your global Navbar + sponsor strip from layout.
-          So this page now ONLY renders the centered "hub" (no extra internal nav).
-      */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-10">
-        <div className="rounded-2xl overflow-hidden border border-black/10 bg-[#0B0D14] text-white shadow-[0_20px_70px_rgba(0,0,0,0.25)]">
-          {/* HERO */}
-          <section className="relative">
-            <div className="relative w-full h-[260px] sm:h-[320px]">
-              <Image src="/afl1.png" alt="AFL hero" fill priority className="object-cover object-top opacity-95" />
-              <div className="absolute inset-0 bg-black/40" />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/25 to-transparent" />
-
-               <div className="absolute bottom-6 left-6 right-6 max-w-2xl">
-                <div className="text-[11px] font-extrabold tracking-wide text-white/70 mb-2">
-                  TORPY • AFL {roundNumber ? `• ROUND ${roundNumber}` : ""}
-                </div>
-
-                <h1 className="text-4xl sm:text-5xl font-extrabold leading-[0.95] tracking-tight">
-                  PREDICT.
-                  <br />
-                  PLAY. <span style={{ color: COLORS.red }}>WIN.</span>
-                </h1>
-
-                <p className="mt-3 text-sm sm:text-base text-white/75">
-                  Live AFL yes/no picks tied to each match. Pick as many as you want.
-                  One wrong call in a game and your streak is cooked.
-                </p>
-
-                <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <Link
-                    href={picksHref}
-                    onClick={onClickGoToPicks}
-                    className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border"
-                    style={primaryCtaStyle}
-                  >
-                    PLAY NOW
-                  </Link>
-
-                  <Link
-                    href="#how-to-play"
-                    className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border"
-                    style={secondaryCtaStyle}
-                  >
-                    HOW TO PLAY
-                  </Link>
+    <div className="min-h-screen">
+      <div className="container py-6">
+        {/* Top row: Mission Control */}
+        <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-2xl border border-border-subtle bg-bg-elevated px-4 py-3">
+              <div className="text-xs font-black uppercase tracking-wide text-text-secondary">
+                Dashboard
+              </div>
+              <div className="mt-1 flex items-baseline gap-2">
+                <div className="text-lg font-black">Current Streak</div>
+                <div className="streak-glow animate-streak text-lg font-black">
+                  {currentStreak ?? 0}
                 </div>
               </div>
-            </div>
-          </section>
-
-          {/* HOW IT WORKS */}
-          <section id="how-to-play" className="px-6 pt-6 pb-2">
-            <h2 className="text-xs font-extrabold tracking-wide text-white/60 mb-4">HOW IT WORKS</h2>
-
-            <div className="grid md:grid-cols-3 gap-4">
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-extrabold text-white/90 mb-1">1. PICK OUTCOMES</div>
-                <p className="text-sm text-white/70">
-                  Tap <span className="font-extrabold text-white">YES</span> or{" "}
-                  <span className="font-extrabold" style={{ color: COLORS.red }}>
-                    NO
-                  </span>{" "}
-                  on any question. Pick 0, 1, 5 or all 12 — your call.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-extrabold text-white/90 mb-1">2. PLAY LIVE</div>
-                <p className="text-sm text-white/70">
-                  Picks lock at bounce. Live questions drop during the match. Clear a pick any time before lock.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-extrabold text-white/90 mb-1">3. WIN PRIZES</div>
-                <p className="text-sm text-white/70">
-                  Clean sweep per match to keep your streak alive. Any wrong pick in that game = cooked.
-                </p>
+              <div className="mt-1 text-xs text-text-tertiary">
+                1 wrong = 0 (Clean Sweep)
               </div>
             </div>
-          </section>
 
-          {/* FEATURED MATCHES (WHITE BOTTOM OF EACH CARD) */}
-          <section className="px-6 py-8">
-            <div className="flex items-end justify-between gap-4 mb-4">
+            <div className="rounded-2xl border border-border-subtle bg-bg-elevated px-4 py-3">
+              <div className="text-xs font-black uppercase tracking-wide text-text-secondary">
+                How it works
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                Pick any amount — 0, 1, 5 or all 12. Use the <span className="font-black">X</span> to clear.
+              </div>
+              <div className="mt-1 text-sm text-text-secondary">
+                Click a match to enter <span className="font-black">Tunnel Vision</span>.
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => router.push("/picks")}
+              type="button"
+            >
+              Go to Picks
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => router.push("/")}
+              type="button"
+            >
+              Home
+            </button>
+          </div>
+        </div>
+
+        {/* Sponsor placeholder */}
+        <div className="sponsor-banner mb-6" aria-label="Sponsor banner placeholder" />
+
+        {/* Loading / Error */}
+        {apiLoading ? (
+          <div className="card p-5">
+            <div className="text-sm font-black">Loading matches…</div>
+            <div className="mt-1 text-sm text-text-secondary">
+              Pulling live questions and match cards.
+            </div>
+          </div>
+        ) : apiError ? (
+          <div className="card p-5">
+            <div className="text-sm font-black">Couldn’t load AFL matches</div>
+            <div className="mt-2 text-sm text-text-secondary">{apiError}</div>
+            <div className="mt-4">
+              <button className="btn btn-primary" onClick={() => window.location.reload()} type="button">
+                Retry
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* MATCH CARDS GRID (Home-style portal) */}
+        {!apiLoading && !apiError && !showMatchView && (
+          <div>
+            <div className="mb-3 flex items-end justify-between">
               <div>
-                <div className="text-xs font-extrabold tracking-wide text-white/60">FEATURED MATCHES</div>
-                <div className="text-sm text-white/60 mt-1">Pick any amount — questions live inside Picks.</div>
+                <div className="text-xl font-black">Featured Matches</div>
+                <div className="text-sm text-text-secondary">
+                  Click a match card to enter picks (reduces decision paralysis).
+                </div>
               </div>
-
-              <Link
-                href={picksHref}
-                onClick={onClickGoToPicks}
-                className="hidden sm:inline-flex rounded-full px-4 py-2 text-xs font-extrabold border border-white/15 bg-white/5 hover:bg-white/10"
-              >
-                View all →
-              </Link>
+              <div className="chip chip-open">
+                {payload?.roundNumber ? `Round ${payload.roundNumber}` : "AFL"}
+              </div>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-4">
-              {(featuredGames.length ? featuredGames : [null, null, null]).map((g, i) => {
-                if (!g) {
-                  return (
-                    <div
-                      key={`sk-${i}`}
-                      className="rounded-2xl border overflow-hidden"
-                      style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
-                    >
-                      <div className="h-[130px] bg-white/5" />
-                      <div className="p-4 bg-white text-black">
-                        <div className="h-4 w-2/3 bg-black/10 rounded mb-2" />
-                        <div className="h-3 w-1/2 bg-black/10 rounded mb-3" />
-                        <div className="h-9 w-28 bg-black/10 rounded" />
-                      </div>
-                    </div>
-                  );
-                }
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {games.map((g) => {
+                const lock = locksByGame[g.id];
+                const draft = draftByGame[g.id] ?? {};
+                const draftCount = Object.values(draft).filter((v) => v === "yes" || v === "no").length;
 
-                const { date, time } = formatStartDate(g.startTime);
-                const totalQs = (g.questions || []).length || 12;
-                const teams = splitMatch(g.match);
+                const mins = minutesToKickoff(g.startTime);
+                const kickoffLabel =
+                  mins === null
+                    ? formatAest(g.startTime)
+                    : mins > 0
+                    ? `Starts in ${mins}m`
+                    : mins === 0
+                    ? "Starting now"
+                    : "LIVE / In progress";
+
+                const hero = g.heroImage;
 
                 return (
-                  <div
+                  <button
                     key={g.id}
-                    className="rounded-2xl border overflow-hidden transition-all"
-                    style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}
+                    type="button"
+                    onClick={() => setSelectedGameId(g.id)}
+                    className="group card overflow-hidden text-left"
                   >
-                    <div className="relative h-[130px]">
-                      <Image src="/afl1.png" alt={g.match} fill className="object-cover object-top opacity-90" />
-                      <div className="absolute inset-0 bg-black/55" />
-                      <div className="absolute left-4 right-4 bottom-3">
-                        <div className="text-[11px] text-white/75 font-semibold">
-                          {date} • {time} AEDT
-                        </div>
-                        <div className="text-sm font-extrabold text-white">
-                          {teams.home} <span className="text-white/50">vs</span> {teams.away}
+                    <div className="relative h-36 w-full">
+                      {hero ? (
+                        <Image
+                          src={hero}
+                          alt={g.match}
+                          fill
+                          className="object-cover opacity-80"
+                          sizes="(max-width: 768px) 100vw, 33vw"
+                          priority={false}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-bg-card" />
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-t from-bg-primary/80 to-transparent" />
+                      <div className="absolute left-4 top-4 flex items-center gap-2">
+                        <span className="chip chip-final">AFL</span>
+                        <span className="chip chip-open">
+                          {mins !== null && mins < 0 ? "LIVE" : "UPCOMING"}
+                        </span>
+                      </div>
+                      <div className="absolute bottom-3 left-4 right-4">
+                        <div className="text-base font-black leading-tight">{g.match}</div>
+                        <div className="mt-1 text-xs text-text-secondary">
+                          {formatAest(g.startTime)}
                         </div>
                       </div>
                     </div>
 
-                    {/* ✅ WHITE BOTTOM SECTION */}
-                    <div className="p-4 bg-white text-black">
-                      <div className="text-xs font-extrabold text-black/80">{g.venue}</div>
-                      <div className="text-xs text-black/55 mt-1">
-                        {totalQs} questions (pick any amount)
-                      </div>
+                    <div className="p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-black">{g.venue}</div>
+                          <div className="mt-0.5 text-xs text-text-secondary">{kickoffLabel}</div>
+                          <div className="mt-2 text-xs text-text-tertiary">
+                            {g.questions?.length ?? 0} questions (pick any amount)
+                          </div>
+                        </div>
 
-                      <div className="mt-3">
-                        <Link
-                          href={picksHref}
-                          onClick={onClickGoToPicks}
-                          className="inline-flex items-center justify-center rounded-md px-4 py-2 text-xs font-extrabold border"
-                          style={{
-                            borderColor: rgbaFromHex(COLORS.red, 0.35),
-                            background: COLORS.red,
-                            color: "#fff",
-                            boxShadow: `0 10px 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
-                          }}
-                        >
-                          PLAY NOW
-                        </Link>
+                        <div className="flex flex-col items-end gap-2">
+                          {lock?.locked ? (
+                            <span className="chip chip-final">PICKS LOCKED</span>
+                          ) : draftCount > 0 ? (
+                            <span className="chip chip-pending blink-warning">
+                              {draftCount} selected
+                            </span>
+                          ) : (
+                            <span className="chip chip-void">No picks</span>
+                          )}
+
+                          <span className="btn btn-primary btn-sm">
+                            {lock?.locked ? "VIEW" : "PLAY NOW"}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
-          </section>
+          </div>
+        )}
 
-          {/* NEXT PICKS */}
-          <section className="px-6 pb-10">
-            <div className="mb-5">
-              <h2 className="text-xl sm:text-2xl font-extrabold">
-                NEXT <span style={{ color: COLORS.red }}>PICKS</span>
-              </h2>
-              <p className="text-sm text-white/65">Tap Yes/No to jump straight into Picks.</p>
+        {/* DEDICATED MATCH PICKS VIEW */}
+        {!apiLoading && !apiError && showMatchView && selectedGame && (
+          <div>
+            {/* Match header */}
+            <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setSelectedGameId(null)}
+                >
+                  ← Back to Matches
+                </button>
+
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="text-xl font-black">{selectedGame.match}</div>
+                    <span className="chip chip-final">{selectedGame.venue}</span>
+                    <span className="chip chip-open">
+                      {lockedForSelected?.locked ? "LOCKED" : "OPEN"}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    {formatAest(selectedGame.startTime)}
+                  </div>
+                  <div className="mt-1 text-sm text-text-tertiary">
+                    Tunnel Vision mode: focus on this match only.
+                  </div>
+                </div>
+              </div>
+
+              {/* Right side: summary */}
+              <div className="card p-4 md:w-[420px]">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-black">Your Parlay</div>
+                  <div className="text-sm text-text-secondary">
+                    {picksCount} pick{picksCount === 1 ? "" : "s"} selected
+                  </div>
+                </div>
+                <div className="mt-2 text-xs text-text-secondary">
+                  Moment of Truth: confirm before you commit (1 wrong = 0).
+                </div>
+
+                <div className="mt-3 flex items-center gap-2">
+                  {!lockedForSelected?.locked ? (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => clearAllPicks(selectedGame.id)}
+                        disabled={picksCount === 0}
+                      >
+                        Clear All
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={openConfirm}
+                        disabled={picksCount === 0}
+                      >
+                        LOCK IN {picksCount} PICK{picksCount === 1 ? "" : "S"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="chip chip-final">Locked</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => {
+                          setShareOpen(true);
+                          setShareReadOnly(false);
+                        }}
+                      >
+                        View / Share
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
 
-            {error ? (
-              <div
-                className="rounded-2xl border px-5 py-4 mb-6"
-                style={{
-                  borderColor: rgbaFromHex(COLORS.red, 0.3),
-                  background: rgbaFromHex(COLORS.red, 0.1),
-                }}
-              >
-                <p className="text-sm" style={{ color: "rgba(255,255,255,0.92)" }}>
-                  {error}
-                </p>
-              </div>
-            ) : null}
+            {/* Questions grid (WHITE PICK CARDS like your reference) */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {(selectedGame.questions ?? []).map((q) => {
+                const status = normalizeStatus(q.status);
+                const locked = !!lockedForSelected?.locked;
 
-            {loading ? (
-              <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="rounded-2xl border px-5 py-4 animate-pulse" style={darkCardStyle}>
-                    <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
-                    <div className="h-3 bg-white/5 rounded w-1/2" />
-                  </div>
-                ))}
-              </div>
-            ) : null}
+                const current = (draftForSelected?.[q.id] ?? "none") as LocalPick;
+                const isYes = current === "yes";
+                const isNo = current === "no";
 
-            {!loading && previewQuestions.length === 0 && !error ? (
-              <div className="rounded-2xl border px-6 py-8 text-center" style={darkCardStyle}>
-                <p className="text-sm text-white/65 mb-4">
-                  No open questions right now. Check back closer to bounce.
-                </p>
-                <Link
-                  href={picksHref}
-                  onClick={onClickGoToPicks}
-                  className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-black border active:scale-[0.99] transition"
-                  style={primaryCtaStyle}
-                >
-                  Go to picks page anyway
-                </Link>
-              </div>
-            ) : null}
+                // crowd % placeholders (safe if API doesn’t provide)
+                const yesPct = (q as any)?.yesPercent;
+                const noPct = (q as any)?.noPercent;
 
-            <div className="space-y-4">
-              {previewQuestions.map((q, idx) => {
-                const { date, time } = formatStartDate(q.startTime);
+                const playerImg = q.playerImage;
+                const playerName = q.playerName;
 
                 return (
                   <div
                     key={q.id}
-                    className="relative rounded-2xl border px-5 py-4 transition-all group"
-                    style={darkCardStyle}
-                    onMouseEnter={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.borderColor = cardHoverBorder;
-                    }}
-                    onMouseLeave={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.10)";
-                    }}
+                    className="rounded-2xl border border-border-subtle bg-white p-4 text-black shadow-sm"
                   >
-                    <div
-                      className="absolute -top-3 -left-3 h-8 w-8 rounded-full border-2 border-black flex items-center justify-center text-white font-black text-sm"
-                      style={{
-                        background: COLORS.red,
-                        boxShadow: `0 0 18px ${rgbaFromHex(COLORS.red, 0.18)}`,
-                      }}
-                    >
-                      {idx + 1}
-                    </div>
-
-                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/45 mb-2">
-                          <span
-                            className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
-                            style={{
-                              borderColor: rgbaFromHex(COLORS.red, 0.35),
-                              background: rgbaFromHex(COLORS.red, 0.1),
-                              color: "rgba(255,255,255,0.92)",
-                            }}
-                          >
-                            <span className="relative flex h-2 w-2">
-                              <span
-                                className="absolute inline-flex h-full w-full rounded-full"
-                                style={{
-                                  background: rgbaFromHex(COLORS.red, 0.85),
-                                  animation: "torpyPing 1.6s cubic-bezier(0,0,0.2,1) infinite",
-                                }}
-                              />
-                              <span
-                                className="relative inline-flex h-2 w-2 rounded-full"
-                                style={{ background: rgbaFromHex(COLORS.red, 0.95) }}
-                              />
-                            </span>
-                            Q{q.quarter}
-                          </span>
-
-                          <span>•</span>
-                          <span className="font-semibold text-white/65">
-                            {date} • {time} AEDT
-                          </span>
-                          <span>•</span>
-                          <span className="text-white/65">{q.venue}</span>
+                    <div className="mb-2 flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="relative h-10 w-10 overflow-hidden rounded-xl border border-black/10 bg-black/5">
+                          {playerImg ? (
+                            <Image
+                              src={playerImg}
+                              alt={playerName ?? "Player"}
+                              fill
+                              className="object-cover"
+                              sizes="40px"
+                            />
+                          ) : (
+                            <div className="h-full w-full" />
+                          )}
                         </div>
 
-                        <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
-
-                        <div className="text-sm sm:text-base font-semibold text-white/90 group-hover:text-white transition-colors">
-                          {q.question}
+                        <div>
+                          <div className="text-xs font-black uppercase tracking-wide text-black/60">
+                            Q{q.quarter} • {status.toUpperCase()}
+                          </div>
+                          <div className="text-sm font-black leading-snug">
+                            {q.question}
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 lg:ml-6 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
-                          className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                          style={yesBtnStyle}
-                        >
-                          YES
-                        </button>
+                      {/* Clear X */}
+                      <button
+                        type="button"
+                        className="rounded-full border border-black/10 bg-black/5 px-2 py-1 text-xs font-black"
+                        onClick={() => setPick(selectedGame.id, q.id, "none")}
+                        disabled={locked || current === "none"}
+                        title="Clear pick"
+                      >
+                        X
+                      </button>
+                    </div>
 
-                        <button
-                          type="button"
-                          onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
-                          className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                          style={noBtnStyle}
-                        >
-                          NO
-                        </button>
+                    {/* Crowd / majority strip */}
+                    <div className="mb-3 rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-black/70">CROWD</span>
+                        <span className="font-black text-black/50">
+                          {typeof yesPct === "number" && typeof noPct === "number"
+                            ? `YES ${yesPct}% / NO ${noPct}%`
+                            : "Live crowd split"}
+                        </span>
                       </div>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={locked || status !== "open"}
+                        onClick={() => setPick(selectedGame.id, q.id, isYes ? "none" : "yes")}
+                        className={[
+                          "rounded-xl px-3 py-2 text-sm font-black transition",
+                          isYes
+                            ? "bg-success text-black"
+                            : "bg-white text-black border border-black/15",
+                          locked || status !== "open" ? "opacity-60" : "hover:shadow",
+                        ].join(" ")}
+                      >
+                        YES
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={locked || status !== "open"}
+                        onClick={() => setPick(selectedGame.id, q.id, isNo ? "none" : "no")}
+                        className={[
+                          "rounded-xl px-3 py-2 text-sm font-black transition",
+                          isNo
+                            ? "bg-error text-black"
+                            : "bg-white text-black border border-black/15",
+                          locked || status !== "open" ? "opacity-60" : "hover:shadow",
+                        ].join(" ")}
+                      >
+                        NO
+                      </button>
+                    </div>
+
+                    {/* Locked hint */}
+                    {lockedForSelected?.locked && (
+                      <div className="mt-3 text-xs font-black text-black/60">
+                        Picks locked ✅
+                      </div>
+                    )}
+                    {status !== "open" && !lockedForSelected?.locked && (
+                      <div className="mt-3 text-xs font-black text-black/60">
+                        This question is {status}.
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
 
-            {questions.length > 0 ? (
-              <div className="mt-8 text-center">
-                <Link
-                  href={picksHref}
-                  onClick={onClickGoToPicks}
-                  className="inline-flex items-center justify-center rounded-full px-8 py-4 text-base font-black border active:scale-[0.99] transition"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.18)",
-                    background: "rgba(255,255,255,0.06)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                >
-                  View all {questions.length} open picks →
-                </Link>
+            {/* Sticky bottom action bar (mobile) */}
+            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-3 pb-3 md:hidden">
+              <div className="pointer-events-auto card p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-black">{picksCount} selected</div>
+                    <div className="text-xs text-text-secondary">
+                      1 wrong = streak reset to 0
+                    </div>
+                  </div>
+                  {!lockedForSelected?.locked ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      onClick={openConfirm}
+                      disabled={picksCount === 0}
+                    >
+                      LOCK IN
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShareOpen(true);
+                        setShareReadOnly(false);
+                      }}
+                    >
+                      SHARE
+                    </button>
+                  )}
+                </div>
               </div>
-            ) : null}
-          </section>
-
-          <div className="border-t border-white/10 px-6 py-4 text-[11px] text-white/55">
-            Torpy is free-to-play. Skill-based. No gambling.
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* CONFIRM MODAL (Moment of Truth) */}
+        {confirmOpen && selectedGame && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setConfirmOpen(false);
+            }}
+          >
+            <div
+              ref={modalRef}
+              className="w-full max-w-2xl rounded-2xl border border-border-subtle bg-bg-elevated p-5 text-text-primary"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black">Confirm Your Parlay</div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    {selectedGame.match} • {selectedGame.venue}
+                  </div>
+                  <div className="mt-1 text-xs text-text-tertiary">
+                    Moment of Truth: you’re committing to an all-or-nothing sweep.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setConfirmOpen(false)}
+                >
+                  X
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-border-subtle bg-bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-black">Selected Picks</div>
+                  <div className="chip chip-pending blink-warning">
+                    {picksCount} PICK{picksCount === 1 ? "" : "S"}
+                  </div>
+                </div>
+
+                {picksCount === 0 ? (
+                  <div className="mt-3 text-sm text-text-secondary">
+                    No picks selected yet.
+                  </div>
+                ) : (
+                  <div className="mt-3 max-h-64 overflow-auto pr-1">
+                    <ul className="space-y-2">
+                      {selectedPicksList.map((p) => (
+                        <li
+                          key={p.questionId}
+                          className="flex items-start justify-between gap-3 rounded-xl border border-border-subtle bg-bg-elevated px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-text-secondary">
+                              Q{p.quarter}
+                            </div>
+                            <div className="text-sm font-black leading-snug">
+                              {p.question}
+                            </div>
+                          </div>
+                          <span
+                            className={[
+                              "chip",
+                              p.pick === "yes" ? "chip-yes" : "chip-no",
+                            ].join(" ")}
+                          >
+                            {p.pick.toUpperCase()}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="rounded-2xl border border-border-subtle bg-bg-card p-4">
+                  <div className="text-xs font-black uppercase tracking-wide text-text-secondary">
+                    Risk Reminder
+                  </div>
+                  <div className="mt-1 text-sm font-black">
+                    1 wrong pick resets your streak to{" "}
+                    <span className="text-error">0</span>.
+                  </div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    This is what makes Torpy addictive: commitment, tension, payoff.
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setConfirmOpen(false)}
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={confirmLock}
+                    disabled={picksCount === 0}
+                  >
+                    Confirm & Lock
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SHARE MODAL (Shareable Parlay) */}
+        {shareOpen && selectedGame && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) closeAllModals();
+            }}
+          >
+            <div className="w-full max-w-2xl rounded-2xl border border-border-subtle bg-bg-elevated p-5 text-text-primary">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black">
+                    {shareReadOnly ? "Parlay Preview" : "Parlay Locked ✅"}
+                  </div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    {selectedGame.match} • {selectedGame.venue}
+                  </div>
+                  <div className="mt-1 text-xs text-text-tertiary">
+                    Share this slip — it opens the same modal for anyone with the link.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={closeAllModals}
+                >
+                  X
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-border-subtle bg-bg-card p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-black">Your Picks</div>
+                  <div className="chip chip-final">{selectedPicksList.length} TOTAL</div>
+                </div>
+
+                <div className="mt-3 max-h-64 overflow-auto pr-1">
+                  {selectedPicksList.length === 0 ? (
+                    <div className="text-sm text-text-secondary">No picks.</div>
+                  ) : (
+                    <ul className="space-y-2">
+                      {selectedPicksList.map((p) => (
+                        <li
+                          key={p.questionId}
+                          className="flex items-start justify-between gap-3 rounded-xl border border-border-subtle bg-bg-elevated px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-text-secondary">
+                              Q{p.quarter}
+                            </div>
+                            <div className="text-sm font-black leading-snug">
+                              {p.question}
+                            </div>
+                          </div>
+                          <span className={["chip", p.pick === "yes" ? "chip-yes" : "chip-no"].join(" ")}>
+                            {p.pick.toUpperCase()}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-border-subtle bg-bg-elevated p-4">
+                  <div className="text-xs font-black uppercase tracking-wide text-text-secondary">
+                    Share Link
+                  </div>
+                  <div className="mt-2 break-all text-sm text-text-secondary">
+                    {typeof window !== "undefined" ? buildShareUrl(selectedGame) : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="text-xs text-text-tertiary">
+                  Tip: posting slips drives rivalry + bragging rights.
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button type="button" className="btn btn-secondary" onClick={shareParlay}>
+                    Share / Copy
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      closeAllModals();
+                    }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              {shareToast && (
+                <div className="mt-3 text-center text-sm font-black">
+                  {shareToast}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Spacer for sticky bar on mobile */}
+        <div className="h-20 md:h-0" />
       </div>
-
-      {/* AUTH MODAL */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-2xl border p-6" style={darkCardStyle}>
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">Log in to play</h2>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(false)}
-                className="text-sm transition-colors hover:text-white"
-                style={{ color: "rgba(255,255,255,0.65)" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-sm text-white/65 mb-4">
-              You need a free Torpy account to make picks and appear on the leaderboard.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
-                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-black border active:scale-[0.99] transition flex-1"
-                style={primaryCtaStyle}
-                onClick={() => setShowAuthModal(false)}
-              >
-                Login
-              </Link>
-
-              <Link
-                href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
-                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-black border active:scale-[0.99] transition flex-1"
-                style={{
-                  borderColor: "rgba(255,255,255,0.18)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-                onClick={() => setShowAuthModal(false)}
-              >
-                Sign up
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
-    </main>
+    </div>
   );
 }
