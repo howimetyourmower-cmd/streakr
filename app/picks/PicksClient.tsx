@@ -8,12 +8,14 @@ import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
 
+type QuestionStatus = "open" | "final" | "pending" | "void";
+
 type ApiQuestion = {
   id: string;
   gameId?: string;
   quarter: number;
   question: string;
-  status: "open" | "final" | "pending" | "void";
+  status: QuestionStatus;
   userPick?: "yes" | "no";
 };
 
@@ -28,6 +30,11 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+
+  // Optional (won’t break if API doesn’t send)
+  currentScore?: number;
+  leaderScore?: number;
+  eligible?: boolean | null;
 };
 
 const COLORS = {
@@ -96,13 +103,29 @@ type TeamSlug =
 function teamNameToSlug(nameRaw: string): TeamSlug | null {
   const n = (nameRaw || "").toLowerCase().trim();
 
-  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (
+    n.includes("greater western sydney") ||
+    n === "gws" ||
+    n.includes("giants")
+  )
+    return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (
+    n.includes("western bulldogs") ||
+    n.includes("bulldogs") ||
+    n.includes("footscray")
+  )
+    return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos"))
+    return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+  if (
+    n.includes("st kilda") ||
+    n.includes("saints") ||
+    n.replace(/\s/g, "") === "stkilda"
+  )
+    return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
   if (n.includes("brisbane")) return "brisbane";
@@ -135,7 +158,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
 
 const TeamLogo = React.memo(function TeamLogoInner({
   teamName,
-  size = 44,
+  size = 46,
 }: {
   teamName: string;
   size?: number;
@@ -144,31 +167,15 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
-  if (!slug) {
-    const initials = teamName
+  const initials =
+    teamName
       .split(" ")
       .filter(Boolean)
       .slice(0, 2)
       .map((x) => x[0]?.toUpperCase())
-      .join("");
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl border font-black"
-        style={{
-          width: size,
-          height: size,
-          borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          color: "rgba(255,255,255,0.85)",
-        }}
-        title={teamName}
-      >
-        {initials || "AFL"}
-      </div>
-    );
-  }
+      .join("") || "AFL";
 
-  if (dead) {
+  if (!slug || dead) {
     return (
       <div
         className="flex items-center justify-center rounded-2xl border font-black"
@@ -177,16 +184,11 @@ const TeamLogo = React.memo(function TeamLogoInner({
           height: size,
           borderColor: "rgba(255,255,255,0.12)",
           background: "rgba(255,255,255,0.06)",
-          color: "rgba(255,255,255,0.70)",
+          color: "rgba(255,255,255,0.85)",
         }}
         title={teamName}
       >
-        {teamName
-          .split(" ")
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((x) => x[0]?.toUpperCase())
-          .join("") || "AFL"}
+        {initials}
       </div>
     );
   }
@@ -215,7 +217,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
           onError={() => {
             setIdx((p) => {
               if (p + 1 < candidates.length) return p + 1;
-              setDead(true);
+              setDead(true); // stop trying -> no flashing
               return p;
             });
           }}
@@ -225,81 +227,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-function HowToPlayModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  if (!open) return null;
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.70)" }}
-        onClick={onClose}
-      />
-      <div
-        className="relative w-full max-w-lg rounded-3xl border p-6"
-        style={{
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.92) 65%, rgba(0,0,0,0.96) 100%)",
-          boxShadow: "0 22px 70px rgba(0,0,0,0.80)",
-        }}
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-widest text-white/55">How to play</div>
-            <h2 className="mt-1 text-2xl font-black text-white">Torpie Picks</h2>
-          </div>
-          <button
-            className="rounded-xl border px-3 py-2 text-[12px] font-black"
-            style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.85)",
-            }}
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="mt-5 space-y-3 text-[14px] leading-relaxed" style={{ color: "rgba(255,255,255,0.82)" }}>
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)" }}>
-            <div className="font-black text-white">1) Pick any amount</div>
-            <div className="mt-1 text-white/75">Choose 0–12 questions. Use X to clear a pick.</div>
-          </div>
-
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)" }}>
-            <div className="font-black text-white">2) Locks at bounce</div>
-            <div className="mt-1 text-white/75">At match start, picks auto-lock. No “Lock In” button needed.</div>
-          </div>
-
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)" }}>
-            <div className="font-black text-white">3) Streak is all-or-nothing</div>
-            <div className="mt-1 text-white/75">One wrong pick ends the streak. Voids don’t count.</div>
-          </div>
-        </div>
-
-        <button
-          className="mt-6 w-full rounded-2xl px-5 py-3 text-[14px] font-black border"
-          style={{
-            borderColor: "rgba(255,46,77,0.35)",
-            background: `linear-gradient(180deg, ${COLORS.red} 0%, rgba(255,46,77,0.82) 100%)`,
-            color: "rgba(255,255,255,0.98)",
-            boxShadow: "0 14px 36px rgba(255,46,77,0.18)",
-          }}
-          onClick={onClose}
-        >
-          GOT IT
-        </button>
-      </div>
-    </div>
-  );
-}
+type FilterKey = "all" | "upcoming" | "live" | "finished";
 
 export default function PicksPage() {
   const { user } = useAuth();
@@ -309,25 +237,18 @@ export default function PicksPage() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [howToOpen, setHowToOpen] = useState(false);
+  // Optional dashboard values (safe if API doesn’t send them)
+  const [currentScore, setCurrentScore] = useState<number | null>(null);
+  const [leaderScore, setLeaderScore] = useState<number | null>(null);
+  const [eligible, setEligible] = useState<boolean | null>(null);
 
-  // countdown ticker (logos won't flash because TeamLogo locks candidates and stops after dead)
+  const [filter, setFilter] = useState<FilterKey>("all");
+
+  // countdown tick
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
-
-  useEffect(() => {
-    // show once per device
-    try {
-      const key = "torpie_seen_how_to_play_picks_v1";
-      const seen = window.localStorage.getItem(key);
-      if (!seen) {
-        setHowToOpen(true);
-        window.localStorage.setItem(key, "1");
-      }
-    } catch {}
   }, []);
 
   const loadPicks = useCallback(async () => {
@@ -343,12 +264,20 @@ export default function PicksPage() {
         } catch {}
       }
 
-      const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
+      const res = await fetch("/api/picks", {
+        headers: authHeader,
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error(await res.text());
 
       const data = (await res.json()) as PicksApiResponse;
+
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
       setGames(Array.isArray(data.games) ? data.games : []);
+
+      setCurrentScore(typeof data.currentScore === "number" ? data.currentScore : null);
+      setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
+      setEligible(typeof data.eligible === "boolean" ? data.eligible : null);
     } catch (e) {
       console.error(e);
       setErr("Could not load picks right now.");
@@ -365,70 +294,152 @@ export default function PicksPage() {
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   const sortedGames = useMemo(() => {
-    return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    return [...games].sort(
+      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+    );
   }, [games]);
 
-  // Lightweight dashboard (placeholders unless you wire a stats endpoint later)
-  const dashboard = useMemo(() => {
-    // You can replace these later with real values from an API (current streak, leader streak, eligibility).
-    // For now we still fill the space nicely.
-    const current = user ? "—" : "—";
-    const leader = "—";
-    const eligible = user ? "—" : "Sign in";
-    return { current, leader, eligible };
-  }, [user]);
+  const computedGames = useMemo(() => {
+    return sortedGames.map((g) => {
+      const startMs = new Date(g.startTime).getTime();
+      const lockMs = startMs - nowMs;
+      const isLive = lockMs <= 0;
+      const isFinished =
+        g.questions?.length > 0 &&
+        g.questions.every((q) => q.status === "final" || q.status === "void");
+      return { g, lockMs, isLive, isFinished };
+    });
+  }, [sortedGames, nowMs]);
 
-  const MatchCard = ({ g }: { g: ApiGame }) => {
-    const lockMs = new Date(g.startTime).getTime() - nowMs;
+  const filteredGames = useMemo(() => {
+    if (filter === "all") return computedGames;
+    if (filter === "upcoming") return computedGames.filter((x) => !x.isLive && !x.isFinished);
+    if (filter === "live") return computedGames.filter((x) => x.isLive && !x.isFinished);
+    if (filter === "finished") return computedGames.filter((x) => x.isFinished);
+    return computedGames;
+  }, [computedGames, filter]);
+
+  const nextUp = useMemo(() => {
+    // Next upcoming game (not finished)
+    const upcoming = computedGames.find((x) => !x.isFinished && x.lockMs > 0);
+    return upcoming ?? computedGames.find((x) => !x.isFinished) ?? null;
+  }, [computedGames]);
+
+  const behindLeader =
+    currentScore != null && leaderScore != null ? Math.max(0, leaderScore - currentScore) : null;
+
+  const FilterChip = ({
+    k,
+    label,
+  }: {
+    k: FilterKey;
+    label: string;
+  }) => {
+    const active = filter === k;
+    return (
+      <button
+        type="button"
+        onClick={() => setFilter(k)}
+        className="px-3 py-1 rounded-full border text-[11px] font-black transition"
+        style={{
+          borderColor: active ? "rgba(255,46,77,0.45)" : "rgba(255,255,255,0.14)",
+          background: active ? "rgba(255,46,77,0.12)" : "rgba(255,255,255,0.05)",
+          color: "rgba(255,255,255,0.92)",
+        }}
+      >
+        {label}
+      </button>
+    );
+  };
+
+  const MatchCard = ({
+    g,
+    lockMs,
+    isLive,
+    isFinished,
+  }: {
+    g: ApiGame;
+    lockMs: number;
+    isLive: boolean;
+    isFinished: boolean;
+  }) => {
     const m = splitMatch(g.match);
     const homeName = m?.home ?? g.match;
     const awayName = m?.away ?? "";
     const matchSlug = slugify(g.match);
 
+    const urgent = lockMs > 0 && lockMs <= 60 * 60 * 1000; // < 60 mins
+
     return (
       <Link
         href={`/picks/${matchSlug}`}
-        className="block rounded-2xl overflow-hidden border"
+        className="group block rounded-2xl overflow-hidden border transition"
         style={{
-          borderColor: "rgba(255,255,255,0.10)",
+          borderColor: isLive
+            ? "rgba(255,46,77,0.40)"
+            : "rgba(255,255,255,0.10)",
           background: "rgba(255,255,255,0.03)",
-          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
+          boxShadow: isLive
+            ? "0 18px 55px rgba(255,46,77,0.10)"
+            : "0 18px 55px rgba(0,0,0,0.75)",
           textDecoration: "none",
+          transform: "translateY(0px)",
         }}
         title="Open match"
       >
+        {/* TOP */}
         <div
-          className="p-5"
+          className="relative p-5"
           style={{
             background:
               "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
           }}
         >
-          {/* Row 1: logos + time */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <TeamLogo teamName={homeName} size={44} />
-              <div className="text-white/60 font-black text-[12px]">vs</div>
-              <TeamLogo teamName={awayName || "AFL"} size={44} />
+          {/* subtle silhouette */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.08]">
+            <Image
+              src="/afl1.png"
+              alt=""
+              fill
+              sizes="(max-width: 768px) 100vw, 33vw"
+              style={{ objectFit: "cover" }}
+              priority={false}
+            />
+          </div>
+
+          <div className="relative flex items-start justify-between gap-3">
+            {/* Logos + team names BELOW (fix your “names showing” issue) */}
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <TeamLogo teamName={homeName} size={46} />
+                <div className="text-white/60 font-black text-[12px] mt-1">vs</div>
+                <TeamLogo teamName={awayName || "AFL"} size={46} />
+              </div>
+
+              <div className="mt-2 leading-tight">
+                <div className="text-[13px] font-black text-white/90 truncate">
+                  {homeName}
+                </div>
+                <div className="text-[13px] font-black text-white/90 truncate">
+                  {awayName || ""}
+                </div>
+              </div>
             </div>
 
-            <div className="text-right shrink-0">
-              <div className="text-[11px] text-white/70 font-semibold">{formatAedt(g.startTime)}</div>
+            <div className="text-right min-w-[120px]">
+              <div className="text-[11px] text-white/70 font-semibold">
+                {formatAedt(g.startTime)}
+              </div>
+              <div className="mt-1 text-[16px] font-black text-white/95 leading-snug">
+                {/* allow wrap instead of ugly truncation */}
+                <span className="block max-w-[180px] sm:max-w-[220px] text-right">
+                  {g.match}
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Row 2: match name UNDER logos (fixes the overlap/truncation issue) */}
-          <div className="mt-3">
-            <div className="text-[18px] font-black text-white leading-snug break-words">
-              {homeName}
-              {awayName ? (
-                <span className="text-white/70"> {" "}vs{" "} </span>
-              ) : null}
-              {awayName}
-            </div>
-          </div>
-
-          <div className="mt-4 flex items-center gap-2 flex-wrap">
+          <div className="relative mt-4 flex flex-wrap items-center gap-2">
             <span
               className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
               style={{
@@ -441,20 +452,41 @@ export default function PicksPage() {
             </span>
 
             <span
-              className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+              className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border ${
+                urgent && !isLive ? "animate-pulse" : ""
+              }`}
               style={{
-                borderColor: "rgba(255,46,77,0.28)",
-                background: "rgba(255,46,77,0.10)",
+                borderColor: isLive
+                  ? "rgba(255,46,77,0.45)"
+                  : urgent
+                  ? "rgba(255,46,77,0.45)"
+                  : "rgba(255,46,77,0.28)",
+                background: isLive
+                  ? "rgba(255,46,77,0.14)"
+                  : urgent
+                  ? "rgba(255,46,77,0.14)"
+                  : "rgba(255,46,77,0.10)",
                 color: "rgba(255,255,255,0.92)",
               }}
             >
-              {lockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              {isFinished ? "Finished" : isLive ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
             </span>
 
-            <span className="text-[12px] font-semibold text-white/60">Locks at bounce (auto)</span>
+            <span className="text-[11px] font-semibold text-white/60">
+              Locks at bounce (auto)
+            </span>
           </div>
+
+          {/* hover lift */}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition"
+            style={{
+              boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+            }}
+          />
         </div>
 
+        {/* BOTTOM */}
         <div
           className="px-5 py-4"
           style={{
@@ -483,7 +515,112 @@ export default function PicksPage() {
               PLAY NOW
             </span>
 
-            {/* Removed "Focus mode" per your instruction */}
+            {/* ✅ removed “Focus mode” per your request */}
+          </div>
+        </div>
+      </Link>
+    );
+  };
+
+  const FeaturedHero = () => {
+    if (!nextUp) return null;
+
+    const { g, lockMs, isLive, isFinished } = nextUp;
+    const m = splitMatch(g.match);
+    const homeName = m?.home ?? g.match;
+    const awayName = m?.away ?? "";
+
+    const matchSlug = slugify(g.match);
+
+    return (
+      <Link
+        href={`/picks/${matchSlug}`}
+        className="block rounded-3xl border overflow-hidden"
+        style={{
+          borderColor: isLive ? "rgba(255,46,77,0.45)" : "rgba(255,255,255,0.12)",
+          background:
+            "linear-gradient(135deg, rgba(255,46,77,0.24) 0%, rgba(0,0,0,0.86) 55%, rgba(0,0,0,0.94) 100%)",
+          boxShadow: isLive
+            ? "0 30px 90px rgba(255,46,77,0.12)"
+            : "0 30px 90px rgba(0,0,0,0.75)",
+          textDecoration: "none",
+        }}
+        title="Open next match"
+      >
+        <div className="relative p-6 sm:p-7">
+          {/* silhouette */}
+          <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
+            <Image
+              src="/afl1.png"
+              alt=""
+              fill
+              sizes="(max-width: 768px) 100vw, 60vw"
+              style={{ objectFit: "cover" }}
+              priority={false}
+            />
+          </div>
+
+          <div className="relative">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-white/60 font-black">
+                  Next Up
+                </div>
+                <div className="mt-1 text-[22px] sm:text-[26px] font-black text-white leading-tight">
+                  {g.match}
+                </div>
+                <div className="mt-1 text-[12px] text-white/70 font-semibold">
+                  {formatAedt(g.startTime)} • {g.venue}
+                </div>
+              </div>
+
+              <div className="text-right">
+                <div
+                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  {g.questions.length}/12
+                </div>
+                <div
+                  className="mt-2 inline-flex items-center rounded-full px-3 py-1 text-[12px] font-black border"
+                  style={{
+                    borderColor: isLive ? "rgba(255,46,77,0.45)" : "rgba(255,46,77,0.28)",
+                    background: isLive ? "rgba(255,46,77,0.14)" : "rgba(255,46,77,0.10)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  {isFinished ? "Finished" : isLive ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center gap-4">
+              <TeamLogo teamName={homeName} size={64} />
+              <div className="text-white/70 font-black text-[14px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={64} />
+
+              <div className="ml-auto hidden sm:flex items-center gap-2">
+                <span
+                  className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-[13px] font-black border"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.18)",
+                    background: `linear-gradient(180deg, ${COLORS.red} 0%, rgba(255,46,77,0.82) 100%)`,
+                    color: "rgba(255,255,255,0.98)",
+                    boxShadow: "0 16px 44px rgba(255,46,77,0.20)",
+                  }}
+                >
+                  PLAY NOW
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-4 text-[12px] text-white/65 font-semibold">
+              Pick any amount — picks auto-lock at bounce. No lock-in button.
+            </div>
           </div>
         </div>
       </Link>
@@ -492,9 +629,17 @@ export default function PicksPage() {
 
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <HowToPlayModal open={howToOpen} onClose={() => setHowToOpen(false)} />
+      {/* subtle page depth */}
+      <div
+        className="pointer-events-none fixed inset-0"
+        style={{
+          background:
+            "radial-gradient(900px 500px at 20% 10%, rgba(255,46,77,0.10) 0%, rgba(0,0,0,0) 60%), radial-gradient(900px 500px at 80% 20%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0) 60%)",
+          opacity: 1,
+        }}
+      />
 
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-16">
+      <div className="relative w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-16">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -514,67 +659,26 @@ export default function PicksPage() {
               ) : null}
             </div>
 
-            <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.70)" }}>
+            <p className="mt-1 text-sm" style={{ color: "rgba(255,255,255,0.72)" }}>
               Tap a match → picks auto-lock at bounce. No lock-in button.
             </p>
           </div>
-        </div>
 
-        {/* Dashboard row (fills the empty space with the stats + a tip) */}
-        <div
-          className="mt-6 rounded-2xl border overflow-hidden"
-          style={{
-            borderColor: "rgba(255,255,255,0.12)",
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <div className="p-4 sm:p-5 flex flex-col gap-3 sm:gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[12px] uppercase tracking-widest text-white/55">Dashboard</div>
-
-              <button
-                className="rounded-xl border px-4 py-2 text-[12px] font-black"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.85)",
-                }}
-                onClick={() => setHowToOpen(true)}
-              >
-                How to play
-              </button>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div
-                className="rounded-2xl border p-3"
-                style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)" }}
-              >
-                <div className="text-[11px] uppercase tracking-widest text-white/55">Current score</div>
-                <div className="mt-1 text-[20px] font-black text-white">{dashboard.current}</div>
-              </div>
-
-              <div
-                className="rounded-2xl border p-3"
-                style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)" }}
-              >
-                <div className="text-[11px] uppercase tracking-widest text-white/55">Leader score</div>
-                <div className="mt-1 text-[20px] font-black text-white">{dashboard.leader}</div>
-              </div>
-
-              <div
-                className="rounded-2xl border p-3"
-                style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}
-              >
-                <div className="text-[11px] uppercase tracking-widest text-white/70">Eligible</div>
-                <div className="mt-1 text-[20px] font-black text-white">{dashboard.eligible}</div>
-              </div>
-            </div>
-
-            <div className="text-[12px] text-white/65">
-              Tip: pick any amount. At bounce, picks lock automatically.
-            </div>
-          </div>
+          <button
+            type="button"
+            className="hidden sm:inline-flex items-center rounded-full px-4 py-2 text-[12px] font-black border"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.05)",
+              color: "rgba(255,255,255,0.92)",
+            }}
+            onClick={() => {
+              // if you later wire a modal: trigger it here
+              alert("How to play:\n\n1) Pick any amount\n2) Locks at bounce\n3) Streak is all-or-nothing");
+            }}
+          >
+            How to play
+          </button>
         </div>
 
         {err ? (
@@ -583,8 +687,117 @@ export default function PicksPage() {
           </div>
         ) : null}
 
+        {/* ✅ Featured Hero */}
+        <div className="mt-6">
+          <FeaturedHero />
+        </div>
+
+        {/* Dashboard (fills that “empty space” with game HUD energy) */}
+        <div className="mt-6">
+          <div className="text-[12px] uppercase tracking-widest text-white/55">Dashboard</div>
+
+          <div
+            className="mt-3 rounded-2xl border p-4 sm:p-5"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(255,255,255,0.03)",
+              boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+            }}
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div
+                className="rounded-2xl border p-4"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.04)",
+                }}
+              >
+                <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
+                  Current Score
+                </div>
+                <div className="mt-2 text-[28px] font-black text-white/95">
+                  {currentScore ?? "—"}
+                </div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">
+                  {behindLeader == null
+                    ? "Keep the streak alive."
+                    : behindLeader === 0
+                    ? "You’re leading 🔥"
+                    : `${behindLeader} behind leader`}
+                </div>
+              </div>
+
+              <div
+                className="rounded-2xl border p-4"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.04)",
+                }}
+              >
+                <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
+                  Leader Score
+                </div>
+                <div className="mt-2 text-[28px] font-black text-white/95">
+                  {leaderScore ?? "—"}
+                </div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">
+                  Chase them down.
+                </div>
+              </div>
+
+              <div
+                className="rounded-2xl border p-4 flex flex-col justify-between"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.04)",
+                }}
+              >
+                <div>
+                  <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
+                    Eligible
+                  </div>
+                  <div className="mt-3">
+                    <span
+                      className="inline-flex items-center rounded-full px-3 py-1 text-[12px] font-black border"
+                      style={{
+                        borderColor:
+                          eligible === true
+                            ? "rgba(120,255,170,0.35)"
+                            : eligible === false
+                            ? "rgba(255,46,77,0.40)"
+                            : "rgba(255,255,255,0.14)",
+                        background:
+                          eligible === true
+                            ? "rgba(120,255,170,0.10)"
+                            : eligible === false
+                            ? "rgba(255,46,77,0.12)"
+                            : "rgba(255,255,255,0.05)",
+                        color: "rgba(255,255,255,0.92)",
+                      }}
+                    >
+                      {eligible === true ? "YES" : eligible === false ? "NO" : "—"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 text-[12px] text-white/60 font-semibold">
+                  Tip: pick any amount. Locks at bounce.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="mt-6 flex flex-wrap items-center gap-2">
+          <FilterChip k="all" label="All" />
+          <FilterChip k="upcoming" label="Upcoming" />
+          <FilterChip k="live" label="Live / Locked" />
+          <FilterChip k="finished" label="Finished" />
+        </div>
+
         {/* Matches */}
-        <div className="mt-8">
+        <div className="mt-6">
           <div className="text-[12px] uppercase tracking-widest text-white/55">Scheduled Matches</div>
           <div className="mt-1 text-[14px] text-white/75">
             Pick any amount — questions live inside the match page.
@@ -601,12 +814,12 @@ export default function PicksPage() {
                     background: "rgba(255,255,255,0.03)",
                   }}
                 >
-                  <div className="h-[160px] bg-white/5" />
+                  <div className="h-[170px] bg-white/5" />
                   <div className="h-[120px]" style={{ background: "rgba(255,255,255,0.92)" }} />
                 </div>
               ))}
             </div>
-          ) : sortedGames.length === 0 ? (
+          ) : filteredGames.length === 0 ? (
             <div
               className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
               style={{
@@ -614,12 +827,12 @@ export default function PicksPage() {
                 background: "rgba(255,255,255,0.03)",
               }}
             >
-              No games found.
+              No games found for this filter.
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sortedGames.map((g) => (
-                <MatchCard key={g.id} g={g} />
+              {filteredGames.map(({ g, lockMs, isLive, isFinished }) => (
+                <MatchCard key={g.id} g={g} lockMs={lockMs} isLive={isLive} isFinished={isFinished} />
               ))}
             </div>
           )}
@@ -629,7 +842,7 @@ export default function PicksPage() {
           <span className="font-black" style={{ color: COLORS.red }}>
             Torpie
           </span>{" "}
-          — Dashboard → Match page → Auto-lock.
+          — Picks auto-lock at bounce.
         </div>
       </div>
     </div>
