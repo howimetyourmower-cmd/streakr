@@ -659,7 +659,7 @@ export default function PicksPage() {
       >
         {/* ✅ CRITICAL: overflow-hidden here ensures the silhouette cannot escape the card */}
         <div className="relative p-5 overflow-hidden" style={{ minHeight: 205 }}>
-          <CardSilhouetteBg opacity={0.30} />
+          <CardSilhouetteBg opacity={1} />
 
           <div className="relative z-10">
             <div className="flex items-center justify-between gap-3">
@@ -801,7 +801,7 @@ export default function PicksPage() {
             >
               {/* ✅ also clip the hero */}
               <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 180 }}>
-                <CardSilhouetteBg opacity={0.20} />
+                <CardSilhouetteBg opacity={1} />
 
                 <div className="relative z-10">
                   <div className="flex items-center justify-between gap-3">
