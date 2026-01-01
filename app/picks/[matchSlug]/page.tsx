@@ -1,4 +1,3 @@
-// /app/picks/[matchSlug]/page.tsx
 import MatchPicksClient from "./MatchPicksClient";
 
 export const dynamic = "force-dynamic";
