@@ -14,9 +14,10 @@ export const metadata: Metadata = {
 const NavBar = dynamic(() => import("@/components/Navbar"), {
   ssr: false,
   loading: () => (
-    <div className="h-[55px] w-full border-b border-black/10 bg-white" />
+    <div className="h-[52px] w-full border-b border-black/10 bg-white" />
   ),
 });
+
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
