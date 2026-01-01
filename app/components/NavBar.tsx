@@ -87,7 +87,7 @@ export default function Navbar() {
         <Link href="/" className="flex items-center min-w-0">
           {/* Height stays the same, width grows with screen but is capped.
               This prevents pushing the right nav off-screen. */}
-          <div className="relative h-[60px] w-[320px] sm:h-[70px] sm:w-[420px] md:w-[460px] lg:w-[520px] max-w-[60vw]">
+          <div className="relative h-[55px] w-[320px] sm:h-[70px] sm:w-[420px] md:w-[460px] lg:w-[520px] max-w-[60vw]">
             <Image
               src="/Torpielogo.png"
               alt="Torpie"
