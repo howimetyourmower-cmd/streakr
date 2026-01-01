@@ -9,9 +9,9 @@ export const metadata: Metadata = {
   description: "Torpie – Streak prediction game",
 };
 
-// NOTE: Your Navbar file is /components/Navbar.tsx (capital N, no extra folder)
-// so the import should be "@/components/Navbar" from app/layout.tsx.
-const NavBar = dynamic(() => import("@/components/Navbar"), {
+// NOTE: Your Navbar file is /components/NavBar.tsx (capital N, no extra folder)
+// so the import should be "@/components/NavBar" from app/layout.tsx.
+const NavBar = dynamic(() => import("@/components/NavBar"), {
   ssr: false,
   loading: () => (
     <div className="h-[52px] w-full border-b border-black/10 bg-white" />
