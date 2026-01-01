@@ -10,11 +10,11 @@ export const metadata: Metadata = {
 };
 
 // NOTE: Your Navbar file is /components/Navbar.tsx (capital N, no extra folder)
-// so the import should be "../components/Navbar" from app/layout.tsx.
-const NavBar = dynamic(() => import("../components/Navbar"), {
+// so the import should be "@/components/Navbar" from app/layout.tsx.
+const NavBar = dynamic(() => import("@/components/Navbar"), {
   ssr: false,
   loading: () => (
-    <div className="h-[52px] w-full border-b border-black/10 bg-white" />
+    <div className="h-[55px] w-full border-b border-black/10 bg-white" />
   ),
 });
 
