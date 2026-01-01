@@ -17,7 +17,7 @@ type ApiQuestion = {
   gameId?: string;
   quarter: number;
   question: string;
-  status: QuestionStatus; // MUST stay lowercase from API
+  status: QuestionStatus;
   userPick?: PickOutcome;
 
   isSponsorQuestion?: boolean;
@@ -93,8 +93,7 @@ function splitMatch(match: string): { home: string; away: string } | null {
   return { home: m[0].trim(), away: m[1].trim() };
 }
 
-/** Silhouette used behind each card + sponsor cover */
-function CardSilhouetteBg({ opacity = 1, scale = 1.06 }: { opacity?: number; scale?: number }) {
+function CardSilhouetteBg({ opacity = 0.10, scale = 1.06 }: { opacity?: number; scale?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
@@ -127,7 +126,6 @@ function quarterLabel(q: number): string {
   return `QUARTER ${q}`;
 }
 
-/** player detection: "Will First Last (Abbr)" */
 function extractPlayerName(question: string): string | null {
   const q = (question || "").trim();
   if (!q.toLowerCase().startsWith("will ")) return null;
@@ -157,21 +155,13 @@ function playerImageCandidates(playerName: string): string[] {
   ];
 }
 
-/** Squircle avatar with RED background behind cutout */
-function PlayerAvatar({
-  playerName,
-  size = 56,
-}: {
-  playerName: string;
-  size?: number;
-}) {
+function PlayerAvatar({ playerName, size = 56 }: { playerName: string; size?: number }) {
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
   const candidates = useMemo(() => playerImageCandidates(playerName), [playerName]);
   const src = candidates[Math.min(idx, candidates.length - 1)];
-
-  const squircleRadius = 18; // “squircle” look (not circle)
+  const squircleRadius = 18;
 
   if (dead) {
     return (
@@ -202,7 +192,7 @@ function PlayerAvatar({
         height: size,
         borderRadius: squircleRadius,
         borderColor: "rgba(255,255,255,0.14)",
-        background: COLORS.red, // solid red behind player
+        background: COLORS.red,
         boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
       }}
       title={playerName}
@@ -221,7 +211,6 @@ function PlayerAvatar({
           });
         }}
       />
-      {/* subtle dark fade at bottom like your reference */}
       <div
         className="absolute inset-0"
         style={{
@@ -486,7 +475,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </button>
         </div>
 
-        {/* Header */}
         <div className="mt-4 rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
           <div
             className="p-5"
@@ -503,7 +491,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
               <>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    {/* Aggressive italic ALL CAPS title */}
                     <div className="text-[18px] sm:text-[22px] font-black italic tracking-wide text-white leading-tight uppercase">
                       {game.match}
                     </div>
@@ -561,7 +548,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </div>
         ) : null}
 
-        {/* Grid (tight gap) */}
         <div className="mt-5 mx-auto w-full max-w-[1200px]">
           {loading ? (
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
@@ -569,9 +555,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 <div
                   key={i}
                   className="rounded-2xl border overflow-hidden"
-                  style={{ borderColor: "rgba(255,255,255,0.10)", background: COLORS.cardBg, minHeight: 200 }}
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: COLORS.cardBg, minHeight: 220 }}
                 >
-                  <div className="h-[200px] bg-white/5" />
+                  <div className="h-[220px] bg-white/5" />
                 </div>
               ))}
             </div>
@@ -589,14 +575,14 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 const playerNameRaw = extractPlayerName(q.question);
                 const playerName = playerNameRaw && isProbablyPlayerName(playerNameRaw) ? playerNameRaw : null;
 
-                // Percent fallback if API doesn't send it
                 const yesPct = typeof q.yesPercent === "number" ? Math.max(0, Math.min(100, q.yesPercent)) : 50;
                 const noPct = typeof q.noPercent === "number" ? Math.max(0, Math.min(100, q.noPercent)) : 50;
 
-                const cardBorder =
-                  sponsor && revealed
-                    ? "rgba(255,46,77,0.55)"
-                    : "rgba(255,255,255,0.10)";
+                const cardBorder = sponsor && revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.10)";
+
+                // --- NEW: two-tone split (top dark + bottom light) ---
+                // Pick "where" the white begins. This gives the breakup without looking like a hard half.
+                const splitAt = 132; // px (tweak if you want a touch more/less white)
 
                 return (
                   <div
@@ -604,26 +590,34 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                     className="relative rounded-2xl border overflow-hidden"
                     style={{
                       borderColor: cardBorder,
-                      background: COLORS.cardBg, // ✅ lighter than page bg
+                      background: COLORS.cardBg,
                       boxShadow: "0 12px 36px rgba(0,0,0,0.55)",
-                      minHeight: 210,
+                      minHeight: 230,
                     }}
                   >
-                    {/* silhouette */}
+                    {/* silhouette + dark overlays */}
                     <div className="absolute inset-0">
-                      <CardSilhouetteBg opacity={1} scale={1.06} />
+                      <CardSilhouetteBg opacity={0.10} scale={1.06} />
                     </div>
 
+                    {/* NEW: bottom white “breakup” layer */}
+                    <div
+                      className="absolute left-0 right-0 bottom-0 pointer-events-none"
+                      style={{
+                        top: splitAt,
+                        background:
+                          "linear-gradient(180deg, rgba(255,255,255,0.00) 0%, rgba(255,255,255,0.92) 14%, rgba(255,255,255,0.98) 100%)",
+                      }}
+                      aria-hidden="true"
+                    />
+
                     <div className="relative z-10 p-3 sm:p-4 flex flex-col h-full">
-                      {/* Top meta row */}
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          {/* ✅ Needs to be significantly bolder (900) */}
                           <div className="text-[11px] uppercase tracking-widest text-white/70 font-black">
                             {`Q${String(idx + 1).padStart(2, "0")} - ${quarterLabel(q.quarter)}`}
                           </div>
 
-                          {/* ✅ case sensitivity: do NOT capitalize open/final/pending/void */}
                           <div className="mt-0.5 text-[11px] text-white/55">
                             Status: <span className="font-semibold text-white/70">{q.status}</span>
                           </div>
@@ -648,7 +642,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         ) : null}
                       </div>
 
-                      {/* Sponsor banner (when revealed) */}
                       {sponsor ? (
                         <div
                           className="mt-2 rounded-xl border px-2.5 py-2"
@@ -663,12 +656,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         </div>
                       ) : null}
 
-                      {/* Avatar block */}
                       <div className="mt-3 flex flex-col items-center justify-center">
                         {playerName ? (
                           <>
                             <PlayerAvatar playerName={playerName} size={56} />
-                            {/* ✅ centered under avatar, small, low opacity, uppercase */}
                             <div className="mt-2 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
                               Player pick
                             </div>
@@ -680,14 +671,12 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         )}
                       </div>
 
-                      {/* Question */}
                       <div className="mt-3 text-[12px] sm:text-[13px] font-semibold text-white/92 leading-snug">
                         {q.question}
                       </div>
 
-                      {/* Buttons + Stats */}
+                      {/* Bottom section now sits on white */}
                       <div className="mt-auto pt-3">
-                        {/* ✅ chunkier pill buttons, subtle border even when unselected */}
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -697,10 +686,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             style={{
                               paddingTop: 12,
                               paddingBottom: 12,
-                              borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(255,255,255,0.14)",
-                              background: pick === "yes" ? "rgba(255,46,77,0.24)" : "rgba(0,0,0,0.35)",
-                              color: "rgba(255,255,255,0.96)",
-                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                              borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                              background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
+                              color: pick === "yes" ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.78)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
                             }}
                           >
                             YES
@@ -714,29 +703,27 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             style={{
                               paddingTop: 12,
                               paddingBottom: 12,
-                              borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(255,255,255,0.14)",
-                              background: pick === "no" ? "rgba(255,46,77,0.24)" : "rgba(0,0,0,0.35)",
-                              color: "rgba(255,255,255,0.96)",
-                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                              borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                              background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
+                              color: pick === "no" ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.78)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
                             }}
                           >
                             NO
                           </button>
                         </div>
 
-                        {/* ✅ percent labels ABOVE thin bar */}
                         <div className="mt-3 flex items-center justify-between text-[10px] font-semibold">
-                          <span style={{ color: "rgba(255,255,255,0.48)" }}>{`Yes ${Math.round(yesPct)}%`}</span>
-                          <span style={{ color: "rgba(255,255,255,0.48)" }}>{`No ${Math.round(noPct)}%`}</span>
+                          <span style={{ color: "rgba(0,0,0,0.55)" }}>{`Yes ${Math.round(yesPct)}%`}</span>
+                          <span style={{ color: "rgba(0,0,0,0.55)" }}>{`No ${Math.round(noPct)}%`}</span>
                         </div>
 
-                        {/* ✅ ultra thin bar (2-3px) */}
                         <div
                           className="mt-1 w-full overflow-hidden"
                           style={{
                             height: 3,
                             borderRadius: 999,
-                            background: "rgba(255,255,255,0.10)",
+                            background: "rgba(0,0,0,0.12)",
                           }}
                         >
                           <div
@@ -750,7 +737,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       </div>
                     </div>
 
-                    {/* Sponsor reveal cover — must completely hide the card */}
                     {sponsor && !revealed ? (
                       <button
                         type="button"
@@ -776,20 +762,14 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
                           }}
                         >
-                          <div className="text-[10px] font-black uppercase tracking-widest text-white/70">
-                            SPONSOR QUESTION
-                          </div>
-
+                          <div className="text-[10px] font-black uppercase tracking-widest text-white/70">SPONSOR QUESTION</div>
                           <div className="mt-2 text-[13px] sm:text-[14px] font-black">Tap to reveal</div>
-
                           <div className="mt-2 text-[11px] text-white/80">
                             Proudly sponsored by <span className="font-black text-white">{sponsorName}</span>
                           </div>
-
                           <div className="mt-2 text-[11px] text-white/70">
                             Win <span className="font-black text-white">{prize}</span>
                           </div>
-
                           <div
                             className="mt-3 inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-[11px] font-black"
                             style={{
@@ -811,7 +791,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
         </div>
       </div>
 
-      {/* Bottom bar */}
       <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
         <div className="mx-auto max-w-6xl rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
           <div
@@ -842,3 +821,4 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     </div>
   );
 }
+
