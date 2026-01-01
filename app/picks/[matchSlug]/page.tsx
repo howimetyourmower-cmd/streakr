@@ -23,6 +23,10 @@ type ApiQuestion = {
   isSponsorQuestion?: boolean;
   sponsorName?: string;
   sponsorPrize?: string;
+
+  // (optional) if your API already sends these later
+  yesPercent?: number;
+  noPercent?: number;
 };
 
 type ApiGame = {
@@ -83,6 +87,12 @@ function slugify(text: string): string {
     .replace(/^-|-$/g, "");
 }
 
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
+}
+
 type TeamSlug =
   | "adelaide"
   | "brisbane"
@@ -109,11 +119,7 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (
-    n.includes("western bulldogs") ||
-    n.includes("bulldogs") ||
-    n.includes("footscray")
-  )
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
     return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
@@ -133,12 +139,6 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("sydney") || n.includes("swans")) return "sydney";
 
   return null;
-}
-
-function splitMatch(match: string): { home: string; away: string } | null {
-  const m = (match || "").split(/\s+vs\s+/i);
-  if (m.length !== 2) return null;
-  return { home: m[0].trim(), away: m[1].trim() };
 }
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
@@ -174,9 +174,9 @@ const TeamLogo = React.memo(function TeamLogoInner({
         style={{
           width: size,
           height: size,
-          borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.06)",
-          color: "rgba(255,255,255,0.75)",
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
         }}
         title={teamName}
       >
@@ -194,8 +194,8 @@ const TeamLogo = React.memo(function TeamLogoInner({
       style={{
         width: size,
         height: size,
-        borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.06)",
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
       }}
       title={teamName}
     >
@@ -219,29 +219,150 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-/** ✅ AFL silhouette used behind EACH pick box (question card) */
-function AflSilhouetteBg({
-  opacityClass = "opacity-[0.07]",
-}: {
-  opacityClass?: string;
-}) {
+function CardSilhouetteBg({ opacity = 0.14 }: { opacity?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <Image
-        src="/afl1.png"
-        alt=""
-        fill
-        sizes="(max-width: 768px) 100vw, 768px"
-        style={{ objectFit: "contain" }}
-        className={opacityClass}
-        priority={false}
-      />
-      {/* Soft fade so silhouette never fights text/buttons */}
+      <div className="absolute inset-0" style={{ opacity }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1024px) 100vw, 1024px"
+          style={{
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.25)",
+            transform: "scale(1.04)",
+          }}
+          priority={false}
+        />
+      </div>
       <div
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.78) 100%)",
+            "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.72) 60%, rgba(0,0,0,0.88) 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
+function quarterLabel(q: number): string {
+  // You confirmed: show "Quarter 1" (not Q1)
+  if (!q || q <= 0) return "Full game";
+  return `Quarter ${q}`;
+}
+
+/**
+ * ✅ Player auto-detect (no schema changes):
+ * - Prefer: "Will {Player Name} (" pattern
+ * - Fallback: "Will {First Last}" (2–3 capitalised words)
+ * - Avoid false positives on team questions
+ */
+function extractPlayerName(question: string): string | null {
+  const q = (question || "").trim();
+  if (!q.toLowerCase().startsWith("will ")) return null;
+
+  // Strongest: "Will Charlie Curnow (Syd) ..."
+  const paren = q.match(/^Will\s+(.+?)\s*\(/i);
+  if (paren && paren[1]) {
+    const name = paren[1].trim();
+    return name.length >= 3 ? name : null;
+  }
+
+  // Fallback: "Will Tom De Koning ..."
+  const capWords = q.match(/^Will\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/);
+  if (capWords && capWords[1]) return capWords[1].trim();
+
+  return null;
+}
+
+function isProbablyPlayerName(name: string): boolean {
+  const n = (name || "").trim();
+  if (!n) return false;
+  // Must be 2+ words
+  if (n.split(/\s+/).filter(Boolean).length < 2) return false;
+  // If it looks like a team name, reject
+  if (teamNameToSlug(n)) return false;
+  // Avoid match/team patterns
+  if (/\bvs\b/i.test(n)) return false;
+  // Avoid numbers
+  if (/\d/.test(n)) return false;
+  return true;
+}
+
+function playerImageCandidates(playerName: string): string[] {
+  const slug = slugify(playerName);
+  return [
+    `/players/${slug}.png`,
+    `/players/${slug}.jpg`,
+    `/players/${slug}.jpeg`,
+    `/players/${slug}.webp`,
+  ];
+}
+
+function PlayerImage({
+  playerName,
+  size = 68,
+  teamFallbackLeft,
+  teamFallbackRight,
+}: {
+  playerName: string;
+  size?: number;
+  teamFallbackLeft: string;
+  teamFallbackRight: string;
+}) {
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const candidates = useMemo(() => playerImageCandidates(playerName), [playerName]);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  if (dead) {
+    // ✅ No circles. Fall back cleanly to team logos.
+    return (
+      <div className="flex items-center justify-center gap-3">
+        <TeamLogo teamName={teamFallbackLeft} size={Math.max(42, Math.floor(size * 0.65))} />
+        <div className="text-white/70 font-black text-[12px]">vs</div>
+        <TeamLogo teamName={teamFallbackRight || "AFL"} size={Math.max(42, Math.floor(size * 0.65))} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
+      }}
+      title={playerName}
+    >
+      <div className="absolute inset-0">
+        <Image
+          src={src}
+          alt={playerName}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "cover" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
+        />
+      </div>
+
+      {/* subtle vignette to keep it clean */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.10) 55%, rgba(0,0,0,0.28) 100%)",
         }}
       />
     </div>
@@ -271,9 +392,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
         <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[12px] uppercase tracking-widest text-white/60">
-                How to play
-              </div>
+              <div className="text-[12px] uppercase tracking-widest text-white/60">How to play</div>
               <div className="mt-1 text-[22px] font-black text-white">Pick. Lock. Survive.</div>
               <div className="mt-1 text-[13px] text-white/70 leading-snug">
                 Picks auto-lock at bounce. No lock-in button.
@@ -305,9 +424,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
             >
               <div className="text-[12px] uppercase tracking-widest text-white/55">1</div>
               <div className="mt-1 text-[14px] font-black text-white">Pick any amount</div>
-              <div className="mt-1 text-[12px] text-white/70">
-                Choose 0–12 questions for this match.
-              </div>
+              <div className="mt-1 text-[12px] text-white/70">Choose 0–12 questions for this match.</div>
             </div>
 
             <div
@@ -319,9 +436,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
             >
               <div className="text-[12px] uppercase tracking-widest text-white/55">2</div>
               <div className="mt-1 text-[14px] font-black text-white">Locks at bounce</div>
-              <div className="mt-1 text-[12px] text-white/70">
-                Once the countdown hits zero, picks are locked.
-              </div>
+              <div className="mt-1 text-[12px] text-white/70">Once the countdown hits zero, picks are locked.</div>
             </div>
 
             <div
@@ -358,12 +473,36 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+function BoldPlayerNameInQuestion({
+  question,
+  playerName,
+}: {
+  question: string;
+  playerName: string | null;
+}) {
+  if (!playerName) return <>{question}</>;
+
+  const idx = question.toLowerCase().indexOf(playerName.toLowerCase());
+  if (idx < 0) return <>{question}</>;
+
+  const before = question.slice(0, idx);
+  const mid = question.slice(idx, idx + playerName.length);
+  const after = question.slice(idx + playerName.length);
+
+  return (
+    <>
+      {before}
+      <span className="font-black text-white">{mid}</span>
+      {after}
+    </>
+  );
+}
+
 export default function MatchPicksPage({ params }: { params: { matchSlug: string } }) {
   const { user } = useAuth();
   const matchSlug = params.matchSlug;
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
-
   const [game, setGame] = useState<ApiGame | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -510,11 +649,20 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     setRevealedSponsor((p) => ({ ...p, [qid]: true }));
   }, []);
 
+  const sortedQuestions = useMemo(() => {
+    if (!game?.questions?.length) return [];
+    return game.questions.slice().sort((a, b) => {
+      // sort by quarter then stable by id
+      if (a.quarter !== b.quarter) return a.quarter - b.quarter;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }, [game]);
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howToOpen} onClose={closeHowTo} />
 
-      <div className="w-full max-w-3xl mx-auto px-4 sm:px-6 pt-6 pb-28">
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-28">
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/picks"
@@ -631,27 +779,27 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </div>
         ) : null}
 
-        <div className="mt-5 space-y-3">
+        {/* ✅ PICKS IN BOXES (GRID): 1 col mobile, 2 tablet, 3 desktop */}
+        <div className="mt-5">
           {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-2xl border overflow-hidden relative"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.03)",
-                }}
-              >
-                {/* ✅ silhouette behind loading box too (stable) */}
-                <AflSilhouetteBg opacityClass="opacity-[0.05]" />
-                <div className="relative z-10 h-[90px] bg-white/5" />
-              </div>
-            ))
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-2xl border overflow-hidden"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.03)",
+                    minHeight: 240,
+                  }}
+                >
+                  <div className="h-[240px] bg-white/5" />
+                </div>
+              ))}
+            </div>
           ) : !game ? null : (
-            game.questions
-              .slice()
-              .sort((a, b) => a.quarter - b.quarter)
-              .map((q, idx) => {
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sortedQuestions.map((q, i) => {
                 const pick = localPicks[q.id] ?? "none";
                 const sponsor = !!q.isSponsorQuestion;
                 const revealed = !!revealedSponsor[q.id];
@@ -660,62 +808,39 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 const prize = (q.sponsorPrize || "$100 Rebel Sport Gift Card").trim();
                 const sponsorLine = `Proudly sponsored by ${sponsorName}. Get this pick correct and go in the draw to win ${prize}.`;
 
+                const playerNameRaw = extractPlayerName(q.question);
+                const playerName = playerNameRaw && isProbablyPlayerName(playerNameRaw) ? playerNameRaw : null;
+                const isPlayerQuestion = !!playerName;
+
                 const revealedCardStyles =
                   revealed && sponsor
-                    ? {
-                        borderColor: "rgba(255,46,77,0.55)",
-                        background: "rgba(255,46,77,0.10)",
-                      }
-                    : {
-                        borderColor: "rgba(255,255,255,0.10)",
-                        background: "rgba(255,255,255,0.03)",
-                      };
+                    ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.08)" }
+                    : { borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" };
 
                 return (
                   <div
                     key={q.id}
-                    className="rounded-2xl border overflow-hidden relative"
-                    style={revealedCardStyles}
+                    className="relative rounded-2xl border overflow-hidden"
+                    style={{
+                      ...revealedCardStyles,
+                      boxShadow: "0 14px 45px rgba(0,0,0,0.60)",
+                      minHeight: 270,
+                    }}
                   >
-                    {/* ✅ REQUIRED: afl1.png in EACH picks box (question card) */}
-                    <AflSilhouetteBg />
+                    {/* ✅ silhouette locked INSIDE each box */}
+                    <div className="absolute inset-0">
+                      <CardSilhouetteBg opacity={0.12} />
+                    </div>
 
-                    <div className="relative z-10 p-4 sm:p-5">
+                    <div className="relative z-10 p-4 sm:p-5 flex flex-col h-full">
+                      {/* Header row */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="text-[12px] uppercase tracking-widest text-white/55">
-                            Q{String(idx + 1).padStart(2, "0")} · Q{q.quarter}
+                          <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">
+                            {`Q${String(i + 1).padStart(2, "0")} · ${quarterLabel(q.quarter)}`}
                           </div>
-
-                          {sponsor ? (
-                            <div
-                              className="mt-2 rounded-xl border px-3 py-2"
-                              style={{
-                                borderColor: revealed
-                                  ? "rgba(255,46,77,0.55)"
-                                  : "rgba(255,255,255,0.12)",
-                                background: revealed
-                                  ? "rgba(255,46,77,0.18)"
-                                  : "rgba(255,255,255,0.05)",
-                                color: "rgba(255,255,255,0.92)",
-                              }}
-                            >
-                              <div className="text-[11px] font-black uppercase tracking-widest">
-                                Sponsor Question · {sponsorName}
-                              </div>
-                              <div className="mt-1 text-[12px] text-white/80 leading-snug">
-                                {sponsorLine}
-                              </div>
-                            </div>
-                          ) : null}
-
-                          <div className="mt-3 text-[15px] sm:text-[16px] font-black text-white leading-snug">
-                            {q.question}
-                          </div>
-
-                          <div className="mt-2 text-[12px] text-white/60">
-                            Status:{" "}
-                            <span className="font-semibold text-white/80">{q.status}</span>
+                          <div className="mt-1 text-[12px] text-white/70">
+                            Status: <span className="font-semibold text-white/85">{q.status}</span>
                           </div>
                         </div>
 
@@ -726,8 +851,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             disabled={isLocked || (sponsor && !revealed)}
                             className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-black"
                             style={{
-                              borderColor: "rgba(255,255,255,0.14)",
-                              background: "rgba(255,255,255,0.04)",
+                              borderColor: "rgba(255,255,255,0.16)",
+                              background: "rgba(0,0,0,0.45)",
                               color: "rgba(255,255,255,0.92)",
                               opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
                             }}
@@ -738,56 +863,109 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         ) : null}
                       </div>
 
-                      <div className="mt-4 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
-                          disabled={isLocked || (sponsor && !revealed)}
-                          className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
+                      {/* Sponsor badge block (kept) */}
+                      {sponsor ? (
+                        <div
+                          className="mt-3 rounded-xl border px-3 py-2"
                           style={{
-                            borderColor:
-                              pick === "yes"
-                                ? "rgba(255,46,77,0.60)"
-                                : "rgba(255,255,255,0.14)",
-                            background:
-                              pick === "yes"
-                                ? "rgba(255,46,77,0.22)"
-                                : "rgba(255,255,255,0.04)",
-                            color: "rgba(255,255,255,0.95)",
-                            opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                            borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
+                            background: revealed ? "rgba(255,46,77,0.18)" : "rgba(0,0,0,0.40)",
+                            color: "rgba(255,255,255,0.92)",
                           }}
                         >
-                          YES
-                        </button>
+                          <div className="text-[11px] font-black uppercase tracking-widest">
+                            Sponsor Question · {sponsorName}
+                          </div>
+                          <div className="mt-1 text-[12px] text-white/80 leading-snug">{sponsorLine}</div>
+                        </div>
+                      ) : null}
 
-                        <button
-                          type="button"
-                          onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
-                          disabled={isLocked || (sponsor && !revealed)}
-                          className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
-                          style={{
-                            borderColor:
-                              pick === "no"
-                                ? "rgba(255,46,77,0.60)"
-                                : "rgba(255,255,255,0.14)",
-                            background:
-                              pick === "no"
-                                ? "rgba(255,46,77,0.22)"
-                                : "rgba(255,255,255,0.04)",
-                            color: "rgba(255,255,255,0.95)",
-                            opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
-                          }}
-                        >
-                          NO
-                        </button>
+                      {/* Media zone */}
+                      <div className="mt-4 flex items-center justify-center">
+                        {isPlayerQuestion ? (
+                          <div className="flex flex-col items-center gap-2">
+                            <PlayerImage
+                              playerName={playerName!}
+                              size={74}
+                              teamFallbackLeft={headerTeams.home}
+                              teamFallbackRight={headerTeams.away || "AFL"}
+                            />
+                            <div className="text-[11px] text-white/70 font-semibold">
+                              Player pick
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="flex items-center justify-center gap-3">
+                              <TeamLogo teamName={headerTeams.home} size={48} />
+                              <div className="text-white/70 font-black text-[12px]">vs</div>
+                              <TeamLogo teamName={headerTeams.away || "AFL"} size={48} />
+                            </div>
+                            <div className="text-[11px] text-white/70 font-semibold">
+                              Match pick
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Question text */}
+                      <div className="mt-4 text-[14px] sm:text-[15px] font-semibold text-white/90 leading-snug">
+                        <BoldPlayerNameInQuestion question={q.question} playerName={playerName} />
+                      </div>
+
+                      {/* Spacer */}
+                      <div className="mt-4" />
+
+                      {/* Actions */}
+                      <div className="mt-auto">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
+                            disabled={isLocked || (sponsor && !revealed)}
+                            className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
+                            style={{
+                              borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(255,255,255,0.16)",
+                              background: pick === "yes" ? "rgba(255,46,77,0.24)" : "rgba(0,0,0,0.45)",
+                              color: "rgba(255,255,255,0.96)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                            }}
+                          >
+                            YES
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
+                            disabled={isLocked || (sponsor && !revealed)}
+                            className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
+                            style={{
+                              borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(255,255,255,0.16)",
+                              background: pick === "no" ? "rgba(255,46,77,0.24)" : "rgba(0,0,0,0.45)",
+                              color: "rgba(255,255,255,0.96)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                            }}
+                          >
+                            NO
+                          </button>
+                        </div>
+
+                        {/* Optional crowd % if your API sends it later (no schema assumptions) */}
+                        {typeof q.yesPercent === "number" && typeof q.noPercent === "number" ? (
+                          <div className="mt-3 flex items-center justify-between text-[11px] text-white/70 font-semibold">
+                            <span>Yes {Math.round(q.yesPercent)}%</span>
+                            <span>No {Math.round(q.noPercent)}%</span>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
+                    {/* Sponsor reveal cover (kept + unchanged behaviour) */}
                     {sponsor && !revealed ? (
                       <button
                         type="button"
                         onClick={() => revealSponsor(q.id)}
-                        className="absolute inset-0 z-20 flex items-center justify-center p-4"
+                        className="absolute inset-0 flex items-center justify-center p-4"
                         style={{
                           background: "rgba(255,255,255,0.92)",
                           color: "rgba(0,0,0,0.92)",
@@ -813,8 +991,7 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           <div className="mt-2 text-[16px] font-black">Tap to reveal</div>
 
                           <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.62)" }}>
-                            Proudly sponsored by{" "}
-                            <span className="font-black">{sponsorName}</span>
+                            Proudly sponsored by <span className="font-black">{sponsorName}</span>
                           </div>
 
                           <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.60)" }}>
@@ -837,14 +1014,16 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                     ) : null}
                   </div>
                 );
-              })
+              })}
+            </div>
           )}
         </div>
       </div>
 
+      {/* Bottom lock bar (kept) */}
       <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
         <div
-          className="mx-auto max-w-3xl rounded-2xl border overflow-hidden"
+          className="mx-auto max-w-6xl rounded-2xl border overflow-hidden"
           style={{ borderColor: "rgba(255,255,255,0.10)" }}
         >
           <div
@@ -859,7 +1038,11 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 Picks selected: {picksSelected} / 12
               </div>
               <div className="text-[11px] text-white/65">
-                {isLocked ? "LOCKED — Changes disabled" : `Locks in ${msToCountdown(lockMs)}`}
+                {loading
+                  ? "Loading…"
+                  : isLocked
+                  ? "LOCKED — Changes disabled"
+                  : `Locks in ${msToCountdown(lockMs)}`}
               </div>
             </div>
 
