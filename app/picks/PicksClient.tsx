@@ -287,7 +287,7 @@ function ProgressTick({ on }: { on: boolean }) {
  * - Opacity tuned so it’s visible but never competes with text/logos
  */
 function CardSilhouetteBg({
-  opacity = 0.18,
+  opacity = 0.25,
 }: {
   opacity?: number;
 }) {
