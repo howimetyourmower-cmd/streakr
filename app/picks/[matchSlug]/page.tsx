@@ -24,7 +24,6 @@ type ApiQuestion = {
   sponsorName?: string;
   sponsorPrize?: string;
 
-  // Optional (if your API already sends them, we’ll use them)
   yesPercent?: number;
   noPercent?: number;
 };
@@ -219,14 +218,13 @@ function AvatarSquircle({
       style={{
         width: 44,
         height: 44,
-        borderRadius: 16, // ✅ squircle-ish
-        background: "rgba(255,46,77,0.92)", // ✅ red background behind content
+        borderRadius: 16,
+        background: "rgba(255,46,77,0.92)",
         boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
       }}
       title={title}
     >
       <div className="absolute inset-0 opacity-[0.14]">
-        {/* subtle inner highlight */}
         <div
           className="absolute inset-0"
           style={{
@@ -240,33 +238,41 @@ function AvatarSquircle({
   );
 }
 
+/**
+ * ✅ FIXED: GamePickAvatar is now TWO squircles (one per logo)
+ * - No clipping
+ * - Same sizing as player avatar
+ */
 function GamePickAvatar({ match }: { match: string }) {
   const teams = splitMatch(match);
   const home = teams?.home ?? "";
   const away = teams?.away ?? "";
 
   return (
-    <div className="flex items-center justify-center gap-2" title={match}>
+    <div className="flex items-center justify-center gap-3" title={match}>
       <AvatarSquircle title={home || "AFL"}>
-        <InlineTeamLogo teamName={home || "AFL"} size={28} />
+        {/* use 44x44 image area so the logo reads the same visual weight as player */}
+        <div className="relative" style={{ width: 44, height: 44 }}>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <InlineTeamLogo teamName={home || "AFL"} size={28} />
+          </div>
+        </div>
       </AvatarSquircle>
 
       <div className="text-[12px] font-black text-white/70 leading-none">VS</div>
 
       <AvatarSquircle title={away || "AFL"}>
-        <InlineTeamLogo teamName={away || "AFL"} size={28} />
+        <div className="relative" style={{ width: 44, height: 44 }}>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <InlineTeamLogo teamName={away || "AFL"} size={28} />
+          </div>
+        </div>
       </AvatarSquircle>
     </div>
   );
 }
 
-function PlayerAvatar({
-  name,
-  src,
-}: {
-  name: string;
-  src: string | null;
-}) {
+function PlayerAvatar({ name, src }: { name: string; src: string | null }) {
   const initials = (name || "?")
     .split(" ")
     .filter(Boolean)
@@ -278,13 +284,7 @@ function PlayerAvatar({
     <AvatarSquircle title={name}>
       {src ? (
         <div className="relative" style={{ width: 44, height: 44 }}>
-          <Image
-            src={src}
-            alt={name}
-            fill
-            sizes="44px"
-            style={{ objectFit: "cover" }}
-          />
+          <Image src={src} alt={name} fill sizes="44px" style={{ objectFit: "cover" }} />
         </div>
       ) : (
         <div className="text-white font-black">{initials || "?"}</div>
@@ -293,24 +293,19 @@ function PlayerAvatar({
   );
 }
 
-// ✅ very simple: detect player name like "Will Charlie Curnow (Syd) ..."
 function extractPlayerName(question: string): string | null {
   const q = (question || "").trim();
   const m = q.match(/Will\s+(.+?)(?:\s*\([^)]+\))?\s+(?:kick|have|get|record|register|score|take|be)\b/i);
   if (!m) return null;
   const name = (m[1] || "").trim();
   if (!name || name.length < 3) return null;
-  // strip trailing punctuation
   return name.replace(/[?.!,]+$/g, "").trim();
 }
 
 function playerNameToFile(name: string): string | null {
-  // expects /public/players/<name>.jpg (as you said)
-  // we’ll try .jpg/.jpeg/.png
   const base = (name || "").trim();
   if (!base) return null;
   const safe = base.replace(/\s+/g, " ").trim();
-  // IMPORTANT: keep spaces, because you said "Charlie Curnow.jpg"
   return `/players/${encodeURIComponent(safe)}.jpg`;
 }
 
@@ -569,7 +564,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howToOpen} onClose={closeHowTo} />
 
-      {/* ✅ keep desktop tighter (was looking too spread) */}
       <div className="w-full max-w-[1100px] mx-auto px-4 sm:px-6 pt-6 pb-28">
         <div className="flex items-center justify-between gap-3">
           <Link
@@ -626,7 +620,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       {formatAedt(game.startTime)}
                     </div>
 
-                    {/* ✅ aggressive header */}
                     <div className="mt-2 text-[26px] sm:text-[30px] font-black text-white leading-tight italic uppercase">
                       {game.match}
                     </div>
@@ -672,7 +665,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                   </span>
                 </div>
 
-                {/* subtle home/away hint row (optional) */}
                 <div className="mt-4 flex items-center gap-2 text-[12px] text-white/65">
                   <InlineTeamLogo teamName={headerTeams.home} size={18} />
                   <span className="font-black text-white/70">vs</span>
@@ -689,7 +681,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </div>
         ) : null}
 
-        {/* ✅ tighter grid like your notes (gap-3) + 3 columns on desktop */}
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {loading ? (
             Array.from({ length: 9 }).map((_, i) => (
@@ -713,11 +704,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 const sponsorName = (q.sponsorName || "Rebel Sport").trim();
                 const prize = (q.sponsorPrize || "$100 Rebel Sport Gift Card").trim();
 
-                // ✅ player vs game pick detection
                 const playerName = extractPlayerName(q.question);
                 const isPlayerPick = !!playerName;
-                const isGamePick = !isPlayerPick;
-
                 const playerImg = playerName ? playerNameToFile(playerName) : null;
 
                 const yesPct = typeof q.yesPercent === "number" ? q.yesPercent : 0;
@@ -732,7 +720,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       background: COLORS.card,
                     }}
                   >
-                    {/* ✅ silhouette behind (stays in box) */}
                     <div className="absolute inset-0 pointer-events-none">
                       <Image
                         src="/afl1.png"
@@ -760,7 +747,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           <div className="text-[12px] uppercase tracking-widest text-white/60 font-black">
                             Q{String(idx + 1).padStart(2, "0")} · QUARTER {q.quarter}
                           </div>
-                          {/* ✅ lowercase open (don’t capitalize) */}
                           <div className="mt-1 text-[12px] text-white/55">
                             Status: <span className="font-semibold text-white/75">{q.status}</span>
                           </div>
@@ -785,7 +771,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         ) : null}
                       </div>
 
-                      {/* ✅ avatar row */}
                       <div className="mt-5 flex items-center justify-center">
                         {isPlayerPick ? (
                           <PlayerAvatar name={playerName || "Player"} src={playerImg} />
@@ -802,11 +787,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         {q.question}
                       </div>
 
-                      {/* ✅ sponsor reveal overlay MUST completely cover */}
                       {sponsor && !revealed ? (
                         <button
                           type="button"
-                          onClick={() => revealSponsor(q.id)}
+                          onClick={() => setRevealedSponsor((p) => ({ ...p, [q.id]: true }))}
                           className="absolute inset-0 flex items-center justify-center p-4"
                           style={{
                             background: "rgba(255,255,255,0.96)",
@@ -848,7 +832,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         </button>
                       ) : null}
 
-                      {/* ✅ buttons live on light panel (but no “bottom black section”) */}
                       <div
                         className="mt-4 rounded-2xl border p-3"
                         style={{
@@ -888,7 +871,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           </button>
                         </div>
 
-                        {/* ✅ thin percent bar + labels */}
                         <ThinPercentBar yesPct={yesPct} noPct={noPct} />
                       </div>
                     </div>
@@ -899,7 +881,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
         </div>
       </div>
 
-      {/* bottom sticky bar */}
       <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
         <div className="mx-auto max-w-[1100px] rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
           <div
