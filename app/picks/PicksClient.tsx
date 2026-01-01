@@ -659,7 +659,7 @@ export default function PicksPage() {
       >
         {/* ✅ CRITICAL: overflow-hidden here ensures the silhouette cannot escape the card */}
         <div className="relative p-5 overflow-hidden" style={{ minHeight: 205 }}>
-          <CardSilhouetteBg opacity={0.18} />
+          <CardSilhouetteBg opacity={0.30} />
 
           <div className="relative z-10">
             <div className="flex items-center justify-between gap-3">
