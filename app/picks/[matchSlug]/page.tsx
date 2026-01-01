@@ -109,15 +109,20 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
+  if (
+    n.includes("western bulldogs") ||
+    n.includes("bulldogs") ||
+    n.includes("footscray")
+  )
+    return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
+    return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
   if (n.includes("brisbane")) return "brisbane";
   if (n.includes("carlton")) return "carlton";
-  if (n.includes("collingwood")) return "collingwood";
   if (n.includes("collingwood")) return "collingwood";
   if (n.includes("essendon")) return "essendon";
   if (n.includes("fremantle")) return "fremantle";
@@ -214,11 +219,44 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
+/** ✅ AFL silhouette used behind EACH pick box (question card) */
+function AflSilhouetteBg({
+  opacityClass = "opacity-[0.07]",
+}: {
+  opacityClass?: string;
+}) {
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <Image
+        src="/afl1.png"
+        alt=""
+        fill
+        sizes="(max-width: 768px) 100vw, 768px"
+        style={{ objectFit: "contain" }}
+        className={opacityClass}
+        priority={false}
+      />
+      {/* Soft fade so silhouette never fights text/buttons */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.78) 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
 function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.72)" }} onClick={onClose} />
+      <div
+        className="absolute inset-0"
+        style={{ background: "rgba(0,0,0,0.72)" }}
+        onClick={onClose}
+      />
       <div
         className="relative w-full max-w-lg rounded-2xl border overflow-hidden"
         style={{
@@ -233,7 +271,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
         <div className="p-5 sm:p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-[12px] uppercase tracking-widest text-white/60">How to play</div>
+              <div className="text-[12px] uppercase tracking-widest text-white/60">
+                How to play
+              </div>
               <div className="mt-1 text-[22px] font-black text-white">Pick. Lock. Survive.</div>
               <div className="mt-1 text-[13px] text-white/70 leading-snug">
                 Picks auto-lock at bounce. No lock-in button.
@@ -256,22 +296,46 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
           </div>
 
           <div className="mt-5 space-y-3">
-            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+              }}
+            >
               <div className="text-[12px] uppercase tracking-widest text-white/55">1</div>
               <div className="mt-1 text-[14px] font-black text-white">Pick any amount</div>
-              <div className="mt-1 text-[12px] text-white/70">Choose 0–12 questions for this match.</div>
+              <div className="mt-1 text-[12px] text-white/70">
+                Choose 0–12 questions for this match.
+              </div>
             </div>
 
-            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+              }}
+            >
               <div className="text-[12px] uppercase tracking-widest text-white/55">2</div>
               <div className="mt-1 text-[14px] font-black text-white">Locks at bounce</div>
-              <div className="mt-1 text-[12px] text-white/70">Once the countdown hits zero, picks are locked.</div>
+              <div className="mt-1 text-[12px] text-white/70">
+                Once the countdown hits zero, picks are locked.
+              </div>
             </div>
 
-            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+            <div
+              className="rounded-2xl border p-4"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.04)",
+              }}
+            >
               <div className="text-[12px] uppercase tracking-widest text-white/55">3</div>
               <div className="mt-1 text-[14px] font-black text-white">Clean Sweep</div>
-              <div className="mt-1 text-[12px] text-white/70">One wrong pick wipes this match streak. Voids don’t count.</div>
+              <div className="mt-1 text-[12px] text-white/70">
+                One wrong pick wipes this match streak. Voids don’t count.
+              </div>
             </div>
           </div>
 
@@ -300,7 +364,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
 
-  // ✅ CRITICAL FIX: type this so TS never infers `never`
   const [game, setGame] = useState<ApiGame | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -368,7 +431,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
       const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
 
-      // ✅ Cast response so TS doesn’t infer unknown/never
       const data = (await res.json()) as PicksApiResponse;
 
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
@@ -412,7 +474,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
   const roundLabel =
     roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  // ✅ FIXED: don’t reference game?.match inside the !game path
   const headerTeams = useMemo(() => {
     if (!game) return { home: "", away: "" };
     const m = splitMatch(game.match);
@@ -482,7 +543,13 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </button>
         </div>
 
-        <div className="mt-4 rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+        <div
+          className="mt-4 rounded-2xl border overflow-hidden"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+          }}
+        >
           <div
             className="p-5"
             style={{
@@ -499,7 +566,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <TeamLogo teamName={headerTeams.home} size={46} />
-                    <div className="text-white/60 font-black text-[12px] w-[22px] text-center">VS</div>
+                    <div className="text-white/60 font-black text-[12px] w-[22px] text-center">
+                      VS
+                    </div>
                     <TeamLogo teamName={headerTeams.away || "AFL"} size={46} />
                   </div>
 
@@ -516,7 +585,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         {roundLabel}
                       </div>
                     ) : null}
-                    <div className="mt-2 text-[11px] text-white/70 font-semibold">{formatAedt(game.startTime)}</div>
+                    <div className="mt-2 text-[11px] text-white/70 font-semibold">
+                      {formatAedt(game.startTime)}
+                    </div>
                   </div>
                 </div>
 
@@ -565,10 +636,15 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
             Array.from({ length: 6 }).map((_, i) => (
               <div
                 key={i}
-                className="rounded-2xl border overflow-hidden"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
+                className="rounded-2xl border overflow-hidden relative"
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background: "rgba(255,255,255,0.03)",
+                }}
               >
-                <div className="h-[90px] bg-white/5" />
+                {/* ✅ silhouette behind loading box too (stable) */}
+                <AflSilhouetteBg opacityClass="opacity-[0.05]" />
+                <div className="relative z-10 h-[90px] bg-white/5" />
               </div>
             ))
           ) : !game ? null : (
@@ -586,12 +662,25 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
 
                 const revealedCardStyles =
                   revealed && sponsor
-                    ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.10)" }
-                    : { borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" };
+                    ? {
+                        borderColor: "rgba(255,46,77,0.55)",
+                        background: "rgba(255,46,77,0.10)",
+                      }
+                    : {
+                        borderColor: "rgba(255,255,255,0.10)",
+                        background: "rgba(255,255,255,0.03)",
+                      };
 
                 return (
-                  <div key={q.id} className="rounded-2xl border overflow-hidden relative" style={revealedCardStyles}>
-                    <div className="p-4 sm:p-5">
+                  <div
+                    key={q.id}
+                    className="rounded-2xl border overflow-hidden relative"
+                    style={revealedCardStyles}
+                  >
+                    {/* ✅ REQUIRED: afl1.png in EACH picks box (question card) */}
+                    <AflSilhouetteBg />
+
+                    <div className="relative z-10 p-4 sm:p-5">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-[12px] uppercase tracking-widest text-white/55">
@@ -602,15 +691,21 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             <div
                               className="mt-2 rounded-xl border px-3 py-2"
                               style={{
-                                borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
-                                background: revealed ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.05)",
+                                borderColor: revealed
+                                  ? "rgba(255,46,77,0.55)"
+                                  : "rgba(255,255,255,0.12)",
+                                background: revealed
+                                  ? "rgba(255,46,77,0.18)"
+                                  : "rgba(255,255,255,0.05)",
                                 color: "rgba(255,255,255,0.92)",
                               }}
                             >
                               <div className="text-[11px] font-black uppercase tracking-widest">
                                 Sponsor Question · {sponsorName}
                               </div>
-                              <div className="mt-1 text-[12px] text-white/80 leading-snug">{sponsorLine}</div>
+                              <div className="mt-1 text-[12px] text-white/80 leading-snug">
+                                {sponsorLine}
+                              </div>
                             </div>
                           ) : null}
 
@@ -619,7 +714,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           </div>
 
                           <div className="mt-2 text-[12px] text-white/60">
-                            Status: <span className="font-semibold text-white/80">{q.status}</span>
+                            Status:{" "}
+                            <span className="font-semibold text-white/80">{q.status}</span>
                           </div>
                         </div>
 
@@ -649,8 +745,14 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           disabled={isLocked || (sponsor && !revealed)}
                           className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
                           style={{
-                            borderColor: pick === "yes" ? "rgba(255,46,77,0.60)" : "rgba(255,255,255,0.14)",
-                            background: pick === "yes" ? "rgba(255,46,77,0.22)" : "rgba(255,255,255,0.04)",
+                            borderColor:
+                              pick === "yes"
+                                ? "rgba(255,46,77,0.60)"
+                                : "rgba(255,255,255,0.14)",
+                            background:
+                              pick === "yes"
+                                ? "rgba(255,46,77,0.22)"
+                                : "rgba(255,255,255,0.04)",
                             color: "rgba(255,255,255,0.95)",
                             opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
                           }}
@@ -664,8 +766,14 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           disabled={isLocked || (sponsor && !revealed)}
                           className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
                           style={{
-                            borderColor: pick === "no" ? "rgba(255,46,77,0.60)" : "rgba(255,255,255,0.14)",
-                            background: pick === "no" ? "rgba(255,46,77,0.22)" : "rgba(255,255,255,0.04)",
+                            borderColor:
+                              pick === "no"
+                                ? "rgba(255,46,77,0.60)"
+                                : "rgba(255,255,255,0.14)",
+                            background:
+                              pick === "no"
+                                ? "rgba(255,46,77,0.22)"
+                                : "rgba(255,255,255,0.04)",
                             color: "rgba(255,255,255,0.95)",
                             opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
                           }}
@@ -679,7 +787,7 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       <button
                         type="button"
                         onClick={() => revealSponsor(q.id)}
-                        className="absolute inset-0 flex items-center justify-center p-4"
+                        className="absolute inset-0 z-20 flex items-center justify-center p-4"
                         style={{
                           background: "rgba(255,255,255,0.92)",
                           color: "rgba(0,0,0,0.92)",
@@ -695,18 +803,23 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             boxShadow: "0 18px 55px rgba(0,0,0,0.18)",
                           }}
                         >
-                          <div className="text-[11px] font-black uppercase tracking-widest" style={{ color: "rgba(0,0,0,0.55)" }}>
+                          <div
+                            className="text-[11px] font-black uppercase tracking-widest"
+                            style={{ color: "rgba(0,0,0,0.55)" }}
+                          >
                             Sponsor Question
                           </div>
 
                           <div className="mt-2 text-[16px] font-black">Tap to reveal</div>
 
                           <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.62)" }}>
-                            Proudly sponsored by <span className="font-black">{sponsorName}</span>
+                            Proudly sponsored by{" "}
+                            <span className="font-black">{sponsorName}</span>
                           </div>
 
                           <div className="mt-2 text-[12px]" style={{ color: "rgba(0,0,0,0.60)" }}>
-                            Get this pick correct and go in the draw to win <span className="font-black">{prize}</span>
+                            Get this pick correct and go in the draw to win{" "}
+                            <span className="font-black">{prize}</span>
                           </div>
 
                           <div
@@ -730,7 +843,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
-        <div className="mx-auto max-w-3xl rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+        <div
+          className="mx-auto max-w-3xl rounded-2xl border overflow-hidden"
+          style={{ borderColor: "rgba(255,255,255,0.10)" }}
+        >
           <div
             className="px-4 py-3 flex items-center justify-between gap-3"
             style={{
@@ -739,8 +855,12 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
             }}
           >
             <div className="min-w-0">
-              <div className="text-[12px] font-black text-white">Picks selected: {picksSelected} / 12</div>
-              <div className="text-[11px] text-white/65">{isLocked ? "LOCKED — Changes disabled" : `Locks in ${msToCountdown(lockMs)}`}</div>
+              <div className="text-[12px] font-black text-white">
+                Picks selected: {picksSelected} / 12
+              </div>
+              <div className="text-[11px] text-white/65">
+                {isLocked ? "LOCKED — Changes disabled" : `Locks in ${msToCountdown(lockMs)}`}
+              </div>
             </div>
 
             <div
