@@ -93,34 +93,6 @@ function splitMatch(match: string): { home: string; away: string } | null {
   return { home: m[0].trim(), away: m[1].trim() };
 }
 
-function CardSilhouetteBg({ opacity = 0.10, scale = 1.06 }: { opacity?: number; scale?: number }) {
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <div className="absolute inset-0" style={{ opacity }}>
-        <Image
-          src="/afl1.png"
-          alt=""
-          fill
-          sizes="(max-width: 1200px) 100vw, 1200px"
-          style={{
-            objectFit: "cover",
-            filter: "grayscale(1) brightness(0.32) contrast(1.25)",
-            transform: `scale(${scale})`,
-          }}
-          priority={false}
-        />
-      </div>
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(0,0,0,0.34) 0%, rgba(0,0,0,0.72) 60%, rgba(0,0,0,0.92) 100%)",
-        }}
-      />
-    </div>
-  );
-}
-
 function quarterLabel(q: number): string {
   if (!q || q <= 0) return "FULL GAME";
   return `QUARTER ${q}`;
@@ -216,6 +188,34 @@ function PlayerAvatar({ playerName, size = 56 }: { playerName: string; size?: nu
         style={{
           background:
             "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.08) 55%, rgba(0,0,0,0.22) 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
+function CardTopSilhouette() {
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0" style={{ opacity: 0.12 }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1200px) 100vw, 1200px"
+          style={{
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.25)",
+            transform: "scale(1.06)",
+          }}
+          priority={false}
+        />
+      </div>
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.72) 70%, rgba(0,0,0,0.92) 100%)",
         }}
       />
     </div>
@@ -555,9 +555,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                 <div
                   key={i}
                   className="rounded-2xl border overflow-hidden"
-                  style={{ borderColor: "rgba(255,255,255,0.10)", background: COLORS.cardBg, minHeight: 220 }}
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: COLORS.cardBg, minHeight: 240 }}
                 >
-                  <div className="h-[220px] bg-white/5" />
+                  <div className="h-[240px] bg-white/5" />
                 </div>
               ))}
             </div>
@@ -580,9 +580,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
 
                 const cardBorder = sponsor && revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.10)";
 
-                // --- NEW: two-tone split (top dark + bottom light) ---
-                // Pick "where" the white begins. This gives the breakup without looking like a hard half.
-                const splitAt = 132; // px (tweak if you want a touch more/less white)
+                // how tall the DARK top section is (where question lives)
+                const topMinHeight = 160;
 
                 return (
                   <div
@@ -592,165 +591,183 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       borderColor: cardBorder,
                       background: COLORS.cardBg,
                       boxShadow: "0 12px 36px rgba(0,0,0,0.55)",
-                      minHeight: 230,
+                      minHeight: 240,
                     }}
                   >
-                    {/* silhouette + dark overlays */}
-                    <div className="absolute inset-0">
-                      <CardSilhouetteBg opacity={0.10} scale={1.06} />
-                    </div>
+                    {/* TOP (DARK): header + avatar + question */}
+                    <div className="relative" style={{ minHeight: topMinHeight }}>
+                      <CardTopSilhouette />
 
-                    {/* NEW: bottom white “breakup” layer */}
-                    <div
-                      className="absolute left-0 right-0 bottom-0 pointer-events-none"
-                      style={{
-                        top: splitAt,
-                        background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.00) 0%, rgba(255,255,255,0.92) 14%, rgba(255,255,255,0.98) 100%)",
-                      }}
-                      aria-hidden="true"
-                    />
-
-                    <div className="relative z-10 p-3 sm:p-4 flex flex-col h-full">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="text-[11px] uppercase tracking-widest text-white/70 font-black">
-                            {`Q${String(idx + 1).padStart(2, "0")} - ${quarterLabel(q.quarter)}`}
-                          </div>
-
-                          <div className="mt-0.5 text-[11px] text-white/55">
-                            Status: <span className="font-semibold text-white/70">{q.status}</span>
-                          </div>
-                        </div>
-
-                        {pick !== "none" ? (
-                          <button
-                            type="button"
-                            onClick={() => onClear(q.id)}
-                            disabled={isLocked || (sponsor && !revealed)}
-                            className="shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-black"
-                            style={{
-                              borderColor: "rgba(255,255,255,0.14)",
-                              background: "rgba(0,0,0,0.40)",
-                              color: "rgba(255,255,255,0.92)",
-                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
-                            }}
-                            title={isLocked ? "Locked" : "Clear pick"}
-                          >
-                            ✕
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {sponsor ? (
-                        <div
-                          className="mt-2 rounded-xl border px-2.5 py-2"
-                          style={{
-                            borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
-                            background: revealed ? "rgba(255,46,77,0.14)" : "rgba(0,0,0,0.35)",
-                            color: "rgba(255,255,255,0.92)",
-                          }}
-                        >
-                          <div className="text-[10px] font-black uppercase tracking-widest">SPONSOR QUESTION - {sponsorName}</div>
-                          <div className="mt-1 text-[11px] text-white/75 leading-snug">{sponsorLine}</div>
-                        </div>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-col items-center justify-center">
-                        {playerName ? (
-                          <>
-                            <PlayerAvatar playerName={playerName} size={56} />
-                            <div className="mt-2 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
-                              Player pick
+                      <div className="relative z-10 p-3 sm:p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-[11px] uppercase tracking-widest text-white/70 font-black">
+                              {`Q${String(idx + 1).padStart(2, "0")} - ${quarterLabel(q.quarter)}`}
                             </div>
-                          </>
-                        ) : (
-                          <div className="mt-1 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
-                            Match pick
+
+                            {/* IMPORTANT: keep "open" lowercase from API */}
+                            <div className="mt-0.5 text-[11px] text-white/55">
+                              Status: <span className="font-semibold text-white/70">{q.status}</span>
+                            </div>
                           </div>
-                        )}
-                      </div>
 
-                      <div className="mt-3 text-[12px] sm:text-[13px] font-semibold text-white/92 leading-snug">
-                        {q.question}
-                      </div>
-
-                      {/* Bottom section now sits on white */}
-                      <div className="mt-auto pt-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
-                            disabled={isLocked || (sponsor && !revealed)}
-                            className="flex-1 rounded-2xl border text-[12px] font-black"
-                            style={{
-                              paddingTop: 12,
-                              paddingBottom: 12,
-                              borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
-                              background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
-                              color: pick === "yes" ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.78)",
-                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
-                            }}
-                          >
-                            YES
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
-                            disabled={isLocked || (sponsor && !revealed)}
-                            className="flex-1 rounded-2xl border text-[12px] font-black"
-                            style={{
-                              paddingTop: 12,
-                              paddingBottom: 12,
-                              borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
-                              background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
-                              color: pick === "no" ? "rgba(0,0,0,0.88)" : "rgba(0,0,0,0.78)",
-                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
-                            }}
-                          >
-                            NO
-                          </button>
+                          {pick !== "none" ? (
+                            <button
+                              type="button"
+                              onClick={() => onClear(q.id)}
+                              disabled={isLocked || (sponsor && !revealed)}
+                              className="shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-black"
+                              style={{
+                                borderColor: "rgba(255,255,255,0.14)",
+                                background: "rgba(0,0,0,0.40)",
+                                color: "rgba(255,255,255,0.92)",
+                                opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                              }}
+                              title={isLocked ? "Locked" : "Clear pick"}
+                            >
+                              ✕
+                            </button>
+                          ) : null}
                         </div>
 
-                        <div className="mt-3 flex items-center justify-between text-[10px] font-semibold">
-                          <span style={{ color: "rgba(0,0,0,0.55)" }}>{`Yes ${Math.round(yesPct)}%`}</span>
-                          <span style={{ color: "rgba(0,0,0,0.55)" }}>{`No ${Math.round(noPct)}%`}</span>
-                        </div>
-
-                        <div
-                          className="mt-1 w-full overflow-hidden"
-                          style={{
-                            height: 3,
-                            borderRadius: 999,
-                            background: "rgba(0,0,0,0.12)",
-                          }}
-                        >
+                        {sponsor ? (
                           <div
+                            className="mt-2 rounded-xl border px-2.5 py-2"
                             style={{
-                              height: "100%",
-                              width: `${Math.round(yesPct)}%`,
-                              background: "rgba(255,46,77,0.85)",
+                              borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
+                              background: revealed ? "rgba(255,46,77,0.14)" : "rgba(0,0,0,0.35)",
+                              color: "rgba(255,255,255,0.92)",
                             }}
-                          />
+                          >
+                            <div className="text-[10px] font-black uppercase tracking-widest">SPONSOR QUESTION - {sponsorName}</div>
+                            <div className="mt-1 text-[11px] text-white/75 leading-snug">{sponsorLine}</div>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 flex flex-col items-center justify-center">
+                          {playerName ? (
+                            <>
+                              <PlayerAvatar playerName={playerName} size={56} />
+                              <div className="mt-2 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
+                                Player pick
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-1 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
+                              Match pick
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-3 text-[12px] sm:text-[13px] font-semibold text-white/92 leading-snug">
+                          {q.question}
                         </div>
                       </div>
                     </div>
 
+                    {/* BOTTOM (WHITE): buttons + % bar */}
+                    <div
+                      className="relative z-10 px-3 sm:px-4 pt-3 pb-4"
+                      style={{
+                        background: "rgba(255,255,255,0.98)",
+                        borderTop: "1px solid rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
+                          disabled={isLocked || (sponsor && !revealed)}
+                          className="flex-1 rounded-2xl border text-[12px] font-black"
+                          style={{
+                            paddingTop: 12,
+                            paddingBottom: 12,
+                            borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                            background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.80)",
+                            color: "rgba(0,0,0,0.82)",
+                            opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                          }}
+                        >
+                          YES
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
+                          disabled={isLocked || (sponsor && !revealed)}
+                          className="flex-1 rounded-2xl border text-[12px] font-black"
+                          style={{
+                            paddingTop: 12,
+                            paddingBottom: 12,
+                            borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                            background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.80)",
+                            color: "rgba(0,0,0,0.82)",
+                            opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                          }}
+                        >
+                          NO
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between text-[10px] font-semibold">
+                        <span style={{ color: "rgba(0,0,0,0.52)" }}>{`Yes ${Math.round(yesPct)}%`}</span>
+                        <span style={{ color: "rgba(0,0,0,0.52)" }}>{`No ${Math.round(noPct)}%`}</span>
+                      </div>
+
+                      <div
+                        className="mt-1 w-full overflow-hidden"
+                        style={{
+                          height: 3,
+                          borderRadius: 999,
+                          background: "rgba(0,0,0,0.12)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${Math.round(yesPct)}%`,
+                            background: "rgba(255,46,77,0.85)",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Sponsor reveal overlay MUST fully cover and hide everything */}
                     {sponsor && !revealed ? (
                       <button
                         type="button"
                         onClick={() => revealSponsor(q.id)}
-                        className="absolute inset-0 z-[40] flex items-center justify-center p-3"
+                        className="absolute inset-0 z-[60] flex items-center justify-center p-3"
                         style={{
-                          background: "rgba(0,0,0,0.94)",
+                          background: "#000000", // fully opaque (no bleed-through)
                           color: "rgba(255,255,255,0.94)",
                           cursor: "pointer",
                         }}
                         aria-label="Reveal sponsored question"
                       >
                         <div className="absolute inset-0">
-                          <CardSilhouetteBg opacity={0.12} scale={1.08} />
+                          {/* subtle texture silhouette */}
+                          <div className="absolute inset-0" style={{ opacity: 0.14 }}>
+                            <Image
+                              src="/afl1.png"
+                              alt=""
+                              fill
+                              sizes="(max-width: 1200px) 100vw, 1200px"
+                              style={{
+                                objectFit: "cover",
+                                filter: "grayscale(1) brightness(0.30) contrast(1.25)",
+                                transform: "scale(1.08)",
+                              }}
+                              priority={false}
+                            />
+                          </div>
+                          <div
+                            className="absolute inset-0"
+                            style={{
+                              background:
+                                "radial-gradient(circle at 30% 20%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.92) 55%, rgba(0,0,0,0.98) 100%)",
+                            }}
+                          />
                         </div>
 
                         <div
@@ -758,8 +775,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           style={{
                             borderColor: "rgba(255,255,255,0.14)",
                             background:
-                              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.42) 65%, rgba(0,0,0,0.62) 100%)",
-                            boxShadow: "0 18px 55px rgba(0,0,0,0.55)",
+                              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.72) 100%)",
+                            boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
                           }}
                         >
                           <div className="text-[10px] font-black uppercase tracking-widest text-white/70">SPONSOR QUESTION</div>
@@ -821,4 +838,3 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     </div>
   );
 }
-
