@@ -83,16 +83,18 @@ export default function Navbar() {
       style={{ ["--torpie-red" as any]: TORPIE_RED }}
     >
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2">
-        {/* BIG, READABLE LOGO (LEFT) */}
-        <Link href="/" className="flex items-center">
-          <div className="relative h-[60px] w-[270px] sm:h-[70px] sm:w-[320px]">
+        {/* LOGO (LEFT) - keep height, increase width */}
+        <Link href="/" className="flex items-center min-w-0">
+          {/* Height stays the same, width grows with screen but is capped.
+              This prevents pushing the right nav off-screen. */}
+          <div className="relative h-[60px] w-[320px] sm:h-[70px] sm:w-[420px] md:w-[460px] lg:w-[520px] max-w-[60vw]">
             <Image
               src="/Torpielogo.png"
               alt="Torpie"
               fill
               priority
               className="object-contain object-left"
-              sizes="300px"
+              sizes="(max-width: 768px) 60vw, 520px"
             />
           </div>
         </Link>
