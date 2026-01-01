@@ -1,4 +1,3 @@
-// /components/Navbar.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -16,7 +15,7 @@ type MinimalUserDoc = {
 
 const TORPIE_RED = "#CE2029";
 
-export default function Navbar() {
+export default function NavBar() {
   const pathname = usePathname();
 
   const [user, setUser] = useState<User | null>(null);
@@ -83,18 +82,16 @@ export default function Navbar() {
       style={{ ["--torpie-red" as any]: TORPIE_RED }}
     >
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2">
-        {/* LOGO (LEFT) - keep height, increase width */}
-        <Link href="/" className="flex items-center min-w-0">
-          {/* Height stays the same, width grows with screen but is capped.
-              This prevents pushing the right nav off-screen. */}
-          <div className="relative h-[70px] w-[320px] sm:h-[70px] sm:w-[420px] md:w-[460px] lg:w-[520px] max-w-[60vw]">
+        {/* LOGO — SAME HEIGHT, WIDER */}
+        <Link href="/" className="flex items-center">
+          <div className="relative h-[60px] w-[320px] sm:h-[70px] sm:w-[380px]">
             <Image
               src="/Torpielogo.png"
               alt="Torpie"
               fill
               priority
-              className="object-contain object-centre origin-right-top scale-[1.25]"
-              sizes="(max-width: 768px) 60vw, 520px"
+              className="object-contain object-left"
+              sizes="380px"
             />
           </div>
         </Link>
