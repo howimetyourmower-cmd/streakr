@@ -84,7 +84,7 @@ export default function NavBar() {
       <nav className="mx-auto flex max-w-6xl items-center justify-between px-4 py-2">
         {/* LOGO — SAME HEIGHT, WIDER */}
         <Link href="/" className="flex items-center">
-          <div className="relative h-[60px] w-[320px] sm:h-[70px] sm:w-[380px]">
+          <div className="relative h-[60px] w-[360px] sm:h-[70px] sm:w-[500px]">
             <Image
               src="/Torpielogo.png"
               alt="Torpie"
