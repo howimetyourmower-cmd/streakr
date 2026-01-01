@@ -611,7 +611,7 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                   >
                     {/* silhouette */}
                     <div className="absolute inset-0">
-                      <CardSilhouetteBg opacity={0.10} scale={1.06} />
+                      <CardSilhouetteBg opacity={1} scale={1.06} />
                     </div>
 
                     <div className="relative z-10 p-3 sm:p-4 flex flex-col h-full">
