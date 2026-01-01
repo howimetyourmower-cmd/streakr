@@ -94,7 +94,7 @@ function splitMatch(match: string): { home: string; away: string } | null {
 }
 
 /** Silhouette used behind each card + sponsor cover */
-function CardSilhouetteBg({ opacity = 0.10, scale = 1.06 }: { opacity?: number; scale?: number }) {
+function CardSilhouetteBg({ opacity = 1, scale = 1.06 }: { opacity?: number; scale?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
