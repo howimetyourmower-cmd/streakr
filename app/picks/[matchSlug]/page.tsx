@@ -24,7 +24,7 @@ type ApiQuestion = {
   sponsorName?: string;
   sponsorPrize?: string;
 
-  // optional % stats if your API sends them
+  // Optional (if your API already sends them, we’ll use them)
   yesPercent?: number;
   noPercent?: number;
 };
@@ -46,6 +46,7 @@ const COLORS = {
   bg: "#0d1117",
   card: "#161b22",
   red: "#FF2E4D",
+  text: "#ffffff",
 };
 
 const HOW_TO_PLAY_KEY = "torpie_seen_how_to_play_match_v1";
@@ -86,6 +87,12 @@ function slugify(text: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
 }
 
 type TeamSlug =
@@ -134,12 +141,6 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   return null;
 }
 
-function splitMatch(match: string): { home: string; away: string } | null {
-  const m = (match || "").split(/\s+vs\s+/i);
-  if (m.length !== 2) return null;
-  return { home: m[0].trim(), away: m[1].trim() };
-}
-
 function logoCandidates(teamSlug: TeamSlug): string[] {
   return [
     `/aflteams/${teamSlug}-logo.jpg`,
@@ -148,9 +149,9 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = React.memo(function TeamLogoInner({
+const InlineTeamLogo = React.memo(function InlineTeamLogoInner({
   teamName,
-  size = 44,
+  size = 28,
 }: {
   teamName: string;
   size?: number;
@@ -169,13 +170,11 @@ const TeamLogo = React.memo(function TeamLogoInner({
   if (!slug || dead) {
     return (
       <div
-        className="flex items-center justify-center rounded-2xl border font-black"
+        className="flex items-center justify-center font-black"
         style={{
           width: size,
           height: size,
-          borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.06)",
-          color: "rgba(255,255,255,0.75)",
+          color: "rgba(255,255,255,0.85)",
         }}
         title={teamName}
       >
@@ -188,35 +187,132 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const src = candidates[Math.min(idx, candidates.length - 1)];
 
   return (
-    <div
-      className="relative rounded-2xl border overflow-hidden"
-      style={{
-        width: size,
-        height: size,
-        borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.06)",
-      }}
-      title={teamName}
-    >
-      <div className="absolute inset-0 p-2">
-        <Image
-          src={src}
-          alt={`${teamName} logo`}
-          fill
-          sizes={`${size}px`}
-          style={{ objectFit: "contain" }}
-          onError={() => {
-            setIdx((p) => {
-              if (p + 1 < candidates.length) return p + 1;
-              setDead(true);
-              return p;
-            });
-          }}
-        />
-      </div>
+    <div className="relative" style={{ width: size, height: size }} title={teamName}>
+      <Image
+        src={src}
+        alt={`${teamName} logo`}
+        fill
+        sizes={`${size}px`}
+        style={{ objectFit: "contain" }}
+        onError={() => {
+          setIdx((p) => {
+            if (p + 1 < candidates.length) return p + 1;
+            setDead(true);
+            return p;
+          });
+        }}
+      />
     </div>
   );
 });
+
+function AvatarSquircle({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title?: string;
+}) {
+  return (
+    <div
+      className="relative flex items-center justify-center overflow-hidden"
+      style={{
+        width: 44,
+        height: 44,
+        borderRadius: 16, // ✅ squircle-ish
+        background: "rgba(255,46,77,0.92)", // ✅ red background behind content
+        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+      }}
+      title={title}
+    >
+      <div className="absolute inset-0 opacity-[0.14]">
+        {/* subtle inner highlight */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.35), rgba(255,255,255,0) 55%)",
+          }}
+        />
+      </div>
+      <div className="relative">{children}</div>
+    </div>
+  );
+}
+
+function GamePickAvatar({ match }: { match: string }) {
+  const teams = splitMatch(match);
+  const home = teams?.home ?? "";
+  const away = teams?.away ?? "";
+
+  return (
+    <div className="flex items-center justify-center gap-2" title={match}>
+      <AvatarSquircle title={home || "AFL"}>
+        <InlineTeamLogo teamName={home || "AFL"} size={28} />
+      </AvatarSquircle>
+
+      <div className="text-[12px] font-black text-white/70 leading-none">VS</div>
+
+      <AvatarSquircle title={away || "AFL"}>
+        <InlineTeamLogo teamName={away || "AFL"} size={28} />
+      </AvatarSquircle>
+    </div>
+  );
+}
+
+function PlayerAvatar({
+  name,
+  src,
+}: {
+  name: string;
+  src: string | null;
+}) {
+  const initials = (name || "?")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  return (
+    <AvatarSquircle title={name}>
+      {src ? (
+        <div className="relative" style={{ width: 44, height: 44 }}>
+          <Image
+            src={src}
+            alt={name}
+            fill
+            sizes="44px"
+            style={{ objectFit: "cover" }}
+          />
+        </div>
+      ) : (
+        <div className="text-white font-black">{initials || "?"}</div>
+      )}
+    </AvatarSquircle>
+  );
+}
+
+// ✅ very simple: detect player name like "Will Charlie Curnow (Syd) ..."
+function extractPlayerName(question: string): string | null {
+  const q = (question || "").trim();
+  const m = q.match(/Will\s+(.+?)(?:\s*\([^)]+\))?\s+(?:kick|have|get|record|register|score|take|be)\b/i);
+  if (!m) return null;
+  const name = (m[1] || "").trim();
+  if (!name || name.length < 3) return null;
+  // strip trailing punctuation
+  return name.replace(/[?.!,]+$/g, "").trim();
+}
+
+function playerNameToFile(name: string): string | null {
+  // expects /public/players/<name>.jpg (as you said)
+  // we’ll try .jpg/.jpeg/.png
+  const base = (name || "").trim();
+  if (!base) return null;
+  const safe = base.replace(/\s+/g, " ").trim();
+  // IMPORTANT: keep spaces, because you said "Charlie Curnow.jpg"
+  return `/players/${encodeURIComponent(safe)}.jpg`;
+}
 
 function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
@@ -298,172 +394,23 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-// --- Helpers for "player pick" auto image ---
-function extractPlayerName(question: string): string | null {
-  // matches "Will Charlie Curnow (Syd) ..." -> "Charlie Curnow"
-  const m = (question || "").match(/Will\s+([A-Za-z'\-]+\s+[A-Za-z'\-]+)/i);
-  if (!m) return null;
-  return m[1].trim();
-}
-function playerImageCandidates(playerName: string): string[] {
-  const base = slugify(playerName);
-  // you said you save as "/public/players/Charlie Curnow.jpg" etc; we'll try both
-  return [
-    `/players/${playerName}.jpg`,
-    `/players/${playerName}.png`,
-    `/players/${playerName}.jpeg`,
-    `/players/${base}.jpg`,
-    `/players/${base}.png`,
-    `/players/${base}.jpeg`,
-  ];
-}
+function ThinPercentBar({ yesPct, noPct }: { yesPct: number; noPct: number }) {
+  const y = Math.max(0, Math.min(100, yesPct));
+  const n = Math.max(0, Math.min(100, noPct));
+  const total = y + n;
+  const yy = total > 0 ? (y / total) * 100 : 50;
+  const nn = 100 - yy;
 
-function AvatarSquircle({
-  children,
-  title,
-}: {
-  children: React.ReactNode;
-  title?: string;
-}) {
-  // single source of truth for the avatar sizing/shape
   return (
-    <div
-      className="mx-auto flex items-center justify-center overflow-hidden border"
-      style={{
-        width: 56,
-        height: 56,
-        borderRadius: 18, // squircle-ish
-        borderColor: "rgba(255,255,255,0.10)",
-        background: "rgba(255,46,77,0.95)", // solid red fill behind player cutout
-        boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-      }}
-      title={title}
-    >
-      {children}
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-[11px] font-semibold">
+        <div className="text-white/45">Yes {Math.round(yy)}%</div>
+        <div className="text-white/45">No {Math.round(nn)}%</div>
+      </div>
+      <div className="mt-1 h-[3px] w-full rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.10)" }}>
+        <div className="h-full" style={{ width: `${yy}%`, background: "rgba(255,46,77,0.75)" }} />
+      </div>
     </div>
-  );
-}
-
-function PlayerAvatar({ question }: { question: string }) {
-  const name = extractPlayerName(question);
-  const [idx, setIdx] = useState(0);
-  const [dead, setDead] = useState(false);
-
-  if (!name || dead) {
-    return (
-      <AvatarSquircle title={name || "Player"}>
-        <div className="text-[18px] font-black text-white/90">?</div>
-      </AvatarSquircle>
-    );
-  }
-
-  const candidates = playerImageCandidates(name);
-  const src = candidates[Math.min(idx, candidates.length - 1)];
-
-  return (
-    <AvatarSquircle title={name}>
-      <div className="relative w-full h-full">
-        <Image
-          src={src}
-          alt={name}
-          fill
-          sizes="56px"
-          style={{ objectFit: "cover" }}
-          onError={() => {
-            setIdx((p) => {
-              if (p + 1 < candidates.length) return p + 1;
-              setDead(true);
-              return p;
-            });
-          }}
-        />
-      </div>
-    </AvatarSquircle>
-  );
-}
-
-function InlineTeamLogo({
-  teamName,
-  size = 22,
-}: {
-  teamName: string;
-  size?: number;
-}) {
-  const slug = teamNameToSlug(teamName);
-  const [idx, setIdx] = useState(0);
-  const [dead, setDead] = useState(false);
-
-  const initials = (teamName || "AFL")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0]?.toUpperCase())
-    .join("");
-
-  if (!slug || dead) {
-    return (
-      <div
-        className="flex items-center justify-center font-black"
-        style={{
-          width: size,
-          height: size,
-          borderRadius: 8,
-          background: "rgba(255,255,255,0.12)",
-          color: "rgba(255,255,255,0.90)",
-          fontSize: 10,
-          lineHeight: 1,
-        }}
-        title={teamName}
-      >
-        {initials || "AFL"}
-      </div>
-    );
-  }
-
-  const candidates = logoCandidates(slug);
-  const src = candidates[Math.min(idx, candidates.length - 1)];
-
-  return (
-    <div
-      className="relative overflow-hidden"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 8,
-      }}
-      title={teamName}
-    >
-      <Image
-        src={src}
-        alt={`${teamName} logo`}
-        fill
-        sizes={`${size}px`}
-        style={{ objectFit: "contain" }}
-        onError={() => {
-          setIdx((p) => {
-            if (p + 1 < candidates.length) return p + 1;
-            setDead(true);
-            return p;
-          });
-        }}
-      />
-    </div>
-  );
-}
-
-function GamePickAvatar({ match }: { match: string }) {
-  const teams = splitMatch(match);
-  const home = teams?.home ?? "";
-  const away = teams?.away ?? "";
-
-  return (
-    <AvatarSquircle title={match}>
-      <div className="flex items-center justify-center gap-1.5 px-1">
-        <InlineTeamLogo teamName={home || "AFL"} size={22} />
-        <div className="text-[10px] font-black text-white/90 leading-none">VS</div>
-        <InlineTeamLogo teamName={away || "AFL"} size={22} />
-      </div>
-    </AvatarSquircle>
   );
 }
 
@@ -618,13 +565,12 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     setRevealedSponsor((p) => ({ ...p, [qid]: true }));
   }, []);
 
-  const silhouetteSrc = "/afl1.png";
-
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howToOpen} onClose={closeHowTo} />
 
-      <div className="w-full max-w-5xl mx-auto px-4 sm:px-6 pt-6 pb-28">
+      {/* ✅ keep desktop tighter (was looking too spread) */}
+      <div className="w-full max-w-[1100px] mx-auto px-4 sm:px-6 pt-6 pb-28">
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/picks"
@@ -653,12 +599,18 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </button>
         </div>
 
-        <div className="mt-4 rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
+        <div
+          className="mt-4 rounded-2xl border overflow-hidden"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+          }}
+        >
           <div
             className="p-5"
             style={{
               background:
-                "linear-gradient(135deg, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
+                "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
             }}
           >
             {loading ? (
@@ -668,13 +620,19 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
             ) : (
               <>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <TeamLogo teamName={headerTeams.home} size={46} />
-                    <div className="text-white/60 font-black text-[12px] w-[22px] text-center">VS</div>
-                    <TeamLogo teamName={headerTeams.away || "AFL"} size={46} />
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-white/60">{game.venue}</div>
+                    <div className="mt-1 text-[11px] text-white/70 font-semibold">
+                      {formatAedt(game.startTime)}
+                    </div>
+
+                    {/* ✅ aggressive header */}
+                    <div className="mt-2 text-[26px] sm:text-[30px] font-black text-white leading-tight italic uppercase">
+                      {game.match}
+                    </div>
                   </div>
 
-                  <div className="text-right">
+                  <div className="shrink-0 text-right">
                     {roundLabel ? (
                       <div
                         className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
@@ -687,15 +645,8 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         {roundLabel}
                       </div>
                     ) : null}
-                    <div className="mt-2 text-[11px] text-white/70 font-semibold">{formatAedt(game.startTime)}</div>
                   </div>
                 </div>
-
-                <div className="mt-3 text-[18px] sm:text-[22px] font-black text-white leading-tight italic uppercase">
-                  {game.match}
-                </div>
-
-                <div className="mt-3 text-[12px] text-white/65">{game.venue}</div>
 
                 <div className="mt-4 flex items-center gap-2 flex-wrap">
                   <span
@@ -720,6 +671,13 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                     {isLocked ? "LOCKED (auto)" : `Locks in ${msToCountdown(lockMs)}`}
                   </span>
                 </div>
+
+                {/* subtle home/away hint row (optional) */}
+                <div className="mt-4 flex items-center gap-2 text-[12px] text-white/65">
+                  <InlineTeamLogo teamName={headerTeams.home} size={18} />
+                  <span className="font-black text-white/70">vs</span>
+                  <InlineTeamLogo teamName={headerTeams.away || "AFL"} size={18} />
+                </div>
               </>
             )}
           </div>
@@ -731,182 +689,127 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </div>
         ) : null}
 
-        <div className="mt-5 space-y-3">
+        {/* ✅ tighter grid like your notes (gap-3) + 3 columns on desktop */}
+        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
+            Array.from({ length: 9 }).map((_, i) => (
               <div
                 key={i}
                 className="rounded-2xl border overflow-hidden"
                 style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
               >
-                <div className="h-[90px] bg-white/5" />
+                <div className="h-[240px] bg-white/5" />
               </div>
             ))
           ) : !game ? null : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {game.questions
-                .slice()
-                .sort((a, b) => a.quarter - b.quarter)
-                .map((q, idx) => {
-                  const pick = localPicks[q.id] ?? "none";
-                  const sponsor = !!q.isSponsorQuestion;
-                  const revealed = !!revealedSponsor[q.id];
+            game.questions
+              .slice()
+              .sort((a, b) => a.quarter - b.quarter)
+              .map((q, idx) => {
+                const pick = localPicks[q.id] ?? "none";
+                const sponsor = !!q.isSponsorQuestion;
+                const revealed = !!revealedSponsor[q.id];
 
-                  const sponsorName = (q.sponsorName || "Rebel Sport").trim();
-                  const prize = (q.sponsorPrize || "$100 Rebel Sport Gift Card").trim();
-                  const sponsorLine = `Proudly sponsored by ${sponsorName}. Get this pick correct and go in the draw to win ${prize}.`;
+                const sponsorName = (q.sponsorName || "Rebel Sport").trim();
+                const prize = (q.sponsorPrize || "$100 Rebel Sport Gift Card").trim();
 
-                  const yes = typeof q.yesPercent === "number" ? Math.max(0, Math.min(100, q.yesPercent)) : 0;
-                  const no = typeof q.noPercent === "number" ? Math.max(0, Math.min(100, q.noPercent)) : 0;
-                  const hasStats = typeof q.yesPercent === "number" || typeof q.noPercent === "number";
+                // ✅ player vs game pick detection
+                const playerName = extractPlayerName(q.question);
+                const isPlayerPick = !!playerName;
+                const isGamePick = !isPlayerPick;
 
-                  const cardStyles =
-                    revealed && sponsor
-                      ? { borderColor: "rgba(255,46,77,0.55)", background: COLORS.card }
-                      : { borderColor: "rgba(255,255,255,0.10)", background: COLORS.card };
+                const playerImg = playerName ? playerNameToFile(playerName) : null;
 
-                  const isGamePick = !extractPlayerName(q.question);
+                const yesPct = typeof q.yesPercent === "number" ? q.yesPercent : 0;
+                const noPct = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-                  return (
-                    <div key={q.id} className="rounded-2xl border overflow-hidden relative" style={cardStyles}>
-                      <div className="absolute inset-0 pointer-events-none">
-                        <div className="absolute inset-0 opacity-[0.08]">
-                          <Image src={silhouetteSrc} alt="" fill sizes="600px" style={{ objectFit: "cover" }} />
-                        </div>
-                      </div>
+                return (
+                  <div
+                    key={q.id}
+                    className="rounded-2xl border overflow-hidden relative"
+                    style={{
+                      borderColor: "rgba(255,255,255,0.10)",
+                      background: COLORS.card,
+                    }}
+                  >
+                    {/* ✅ silhouette behind (stays in box) */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      <Image
+                        src="/afl1.png"
+                        alt=""
+                        fill
+                        sizes="(max-width: 1024px) 100vw, 33vw"
+                        style={{
+                          objectFit: "cover",
+                          opacity: 0.12,
+                          filter: "grayscale(1) contrast(1.05)",
+                        }}
+                      />
+                      <div
+                        className="absolute inset-0"
+                        style={{
+                          background:
+                            "linear-gradient(180deg, rgba(13,17,23,0.55) 0%, rgba(13,17,23,0.82) 60%, rgba(13,17,23,0.92) 100%)",
+                        }}
+                      />
+                    </div>
 
-                      <div className="relative p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">
-                              Q{String(idx + 1).padStart(2, "0")} · QUARTER {q.quarter}
-                            </div>
-
-                            <div className="mt-1 text-[12px] text-white/60">
-                              Status: <span className="text-white/75">{q.status}</span>
-                            </div>
+                    <div className="relative p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-[12px] uppercase tracking-widest text-white/60 font-black">
+                            Q{String(idx + 1).padStart(2, "0")} · QUARTER {q.quarter}
                           </div>
-
-                          {pick !== "none" ? (
-                            <button
-                              type="button"
-                              onClick={() => onClear(q.id)}
-                              disabled={isLocked || (sponsor && !revealed)}
-                              className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-black"
-                              style={{
-                                borderColor: "rgba(255,255,255,0.14)",
-                                background: "rgba(255,255,255,0.04)",
-                                color: "rgba(255,255,255,0.92)",
-                                opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
-                              }}
-                              title={isLocked ? "Locked" : "Clear pick"}
-                            >
-                              ✕
-                            </button>
-                          ) : null}
-                        </div>
-
-                        {/* Avatar + label */}
-                        <div className="mt-5">
-                          {isGamePick ? <GamePickAvatar match={game.match} /> : <PlayerAvatar question={q.question} />}
-
-                          <div className="mt-2 text-center text-[11px] font-black uppercase tracking-widest text-white/45">
-                            {isGamePick ? "GAME PICK" : "PLAYER PICK"}
+                          {/* ✅ lowercase open (don’t capitalize) */}
+                          <div className="mt-1 text-[12px] text-white/55">
+                            Status: <span className="font-semibold text-white/75">{q.status}</span>
                           </div>
                         </div>
 
-                        {sponsor ? (
-                          <div
-                            className="mt-4 rounded-xl border px-3 py-2"
+                        {pick !== "none" ? (
+                          <button
+                            type="button"
+                            onClick={() => onClear(q.id)}
+                            disabled={isLocked || (sponsor && !revealed)}
+                            className="shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-black"
                             style={{
-                              borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
-                              background: revealed ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.05)",
+                              borderColor: "rgba(255,255,255,0.14)",
+                              background: "rgba(255,255,255,0.04)",
                               color: "rgba(255,255,255,0.92)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
                             }}
+                            title={isLocked ? "Locked" : "Clear pick"}
                           >
-                            <div className="text-[11px] font-black uppercase tracking-widest">
-                              Sponsor Question · {sponsorName}
-                            </div>
-                            <div className="mt-1 text-[12px] text-white/80 leading-snug">{sponsorLine}</div>
-                          </div>
+                            ✕
+                          </button>
                         ) : null}
-
-                        <div className="mt-4 text-[15px] font-black text-white leading-snug">
-                          {q.question}
-                        </div>
-
-                        {/* Bottom section */}
-                        <div
-                          className="mt-4 rounded-2xl border px-3 py-3"
-                          style={{
-                            borderColor: "rgba(0,0,0,0.08)",
-                            background: "rgba(255,255,255,0.88)",
-                            color: "rgba(0,0,0,0.85)",
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
-                              disabled={isLocked || (sponsor && !revealed)}
-                              className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
-                              style={{
-                                borderRadius: 16,
-                                borderColor: pick === "yes" ? "rgba(0,0,0,0.30)" : "rgba(0,0,0,0.12)",
-                                background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
-                                color: "rgba(0,0,0,0.82)",
-                                opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
-                              }}
-                            >
-                              YES
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
-                              disabled={isLocked || (sponsor && !revealed)}
-                              className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
-                              style={{
-                                borderRadius: 16,
-                                borderColor: pick === "no" ? "rgba(0,0,0,0.30)" : "rgba(0,0,0,0.12)",
-                                background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.72)",
-                                color: "rgba(0,0,0,0.82)",
-                                opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
-                              }}
-                            >
-                              NO
-                            </button>
-                          </div>
-
-                          {/* % labels + ultra thin bar */}
-                          {hasStats ? (
-                            <div className="mt-3">
-                              <div className="flex items-center justify-between text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.45)" }}>
-                                <div>Yes {yes}%</div>
-                                <div>No {no}%</div>
-                              </div>
-                              <div className="mt-1 h-[3px] w-full rounded-full" style={{ background: "rgba(0,0,0,0.10)" }}>
-                                <div
-                                  className="h-[3px] rounded-full"
-                                  style={{
-                                    width: `${Math.max(0, Math.min(100, yes))}%`,
-                                    background: "rgba(255,46,77,0.65)",
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
                       </div>
 
-                      {/* Sponsor reveal overlay (must cover EVERYTHING) */}
+                      {/* ✅ avatar row */}
+                      <div className="mt-5 flex items-center justify-center">
+                        {isPlayerPick ? (
+                          <PlayerAvatar name={playerName || "Player"} src={playerImg} />
+                        ) : (
+                          <GamePickAvatar match={game.match} />
+                        )}
+                      </div>
+
+                      <div className="mt-2 text-center text-[11px] uppercase tracking-widest font-black text-white/40">
+                        {isPlayerPick ? "PLAYER PICK" : "GAME PICK"}
+                      </div>
+
+                      <div className="mt-3 text-[18px] font-black text-white leading-snug">
+                        {q.question}
+                      </div>
+
+                      {/* ✅ sponsor reveal overlay MUST completely cover */}
                       {sponsor && !revealed ? (
                         <button
                           type="button"
                           onClick={() => revealSponsor(q.id)}
-                          className="absolute inset-0 z-[20] flex items-center justify-center p-4"
+                          className="absolute inset-0 flex items-center justify-center p-4"
                           style={{
-                            background: "rgba(255,255,255,0.95)",
+                            background: "rgba(255,255,255,0.96)",
                             color: "rgba(0,0,0,0.92)",
                             cursor: "pointer",
                           }}
@@ -916,7 +819,7 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                             className="w-full max-w-md rounded-2xl border px-5 py-4 text-center"
                             style={{
                               borderColor: "rgba(0,0,0,0.10)",
-                              background: "rgba(255,255,255,0.86)",
+                              background: "rgba(255,255,255,0.85)",
                               boxShadow: "0 18px 55px rgba(0,0,0,0.18)",
                             }}
                           >
@@ -944,16 +847,61 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                           </div>
                         </button>
                       ) : null}
+
+                      {/* ✅ buttons live on light panel (but no “bottom black section”) */}
+                      <div
+                        className="mt-4 rounded-2xl border p-3"
+                        style={{
+                          borderColor: "rgba(0,0,0,0.06)",
+                          background: "rgba(255,255,255,0.92)",
+                        }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
+                            disabled={isLocked || (sponsor && !revealed)}
+                            className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
+                            style={{
+                              borderColor: pick === "yes" ? "rgba(255,46,77,0.55)" : "rgba(0,0,0,0.10)",
+                              background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.70)",
+                              color: "rgba(0,0,0,0.80)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                            }}
+                          >
+                            YES
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
+                            disabled={isLocked || (sponsor && !revealed)}
+                            className="flex-1 rounded-2xl border px-4 py-3 text-[13px] font-black"
+                            style={{
+                              borderColor: pick === "no" ? "rgba(255,46,77,0.55)" : "rgba(0,0,0,0.10)",
+                              background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.70)",
+                              color: "rgba(0,0,0,0.80)",
+                              opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                            }}
+                          >
+                            NO
+                          </button>
+                        </div>
+
+                        {/* ✅ thin percent bar + labels */}
+                        <ThinPercentBar yesPct={yesPct} noPct={noPct} />
+                      </div>
                     </div>
-                  );
-                })}
-            </div>
+                  </div>
+                );
+              })
           )}
         </div>
       </div>
 
+      {/* bottom sticky bar */}
       <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
-        <div className="mx-auto max-w-5xl rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+        <div className="mx-auto max-w-[1100px] rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
           <div
             className="px-4 py-3 flex items-center justify-between gap-3"
             style={{
