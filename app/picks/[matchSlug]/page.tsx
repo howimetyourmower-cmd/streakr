@@ -218,7 +218,20 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-function CardSilhouetteBg({ opacity = 0.12 }: { opacity?: number }) {
+/**
+ * ✅ GLOBAL SILHOUETTE BG used for:
+ * - pick boxes (question cards)
+ * - sponsor reveal cover
+ *
+ * You said: "I changed the silhouette to 1" -> use /afl1.png.
+ */
+function CardSilhouetteBg({
+  opacity = 0.10,
+  scale = 1.04,
+}: {
+  opacity?: number;
+  scale?: number;
+}) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
@@ -226,11 +239,11 @@ function CardSilhouetteBg({ opacity = 0.12 }: { opacity?: number }) {
           src="/afl1.png"
           alt=""
           fill
-          sizes="(max-width: 1024px) 100vw, 1024px"
+          sizes="(max-width: 1200px) 100vw, 1200px"
           style={{
             objectFit: "cover",
-            filter: "grayscale(1) brightness(0.35) contrast(1.25)",
-            transform: "scale(1.04)",
+            filter: "grayscale(1) brightness(0.32) contrast(1.25)",
+            transform: `scale(${scale})`,
           }}
           priority={false}
         />
@@ -239,7 +252,7 @@ function CardSilhouetteBg({ opacity = 0.12 }: { opacity?: number }) {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(180deg, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0.74) 60%, rgba(0,0,0,0.90) 100%)",
+            "linear-gradient(180deg, rgba(0,0,0,0.36) 0%, rgba(0,0,0,0.72) 60%, rgba(0,0,0,0.90) 100%)",
         }}
       />
     </div>
@@ -289,7 +302,7 @@ function playerImageCandidates(playerName: string): string[] {
 
 function PlayerImage({
   playerName,
-  size = 56,
+  size = 52,
   teamFallbackLeft,
   teamFallbackRight,
 }: {
@@ -307,9 +320,9 @@ function PlayerImage({
   if (dead) {
     return (
       <div className="flex items-center justify-center gap-3">
-        <TeamLogo teamName={teamFallbackLeft} size={40} />
+        <TeamLogo teamName={teamFallbackLeft} size={38} />
         <div className="text-white/70 font-black text-[12px]">vs</div>
-        <TeamLogo teamName={teamFallbackRight || "AFL"} size={40} />
+        <TeamLogo teamName={teamFallbackRight || "AFL"} size={38} />
       </div>
     );
   }
@@ -593,6 +606,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
     });
   }, [game]);
 
+  // ✅ Desktop looks “too spread out” fix:
+  // - cap the content width to 1200 (max-w-6xl) AND
+  // - cap the GRID width slightly (max-w-[1200px]) so it doesn’t stretch across huge monitors
+  // - use denser gaps on desktop
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howToOpen} onClose={closeHowTo} />
@@ -701,10 +718,10 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
           </div>
         ) : null}
 
-        {/* ✅ SMALLER BOXES (roughly ~1/2): reduced padding + minHeight + media */}
-        <div className="mt-5">
+        {/* ✅ DENSER DESKTOP + centered grid wrapper */}
+        <div className="mt-5 mx-auto w-full max-w-[1200px]">
           {loading ? (
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 lg:gap-3">
               {Array.from({ length: 9 }).map((_, i) => (
                 <div
                   key={i}
@@ -720,7 +737,7 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
               ))}
             </div>
           ) : !game ? null : (
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 lg:gap-3">
               {sortedQuestions.map((q, i) => {
                 const pick = localPicks[q.id] ?? "none";
                 const sponsor = !!q.isSponsorQuestion;
@@ -750,8 +767,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       minHeight: 190,
                     }}
                   >
+                    {/* ✅ Same silhouette treatment as cards (now using afl1.png) */}
                     <div className="absolute inset-0">
-                      <CardSilhouetteBg opacity={0.10} />
+                      <CardSilhouetteBg opacity={0.10} scale={1.06} />
                     </div>
 
                     <div className="relative z-10 p-3 sm:p-4 flex flex-col h-full">
@@ -800,7 +818,6 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         </div>
                       ) : null}
 
-                      {/* media */}
                       <div className="mt-3 flex items-center justify-center">
                         {isPlayerQuestion ? (
                           <div className="flex flex-col items-center gap-1.5">
@@ -815,9 +832,9 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                         ) : (
                           <div className="flex flex-col items-center gap-1.5">
                             <div className="flex items-center justify-center gap-2.5">
-                              <TeamLogo teamName={headerTeams.home} size={40} />
+                              <TeamLogo teamName={headerTeams.home} size={38} />
                               <div className="text-white/70 font-black text-[11px]">vs</div>
-                              <TeamLogo teamName={headerTeams.away || "AFL"} size={40} />
+                              <TeamLogo teamName={headerTeams.away || "AFL"} size={38} />
                             </div>
                             <div className="text-[10px] text-white/70 font-semibold">Match pick</div>
                           </div>
@@ -870,21 +887,25 @@ export default function MatchPicksPage({ params }: { params: { matchSlug: string
                       </div>
                     </div>
 
-                    {/* ✅ Sponsor reveal cover COMPLETELY covers card (no bleed) */}
+                    {/* ✅ Sponsor reveal cover uses SAME silhouette style (like slug cards) */}
                     {sponsor && !revealed ? (
                       <button
                         type="button"
                         onClick={() => revealSponsor(q.id)}
                         className="absolute inset-0 z-[40] flex items-center justify-center p-3"
                         style={{
-                          background: "rgba(10,10,10,0.98)",
+                          background: "rgba(0,0,0,0.92)",
                           color: "rgba(255,255,255,0.94)",
                           cursor: "pointer",
                         }}
                         aria-label="Reveal sponsored question"
                       >
+                        <div className="absolute inset-0">
+                          <CardSilhouetteBg opacity={0.12} scale={1.08} />
+                        </div>
+
                         <div
-                          className="w-full h-full rounded-2xl border p-4 flex flex-col items-center justify-center text-center"
+                          className="relative z-10 w-full h-full rounded-2xl border p-4 flex flex-col items-center justify-center text-center"
                           style={{
                             borderColor: "rgba(255,255,255,0.14)",
                             background:
