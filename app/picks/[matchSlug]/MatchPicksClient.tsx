@@ -1,10 +1,10 @@
 "use client";
 
+// /app/picks/[matchSlug]/MatchPicksClient.tsx
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
@@ -13,453 +13,460 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: any;
+  status: any; // API can send Open/Final/etc
   match?: string;
   venue?: string;
   startTime?: string;
 
-  // optional stats
+  userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
+  commentCount?: number;
+
+  isSponsorQuestion?: boolean;
+  sponsorName?: string;
+  sponsorBlurb?: string;
 };
 
 type ApiGame = {
   id: string;
-  match: string;
+  match: string; // "Sydney vs Carlton"
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
 };
 
 type PicksApiResponse = {
-  games?: ApiGame[];
+  games: ApiGame[];
   roundNumber?: number;
 };
 
-function safeLower(x: any) {
-  return String(x ?? "").trim().toLowerCase();
+function slugifyMatch(match: string) {
+  return match
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-");
 }
 
-function decodeSlug(slug: string) {
-  try {
-    return decodeURIComponent(slug);
-  } catch {
-    return slug;
-  }
+function normaliseTeamKey(team: string) {
+  // maps "St Kilda" -> "stkilda", "GWS" -> "gws", "North Melbourne" -> "northmelbourne"
+  return team
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]/g, "");
 }
 
-function titleFromSlug(slug: string) {
-  const s = decodeSlug(slug).replace(/-/g, " ").trim();
-  return s.toUpperCase();
-}
+function extractPlayerName(question: string) {
+  // tries to pull "Charlie Curnow" from: "Will Charlie Curnow (Syd) kick..."
+  const q = question.trim();
 
-function matchNameFromSlug(slug: string) {
-  const s = decodeSlug(slug).replace(/-/g, " ").trim();
-  return s
-    .split(" ")
-    .map((w) =>
-      w.toLowerCase() === "vs" ? "vs" : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
-    )
-    .join(" ");
-}
+  const willIdx = q.toLowerCase().startsWith("will ") ? 5 : -1;
+  if (willIdx === -1) return null;
 
-async function fetchJson(url: string) {
-  const res = await fetch(url, { cache: "no-store" });
-  const text = await res.text();
-  let json: any = null;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    // ignore
-  }
-  return { ok: res.ok, status: res.status, text, json };
-}
+  // stop at " (" first if present
+  const parenIdx = q.indexOf(" (", willIdx);
+  const stopIdx = parenIdx !== -1 ? parenIdx : q.length;
 
-/** Extract "Charlie Curnow" from "Will Charlie Curnow (Syd) ..." */
-function extractPlayerName(q: string): string | null {
-  const m = q.match(/^Will\s+(.+?)\s*\(/i);
-  if (!m) return null;
-  const name = m[1].trim();
-  if (!name || name.length < 3) return null;
-  // basic guard: if it looks like a non-person question
-  if (/\d/.test(name)) return null;
+  const name = q.slice(willIdx, stopIdx).trim();
+
+  // if it looks like a non-player question, bail
+  if (!name) return null;
+  if (name.length > 40) return null;
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
+
+  // must contain at least a space (first + last) to be a "player"
+  if (!name.includes(" ")) return null;
+
   return name;
 }
 
-function slugifyName(name: string) {
-  return name
-    .toLowerCase()
-    .replace(/[’']/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+function playerSlug(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
 }
 
-/** "Sydney vs Carlton" -> { home: "Sydney", away: "Carlton" } */
-function parseTeamsFromMatch(match: string): { home: string; away: string } | null {
-  const parts = match.split(/\s+vs\s+/i);
-  if (parts.length !== 2) return null;
-  return { home: parts[0].trim(), away: parts[1].trim() };
+function safeStatus(s: any): QuestionStatus {
+  const v = String(s || "")
+    .toLowerCase()
+    .trim();
+  if (v === "open") return "open";
+  if (v === "final") return "final";
+  if (v === "pending") return "pending";
+  if (v === "void") return "void";
+  return "open";
 }
 
-function teamLogoPath(team: string) {
-  // expects /public/teams/<slug>.png (or jpg). Adjust if your folder differs.
-  const s = team
-    .toLowerCase()
-    .replace(/[’']/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-  return `/teams/${s}.png`;
+function formatQuarterLabel(q: number) {
+  return `QUARTER ${q}`;
+}
+
+function parseTeams(match: string) {
+  const parts = match.split(" vs ");
+  if (parts.length === 2) {
+    return { home: parts[0].trim(), away: parts[1].trim() };
+  }
+  return { home: match.trim(), away: "" };
+}
+
+/**
+ * Renders an image that tries:
+ * 1) /players/<Exact Name>.jpg  (supports your "Charlie Curnow.jpg" style)
+ * 2) /players/<slug>.jpg
+ * 3) fallback block
+ */
+function PlayerAvatar({ name }: { name: string }) {
+  const exact = `/players/${encodeURIComponent(name)}.jpg`;
+  const slug = `/players/${playerSlug(name)}.jpg`;
+
+  const [src, setSrc] = useState(exact);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px] shadow-sm">
+        <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f]">
+          {/* use plain img to allow easy fallback swapping */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={name}
+            className="h-full w-full object-cover"
+            onError={() => {
+              if (src === exact) setSrc(slug);
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">
+        PLAYER PICK
+      </div>
+    </div>
+  );
+}
+
+function TeamLogoSquircle({
+  teamKey,
+  alt,
+}: {
+  teamKey: string;
+  alt: string;
+}) {
+  // IMPORTANT: your files are in /public/aflteams like "sydney-logo.jpg"
+  const src = `/aflteams/${teamKey}-logo.jpg`;
+
+  return (
+    <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px] shadow-sm">
+      <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f] flex items-center justify-center">
+        <Image
+          src={src}
+          alt={alt}
+          width={44}
+          height={44}
+          className="object-contain"
+          priority={false}
+        />
+      </div>
+    </div>
+  );
+}
+
+function GamePickHeader({ match }: { match: string }) {
+  const { home, away } = parseTeams(match);
+  const homeKey = normaliseTeamKey(home);
+  const awayKey = normaliseTeamKey(away);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="flex items-center justify-center gap-3">
+        <TeamLogoSquircle teamKey={homeKey} alt={home} />
+        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
+        <TeamLogoSquircle teamKey={awayKey} alt={away} />
+      </div>
+
+      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">
+        GAME PICK
+      </div>
+    </div>
+  );
+}
+
+function PercentBar({ yes, no }: { yes: number; no: number }) {
+  const yesPct = Math.max(0, Math.min(100, Math.round(yes)));
+  const noPct = Math.max(0, Math.min(100, Math.round(no)));
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-[11px] text-black/45">
+        <span>Yes {yesPct}%</span>
+        <span>No {noPct}%</span>
+      </div>
+      <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
+        <div className="h-full" style={{ width: `${yesPct}%`, background: "#d11b2f" }} />
+      </div>
+    </div>
+  );
 }
 
 export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<PicksApiResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  // image fallback maps (so if png fails we try jpg/webp)
-  const [brokenPlayers, setBrokenPlayers] = useState<Record<string, boolean>>({});
-  const [brokenTeams, setBrokenTeams] = useState<Record<string, boolean>>({});
-
-  const headerTitle = useMemo(() => titleFromSlug(matchSlug), [matchSlug]);
-  const matchName = useMemo(() => matchNameFromSlug(matchSlug), [matchSlug]);
+  const [err, setErr] = useState<string | null>(null);
+  const [game, setGame] = useState<ApiGame | null>(null);
 
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
 
     async function run() {
       setLoading(true);
-      setError(null);
-      setData(null);
+      setErr(null);
 
-      const candidates = [
-        `/api/picks?matchSlug=${encodeURIComponent(matchSlug)}`,
-        `/api/picks?slug=${encodeURIComponent(matchSlug)}`,
-        `/api/picks?match=${encodeURIComponent(matchName)}`,
-      ];
+      try {
+        // Use the SAME endpoint as your /picks list page
+        const res = await fetch("/api/picks", { cache: "no-store" });
+        if (!res.ok) throw new Error(`API error (${res.status})`);
 
-      for (const url of candidates) {
-        try {
-          const out = await fetchJson(url);
-          if (out.ok && out.json && typeof out.json === "object") {
-            const games = Array.isArray(out.json.games) ? out.json.games : [];
-            if (games.length > 0) {
-              if (!mounted) return;
-              setData(out.json);
-              setLoading(false);
-              return;
-            }
-          }
-        } catch {
-          // ignore
-        }
+        const data = (await res.json()) as PicksApiResponse;
+
+        const found = (data.games || []).find((g) => slugifyMatch(g.match) === matchSlug);
+        if (!found) throw new Error("Match not found for this slug");
+
+        if (!alive) return;
+        setGame(found);
+      } catch (e: any) {
+        if (!alive) return;
+        setErr(e?.message || "Failed to load picks");
+      } finally {
+        if (!alive) return;
+        setLoading(false);
       }
-
-      if (!mounted) return;
-      setError("No games/questions returned from API for this match.");
-      setLoading(false);
     }
 
     run();
     return () => {
-      mounted = false;
+      alive = false;
     };
-  }, [matchSlug, matchName, user?.uid]);
-
-  const game: ApiGame | null = useMemo(() => {
-    const g = data?.games;
-    return Array.isArray(g) && g.length ? g[0] : null;
-  }, [data]);
-
-  const teams = useMemo(() => {
-    const m = game?.match ?? matchName;
-    return parseTeamsFromMatch(m);
-  }, [game?.match, matchName]);
+  }, [matchSlug]);
 
   const questions = useMemo(() => {
-    const qs = game?.questions ?? [];
-    return qs
-      .map((q) => ({
-        ...q,
-        status: (safeLower(q.status) as QuestionStatus) || "open",
-        quarter: Number(q.quarter || 0),
-      }))
-      .sort((a, b) => (a.quarter - b.quarter) || a.id.localeCompare(b.id));
+    const qs = game?.questions || [];
+    // ensure consistent ordering
+    return [...qs].sort((a, b) => (a.quarter - b.quarter) || a.id.localeCompare(b.id));
   }, [game]);
 
-  // placeholder until you wire real local picks back in
-  const picksSelected = 0;
+  if (loading) {
+    return (
+      <div className="min-h-[70vh] bg-[#0d1117] text-white px-4 py-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="h-8 w-72 rounded bg-white/10 animate-pulse" />
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-56 rounded-2xl bg-white/5 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (err || !game) {
+    return (
+      <div className="min-h-[70vh] bg-[#0d1117] text-white px-4 py-10">
+        <div className="max-w-3xl mx-auto rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="text-lg font-black tracking-wide">Couldn’t load match</div>
+          <div className="mt-2 text-white/70 text-sm">{err || "Unknown error"}</div>
+          <div className="mt-4 text-white/40 text-xs">
+            Slug: <span className="font-mono">{matchSlug}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const { home, away } = parseTeams(game.match);
+  const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-white">
-      <div className="mx-auto w-full max-w-6xl px-4 pt-10 pb-24">
-        <div className="mb-6">
-          <h1 className="text-4xl font-black tracking-wide italic uppercase">
-            {headerTitle}
-          </h1>
+      {/* top sponsor strip placeholder */}
+      <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
+        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">
+          OFFICIAL PARTNER
+        </div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">
+          Proudly supporting TORPIE all season long
+        </div>
+      </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-white/70">
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Picks selected:{" "}
-              <span className="text-white/90 font-semibold">{picksSelected} / 12</span>
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* header */}
+        <div className="flex flex-col gap-3">
+          <div className="text-4xl md:text-5xl font-black italic tracking-wide">
+            {matchTitle}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
+            <div className="rounded-full border border-white/15 px-3 py-1">
+              Picks selected: <span className="font-semibold text-white">{0}</span> / 12
             </div>
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              Locks: <span className="text-white/90 font-semibold">—</span>
+            <div className="rounded-full border border-white/15 px-3 py-1">
+              Locks: <span className="text-white/60">—</span>
             </div>
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+            <div className="rounded-full border border-white/15 px-3 py-1">
               Auto-locks at bounce
             </div>
           </div>
         </div>
 
-        {loading && (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-white/80">
-            Loading picks…
-          </div>
-        )}
+        {/* grid */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {questions.map((q, idx) => {
+            const status = safeStatus(q.status);
+            const qNum = String(idx + 1).padStart(2, "0");
 
-        {!loading && error && (
-          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-6">
-            <div className="text-lg font-semibold">No picks loaded</div>
-            <div className="mt-1 text-sm text-white/75">{error}</div>
-          </div>
-        )}
+            const playerName = extractPlayerName(q.question);
+            const isPlayerPick = !!playerName && !q.isSponsorQuestion;
+            const isGamePick = !playerName && !q.isSponsorQuestion;
 
-        {!loading && !error && (
-          <>
-            {/* tighter grid = less boring */}
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {questions.map((q, idx) => {
-                const qNo = String(idx + 1).padStart(2, "0");
-                const quarterLabel = q.quarter ? `QUARTER ${q.quarter}` : "GAME";
-                const status = safeLower(q.status); // keep lowercase
+            const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
+            const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-                const playerName = extractPlayerName(q.question);
-                const isPlayerPick = !!playerName;
-                const isGamePick = !isPlayerPick;
+            return (
+              <div
+                key={q.id}
+                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
+              >
+                {/* silhouette locked INSIDE the card */}
+                <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
+                  <Image
+                    src="/afl1.png"
+                    alt=""
+                    fill
+                    className="object-cover object-center"
+                    priority={false}
+                  />
+                </div>
 
-                // Player image path attempts
-                const playerSlug = playerName ? slugifyName(playerName) : null;
-                const playerBase = playerSlug ? `/players/${playerSlug}` : null;
-
-                // Team logos (game pick)
-                const homeLogo = teams?.home ? teamLogoPath(teams.home) : null;
-                const awayLogo = teams?.away ? teamLogoPath(teams.away) : null;
-
-                const yesPct =
-                  typeof q.yesPercent === "number"
-                    ? Math.max(0, Math.min(100, q.yesPercent))
-                    : 0;
-                const noPct =
-                  typeof q.noPercent === "number"
-                    ? Math.max(0, Math.min(100, q.noPercent))
-                    : 0;
-
-                return (
-                  <div
-                    key={q.id}
-                    className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
-                  >
-                    {/* silhouette stays IN the card */}
-                    <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
-                      <Image
-                        src="/afl1.png"
-                        alt=""
-                        fill
-                        className="object-cover object-center"
-                        priority={false}
-                      />
+                {/* top row */}
+                <div className="relative flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[15px] font-black tracking-wide">
+                      Q{qNum} - {formatQuarterLabel(q.quarter)}
                     </div>
+                    <div className="mt-1 text-[12px] text-white/60">
+                      Status: <span className="text-white/60">{status}</span>
+                    </div>
+                  </div>
 
-                    <div className="relative">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-black tracking-wide">
-                            {`Q${qNo} - ${quarterLabel}`}
-                          </div>
-                          <div className="mt-1 text-xs text-white/70">
-                            Status: <span className="text-white/70">{status}</span>
-                          </div>
+                  {/* clear button placeholder */}
+                  <button
+                    type="button"
+                    className="h-9 w-9 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 flex items-center justify-center"
+                    aria-label="Clear pick"
+                    onClick={() => {
+                      // TODO: wire to clear
+                    }}
+                  >
+                    <span className="text-white/80 font-black">×</span>
+                  </button>
+                </div>
+
+                {/* icon header */}
+                <div className="relative mt-4 flex justify-center">
+                  {q.isSponsorQuestion ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px]">
+                        <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f] flex items-center justify-center">
+                          <span className="text-white font-black">?</span>
                         </div>
+                      </div>
+                      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">
+                        SPONSOR QUESTION
+                      </div>
+                    </div>
+                  ) : isPlayerPick ? (
+                    <PlayerAvatar name={playerName!} />
+                  ) : (
+                    <GamePickHeader match={game.match} />
+                  )}
+                </div>
 
+                {/* question */}
+                <div className="relative mt-4 text-[18px] leading-snug font-extrabold text-white">
+                  {q.question}
+                </div>
+
+                {/* bottom answer panel (light) */}
+                <div className="relative mt-4 rounded-2xl bg-[#f3efe6] p-4">
+                  {/* sponsor reveal (covers everything) */}
+                  {q.isSponsorQuestion ? (
+                    <div className="text-center">
+                      <div className="text-[14px] font-bold text-black/80">
+                        {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                      </div>
+                      <button
+                        type="button"
+                        className="mt-3 inline-flex items-center justify-center rounded-full border border-black/15 bg-[#d6a6b8] px-5 py-2 text-sm font-extrabold text-black/85"
+                        onClick={() => {
+                          // TODO: reveal flow
+                        }}
+                      >
+                        Tap to reveal
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      {/* YES/NO buttons */}
+                      <div className="grid grid-cols-2 gap-4">
                         <button
                           type="button"
-                          className="h-9 w-9 rounded-full border border-white/10 bg-white/5 text-white/70 hover:bg-white/10"
-                          title="Clear pick"
-                          onClick={() => {}}
+                          className="h-12 rounded-2xl border border-black/15 bg-white text-black/80 font-extrabold tracking-wide hover:bg-black/[0.03]"
+                          onClick={() => {
+                            // TODO: pick YES
+                          }}
                         >
-                          ×
+                          YES
+                        </button>
+                        <button
+                          type="button"
+                          className="h-12 rounded-2xl border border-black/15 bg-white text-black/80 font-extrabold tracking-wide hover:bg-black/[0.03]"
+                          onClick={() => {
+                            // TODO: pick NO
+                          }}
+                        >
+                          NO
                         </button>
                       </div>
 
-                      {/* Avatar / Logos block */}
-                      <div className="mt-4 flex flex-col items-center">
-                        {isPlayerPick ? (
-                          <>
-                            {/* squircle avatar */}
-                            <div className="relative h-14 w-14 overflow-hidden rounded-[18px] bg-[#d94b4b] shadow-sm">
-                              {/* try jpg first, then png, then webp by swapping src on error */}
-                              {!playerBase ? null : (
-                                <>
-                                  {!brokenPlayers[`${playerBase}.jpg`] ? (
-                                    <Image
-                                      src={`${playerBase}.jpg`}
-                                      alt={playerName ?? "Player"}
-                                      fill
-                                      className="object-cover"
-                                      onError={() =>
-                                        setBrokenPlayers((p) => ({
-                                          ...p,
-                                          [`${playerBase}.jpg`]: true,
-                                        }))
-                                      }
-                                    />
-                                  ) : !brokenPlayers[`${playerBase}.png`] ? (
-                                    <Image
-                                      src={`${playerBase}.png`}
-                                      alt={playerName ?? "Player"}
-                                      fill
-                                      className="object-cover"
-                                      onError={() =>
-                                        setBrokenPlayers((p) => ({
-                                          ...p,
-                                          [`${playerBase}.png`]: true,
-                                        }))
-                                      }
-                                    />
-                                  ) : !brokenPlayers[`${playerBase}.webp`] ? (
-                                    <Image
-                                      src={`${playerBase}.webp`}
-                                      alt={playerName ?? "Player"}
-                                      fill
-                                      className="object-cover"
-                                      onError={() =>
-                                        setBrokenPlayers((p) => ({
-                                          ...p,
-                                          [`${playerBase}.webp`]: true,
-                                        }))
-                                      }
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-white/70 text-xs font-semibold">
-                                      ?
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                            </div>
-
-                            <div className="mt-2 text-[11px] font-semibold tracking-widest text-white/45 uppercase">
-                              Player pick
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            {/* GAME PICK: two squircles + VS */}
-                            <div className="flex items-center gap-2">
-                              <div className="relative h-14 w-14 overflow-hidden rounded-[18px] bg-white/5 border border-white/10">
-                                {homeLogo && !brokenTeams[homeLogo] ? (
-                                  <Image
-                                    src={homeLogo}
-                                    alt={teams?.home ?? "Home"}
-                                    fill
-                                    className="object-contain p-2"
-                                    onError={() =>
-                                      setBrokenTeams((p) => ({ ...p, [homeLogo]: true }))
-                                    }
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-white/40 text-xs font-semibold">
-                                    {teams?.home?.slice(0, 2).toUpperCase() ?? "H"}
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="text-xs font-black tracking-widest text-white/50">
-                                VS
-                              </div>
-
-                              <div className="relative h-14 w-14 overflow-hidden rounded-[18px] bg-white/5 border border-white/10">
-                                {awayLogo && !brokenTeams[awayLogo] ? (
-                                  <Image
-                                    src={awayLogo}
-                                    alt={teams?.away ?? "Away"}
-                                    fill
-                                    className="object-contain p-2"
-                                    onError={() =>
-                                      setBrokenTeams((p) => ({ ...p, [awayLogo]: true }))
-                                    }
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-white/40 text-xs font-semibold">
-                                    {teams?.away?.slice(0, 2).toUpperCase() ?? "A"}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="mt-2 text-[11px] font-semibold tracking-widest text-white/45 uppercase">
-                              Game pick
-                            </div>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Question */}
-                      <div className="mt-3 text-base font-semibold text-white/90">
-                        {q.question}
-                      </div>
-
-                      {/* bottom light panel */}
-                      <div className="mt-4 rounded-2xl bg-[#f2efe9] p-3 text-[#0d1117]">
-                        <div className="grid grid-cols-2 gap-3">
-                          <button className="h-12 rounded-2xl border border-black/15 bg-white/70 font-semibold">
-                            YES
-                          </button>
-                          <button className="h-12 rounded-2xl border border-black/15 bg-white/70 font-semibold">
-                            NO
-                          </button>
-                        </div>
-
-                        {/* % labels + thin bar */}
-                        <div className="mt-3">
-                          <div className="flex items-center justify-between text-xs text-black/50">
-                            <span>Yes {yesPct}%</span>
-                            <span>No {noPct}%</span>
-                          </div>
-                          <div className="mt-2 h-[3px] w-full rounded-full bg-black/10 overflow-hidden">
-                            <div
-                              className="h-[3px] rounded-full bg-[#e85b7a]"
-                              style={{ width: `${yesPct}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* footer */}
-            <div className="fixed inset-x-0 bottom-0 border-t border-white/10 bg-[#0d1117]/90 backdrop-blur">
-              <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 text-sm text-white/75">
-                <div>Picks selected: {picksSelected} / 12</div>
-                <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-                  AUTO-LOCK
+                      <PercentBar yes={yes} no={no} />
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
-          </>
-        )}
-
-        <div className="mt-8">
-          <Link href="/picks" className="text-sm text-white/70 underline">
-            ← Back to Picks
-          </Link>
+            );
+          })}
         </div>
+
+        {/* bottom bar */}
+        <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-[#0d1117]/90 backdrop-blur">
+          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
+            <div className="rounded-full border border-white/15 px-3 py-1">
+              Picks selected: <span className="font-semibold text-white">{0}</span> / 12
+            </div>
+            <button
+              type="button"
+              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+            >
+              AUTO-LOCK
+            </button>
+          </div>
+        </div>
+
+        {/* spacer so content isn't hidden behind bottom bar */}
+        <div className="h-16" />
       </div>
     </div>
   );
 }
+
