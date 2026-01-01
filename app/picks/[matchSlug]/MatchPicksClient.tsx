@@ -6,10 +6,13 @@ export const dynamic = "force-dynamic";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type PickOutcome = "yes" | "no";
 type LocalPick = PickOutcome | "none";
+type QuestionOutcome = "yes" | "no" | "void";
 
 type ApiQuestion = {
   id: string;
@@ -27,13 +30,18 @@ type ApiQuestion = {
   commentCount?: number;
 
   isSponsorQuestion?: boolean;
-  sponsorName?: string; // e.g. "REBEL SPORT"
+  sponsorName?: string;
   sponsorBlurb?: string;
+
+  // ✅ comes from /api/picks (your route already returns these)
+  correctOutcome?: QuestionOutcome;
+  outcome?: QuestionOutcome;
+  correctPick?: boolean | null;
 };
 
 type ApiGame = {
   id: string;
-  match: string; // "Sydney vs Carlton"
+  match: string;
   venue: string;
   startTime: string;
   questions: ApiQuestion[];
@@ -54,14 +62,10 @@ function slugifyMatch(match: string) {
 }
 
 function normaliseTeamKey(team: string) {
-  return team
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]/g, "");
+  return team.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
 }
 
 function extractPlayerName(question: string) {
-  // "Will Errol Gulden (Syd) have..." => "Errol Gulden"
   const q = question.trim();
   if (!q.toLowerCase().startsWith("will ")) return null;
 
@@ -73,21 +77,14 @@ function extractPlayerName(question: string) {
   if (!name) return null;
   if (!name.includes(" ")) return null;
 
-  if (
-    /\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(
-      name
-    )
-  )
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name))
     return null;
 
   return name;
 }
 
 function playerSlug(name: string) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-+|-+$)/g, "");
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
 }
 
 function safeStatus(s: any): QuestionStatus {
@@ -105,9 +102,7 @@ function formatQuarterLabel(q: number) {
 
 function parseTeams(match: string) {
   const parts = match.split(" vs ");
-  if (parts.length === 2) {
-    return { home: parts[0].trim(), away: parts[1].trim() };
-  }
+  if (parts.length === 2) return { home: parts[0].trim(), away: parts[1].trim() };
   return { home: match.trim(), away: "" };
 }
 
@@ -140,9 +135,8 @@ function PlayerAvatar({ name }: { name: string }) {
 }
 
 function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
-  // ✅ your folder is /public/afllogos (per screenshots)
   const primary = `/afllogos/${teamKey}-logo.jpg`;
-  const fallback = `/aflteams/${teamKey}-logo.jpg`; // just in case you still have older path
+  const fallback = `/aflteams/${teamKey}-logo.jpg`;
   const [src, setSrc] = useState(primary);
 
   return (
@@ -172,9 +166,7 @@ function GamePickHeader({ match }: { match: string }) {
     <div className="flex flex-col items-center gap-2">
       <div className="flex items-center justify-center gap-3">
         <TeamLogoSquircle teamKey={homeKey} alt={home} />
-        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">
-          VS
-        </div>
+        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
         <TeamLogoSquircle teamKey={awayKey} alt={away} />
       </div>
 
@@ -196,12 +188,64 @@ function PercentBar({ yes, no }: { yes: number; no: number }) {
         <span>No {noPct}%</span>
       </div>
       <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
-        <div
-          className="h-full"
-          style={{ width: `${yesPct}%`, background: "#d11b2f" }}
-        />
+        <div className="h-full" style={{ width: `${yesPct}%`, background: "#d11b2f" }} />
       </div>
     </div>
+  );
+}
+
+function ResultPill({
+  status,
+  selected,
+  correctPick,
+  outcome,
+}: {
+  status: QuestionStatus;
+  selected: LocalPick;
+  correctPick: boolean | null | undefined;
+  outcome: QuestionOutcome | undefined;
+}) {
+  const isDone = status === "final" || status === "void";
+
+  if (!isDone) return null;
+
+  const base =
+    "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.14em]";
+
+  if (status === "void" || outcome === "void") {
+    return (
+      <span className={`${base} border-white/15 bg-white/5 text-white/70`}>
+        VOID
+      </span>
+    );
+  }
+
+  if (selected === "none") {
+    return (
+      <span className={`${base} border-white/15 bg-white/5 text-white/70`}>
+        NO PICK
+      </span>
+    );
+  }
+
+  if (correctPick === true) {
+    return (
+      <span className={`${base} border-emerald-400/30 bg-emerald-400/10 text-emerald-200`}>
+        ✅ CORRECT
+      </span>
+    );
+  }
+
+  if (correctPick === false) {
+    return (
+      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>
+        ❌ WRONG
+      </span>
+    );
+  }
+
+  return (
+    <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>
   );
 }
 
@@ -212,19 +256,17 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   const [err, setErr] = useState<string | null>(null);
   const [game, setGame] = useState<ApiGame | null>(null);
 
-  // sponsor reveal state per question
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-
-  // ✅ local pick state (YES/NO working)
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
 
   const picksStorageKey = useMemo(() => {
     const uid = user?.uid || "anon";
     return `torpie:picks:${uid}:${matchSlug}`;
   }, [user?.uid, matchSlug]);
 
+  // localStorage (anon/offline fallback)
   useEffect(() => {
-    // load saved picks
     try {
       const raw = localStorage.getItem(picksStorageKey);
       if (!raw) return;
@@ -236,7 +278,6 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   }, [picksStorageKey]);
 
   useEffect(() => {
-    // persist picks
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
     } catch {
@@ -244,27 +285,35 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
     }
   }, [picks, picksStorageKey]);
 
-  useEffect(() => {
-    let alive = true;
+  async function fetchMatch() {
+    setLoading(true);
+    setErr(null);
 
-    async function run() {
-      setLoading(true);
-      setErr(null);
+    try {
+      const headers: Record<string, string> = {};
+      if (user) {
+        const token = await user.getIdToken();
+        headers.Authorization = `Bearer ${token}`;
+      }
 
-      try {
-        const res = await fetch("/api/picks", { cache: "no-store" });
-        if (!res.ok) throw new Error(`API error (${res.status})`);
+      const res = await fetch("/api/picks", { cache: "no-store", headers });
+      if (!res.ok) throw new Error(`API error (${res.status})`);
 
-        const data = (await res.json()) as PicksApiResponse;
-        const found = (data.games || []).find(
-          (g) => slugifyMatch(g.match) === matchSlug
-        );
-        if (!found) throw new Error("Match not found for this slug");
+      const data = (await res.json()) as PicksApiResponse;
+      const found = (data.games || []).find((g) => slugifyMatch(g.match) === matchSlug);
+      if (!found) throw new Error("Match not found for this slug");
 
-        if (!alive) return;
-        setGame(found);
+      setGame(found);
 
-        // seed picks from API userPick if local has none yet
+      // ✅ if logged in, trust server userPick as source of truth
+      if (user) {
+        const seeded: Record<string, LocalPick> = {};
+        for (const q of found.questions || []) {
+          if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
+        }
+        setPicks((prev) => ({ ...prev, ...seeded }));
+      } else {
+        // anon: if no local picks yet, seed from api (usually empty)
         setPicks((prev) => {
           if (Object.keys(prev || {}).length > 0) return prev;
           const seeded: Record<string, LocalPick> = {};
@@ -273,43 +322,95 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
           }
           return seeded;
         });
-      } catch (e: any) {
-        if (!alive) return;
-        setErr(e?.message || "Failed to load picks");
-      } finally {
-        if (!alive) return;
-        setLoading(false);
       }
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load picks");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    run();
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!alive) return;
+      await fetchMatch();
+    })();
     return () => {
       alive = false;
     };
-  }, [matchSlug]);
+    // important: refetch when login state changes so we get userPick/correctPick
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchSlug, user?.uid]);
 
   const questions = useMemo(() => {
     const qs = game?.questions || [];
-    return [...qs].sort(
-      (a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id)
-    );
+    return [...qs].sort((a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id));
   }, [game]);
 
   const selectedCount = useMemo(() => {
     return Object.values(picks).filter((v) => v === "yes" || v === "no").length;
   }, [picks]);
 
-  function setPick(questionId: string, value: PickOutcome) {
+  const lockedCount = useMemo(() => {
+    return questions.filter((q) => safeStatus(q.status) !== "open").length;
+  }, [questions]);
+
+  async function persistPick(questionId: string, next: LocalPick) {
+    // anon: local only
+    if (!user) return;
+
+    setSaving((prev) => ({ ...prev, [questionId]: true }));
+    try {
+      const ref = doc(db, "picks", `${user.uid}_${questionId}`);
+
+      if (next === "none") {
+        await deleteDoc(ref);
+      } else {
+        await setDoc(
+          ref,
+          {
+            userId: user.uid,
+            questionId,
+            pick: next,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      // optional: pull fresh percents + correctPick after a save
+      // (keeps the UI in sync if you’re testing with multiple users)
+      await fetchMatch();
+    } catch (e) {
+      // keep UI selection (optimistic), but log error
+      console.error("[MatchPicksClient] failed to persist pick", e);
+    } finally {
+      setSaving((prev) => ({ ...prev, [questionId]: false }));
+    }
+  }
+
+  async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus) {
+    if (status !== "open") return;
+
     setPicks((prev) => {
       const current = prev[questionId] || "none";
-      // tap same choice again = clear (you said you like X to clear, but this is a nice bonus)
       const next: LocalPick = current === value ? "none" : value;
+
+      // optimistic update
+      void persistPick(questionId, next);
+
       return { ...prev, [questionId]: next };
     });
   }
 
-  function clearPick(questionId: string) {
-    setPicks((prev) => ({ ...prev, [questionId]: "none" }));
+  async function clearPick(questionId: string, status: QuestionStatus) {
+    if (status !== "open") return;
+
+    setPicks((prev) => {
+      void persistPick(questionId, "none");
+      return { ...prev, [questionId]: "none" };
+    });
   }
 
   if (loading) {
@@ -367,7 +468,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
               <span className="font-semibold text-white">{selectedCount}</span> / 12
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Locks: <span className="text-white/60">—</span>
+              Locks: <span className="font-semibold text-white">{lockedCount}</span>
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
               Auto-locks at bounce
@@ -384,16 +485,16 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
             const isSponsored = !!q.isSponsorQuestion;
             const isRevealed = !!revealed[q.id];
 
-            // pick type is based on content (NOT sponsorship)
             const isPlayerPick = !!playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
             const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
             const sponsorName = (q.sponsorName || "REBEL SPORT").toUpperCase();
-
             const selected = picks[q.id] || "none";
-            const disabledByStatus = status !== "open"; // keep simple
+
+            const isLocked = status !== "open";
+            const isSaving = !!saving[q.id];
 
             const yesBtnClass =
               selected === "yes"
@@ -410,18 +511,14 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                 className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
               >
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
-                  <Image
-                    src="/afl1.png"
-                    alt=""
-                    fill
-                    className="object-cover object-center"
-                  />
+                  <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
-                {/* CONTENT (always rendered underneath) */}
                 <div
                   className={`relative ${
-                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
+                    isSponsored && !isRevealed
+                      ? "pointer-events-none select-none blur-[1px]"
+                      : ""
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -429,16 +526,34 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                       <div className="text-[15px] font-black tracking-wide">
                         Q{qNum} - {formatQuarterLabel(q.quarter)}
                       </div>
-                      <div className="mt-1 text-[12px] text-white/60">
-                        Status: <span className="text-white/60">{status}</span>
+                      <div className="mt-1 flex items-center gap-2">
+                        <div className="text-[12px] text-white/60">
+                          Status: <span className="text-white/60">{status}</span>
+                        </div>
+
+                        <ResultPill
+                          status={status}
+                          selected={selected}
+                          correctPick={q.correctPick}
+                          outcome={q.correctOutcome ?? q.outcome}
+                        />
+
+                        {isSaving && (
+                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">
+                            SAVING…
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <button
                       type="button"
-                      className="h-9 w-9 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 flex items-center justify-center"
+                      className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                        isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                      }`}
                       aria-label="Clear pick"
-                      onClick={() => clearPick(q.id)}
+                      disabled={isLocked}
+                      onClick={() => void clearPick(q.id, status)}
                     >
                       <span className="text-white/80 font-black">×</span>
                     </button>
@@ -460,22 +575,22 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                     <div className="grid grid-cols-2 gap-4">
                       <button
                         type="button"
-                        disabled={disabledByStatus}
+                        disabled={isLocked || isSaving}
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          disabledByStatus ? "opacity-50 cursor-not-allowed" : ""
+                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${yesBtnClass}`}
-                        onClick={() => setPick(q.id, "yes")}
+                        onClick={() => void setPick(q.id, "yes", status)}
                       >
                         YES
                       </button>
 
                       <button
                         type="button"
-                        disabled={disabledByStatus}
+                        disabled={isLocked || isSaving}
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          disabledByStatus ? "opacity-50 cursor-not-allowed" : ""
+                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${noBtnClass}`}
-                        onClick={() => setPick(q.id, "no")}
+                        onClick={() => void setPick(q.id, "no", status)}
                       >
                         NO
                       </button>
@@ -485,7 +600,6 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                   </div>
                 </div>
 
-                {/* SPONSOR OVERLAY (covers whole card until revealed) */}
                 {isSponsored && !isRevealed && (
                   <div className="absolute inset-0 z-20 flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-[#0d1117]/55 backdrop-blur-[2px]" />
@@ -539,11 +653,13 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
               Picks selected:{" "}
               <span className="font-semibold text-white">{selectedCount}</span> / 12
             </div>
+
             <button
               type="button"
               className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+              onClick={() => void fetchMatch()}
             >
-              AUTO-LOCK
+              REFRESH
             </button>
           </div>
         </div>
