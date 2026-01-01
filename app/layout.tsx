@@ -24,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
         {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
         <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_40px_rgba(56,189,248,0.18)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1.5 sm:py-2">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1 sm:py-1">
             {/* Left badge */}
             <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-2.5 py-[2px] text-[9px] font-black uppercase tracking-wide text-sky-950 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-sky-950" />
