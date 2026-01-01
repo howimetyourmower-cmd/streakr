@@ -4,7 +4,6 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
@@ -65,7 +64,12 @@ function slugifyTeamName(name: string) {
     .replace(/\s+/g, "-");
 }
 
-function parseMatchTeams(match: string): { leftName: string; rightName: string; leftSlug: string; rightSlug: string } {
+function parseMatchTeams(match: string): {
+  leftName: string;
+  rightName: string;
+  leftSlug: string;
+  rightSlug: string;
+} {
   const parts = (match || "").split(/\s+vs\s+/i);
   const leftName = (parts[0] || "").trim();
   const rightName = (parts[1] || "").trim();
@@ -84,55 +88,103 @@ function extractPlayerFromQuestion(q: string): { playerName?: string; teamAbbr?:
   return { playerName: (m[1] || "").trim(), teamAbbr: (m[2] || "").trim() };
 }
 
-// Heuristic: if we can extract a player name => player pick, else game pick (non-player question)
+// Heuristic: if we can extract a player name => player pick, else game pick
 function isPlayerPick(q: string) {
   const { playerName } = extractPlayerFromQuestion(q);
   return Boolean(playerName);
 }
 
-// ---------- Robust image candidate logic (prevents “was working then disappeared”) ----------
-function playerImageCandidates(name: string): string[] {
+function encodeFileName(name: string) {
+  // encode for URLs (spaces -> %20 etc)
+  return encodeURIComponent(name);
+}
+
+function normalizeNameVariants(name: string): string[] {
   const clean = (name || "").trim().replace(/\s+/g, " ");
   if (!clean) return [];
-  const encoded = encodeURIComponent(clean);
-  const dashed = encodeURIComponent(
-    clean
-      .toLowerCase()
-      .replace(/[^a-z0-9\s-]/g, "")
-      .trim()
-      .replace(/\s+/g, "-")
-  );
 
-  return [
-    `/players/${encoded}.jpg`,
-    `/players/${encoded}.jpeg`,
-    `/players/${encoded}.png`,
-    `/players/${dashed}.jpg`,
-    `/players/${dashed}.jpeg`,
-    `/players/${dashed}.png`,
+  const lower = clean.toLowerCase();
+
+  const stripped = clean.replace(/[^A-Za-z0-9\s-]/g, "").replace(/\s+/g, " ").trim();
+  const strippedLower = stripped.toLowerCase();
+
+  const dashed = strippedLower.replace(/\s+/g, "-");
+  const dashedTitle = stripped.replace(/\s+/g, "-");
+
+  const parts = stripped.split(" ").filter(Boolean);
+  const first = parts[0] || "";
+  const last = parts[parts.length - 1] || "";
+  const firstLast = [first, last].filter(Boolean).join(" ");
+  const firstLastDashed = [first, last].filter(Boolean).join("-");
+
+  const variants = [
+    clean,
+    lower,
+    stripped,
+    strippedLower,
+    dashedTitle,
+    dashed,
+    firstLast,
+    firstLast.toLowerCase(),
+    firstLastDashed,
+    firstLastDashed.toLowerCase(),
+    last,
+    last.toLowerCase(),
   ];
+
+  // unique
+  return Array.from(new Set(variants.filter(Boolean)));
+}
+
+function playerImageCandidates(name: string): string[] {
+  const variants = normalizeNameVariants(name);
+  const exts = ["jpg", "jpeg", "png", "webp"];
+  const dirs = ["/players", "/players/afl", "/player", "/public/players"]; // harmless extras
+
+  const out: string[] = [];
+  for (const v of variants) {
+    const enc = encodeFileName(v);
+    for (const dir of dirs) {
+      for (const ext of exts) out.push(`${dir}/${enc}.${ext}`);
+    }
+  }
+  return out;
 }
 
 function logoCandidates(teamSlug: string): string[] {
   const s = (teamSlug || "").trim();
   if (!s) return [];
-  return [
-    `/aflteams/${s}-logo.png`,
-    `/aflteams/${s}-logo.jpg`,
-    `/aflteams/${s}-logo.jpeg`,
-    `/aflteams/${s}.png`,
-    `/aflteams/${s}.jpg`,
-    `/aflteams/${s}.jpeg`,
+  const exts = ["png", "jpg", "jpeg", "webp"];
+  const dirs = ["/aflteams", "/teams", "/team-logos", "/logos", "/logos/teams", "/afl/logos"];
+
+  const names = [
+    `${s}-logo`,
+    `${s}_logo`,
+    `${s}logo`,
+    s,
+    s.toUpperCase(),
+    s.replace(/-/g, "_"),
   ];
+
+  const out: string[] = [];
+  for (const dir of dirs) {
+    for (const n of names) {
+      const enc = encodeFileName(n);
+      for (const ext of exts) out.push(`${dir}/${enc}.${ext}`);
+    }
+  }
+  return out;
 }
 
-function useCyclingImageSrc(candidates: string[]) {
+// Reliable image cycling (uses <img> so onError ALWAYS fires)
+function useCyclingSrc(candidates: string[]) {
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
   useEffect(() => {
     setIdx(0);
     setDead(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidates.join("|")]);
 
   const src = candidates.length ? candidates[Math.min(idx, candidates.length - 1)] : "";
@@ -149,35 +201,60 @@ function useCyclingImageSrc(candidates: string[]) {
   return { src, dead, onError };
 }
 
-// ---------- UI atoms ----------
 function Squircle({
   children,
   className,
   title,
+  size = 44,
 }: {
   children: React.ReactNode;
   className?: string;
   title?: string;
+  size?: number;
 }) {
   return (
     <div
       title={title}
       className={cn(
-        "flex items-center justify-center",
-        "bg-[#b21f2d]",
-        "shadow-sm",
-        "border border-white/10",
-        "overflow-hidden",
+        "flex items-center justify-center overflow-hidden",
         "rounded-[18px]",
+        "border border-white/10",
+        "shadow-sm",
         className
       )}
-      style={{
-        width: 44,
-        height: 44,
-      }}
+      style={{ width: size, height: size }}
     >
       {children}
     </div>
+  );
+}
+
+function SmartImg({
+  src,
+  alt,
+  onError,
+  fit,
+  pad,
+}: {
+  src: string;
+  alt: string;
+  onError: () => void;
+  fit: "cover" | "contain";
+  pad?: number;
+}) {
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={onError}
+      className="absolute inset-0 h-full w-full"
+      style={{
+        objectFit: fit,
+        padding: pad ?? 0,
+      }}
+    />
   );
 }
 
@@ -190,21 +267,13 @@ function PlayerAvatar({ name }: { name: string }) {
     .join("");
 
   const candidates = useMemo(() => playerImageCandidates(name), [name]);
-  const { src, dead, onError } = useCyclingImageSrc(candidates);
+  const { src, dead, onError } = useCyclingSrc(candidates);
 
   return (
-    <Squircle title={name} className="bg-[#c51f2f]">
+    <Squircle title={name} className="bg-[#c51f2f]" size={44}>
       {!dead && src ? (
-        <div className="relative w-[44px] h-[44px]">
-          <Image
-            src={src}
-            alt={name}
-            fill
-            sizes="44px"
-            style={{ objectFit: "cover" }}
-            onError={onError}
-            priority={false}
-          />
+        <div className="relative h-full w-full">
+          <SmartImg src={src} alt={name} onError={onError} fit="cover" />
         </div>
       ) : (
         <div className="text-white font-black text-sm">{initials || "?"}</div>
@@ -215,23 +284,18 @@ function PlayerAvatar({ name }: { name: string }) {
 
 function TeamLogo({ teamSlug, label }: { teamSlug: string; label?: string }) {
   const candidates = useMemo(() => logoCandidates(teamSlug), [teamSlug]);
-  const { src, dead, onError } = useCyclingImageSrc(candidates);
+  const { src, dead, onError } = useCyclingSrc(candidates);
 
   return (
-    <Squircle title={label || teamSlug} className="bg-[#0d1117]">
+    <Squircle title={label || teamSlug} className="bg-[#0d1117]" size={44}>
       {!dead && src ? (
-        <div className="relative w-[44px] h-[44px]">
-          <Image
-            src={src}
-            alt={label || teamSlug}
-            fill
-            sizes="44px"
-            style={{ objectFit: "contain", padding: 6 }}
-            onError={onError}
-          />
+        <div className="relative h-full w-full">
+          <SmartImg src={src} alt={label || teamSlug} onError={onError} fit="contain" pad={6} />
         </div>
       ) : (
-        <div className="text-white/80 font-black text-xs">{(label || "?").slice(0, 3).toUpperCase()}</div>
+        <div className="text-white/80 font-black text-xs">
+          {(label || teamSlug || "?").slice(0, 3).toUpperCase()}
+        </div>
       )}
     </Squircle>
   );
@@ -240,7 +304,6 @@ function TeamLogo({ teamSlug, label }: { teamSlug: string; label?: string }) {
 function formatAedt(dateIso?: string) {
   if (!dateIso) return "";
   const d = new Date(dateIso);
-  // keep it simple; your backend already seems to pass AEDT labels elsewhere
   return d.toLocaleString("en-AU", {
     weekday: "short",
     day: "2-digit",
@@ -257,7 +320,10 @@ function msToCountdown(ms: number) {
   const hrs = Math.floor((s % 86400) / 3600);
   const mins = Math.floor((s % 3600) / 60);
   const secs = s % 60;
-  return `${days}d ${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${days}d ${String(hrs).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(secs).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 function calcYesNo(yes?: number, no?: number): { yes: number; no: number } {
@@ -278,7 +344,6 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   const [questions, setQuestions] = useState<ApiQuestion[]>([]);
   const [now, setNow] = useState(Date.now());
 
-  // local picks (simple)
   const [localPicks, setLocalPicks] = useState<Record<string, LocalPick>>({});
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
@@ -288,7 +353,6 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   }, []);
 
   useEffect(() => {
-    // Auth gate (keep consistent with rest of app)
     if (!loading && !user) router.push("/login");
   }, [loading, user, router]);
 
@@ -313,7 +377,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
 
         setGame(g);
         setQuestions(qs);
-      } catch (e) {
+      } catch {
         if (!cancelled) {
           setGame(null);
           setQuestions([]);
@@ -328,9 +392,13 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   }, [matchSlug]);
 
   const header = useMemo(() => {
-    const match = game?.match || matchSlug.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+    const match =
+      game?.match ||
+      matchSlug
+        .replace(/-/g, " ")
+        .replace(/\b\w/g, (m) => m.toUpperCase());
     const venue = game?.venue || "";
-    const start = game?.startTime ? formatAedt(game.startTime) + " AEDT" : "";
+    const start = game?.startTime ? `${formatAedt(game.startTime)} AEDT` : "";
     const { leftName, rightName, leftSlug, rightSlug } = parseMatchTeams(match);
     return { match, venue, start, leftName, rightName, leftSlug, rightSlug };
   }, [game, matchSlug]);
@@ -360,9 +428,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
         <div className="mb-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-[28px] sm:text-[34px] font-black italic tracking-wide uppercase">
-                {header.match}
-              </h1>
+              <h1 className="text-[28px] sm:text-[34px] font-black italic tracking-wide uppercase">{header.match}</h1>
               {header.venue ? <div className="text-white/60 mt-1">{header.venue}</div> : null}
               {header.start ? <div className="text-white/60 mt-1">{header.start}</div> : null}
             </div>
@@ -391,14 +457,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
         </div>
 
         {/* Grid */}
-        <div
-          className={cn(
-            "grid gap-3",
-            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
-            // keep desktop from looking too “spread out”
-            "justify-items-stretch"
-          )}
-        >
+        <div className={cn("grid gap-3", "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3")}>
           {questions.map((q, idx) => {
             const qNum = String(idx + 1).padStart(2, "0");
             const quarterLabel = `QUARTER ${q.quarter}`;
@@ -410,8 +469,15 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
             const player = extractPlayerFromQuestion(q.question || "");
             const playerPick = isPlayerPick(q.question || "");
             const sponsor = Boolean(q.isSponsorQuestion);
-
             const revealOn = revealed[q.id] === true;
+
+            // For GAME PICK logos, prefer the question's match (if provided), else header match.
+            const matchForCard = q.match || header.match;
+            const teams = parseMatchTeams(matchForCard);
+            const leftSlug = teams.leftSlug || header.leftSlug;
+            const rightSlug = teams.rightSlug || header.rightSlug;
+            const leftName = teams.leftName || header.leftName;
+            const rightName = teams.rightName || header.rightName;
 
             return (
               <div
@@ -419,17 +485,16 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                 className={cn(
                   "relative overflow-hidden rounded-2xl",
                   "border border-white/10",
-                  "bg-[#161b22]", // slightly lighter than page bg
+                  "bg-[#161b22]",
                   "shadow-sm"
                 )}
               >
                 {/* silhouette background */}
                 <div className="absolute inset-0 opacity-[0.14] pointer-events-none">
-                  <Image
+                  <img
                     src="/afl1.png"
                     alt=""
-                    fill
-                    sizes="400px"
+                    className="absolute inset-0 h-full w-full"
                     style={{ objectFit: "cover" }}
                   />
                   <div className="absolute inset-0 bg-[#161b22]/60" />
@@ -443,6 +508,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                       <div className="text-white/85 font-black tracking-wide">
                         Q{qNum} - {quarterLabel}
                       </div>
+                      {/* keep lowercase status exactly */}
                       <div className="text-white/55 text-sm">Status: {status}</div>
                     </div>
 
@@ -468,11 +534,13 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                       </>
                     ) : (
                       <>
+                        {/* TWO SQUIRCLES (one per logo) */}
                         <div className="flex items-center gap-2">
-                          <TeamLogo teamSlug={header.leftSlug} label={header.leftName} />
+                          <TeamLogo teamSlug={leftSlug} label={leftName} />
                           <div className="text-white/55 font-black">VS</div>
-                          <TeamLogo teamSlug={header.rightSlug} label={header.rightName} />
+                          <TeamLogo teamSlug={rightSlug} label={rightName} />
                         </div>
+
                         <div className="mt-2 text-[11px] uppercase tracking-[0.22em] text-white/45 text-center">
                           GAME PICK
                         </div>
@@ -481,9 +549,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                   </div>
 
                   {/* question */}
-                  <div className="mt-3 text-[18px] leading-snug font-extrabold">
-                    {q.question}
-                  </div>
+                  <div className="mt-3 text-[18px] leading-snug font-extrabold">{q.question}</div>
 
                   {/* bottom choice panel */}
                   <div className="mt-4 rounded-2xl bg-white/[0.92] border border-black/5 p-3">
@@ -568,9 +634,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
               <div className="text-sm text-white/70">
                 Picks selected: <span className="text-white font-bold">{selectedCount}</span> /{" "}
                 <span className="text-white/80">{questions.length || 12}</span>{" "}
-                {lockMs === null ? null : (
-                  <span className="ml-3 text-white/60">Locks in {msToCountdown(lockMs)}</span>
-                )}
+                {lockMs === null ? null : <span className="ml-3 text-white/60">Locks in {msToCountdown(lockMs)}</span>}
               </div>
 
               <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-black tracking-wide text-white/70">
