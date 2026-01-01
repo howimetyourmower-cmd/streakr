@@ -29,7 +29,8 @@ type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
   currentStreak?: number;
-  leaderScore?: number;
+  leaderScore?: number; // leader current streak (top user)
+  leaderName?: string; // OPTIONAL (if API adds this later)
 };
 
 const COLORS = {
@@ -162,31 +163,14 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
-  if (!slug) {
-    const initials = teamName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((x) => x[0]?.toUpperCase())
-      .join("");
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl border font-black"
-        style={{
-          width: size,
-          height: size,
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(0,0,0,0.35)",
-          color: "rgba(255,255,255,0.90)",
-        }}
-        title={teamName}
-      >
-        {initials || "AFL"}
-      </div>
-    );
-  }
+  const fallbackInitials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
 
-  if (dead) {
+  if (!slug || dead) {
     return (
       <div
         className="flex items-center justify-center rounded-2xl border font-black"
@@ -199,12 +183,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
         }}
         title={teamName}
       >
-        {teamName
-          .split(" ")
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((x) => x[0]?.toUpperCase())
-          .join("") || "AFL"}
+        {fallbackInitials || "AFL"}
       </div>
     );
   }
@@ -281,44 +260,34 @@ function ProgressTick({ on }: { on: boolean }) {
 }
 
 /**
- * ✅ Fix: silhouette MUST be clipped to each card.
- * - Parent cards must have overflow-hidden
- * - This component is absolute inside the card and cannot escape
- * - Opacity tuned so it’s visible but never competes with text/logos
+ * ✅ silhouette MUST be clipped to each card.
  */
-function CardSilhouetteBg({
-  opacity = 1,
-}: {
-  opacity?: number;
-}) {
+function CardSilhouetteBg({ opacity = 1 }: { opacity?: number }) {
   return (
-    <>
-      <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-        <div className="absolute inset-0" style={{ opacity }}>
-          <Image
-            src="/afl1.png"
-            alt=""
-            fill
-            sizes="(max-width: 1024px) 100vw, 1024px"
-            style={{
-              objectFit: "cover",
-              filter: "grayscale(1) brightness(0.35) contrast(1.35)",
-              transform: "scale(1.04)",
-            }}
-            priority={false}
-          />
-        </div>
-
-        {/* Tight readability layer so logos + match name POP */}
-        <div
-          className="absolute inset-0"
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0" style={{ opacity }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1024px) 100vw, 1024px"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.35)",
+            transform: "scale(1.04)",
           }}
+          priority={false}
         />
       </div>
-    </>
+
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
+        }}
+      />
+    </div>
   );
 }
 
@@ -326,8 +295,16 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0"
+        style={{ background: "rgba(0,0,0,0.75)" }}
+        onClick={onClose}
+      />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
         style={{
@@ -370,7 +347,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
 
           <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
+            <div className="text-white/70 mt-1">
+              One wrong pick resets your streak for that match. Voids don’t count.
+            </div>
           </div>
         </div>
 
@@ -392,6 +371,10 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export default function PicksPage() {
   const { user } = useAuth();
 
@@ -402,6 +385,7 @@ export default function PicksPage() {
 
   const [currentStreak, setCurrentStreak] = useState<number>(0);
   const [leaderScore, setLeaderScore] = useState<number | null>(null);
+  const [leaderName, setLeaderName] = useState<string | null>(null);
 
   const [howOpen, setHowOpen] = useState(false);
 
@@ -447,7 +431,10 @@ export default function PicksPage() {
       setGames(Array.isArray(data.games) ? data.games : []);
 
       setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+
+      // ✅ leader is OPTIONAL from API, but we handle it cleanly
       setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
+      setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
     } catch (e) {
       console.error(e);
       setErr("Could not load picks right now.");
@@ -487,7 +474,26 @@ export default function PicksPage() {
     return Math.max(0, leaderScore - currentStreak);
   }, [leaderScore, currentStreak]);
 
+  const leaderProgress = useMemo(() => {
+    if (leaderScore === null || leaderScore <= 0) return 0;
+    return clamp((currentStreak / leaderScore) * 100, 0, 100);
+  }, [leaderScore, currentStreak]);
+
   const DashboardStrip = () => {
+    const leaderText =
+      leaderScore === null
+        ? "Leader: loading…"
+        : leaderName
+        ? `${leaderName} leads on ${leaderScore}`
+        : `Leader at ${leaderScore}`;
+
+    const leaderHint =
+      leaderScore === null
+        ? "If this stays stuck, /api/picks isn’t returning leaderScore."
+        : distanceToLeader === 0
+        ? "You’re equal lead — keep it alive."
+        : `Close the gap by ${distanceToLeader}. Current streak only.`;
+
     return (
       <div
         className="mt-4 rounded-2xl border px-3 py-3"
@@ -498,28 +504,44 @@ export default function PicksPage() {
       >
         <div className="flex items-center justify-between gap-3">
           <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
-            Dashboard
+            Match HQ
           </div>
 
-          <button
-            type="button"
-            className="rounded-full px-3 py-1.5 text-[11px] font-black border"
-            style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
-            }}
-            onClick={() => setHowOpen(true)}
-          >
-            How to play
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/leaderboards"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Leaderboards
+            </Link>
+
+            <button
+              type="button"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              onClick={() => setHowOpen(true)}
+            >
+              How to play
+            </button>
+          </div>
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        {/* ✅ This fills your “gap” with something useful + looks premium */}
+        <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
+          {/* Current streak */}
           <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
+            className="rounded-2xl border px-4 py-3"
             style={{
-              minWidth: 220,
               borderColor: "rgba(255,255,255,0.10)",
               background: "rgba(0,0,0,0.35)",
             }}
@@ -546,16 +568,77 @@ export default function PicksPage() {
             </div>
           </div>
 
+          {/* Leader */}
           <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
+            className="rounded-2xl border px-4 py-3"
             style={{
-              minWidth: 220,
               borderColor: "rgba(255,255,255,0.10)",
               background: "rgba(0,0,0,0.35)",
             }}
           >
             <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">
-              Distance to leader
+              Leader
+            </div>
+
+            <div className="mt-2 flex items-center gap-3">
+              <div
+                className="rounded-xl border px-3 py-2"
+                style={{
+                  borderColor:
+                    leaderScore === null
+                      ? "rgba(255,255,255,0.14)"
+                      : "rgba(255,46,77,0.35)",
+                  background:
+                    leaderScore === null
+                      ? "rgba(255,255,255,0.06)"
+                      : "rgba(255,46,77,0.10)",
+                }}
+              >
+                <span className="text-[18px] font-black text-white">
+                  {leaderScore === null ? "—" : leaderScore}
+                </span>
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[12px] font-black text-white truncate">{leaderText}</div>
+                <div className="text-[11px] text-white/65 font-semibold leading-snug">
+                  Top streak right now.
+                </div>
+              </div>
+            </div>
+
+            {/* mini progress bar */}
+            <div
+              className="mt-3 h-[10px] w-full rounded-full border overflow-hidden"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.06)",
+              }}
+              aria-label="progress to leader"
+            >
+              <div
+                className="h-full"
+                style={{
+                  width: `${leaderProgress}%`,
+                  background:
+                    "linear-gradient(90deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.55) 100%)",
+                }}
+              />
+            </div>
+
+            <div className="mt-2 text-[11px] text-white/65 font-semibold">{leaderHint}</div>
+          </div>
+
+          {/* Distance to leader */}
+          <div
+            className="rounded-2xl border px-4 py-3"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(0,0,0,0.35)",
+            }}
+          >
+            <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">
+              Distance
             </div>
             <div className="mt-2 flex items-center gap-3">
               <div
@@ -571,19 +654,19 @@ export default function PicksPage() {
               </div>
               <div className="min-w-0">
                 <div className="text-[12px] font-black text-white">
-                  {leaderScore === null ? "Leader not loaded" : `Leader at ${leaderScore}`}
+                  {leaderScore === null ? "Waiting on leader data" : "Close the gap"}
                 </div>
                 <div className="text-[11px] text-white/65 font-semibold leading-snug">
-                  Close the gap. Current streak only.
+                  Streak only (not best streak).
                 </div>
               </div>
             </div>
           </div>
 
+          {/* Eligible to win */}
           <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
+            className="rounded-2xl border px-4 py-3"
             style={{
-              minWidth: 240,
               borderColor: "rgba(255,255,255,0.10)",
               background: "rgba(0,0,0,0.35)",
             }}
@@ -657,15 +740,12 @@ export default function PicksPage() {
           textDecoration: "none",
         }}
       >
-        {/* ✅ CRITICAL: overflow-hidden here ensures the silhouette cannot escape the card */}
         <div className="relative p-5 overflow-hidden" style={{ minHeight: 205 }}>
           <CardSilhouetteBg opacity={1} />
 
           <div className="relative z-10">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] text-white/85 font-semibold">
-                {formatAedt(g.startTime)}
-              </div>
+              <div className="text-[11px] text-white/85 font-semibold">{formatAedt(g.startTime)}</div>
 
               <span
                 className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
@@ -799,7 +879,6 @@ export default function PicksPage() {
                 textDecoration: "none",
               }}
             >
-              {/* ✅ also clip the hero */}
               <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 180 }}>
                 <CardSilhouetteBg opacity={1} />
 
@@ -901,10 +980,7 @@ export default function PicksPage() {
           )}
         </div>
 
-        <div
-          className="mt-10 pb-8 text-center text-[11px]"
-          style={{ color: "rgba(255,255,255,0.55)" }}
-        >
+        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
           TORPIE © 2026
         </div>
       </div>
