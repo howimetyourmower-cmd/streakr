@@ -93,7 +93,7 @@ export default function Navbar() {
               alt="Torpie"
               fill
               priority
-              className="object-contain object-left"
+              className="object-contain object-left origin-left scale-[1.35]"
               sizes="(max-width: 768px) 60vw, 520px"
             />
           </div>
