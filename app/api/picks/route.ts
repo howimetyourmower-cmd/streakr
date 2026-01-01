@@ -9,7 +9,6 @@ export const dynamic = "force-dynamic";
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
-// AFL flat JSON rows
 type JsonRow = {
   Round: string; // "OR", "R1", "R2", ...
   Game: number;
@@ -53,9 +52,13 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
+
+  // ✅ dashboard fields
+  currentStreak?: number;
+  leaderScore?: number;
+  leaderName?: string | null;
 };
 
-// Firestore docs used for AFL locks/status (existing)
 type SponsorQuestionConfig = {
   roundNumber: number;
   questionId: string;
@@ -76,10 +79,6 @@ type GameLockDoc = {
   isUnlockedForPicks?: boolean;
   updatedAt?: FirebaseFirestore.Timestamp;
 };
-
-// ─────────────────────────────────────────────
-// AFL helpers
-// ─────────────────────────────────────────────
 
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
@@ -110,10 +109,6 @@ function normaliseStatusValue(val: unknown): QuestionStatus {
   return "open";
 }
 
-// ─────────────────────────────────────────────
-// Shared helpers
-// ─────────────────────────────────────────────
-
 async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get("authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
@@ -141,8 +136,7 @@ async function getPickStatsForRound(
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
 }> {
-  const pickStats: Record<string, { yes: number; no: number; total: number }> =
-    {};
+  const pickStats: Record<string, { yes: number; no: number; total: number }> = {};
   const userPicks: Record<string, "yes" | "no"> = {};
 
   try {
@@ -177,7 +171,6 @@ async function getPickStatsForRound(
   return { pickStats, userPicks };
 }
 
-// AFL-only helpers (kept as-is)
 async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
   try {
     const docRef = db.collection("config").doc("season-2026");
@@ -257,8 +250,7 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> =
-    {};
+  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
   Object.entries(temp).forEach(([qid, value]) => {
     finalMap[qid] = { status: value.status, outcome: value.outcome };
   });
@@ -272,9 +264,7 @@ async function getGameLocksForRound(
 ): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
 
-  const gameIds = Array.from(
-    new Set(roundRows.map((row) => `${roundCode}-G${row.Game}`))
-  );
+  const gameIds = Array.from(new Set(roundRows.map((row) => `${roundCode}-G${row.Game}`)));
   if (!gameIds.length) return map;
 
   const chunks: string[][] = [];
@@ -284,10 +274,7 @@ async function getGameLocksForRound(
 
   try {
     for (const chunk of chunks) {
-      const snap = await db
-        .collection("gameLocks")
-        .where("gameId", "in", chunk)
-        .get();
+      const snap = await db.collection("gameLocks").where("gameId", "in", chunk).get();
 
       snap.forEach((docSnap) => {
         const data = docSnap.data() as GameLockDoc;
@@ -433,20 +420,13 @@ function buildBblGameFromMatchDoc(
   pickStats: Record<string, { yes: number; no: number; total: number }>,
   userPicks: Record<string, "yes" | "no">
 ): ApiGame {
-  const sport = safeUpper(
-    firstString(raw, ["sport", "Sport", "league", "League"], "BBL")
-  );
+  const sport = safeUpper(firstString(raw, ["sport", "Sport", "league", "League"], "BBL"));
 
   const match = firstString(raw, ["match", "Match"], "").trim();
   const venue = firstString(raw, ["venue", "Venue"], "").trim();
   const startTime = firstString(raw, ["startTime", "StartTime"], "").trim();
 
-  const questionsArr = firstArray(raw, [
-    "questions",
-    "Questions",
-    "matchQuestions",
-    "MatchQuestions",
-  ]);
+  const questionsArr = firstArray(raw, ["questions", "Questions", "matchQuestions", "MatchQuestions"]);
 
   const questions: ApiQuestion[] = questionsArr.map((q: any, idx: number) => {
     const fallbackId = `${docId}-Q${idx + 1}`;
@@ -483,12 +463,10 @@ function buildBblGamesFromRoundDoc(
   userPicks: Record<string, "yes" | "no">
 ): ApiGame[] {
   const baseSport = safeUpper(firstString(raw, ["sport", "Sport"], "BBL"));
-
   const gamesArr = firstArray(raw, ["games", "Games", "matches", "Matches"]);
 
   return gamesArr.map((g: any, gi: number) => {
-    const gameId =
-      firstString(g, ["id", "Id"], "")?.trim() || `${docId}-G${gi + 1}`;
+    const gameId = firstString(g, ["id", "Id"], "")?.trim() || `${docId}-G${gi + 1}`;
 
     const match = firstString(g, ["match", "Match"], "").trim();
     const venue = firstString(g, ["venue", "Venue"], "").trim();
@@ -526,6 +504,75 @@ function buildBblGamesFromRoundDoc(
 }
 
 // ─────────────────────────────────────────────
+// ✅ Streak helpers (Clean Sweep per match)
+// ─────────────────────────────────────────────
+
+function computeMatchStreak(game: ApiGame, picksForUser: Record<string, "yes" | "no">): number {
+  let correctCount = 0;
+
+  for (const q of game.questions || []) {
+    const pick = picksForUser[q.id];
+    if (!pick) continue;
+
+    const status = q.status;
+    const outcome = (q.correctOutcome ?? q.outcome) as QuestionOutcome | undefined;
+
+    // only settled questions affect streak
+    if (status !== "final" && status !== "void") continue;
+
+    // voids don't count
+    if (status === "void" || outcome === "void" || !outcome) continue;
+
+    if (pick === outcome) {
+      correctCount += 1;
+      continue;
+    }
+
+    // ❌ any wrong = match streak becomes 0 (Clean Sweep)
+    return 0;
+  }
+
+  return correctCount;
+}
+
+function computeBestStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
+  let best = 0;
+  for (const g of games) {
+    best = Math.max(best, computeMatchStreak(g, picksForUser));
+  }
+  return best;
+}
+
+async function loadPicksByUserForQuestionIds(
+  questionIds: Set<string>
+): Promise<Record<string, Record<string, "yes" | "no">>> {
+  const out: Record<string, Record<string, "yes" | "no">> = {};
+
+  try {
+    const snap = await db.collection("picks").get();
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as {
+        userId?: string;
+        questionId?: string;
+        pick?: "yes" | "no";
+      };
+
+      if (!data.userId || !data.questionId) return;
+      if (data.pick !== "yes" && data.pick !== "no") return;
+      if (!questionIds.has(data.questionId)) return;
+
+      if (!out[data.userId]) out[data.userId] = {};
+      out[data.userId][data.questionId] = data.pick;
+    });
+  } catch (e) {
+    console.error("[/api/picks] Error building picksByUser map", e);
+  }
+
+  return out;
+}
+
+// ─────────────────────────────────────────────
 // Main GET handler
 // ─────────────────────────────────────────────
 
@@ -533,9 +580,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
 
-    const sportParam = String(url.searchParams.get("sport") ?? "AFL")
-      .trim()
-      .toUpperCase();
+    const sportParam = String(url.searchParams.get("sport") ?? "AFL").trim().toUpperCase();
 
     const roundParam = url.searchParams.get("round");
     let roundNumber: number | null = null;
@@ -546,27 +591,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     if (roundNumber === null) roundNumber = 0;
 
     const currentUserId = await getUserIdFromRequest(req);
-    const { pickStats, userPicks } = await getPickStatsForRound(
-      roundNumber,
-      currentUserId
-    );
+    const { pickStats, userPicks } = await getPickStatsForRound(roundNumber, currentUserId);
 
     // ─────────────────────────────
-    // BBL / Cricket path (Firestore) — tolerant parsing
+    // BBL / Cricket path
     // ─────────────────────────────
     if (sportParam === "BBL" || sportParam === "CRICKET") {
-      // support docId or docid
-      const docId = String(
-        url.searchParams.get("docId") ?? url.searchParams.get("docid") ?? ""
-      ).trim();
+      const docId = String(url.searchParams.get("docId") ?? url.searchParams.get("docid") ?? "").trim();
 
       if (!docId) {
         const empty: PicksApiResponse = { games: [], roundNumber };
         return NextResponse.json({
           ...empty,
-          error:
-            "Missing docId. Call /api/picks?sport=BBL&docId=<cricketRounds-docId>",
-        });
+          error: "Missing docId. Call /api/picks?sport=BBL&docId=<cricketRounds-docId>",
+        } as any);
       }
 
       const snap = await db.collection("cricketRounds").doc(docId).get();
@@ -575,32 +613,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({
           ...empty,
           error: `BBL doc not found: cricketRounds/${docId}`,
-        });
+        } as any);
       }
 
       const raw = snap.data() || {};
 
-      // detect games or questions (support casing/variants)
       const gamesArr = firstArray(raw as any, ["games", "Games", "matches", "Matches"]);
-      const questionsArr = firstArray(raw as any, [
-        "questions",
-        "Questions",
-        "matchQuestions",
-        "MatchQuestions",
-      ]);
+      const questionsArr = firstArray(raw as any, ["questions", "Questions", "matchQuestions", "MatchQuestions"]);
 
       let games: ApiGame[] = [];
       let effectiveRoundNumber = roundNumber;
 
       if (gamesArr.length) {
         effectiveRoundNumber =
-          Number(
-            (raw as any).roundNumber ??
-              (raw as any).RoundNumber ??
-              (raw as any).round ??
-              (raw as any).Round ??
-              roundNumber
-          ) || 0;
+          Number((raw as any).roundNumber ?? (raw as any).RoundNumber ?? (raw as any).round ?? (raw as any).Round ?? roundNumber) || 0;
 
         games = buildBblGamesFromRoundDoc(docId, raw, pickStats, userPicks);
       } else if (questionsArr.length) {
@@ -613,26 +639,44 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           error:
             `cricketRounds/${docId} exists but has no games[] or questions[] (including casing variants). ` +
             `Tried: games/Games/matches/Matches and questions/Questions/matchQuestions/MatchQuestions.`,
-        });
+        } as any);
+      }
+
+      // ✅ streaks for cricket too (same logic)
+      const qIds = new Set<string>();
+      games.forEach((g) => g.questions.forEach((q) => qIds.add(q.id)));
+
+      let currentStreak = 0;
+      let leaderScore = 0;
+
+      if (currentUserId) currentStreak = computeBestStreakAcrossGames(games, userPicks);
+
+      const picksByUser = await loadPicksByUserForQuestionIds(qIds);
+      for (const uid of Object.keys(picksByUser)) {
+        const score = computeBestStreakAcrossGames(games, picksByUser[uid]);
+        if (score > leaderScore) leaderScore = score;
       }
 
       const response: PicksApiResponse = {
         games,
         roundNumber: effectiveRoundNumber,
+        currentStreak,
+        leaderScore,
+        leaderName: null,
       };
 
       return NextResponse.json(response);
     }
 
     // ─────────────────────────────
-    // AFL path (existing JSON logic)
+    // AFL path
     // ─────────────────────────────
 
     const roundCode = getRoundCode(roundNumber);
     const roundRows = rows.filter((row) => row.Round === roundCode);
 
     if (!roundRows.length) {
-      const empty: PicksApiResponse = { games: [], roundNumber };
+      const empty: PicksApiResponse = { games: [], roundNumber, currentStreak: 0, leaderScore: 0, leaderName: null };
       return NextResponse.json(empty);
     }
 
@@ -675,13 +719,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         sponsorConfig.questionId === questionId;
 
       const statusInfo = statusOverrides[questionId];
-      const effectiveStatus =
-        statusInfo?.status ?? normaliseStatusValue(row.Status || "Open");
+      const effectiveStatus = statusInfo?.status ?? normaliseStatusValue(row.Status || "Open");
 
       const correctOutcome =
-        effectiveStatus === "final" || effectiveStatus === "void"
-          ? statusInfo?.outcome
-          : undefined;
+        effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
       const userPick = userPicks[questionId];
 
@@ -712,12 +753,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const games = Object.values(gamesByKey);
-    const response: PicksApiResponse = { games, roundNumber };
+
+    // ✅ compute streak + leader now that we have outcomes/status in games
+    const qIds = new Set<string>();
+    games.forEach((g) => g.questions.forEach((q) => qIds.add(q.id)));
+
+    const currentStreak = currentUserId ? computeBestStreakAcrossGames(games, userPicks) : 0;
+
+    let leaderScore = 0;
+    const picksByUser = await loadPicksByUserForQuestionIds(qIds);
+    for (const uid of Object.keys(picksByUser)) {
+      const score = computeBestStreakAcrossGames(games, picksByUser[uid]);
+      if (score > leaderScore) leaderScore = score;
+    }
+
+    const response: PicksApiResponse = {
+      games,
+      roundNumber,
+      currentStreak,
+      leaderScore,
+      leaderName: null,
+    };
+
     return NextResponse.json(response);
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
-      { error: "Internal server error", games: [], roundNumber: 0 },
+      { error: "Internal server error", games: [], roundNumber: 0, currentStreak: 0, leaderScore: 0, leaderName: null },
       { status: 500 }
     );
   }
