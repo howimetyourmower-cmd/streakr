@@ -1,32 +1,21 @@
-// app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import dynamic from "next/dynamic";
+import NavBar from "./components/NavBar";
 
 export const metadata: Metadata = {
   title: "Torpie",
   description: "Torpie – Streak prediction game",
 };
 
-// NOTE: Your Navbar file is /components/NavBar.tsx (capital N, no extra folder)
-// so the import should be "@/components/NavBar" from app/layout.tsx.
-const NavBar = dynamic(() => import("@/components/NavBar"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-[52px] w-full border-b border-black/10 bg-white" />
-  ),
-});
-
-
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="bg-[#0d1117]">
-      <body className="min-h-screen bg-[#0d1117] text-white antialiased">
+    <html lang="en" className="bg-black">
+      <body className="min-h-screen bg-black text-white antialiased">
         {/* NAVIGATION */}
         <NavBar />
 
-        {/* COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
+        {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
         <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_40px_rgba(56,189,248,0.18)]">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1 sm:py-1">
             {/* Left badge */}
@@ -48,7 +37,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </div>
 
         {/* PAGE CONTENT */}
-        <main className="w-full bg-[#0d1117]">{children}</main>
+        <main className="w-full bg-black">{children}</main>
       </body>
     </html>
   );
