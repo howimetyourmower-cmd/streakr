@@ -106,11 +106,20 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
     return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
+  if (
+    n.includes("western bulldogs") ||
+    n.includes("bulldogs") ||
+    n.includes("footscray")
+  )
     return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("north melbourne") || n.includes("kangaroos"))
+    return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
+  if (
+    n.includes("st kilda") ||
+    n.includes("saints") ||
+    n.replace(/\s/g, "") === "stkilda"
+  )
     return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
@@ -139,15 +148,6 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
     `/aflteams/${teamSlug}-logo.png`,
-  ];
-}
-
-function homeTeamImageCandidates(teamSlug: TeamSlug): string[] {
-  return [
-    `/afl/grounds/${teamSlug}.jpg`,
-    `/afl/grounds/${teamSlug}.jpeg`,
-    `/afl/grounds/${teamSlug}.png`,
-    `/afl1.png`,
   ];
 }
 
@@ -243,7 +243,13 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-function CheckIcon({ size = 18, color = COLORS.green }: { size?: number; color?: string }) {
+function CheckIcon({
+  size = 18,
+  color = COLORS.green,
+}: {
+  size?: number;
+  color?: string;
+}) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
@@ -275,84 +281,43 @@ function ProgressTick({ on }: { on: boolean }) {
 }
 
 /**
- * ✅ AFL1 as a true silhouette overlay:
- * - uses CSS filters to desaturate + deepen
- * - low opacity
- * - sits BEHIND text/logos
+ * ✅ Fix: silhouette MUST be clipped to each card.
+ * - Parent cards must have overflow-hidden
+ * - This component is absolute inside the card and cannot escape
+ * - Opacity tuned so it’s visible but never competes with text/logos
  */
-function AflSilhouetteOverlay({
-  opacity = 0.10,
-  scale = 1.05,
+function CardSilhouetteBg({
+  opacity = 0.18,
 }: {
   opacity?: number;
-  scale?: number;
 }) {
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <div className="absolute inset-0" style={{ opacity }}>
-        <Image
-          src="/afl1.png"
-          alt=""
-          fill
-          sizes="(max-width: 1024px) 100vw, 1024px"
-          style={{
-            objectFit: "cover",
-            transform: `scale(${scale})`,
-            filter: "grayscale(1) brightness(0.30) contrast(1.25)",
-          }}
-          priority={false}
-        />
-      </div>
-
-      {/* Soft vignette to push focus back to text/logos */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0.85) 100%)",
-        }}
-      />
-    </div>
-  );
-}
-
-/** Background image for phase-2 (grounds). Still safe if missing. */
-function HomeTeamBg({
-  homeTeamName,
-  overlay = true,
-}: {
-  homeTeamName: string;
-  overlay?: boolean;
-}) {
-  const slug = teamNameToSlug(homeTeamName);
-  const [idx, setIdx] = useState(0);
-  const candidates = slug ? homeTeamImageCandidates(slug) : ["/afl1.png"];
-  const src = candidates[Math.min(idx, candidates.length - 1)];
-
   return (
     <>
-      <div className="absolute inset-0">
-        <Image
-          src={src}
-          alt=""
-          fill
-          priority={false}
-          sizes="(max-width: 1024px) 100vw, 1024px"
-          style={{ objectFit: "cover" }}
-          className="opacity-30"
-          onError={() => setIdx((p) => Math.min(p + 1, candidates.length - 1))}
-        />
-      </div>
+      <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+        <div className="absolute inset-0" style={{ opacity }}>
+          <Image
+            src="/afl1.png"
+            alt=""
+            fill
+            sizes="(max-width: 1024px) 100vw, 1024px"
+            style={{
+              objectFit: "cover",
+              filter: "grayscale(1) brightness(0.35) contrast(1.35)",
+              transform: "scale(1.04)",
+            }}
+            priority={false}
+          />
+        </div>
 
-      {overlay ? (
+        {/* Tight readability layer so logos + match name POP */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.82) 70%, rgba(0,0,0,0.92) 100%)",
+              "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
           }}
         />
-      ) : null}
+      </div>
     </>
   );
 }
@@ -692,20 +657,9 @@ export default function PicksPage() {
           textDecoration: "none",
         }}
       >
-        <div className="relative p-5" style={{ minHeight: 205 }}>
-          {/* Background images stay subtle */}
-          <HomeTeamBg homeTeamName={homeName} />
-          {/* ✅ AFL1 silhouette (not a photo) */}
-          <AflSilhouetteOverlay opacity={0.10} />
-
-          {/* ✅ Strong readability layer for text/logo pop */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.78) 100%)",
-            }}
-          />
+        {/* ✅ CRITICAL: overflow-hidden here ensures the silhouette cannot escape the card */}
+        <div className="relative p-5 overflow-hidden" style={{ minHeight: 205 }}>
+          <CardSilhouetteBg opacity={0.18} />
 
           <div className="relative z-10">
             <div className="flex items-center justify-between gap-3">
@@ -726,17 +680,16 @@ export default function PicksPage() {
 
             <div className="mt-4 flex items-center justify-center gap-3">
               <TeamLogo teamName={homeName} size={50} />
-              <div className="text-white/75 font-black text-[12px]">vs</div>
+              <div className="text-white/80 font-black text-[12px]">vs</div>
               <TeamLogo teamName={awayName || "AFL"} size={50} />
             </div>
 
-            {/* ✅ Match name more dominant */}
             <div className="mt-3 text-center">
               <div
                 className="text-[18px] sm:text-[19px] font-black leading-tight"
                 style={{
                   color: "rgba(255,255,255,0.98)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.65)",
+                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
                 }}
               >
                 {g.match}
@@ -745,7 +698,7 @@ export default function PicksPage() {
                 className="mt-1 text-[12px] font-semibold truncate"
                 style={{
                   color: "rgba(255,255,255,0.78)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.55)",
+                  textShadow: "0 2px 10px rgba(0,0,0,0.60)",
                 }}
               >
                 {g.venue}
@@ -756,8 +709,10 @@ export default function PicksPage() {
               <span
                 className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                 style={{
-                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
-                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+                  borderColor:
+                    picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
+                  background:
+                    picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
                   color: "rgba(255,255,255,0.95)",
                 }}
               >
@@ -844,22 +799,9 @@ export default function PicksPage() {
                 textDecoration: "none",
               }}
             >
-              <div className="relative p-5 sm:p-6" style={{ minHeight: 180 }}>
-                {(() => {
-                  const m = splitMatch(nextUp.match);
-                  const homeName = m?.home ?? nextUp.match;
-                  return <HomeTeamBg homeTeamName={homeName} />;
-                })()}
-                <AflSilhouetteOverlay opacity={0.12} />
-
-                {/* readability layer */}
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    background:
-                      "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 100%)",
-                  }}
-                />
+              {/* ✅ also clip the hero */}
+              <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 180 }}>
+                <CardSilhouetteBg opacity={0.20} />
 
                 <div className="relative z-10">
                   <div className="flex items-center justify-between gap-3">
@@ -899,7 +841,7 @@ export default function PicksPage() {
                       className="text-[22px] sm:text-[28px] font-black leading-tight"
                       style={{
                         color: "rgba(255,255,255,0.98)",
-                        textShadow: "0 2px 12px rgba(0,0,0,0.65)",
+                        textShadow: "0 2px 12px rgba(0,0,0,0.70)",
                       }}
                     >
                       {nextUp.match}
@@ -908,7 +850,7 @@ export default function PicksPage() {
                       className="mt-2 text-[12px] font-semibold"
                       style={{
                         color: "rgba(255,255,255,0.78)",
-                        textShadow: "0 2px 10px rgba(0,0,0,0.55)",
+                        textShadow: "0 2px 10px rgba(0,0,0,0.60)",
                       }}
                     >
                       {formatAedt(nextUp.startTime)} • {nextUp.venue}
@@ -959,7 +901,10 @@ export default function PicksPage() {
           )}
         </div>
 
-        <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+        <div
+          className="mt-10 pb-8 text-center text-[11px]"
+          style={{ color: "rgba(255,255,255,0.55)" }}
+        >
           TORPIE © 2026
         </div>
       </div>
