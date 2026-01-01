@@ -9,20 +9,23 @@ export const metadata: Metadata = {
   description: "Torpie – Streak prediction game",
 };
 
-// Force NavBar to be client-only (prevents build prerender errors if it uses client hooks)
-const NavBar = dynamic(() => import("./components/NavBar"), {
+// NOTE: Your Navbar file is /components/Navbar.tsx (capital N, no extra folder)
+// so the import should be "../components/Navbar" from app/layout.tsx.
+const NavBar = dynamic(() => import("../components/Navbar"), {
   ssr: false,
-  loading: () => <div className="h-[52px] w-full border-b border-white/10 bg-black" />,
+  loading: () => (
+    <div className="h-[52px] w-full border-b border-black/10 bg-white" />
+  ),
 });
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="bg-black">
-      <body className="min-h-screen bg-black text-white antialiased">
+    <html lang="en" className="bg-[#0d1117]">
+      <body className="min-h-screen bg-[#0d1117] text-white antialiased">
         {/* NAVIGATION */}
         <NavBar />
 
-        {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
+        {/* COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
         <div className="border-b border-white/10 bg-gradient-to-r from-sky-900 via-sky-700 to-sky-800 shadow-[0_0_40px_rgba(56,189,248,0.18)]">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1 sm:py-1">
             {/* Left badge */}
@@ -44,7 +47,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         </div>
 
         {/* PAGE CONTENT */}
-        <main className="w-full bg-black">{children}</main>
+        <main className="w-full bg-[#0d1117]">{children}</main>
       </body>
     </html>
   );
