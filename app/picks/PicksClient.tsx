@@ -418,7 +418,7 @@ export default function PicksPage() {
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
       setGames(Array.isArray(data.games) ? data.games : []);
 
-      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0;
 
       setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
       setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
