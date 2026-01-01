@@ -175,9 +175,9 @@ const TeamLogo = React.memo(function TeamLogoInner({
         style={{
           width: size,
           height: size,
-          borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.04)",
-          color: "rgba(255,255,255,0.85)",
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
         }}
         title={teamName}
       >
@@ -193,9 +193,9 @@ const TeamLogo = React.memo(function TeamLogoInner({
         style={{
           width: size,
           height: size,
-          borderColor: "rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.06)",
-          color: "rgba(255,255,255,0.75)",
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
         }}
         title={teamName}
       >
@@ -218,8 +218,8 @@ const TeamLogo = React.memo(function TeamLogoInner({
       style={{
         width: size,
         height: size,
-        borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.06)",
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
       }}
       title={teamName}
     >
@@ -274,30 +274,49 @@ function ProgressTick({ on }: { on: boolean }) {
   );
 }
 
-/** ✅ Always-on AFL silhouette inside every pick box (match cards + hero) */
-function AflSilhouetteOverlay({ opacity = 0.08 }: { opacity?: number }) {
+/**
+ * ✅ AFL1 as a true silhouette overlay:
+ * - uses CSS filters to desaturate + deepen
+ * - low opacity
+ * - sits BEHIND text/logos
+ */
+function AflSilhouetteOverlay({
+  opacity = 0.10,
+  scale = 1.05,
+}: {
+  opacity?: number;
+  scale?: number;
+}) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <Image
-        src="/afl1.png"
-        alt=""
-        fill
-        sizes="(max-width: 1024px) 100vw, 1024px"
-        style={{ objectFit: "contain" }}
-        className="opacity-100"
-        priority={false}
-      />
+      <div className="absolute inset-0" style={{ opacity }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1024px) 100vw, 1024px"
+          style={{
+            objectFit: "cover",
+            transform: `scale(${scale})`,
+            filter: "grayscale(1) brightness(0.30) contrast(1.25)",
+          }}
+          priority={false}
+        />
+      </div>
+
+      {/* Soft vignette to push focus back to text/logos */}
       <div
         className="absolute inset-0"
         style={{
-          background: `radial-gradient(circle at 50% 35%, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.45) 55%, rgba(0,0,0,0.80) 100%)`,
-          opacity,
+          background:
+            "radial-gradient(circle at 50% 40%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.55) 55%, rgba(0,0,0,0.85) 100%)",
         }}
       />
     </div>
   );
 }
 
+/** Background image for phase-2 (grounds). Still safe if missing. */
 function HomeTeamBg({
   homeTeamName,
   overlay = true,
@@ -308,7 +327,6 @@ function HomeTeamBg({
   const slug = teamNameToSlug(homeTeamName);
   const [idx, setIdx] = useState(0);
   const candidates = slug ? homeTeamImageCandidates(slug) : ["/afl1.png"];
-
   const src = candidates[Math.min(idx, candidates.length - 1)];
 
   return (
@@ -331,7 +349,7 @@ function HomeTeamBg({
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.78) 70%, rgba(0,0,0,0.90) 100%)",
+              "linear-gradient(180deg, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0.82) 70%, rgba(0,0,0,0.92) 100%)",
           }}
         />
       ) : null}
@@ -339,22 +357,12 @@ function HomeTeamBg({
   );
 }
 
-function HowToPlayModal({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
+function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.75)" }}
-        onClick={onClose}
-      />
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
         style={{
@@ -438,7 +446,6 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, []);
 
-  // First-time How to play (Picks page)
   useEffect(() => {
     try {
       const seen = localStorage.getItem(HOW_TO_PLAY_PICKS_KEY);
@@ -466,10 +473,7 @@ export default function PicksPage() {
         } catch {}
       }
 
-      const res = await fetch("/api/picks", {
-        headers: authHeader,
-        cache: "no-store",
-      });
+      const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
       if (!res.ok) throw new Error(await res.text());
 
       const data = (await res.json()) as PicksApiResponse;
@@ -500,7 +504,6 @@ export default function PicksPage() {
     );
   }, [games]);
 
-  // picks-per-game logic (real)
   const gamesPicked = useMemo(() => {
     return games.filter((g) =>
       (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
@@ -518,133 +521,6 @@ export default function PicksPage() {
     if (leaderScore === null) return null;
     return Math.max(0, leaderScore - currentStreak);
   }, [leaderScore, currentStreak]);
-
-  const MatchCard = ({ g }: { g: ApiGame }) => {
-    const lockMs = new Date(g.startTime).getTime() - nowMs;
-    const m = splitMatch(g.match);
-    const homeName = m?.home ?? g.match;
-    const awayName = m?.away ?? "";
-    const matchSlug = slugify(g.match);
-
-    const picksCount =
-      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
-
-    const hasPending = (g.questions || []).some((q) => q.status === "pending");
-    const hasFinal = (g.questions || []).some((q) => q.status === "final");
-    const hasVoid = (g.questions || []).some((q) => q.status === "void");
-    const isLiveLocked = lockMs <= 0;
-
-    const statusLabel = isLiveLocked
-      ? "LIVE / Locked"
-      : `Locks in ${msToCountdown(lockMs)}`;
-
-    const statusTone = isLiveLocked
-      ? {
-          borderColor: "rgba(255,46,77,0.55)",
-          background: "rgba(255,46,77,0.16)",
-        }
-      : {
-          borderColor: "rgba(255,255,255,0.16)",
-          background: "rgba(0,0,0,0.35)",
-        };
-
-    const subBadges: { label: string; tone: "neutral" | "green" | "red" }[] = [];
-    subBadges.push({ label: `${picksCount}/12 picked`, tone: picksCount > 0 ? "green" : "neutral" });
-    if (hasPending) subBadges.push({ label: "Pending", tone: "neutral" });
-    if (hasFinal) subBadges.push({ label: "Final", tone: "neutral" });
-    if (hasVoid) subBadges.push({ label: "Void", tone: "neutral" });
-
-    return (
-      <Link
-        href={`/picks/${matchSlug}`}
-        className="block rounded-2xl overflow-hidden border"
-        style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
-          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
-          textDecoration: "none",
-        }}
-        title="Open match"
-      >
-        <div className="relative p-5" style={{ minHeight: 200 }}>
-          {/* ✅ home team background (phase 2 ready) */}
-          <HomeTeamBg homeTeamName={homeName} />
-          {/* ✅ mandatory AFL silhouette inside the box */}
-          <AflSilhouetteOverlay opacity={0.08} />
-
-          <div className="relative z-10">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] text-white/75 font-semibold">
-                {formatAedt(g.startTime)}
-              </div>
-
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  ...statusTone,
-                  color: "rgba(255,255,255,0.95)",
-                }}
-              >
-                {statusLabel}
-              </span>
-            </div>
-
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <TeamLogo teamName={homeName} size={50} />
-              <div className="text-white/60 font-black text-[12px]">vs</div>
-              <TeamLogo teamName={awayName || "AFL"} size={50} />
-            </div>
-
-            <div className="mt-3 text-center">
-              <div className="text-[18px] sm:text-[19px] font-black text-white leading-tight">
-                {g.match}
-              </div>
-              <div className="mt-1 text-[12px] text-white/65 font-semibold truncate">
-                {g.venue}
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-              {subBadges.map((b, i) => (
-                <span
-                  key={`${b.label}-${i}`}
-                  className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor:
-                      b.tone === "green"
-                        ? "rgba(45,255,122,0.45)"
-                        : "rgba(255,255,255,0.14)",
-                    background:
-                      b.tone === "green"
-                        ? "rgba(45,255,122,0.10)"
-                        : "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                >
-                  {b.label}
-                </span>
-              ))}
-            </div>
-
-            <div className="mt-5 flex items-center justify-center">
-              <span
-                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,46,77,0.32)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
-                  color: "rgba(255,255,255,0.98)",
-                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
-                }}
-              >
-                PLAY NOW
-              </span>
-            </div>
-          </div>
-        </div>
-      </Link>
-    );
-  };
 
   const DashboardStrip = () => {
     return (
@@ -675,7 +551,6 @@ export default function PicksPage() {
         </div>
 
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-          {/* Current streak */}
           <div
             className="shrink-0 rounded-2xl border px-4 py-3"
             style={{
@@ -706,7 +581,6 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Distance to leader */}
           <div
             className="shrink-0 rounded-2xl border px-4 py-3"
             style={{
@@ -741,11 +615,10 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Eligible */}
           <div
             className="shrink-0 rounded-2xl border px-4 py-3"
             style={{
-              minWidth: 220,
+              minWidth: 240,
               borderColor: "rgba(255,255,255,0.10)",
               background: "rgba(0,0,0,0.35)",
             }}
@@ -792,12 +665,142 @@ export default function PicksPage() {
     );
   };
 
+  const MatchCard = ({ g }: { g: ApiGame }) => {
+    const lockMs = new Date(g.startTime).getTime() - nowMs;
+    const m = splitMatch(g.match);
+    const homeName = m?.home ?? g.match;
+    const awayName = m?.away ?? "";
+    const matchSlug = slugify(g.match);
+
+    const picksCount =
+      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+
+    const isLocked = lockMs <= 0;
+
+    const badgeStyle = isLocked
+      ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
+      : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
+
+    return (
+      <Link
+        href={`/picks/${matchSlug}`}
+        className="block rounded-2xl overflow-hidden border"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
+          textDecoration: "none",
+        }}
+      >
+        <div className="relative p-5" style={{ minHeight: 205 }}>
+          {/* Background images stay subtle */}
+          <HomeTeamBg homeTeamName={homeName} />
+          {/* ✅ AFL1 silhouette (not a photo) */}
+          <AflSilhouetteOverlay opacity={0.10} />
+
+          {/* ✅ Strong readability layer for text/logo pop */}
+          <div
+            className="absolute inset-0"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.78) 100%)",
+            }}
+          />
+
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] text-white/85 font-semibold">
+                {formatAedt(g.startTime)}
+              </div>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  ...badgeStyle,
+                  color: "rgba(255,255,255,0.96)",
+                }}
+              >
+                {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <TeamLogo teamName={homeName} size={50} />
+              <div className="text-white/75 font-black text-[12px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={50} />
+            </div>
+
+            {/* ✅ Match name more dominant */}
+            <div className="mt-3 text-center">
+              <div
+                className="text-[18px] sm:text-[19px] font-black leading-tight"
+                style={{
+                  color: "rgba(255,255,255,0.98)",
+                  textShadow: "0 2px 10px rgba(0,0,0,0.65)",
+                }}
+              >
+                {g.match}
+              </div>
+              <div
+                className="mt-1 text-[12px] font-semibold truncate"
+                style={{
+                  color: "rgba(255,255,255,0.78)",
+                  textShadow: "0 2px 10px rgba(0,0,0,0.55)",
+                }}
+              >
+                {g.venue}
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
+                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.95)",
+                }}
+              >
+                {picksCount}/12 picked
+              </span>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
+              </span>
+            </div>
+
+            <div className="mt-5 flex items-center justify-center">
+              <span
+                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background:
+                    "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+                }}
+              >
+                PLAY NOW
+              </span>
+            </div>
+          </div>
+        </div>
+      </Link>
+    );
+  };
+
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howOpen} onClose={closeHow} />
 
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-16">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-3">
@@ -827,10 +830,8 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* ✅ Compact dashboard strip (not a big block) */}
         <DashboardStrip />
 
-        {/* Next Up (kept but cleaner, not dominating) */}
         {!loading && nextUp ? (
           <div className="mt-6">
             <Link
@@ -849,7 +850,16 @@ export default function PicksPage() {
                   const homeName = m?.home ?? nextUp.match;
                   return <HomeTeamBg homeTeamName={homeName} />;
                 })()}
-                <AflSilhouetteOverlay opacity={0.10} />
+                <AflSilhouetteOverlay opacity={0.12} />
+
+                {/* readability layer */}
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background:
+                      "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.55) 45%, rgba(0,0,0,0.82) 100%)",
+                  }}
+                />
 
                 <div className="relative z-10">
                   <div className="flex items-center justify-between gap-3">
@@ -864,7 +874,7 @@ export default function PicksPage() {
                       NEXT UP
                     </div>
 
-                    <div className="text-[11px] text-white/70 font-semibold">
+                    <div className="text-[11px] text-white/80 font-semibold">
                       {new Date(nextUp.startTime).getTime() - nowMs <= 0
                         ? "LIVE / Locked"
                         : `Locks in ${msToCountdown(new Date(nextUp.startTime).getTime() - nowMs)}`}
@@ -878,17 +888,29 @@ export default function PicksPage() {
                     return (
                       <div className="mt-4 flex items-center justify-center gap-4">
                         <TeamLogo teamName={homeName} size={54} />
-                        <div className="text-white/70 font-black text-[13px]">vs</div>
+                        <div className="text-white/80 font-black text-[13px]">vs</div>
                         <TeamLogo teamName={awayName || "AFL"} size={54} />
                       </div>
                     );
                   })()}
 
                   <div className="mt-3 text-center">
-                    <div className="text-[22px] sm:text-[28px] font-black text-white leading-tight">
+                    <div
+                      className="text-[22px] sm:text-[28px] font-black leading-tight"
+                      style={{
+                        color: "rgba(255,255,255,0.98)",
+                        textShadow: "0 2px 12px rgba(0,0,0,0.65)",
+                      }}
+                    >
                       {nextUp.match}
                     </div>
-                    <div className="mt-2 text-[12px] text-white/70 font-semibold">
+                    <div
+                      className="mt-2 text-[12px] font-semibold"
+                      style={{
+                        color: "rgba(255,255,255,0.78)",
+                        textShadow: "0 2px 10px rgba(0,0,0,0.55)",
+                      }}
+                    >
                       {formatAedt(nextUp.startTime)} • {nextUp.venue}
                     </div>
                   </div>
@@ -898,17 +920,9 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* Matches */}
         <div className="mt-8">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">
-                Scheduled matches
-              </div>
-              <div className="mt-1 text-[13px] text-white/70 font-semibold">
-                Full match details + countdown in every box.
-              </div>
-            </div>
+          <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">
+            Scheduled matches
           </div>
 
           {loading ? (
@@ -922,7 +936,7 @@ export default function PicksPage() {
                     background: "rgba(255,255,255,0.03)",
                   }}
                 >
-                  <div className="h-[200px] bg-white/5" />
+                  <div className="h-[205px] bg-white/5" />
                 </div>
               ))}
             </div>
@@ -945,7 +959,6 @@ export default function PicksPage() {
           )}
         </div>
 
-        {/* Footer */}
         <div className="mt-10 pb-8 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
           TORPIE © 2026
         </div>
