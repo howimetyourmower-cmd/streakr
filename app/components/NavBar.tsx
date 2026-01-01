@@ -91,7 +91,7 @@ export default function NavBar() {
               fill
               priority
               className="object-contain object-left"
-              sizes="440px"
+              sizes="540px"
             />
           </div>
         </Link>
