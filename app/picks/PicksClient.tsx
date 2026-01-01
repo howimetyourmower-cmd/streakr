@@ -16,7 +16,7 @@ type ApiQuestion = {
   status: "open" | "final" | "pending" | "void";
   userPick?: "yes" | "no";
 
-  // ✅ comes from /api/picks already — we just weren’t typing/using it here
+  // from /api/picks
   correctPick?: boolean | null; // true=correct, false=wrong, null=void
   outcome?: "yes" | "no" | "void";
 };
@@ -33,8 +33,8 @@ type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
   currentStreak?: number;
-  leaderScore?: number; // leader current streak (top user)
-  leaderName?: string; // OPTIONAL
+  leaderScore?: number;
+  leaderName?: string;
 };
 
 const COLORS = {
@@ -144,7 +144,6 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
     `/aflteams/${teamSlug}-logo.jpg`,
     `/aflteams/${teamSlug}-logo.jpeg`,
     `/aflteams/${teamSlug}-logo.png`,
-    // if you’re using /afllogos now, this catches it too:
     `/afllogos/${teamSlug}-logo.jpg`,
     `/afllogos/${teamSlug}-logo.png`,
   ];
@@ -248,9 +247,6 @@ function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: strin
   );
 }
 
-/**
- * ✅ silhouette clipped per card
- */
 function CardSilhouetteBg({ opacity = 1 }: { opacity?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
@@ -359,16 +355,12 @@ type GameStatusRow = {
   match: string;
   venue: string;
   startTime: string;
-
   picks: number;
   correct: number;
   wrong: number;
   voided: number;
   unsettled: number;
-
-  // ✅ Clean Sweep streak after this game
-  streakAfter: number | null; // null if not computable (eg no picks anywhere yet)
-  isCompleteForUser: boolean; // no unsettled picks among your picks
+  streakAfter: number | null;
 };
 
 export default function PicksPage() {
@@ -426,7 +418,7 @@ export default function PicksPage() {
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
       setGames(Array.isArray(data.games) ? data.games : []);
 
-      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0;
 
       setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
       setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
@@ -449,6 +441,11 @@ export default function PicksPage() {
     return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }, [games]);
 
+  const nextUp = useMemo(() => {
+    const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
+    return upcoming.length ? upcoming[0] : sortedGames[0] || null;
+  }, [sortedGames, nowMs]);
+
   const gamesPicked = useMemo(() => {
     return games.filter((g) =>
       (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
@@ -456,11 +453,6 @@ export default function PicksPage() {
   }, [games]);
 
   const eligible = gamesPicked > 0;
-
-  const nextUp = useMemo(() => {
-    const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
-    return upcoming.length ? upcoming[0] : sortedGames[0] || null;
-  }, [sortedGames, nowMs]);
 
   const distanceToLeader = useMemo(() => {
     if (leaderScore === null) return null;
@@ -472,7 +464,6 @@ export default function PicksPage() {
     return clamp((currentStreak / leaderScore) * 100, 0, 100);
   }, [leaderScore, currentStreak]);
 
-  // ✅ Build the per-game dashboard rows (the thing you asked for)
   const gameStatusRows = useMemo((): GameStatusRow[] => {
     let runningStreak = 0;
 
@@ -486,30 +477,14 @@ export default function PicksPage() {
       let unsettled = 0;
 
       for (const q of pickedQs) {
-        // If admin settled the game, API should return correctPick
-        // - true = correct
-        // - false = wrong
-        // - null = void
-        // - undefined = not settled yet
         if (q.correctPick === true) correct += 1;
         else if (q.correctPick === false) wrong += 1;
         else if (q.correctPick === null) voided += 1;
         else unsettled += 1;
       }
 
-      const isCompleteForUser = unsettled === 0;
-
-      // ✅ Clean Sweep per-game streak logic:
-      // if ANY wrong settled in this game -> streak becomes 0 (and this game adds nothing)
-      // else add correct settled only (voids don’t count)
-      if (wrong > 0) {
-        runningStreak = 0;
-      } else {
-        runningStreak += correct;
-      }
-
-      // if user picked nothing, streak stays the same (as your examples)
-      // (runningStreak already stays same, since correct=0 and wrong=0)
+      if (wrong > 0) runningStreak = 0;
+      else runningStreak += correct;
 
       return {
         gameId: g.id,
@@ -522,7 +497,6 @@ export default function PicksPage() {
         voided,
         unsettled,
         streakAfter: runningStreak,
-        isCompleteForUser,
       };
     });
   }, [sortedGames]);
@@ -582,73 +556,41 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* Top tiles */}
         <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
           {/* Current streak */}
-          <div
-            className="rounded-2xl border px-4 py-3"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
+          <div className="rounded-2xl border px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.35)" }}>
             <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">Current streak</div>
             <div className="mt-2 flex items-center gap-3">
-              <div
-                className="rounded-xl border px-3 py-2"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
+              <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)" }}>
                 <span className="text-[18px] font-black text-white">{currentStreak}</span>
               </div>
               <div className="min-w-0">
                 <div className="text-[12px] font-black text-white">Keep it alive</div>
-                <div className="text-[11px] text-white/65 font-semibold leading-snug">
-                  One wrong pick in a match resets to 0.
-                </div>
+                <div className="text-[11px] text-white/65 font-semibold leading-snug">One wrong pick in a match resets to 0.</div>
               </div>
             </div>
           </div>
 
           {/* Leader */}
-          <div
-            className="rounded-2xl border px-4 py-3"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
+          <div className="rounded-2xl border px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.35)" }}>
             <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">Leader</div>
-
             <div className="mt-2 flex items-center gap-3">
               <div
                 className="rounded-xl border px-3 py-2"
                 style={{
-                  borderColor:
-                    leaderScore === null ? "rgba(255,255,255,0.14)" : "rgba(255,46,77,0.35)",
-                  background:
-                    leaderScore === null ? "rgba(255,255,255,0.06)" : "rgba(255,46,77,0.10)",
+                  borderColor: leaderScore === null ? "rgba(255,255,255,0.14)" : "rgba(255,46,77,0.35)",
+                  background: leaderScore === null ? "rgba(255,255,255,0.06)" : "rgba(255,46,77,0.10)",
                 }}
               >
                 <span className="text-[18px] font-black text-white">{leaderScore === null ? "—" : leaderScore}</span>
               </div>
-
               <div className="min-w-0">
                 <div className="text-[12px] font-black text-white truncate">{leaderText}</div>
                 <div className="text-[11px] text-white/65 font-semibold leading-snug">Top streak right now.</div>
               </div>
             </div>
 
-            <div
-              className="mt-3 h-[10px] w-full rounded-full border overflow-hidden"
-              style={{
-                borderColor: "rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.06)",
-              }}
-              aria-label="progress to leader"
-            >
+            <div className="mt-3 h-[10px] w-full rounded-full border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.06)" }}>
               <div
                 className="h-full"
                 style={{
@@ -662,45 +604,24 @@ export default function PicksPage() {
           </div>
 
           {/* Distance */}
-          <div
-            className="rounded-2xl border px-4 py-3"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
+          <div className="rounded-2xl border px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.35)" }}>
             <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">Distance</div>
             <div className="mt-2 flex items-center gap-3">
-              <div
-                className="rounded-xl border px-3 py-2"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
+              <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)" }}>
                 <span className="text-[18px] font-black text-white">
                   {leaderScore === null || distanceToLeader === null ? "—" : distanceToLeader}
                 </span>
               </div>
               <div className="min-w-0">
-                <div className="text-[12px] font-black text-white">
-                  {leaderScore === null ? "Waiting on leader data" : "Close the gap"}
-                </div>
+                <div className="text-[12px] font-black text-white">{leaderScore === null ? "Waiting on leader data" : "Close the gap"}</div>
                 <div className="text-[11px] text-white/65 font-semibold leading-snug">Streak only (not best streak).</div>
               </div>
             </div>
           </div>
 
           {/* Eligible */}
-          <div
-            className="rounded-2xl border px-4 py-3"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
+          <div className="rounded-2xl border px-4 py-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.35)" }}>
             <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">Eligible to win</div>
-
             <div className="mt-2 flex items-center gap-3">
               <div
                 className="rounded-xl border px-3 py-2 flex items-center justify-center"
@@ -713,25 +634,22 @@ export default function PicksPage() {
               >
                 {eligible ? <CheckIcon /> : <span className="text-white font-black">—</span>}
               </div>
-
               <div className="min-w-0">
                 <div className="text-[12px] font-black text-white">{eligible ? "Eligible" : "Not yet"}</div>
-                <div className="mt-1 text-[11px] font-semibold text-white/80">{gamesPicked} games picked</div>
+                <div className="text-[11px] text-white/65 font-semibold leading-snug">{gamesPicked} games picked</div>
               </div>
             </div>
-
             <div className="mt-2 text-[11px] text-white/65 font-semibold">Tip: picks lock at bounce.</div>
           </div>
         </div>
 
-        {/* ✅ NEW: Game Status Dashboard */}
+        {/* Game status dashboard */}
         <div className="mt-4 rounded-2xl border p-3 sm:p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.30)" }}>
           <div className="flex items-center justify-between gap-3">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
           </div>
 
-          {/* Desktop table */}
           <div className="hidden md:block mt-3 overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <table className="w-full text-left">
               <thead>
@@ -745,17 +663,15 @@ export default function PicksPage() {
                   <th className="px-4 py-3 text-[11px] uppercase tracking-widest text-white/60 font-black">Streak after</th>
                 </tr>
               </thead>
-
               <tbody>
                 {gameStatusRows.map((r, i) => {
                   const anyWrong = r.wrong > 0;
-                  const streakText = r.streakAfter === null ? "—" : String(r.streakAfter);
-
-                  const statusPill = anyWrong
-                    ? { label: "BROKEN", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
-                    : r.unsettled > 0
-                    ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
-                    : { label: "CLEAN", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
+                  const pill =
+                    anyWrong
+                      ? { label: "BROKEN", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
+                      : r.unsettled > 0
+                      ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
+                      : { label: "CLEAN", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
                     <tr key={r.gameId} style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.18)" : "rgba(0,0,0,0.10)" }}>
@@ -763,17 +679,15 @@ export default function PicksPage() {
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
                             <div className="text-[13px] font-black text-white truncate">{r.match}</div>
-                            <div className="text-[11px] text-white/60 font-semibold truncate">{formatAedt(r.startTime)} • {r.venue}</div>
+                            <div className="text-[11px] text-white/60 font-semibold truncate">
+                              {formatAedt(r.startTime)} • {r.venue}
+                            </div>
                           </div>
-                          <span
-                            className="shrink-0 inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black border"
-                            style={{ borderColor: statusPill.border, background: statusPill.bg, color: "rgba(255,255,255,0.92)" }}
-                          >
-                            {statusPill.label}
+                          <span className="shrink-0 inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black border" style={{ borderColor: pill.border, background: pill.bg, color: "rgba(255,255,255,0.92)" }}>
+                            {pill.label}
                           </span>
                         </div>
                       </td>
-
                       <td className="px-4 py-3 text-[13px] font-black text-white">{r.picks}</td>
                       <td className="px-4 py-3 text-[13px] font-black" style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}>
                         {r.correct}
@@ -783,7 +697,6 @@ export default function PicksPage() {
                       </td>
                       <td className="px-4 py-3 text-[13px] font-black text-white/80">{r.voided}</td>
                       <td className="px-4 py-3 text-[13px] font-black text-white/80">{r.unsettled}</td>
-
                       <td className="px-4 py-3">
                         <div
                           className="inline-flex items-center gap-2 rounded-xl border px-3 py-2"
@@ -793,7 +706,7 @@ export default function PicksPage() {
                           }}
                         >
                           {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
-                          <span className="text-[14px] font-black text-white">{streakText}</span>
+                          <span className="text-[14px] font-black text-white">{r.streakAfter ?? "—"}</span>
                         </div>
                       </td>
                     </tr>
@@ -803,77 +716,20 @@ export default function PicksPage() {
             </table>
           </div>
 
-          {/* Mobile cards */}
           <div className="md:hidden mt-3 space-y-2">
-            {gameStatusRows.map((r) => {
-              const anyWrong = r.wrong > 0;
-              const streakText = r.streakAfter === null ? "—" : String(r.streakAfter);
-
-              const pill = anyWrong
-                ? { label: "BROKEN", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
-                : r.unsettled > 0
-                ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
-                : { label: "CLEAN", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
-
-              return (
-                <div
-                  key={r.gameId}
-                  className="rounded-2xl border p-3"
-                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[13px] font-black text-white truncate">{r.match}</div>
-                      <div className="text-[11px] text-white/60 font-semibold truncate">{formatAedt(r.startTime)} • {r.venue}</div>
-                    </div>
-                    <span
-                      className="inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black border"
-                      style={{ borderColor: pill.border, background: pill.bg, color: "rgba(255,255,255,0.92)" }}
-                    >
-                      {pill.label}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-[12px]">
-                    <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
-                      <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Picks</div>
-                      <div className="mt-1 text-[14px] font-black text-white">{r.picks}</div>
-                    </div>
-
-                    <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
-                      <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Streak after</div>
-                      <div className="mt-1 text-[14px] font-black text-white">{streakText}</div>
-                    </div>
-
-                    <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
-                      <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Correct</div>
-                      <div className="mt-1 text-[14px] font-black" style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.85)" }}>
-                        {r.correct}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border px-3 py-2" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
-                      <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Wrong</div>
-                      <div className="mt-1 text-[14px] font-black" style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.85)" }}>
-                        {r.wrong}
-                      </div>
-                    </div>
-                  </div>
-
-                  {(r.voided > 0 || r.unsettled > 0) && (
-                    <div className="mt-2 text-[11px] text-white/60 font-semibold">
-                      {r.voided > 0 ? `Void: ${r.voided}` : null}
-                      {r.voided > 0 && r.unsettled > 0 ? " • " : null}
-                      {r.unsettled > 0 ? `Unsettled: ${r.unsettled}` : null}
-                    </div>
-                  )}
+            {gameStatusRows.map((r) => (
+              <div key={r.gameId} className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}>
+                <div className="text-[13px] font-black text-white">{r.match}</div>
+                <div className="text-[11px] text-white/60 font-semibold">{formatAedt(r.startTime)} • {r.venue}</div>
+                <div className="mt-2 text-[12px] text-white/80 font-semibold">
+                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter ?? "—"}
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
 
           <div className="mt-3 text-[11px] text-white/55 font-semibold">
-            Clean Sweep: any wrong pick in a game resets streak to 0 (even if other picks were correct). Voids don’t add.
+            Clean Sweep: any wrong pick in a game resets streak to 0. Voids don’t add.
           </div>
         </div>
       </div>
@@ -932,54 +788,26 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 text-center">
-              <div
-                className="text-[18px] sm:text-[19px] font-black leading-tight"
-                style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
-              >
+              <div className="text-[18px] sm:text-[19px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                 {g.match}
               </div>
-              <div
-                className="mt-1 text-[12px] font-semibold truncate"
-                style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
-              >
+              <div className="mt-1 text-[12px] font-semibold truncate" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                 {g.venue}
               </div>
             </div>
 
             <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
-                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.95)",
-                }}
-              >
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)", background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.95)" }}>
                 {picksCount}/12 picked
               </span>
 
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-              >
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.92)" }}>
                 {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
               </span>
             </div>
 
             <div className="mt-5 flex items-center justify-center">
-              <span
-                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,46,77,0.32)",
-                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
-                  color: "rgba(255,255,255,0.98)",
-                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
-                }}
-              >
+              <span className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border" style={{ borderColor: "rgba(255,46,77,0.32)", background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)", color: "rgba(255,255,255,0.98)", boxShadow: "0 10px 26px rgba(255,46,77,0.18)" }}>
                 PLAY NOW
               </span>
             </div>
@@ -1021,10 +849,9 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        <DashboardStrip />
-
+        {/* ✅ 1) NEXT UP (TOP) */}
         {!loading && nextUp ? (
-          <div className="mt-6">
+          <div className="mt-5">
             <Link
               href={`/picks/${slugify(nextUp.match)}`}
               className="block rounded-2xl overflow-hidden border"
@@ -1072,24 +899,18 @@ export default function PicksPage() {
                   })()}
 
                   <div className="mt-3 text-center">
-                    <div
-                      className="text-[22px] sm:text-[28px] font-black leading-tight"
-                      style={{
-                        color: "rgba(255,255,255,0.98)",
-                        textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-                      }}
-                    >
+                    <div className="text-[22px] sm:text-[28px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                       {nextUp.match}
                     </div>
-                    <div
-                      className="mt-2 text-[12px] font-semibold"
-                      style={{
-                        color: "rgba(255,255,255,0.78)",
-                        textShadow: "0 2px 10px rgba(0,0,0,0.60)",
-                      }}
-                    >
+                    <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                       {formatAedt(nextUp.startTime)} • {nextUp.venue}
                     </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-center">
+                    <span className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border" style={{ borderColor: "rgba(255,46,77,0.32)", background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)", color: "rgba(255,255,255,0.98)", boxShadow: "0 10px 26px rgba(255,46,77,0.18)" }}>
+                      GO PICK
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1097,6 +918,10 @@ export default function PicksPage() {
           </div>
         ) : null}
 
+        {/* ✅ 2) DASHBOARD */}
+        <DashboardStrip />
+
+        {/* ✅ 3) SCHEDULED MATCHES */}
         <div className="mt-8">
           <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
 
