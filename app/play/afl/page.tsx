@@ -263,7 +263,7 @@ export default function AflHubPage() {
       <section className="relative">
         <div className="relative w-full h-[520px] sm:h-[600px]">
           <Image
-            src="/afl1.png"
+            src="/afl2.png"
             alt="AFL hero"
             fill
             priority
