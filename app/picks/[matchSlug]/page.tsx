@@ -382,18 +382,86 @@ function PlayerAvatar({ question }: { question: string }) {
   );
 }
 
+function InlineTeamLogo({
+  teamName,
+  size = 22,
+}: {
+  teamName: string;
+  size?: number;
+}) {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const initials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  if (!slug || dead) {
+    return (
+      <div
+        className="flex items-center justify-center font-black"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 8,
+          background: "rgba(255,255,255,0.12)",
+          color: "rgba(255,255,255,0.90)",
+          fontSize: 10,
+          lineHeight: 1,
+        }}
+        title={teamName}
+      >
+        {initials || "AFL"}
+      </div>
+    );
+  }
+
+  const candidates = logoCandidates(slug);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <div
+      className="relative overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 8,
+      }}
+      title={teamName}
+    >
+      <Image
+        src={src}
+        alt={`${teamName} logo`}
+        fill
+        sizes={`${size}px`}
+        style={{ objectFit: "contain" }}
+        onError={() => {
+          setIdx((p) => {
+            if (p + 1 < candidates.length) return p + 1;
+            setDead(true);
+            return p;
+          });
+        }}
+      />
+    </div>
+  );
+}
+
 function GamePickAvatar({ match }: { match: string }) {
-  // ✅ This now uses the SAME AvatarSquircle as player pick (same size/shape)
   const teams = splitMatch(match);
   const home = teams?.home ?? "";
   const away = teams?.away ?? "";
 
   return (
     <AvatarSquircle title={match}>
-      <div className="flex items-center justify-center gap-2 px-2">
-        <TeamLogo teamName={home || "AFL"} size={24} />
-        <div className="text-[10px] font-black text-white/85">VS</div>
-        <TeamLogo teamName={away || "AFL"} size={24} />
+      <div className="flex items-center justify-center gap-1.5 px-1">
+        <InlineTeamLogo teamName={home || "AFL"} size={22} />
+        <div className="text-[10px] font-black text-white/90 leading-none">VS</div>
+        <InlineTeamLogo teamName={away || "AFL"} size={22} />
       </div>
     </AvatarSquircle>
   );
