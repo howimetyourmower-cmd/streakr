@@ -1,20 +1,31 @@
-// /app/picks/page.tsx
+// /app/picks/[matchSlug]/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
+
+type QuestionStatus = "open" | "final" | "pending" | "void";
+type PickOutcome = "yes" | "no";
+type LocalPick = PickOutcome | "none";
 
 type ApiQuestion = {
   id: string;
   gameId?: string;
   quarter: number;
   question: string;
-  status: "open" | "final" | "pending" | "void";
-  userPick?: "yes" | "no";
+  status: QuestionStatus;
+  userPick?: PickOutcome;
+
+  isSponsorQuestion?: boolean;
+  sponsorName?: string;
+  sponsorPrize?: string;
+
+  yesPercent?: number;
+  noPercent?: number;
 };
 
 type ApiGame = {
@@ -28,18 +39,15 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  currentStreak?: number;
-  leaderScore?: number;
 };
 
 const COLORS = {
-  bg: "#000000",
+  pageBg: "#0d1117",
+  cardBg: "#161b22",
   red: "#FF2E4D",
-  green: "#2DFF7A",
-  white: "#FFFFFF",
 };
 
-const HOW_TO_PLAY_PICKS_KEY = "torpie_seen_how_to_play_picks_v1";
+const HOW_TO_PLAY_KEY = "torpie_seen_how_to_play_match_v1";
 
 function formatAedt(dateIso: string): string {
   try {
@@ -79,312 +87,212 @@ function slugify(text: string): string {
     .replace(/^-|-$/g, "");
 }
 
-type TeamSlug =
-  | "adelaide"
-  | "brisbane"
-  | "carlton"
-  | "collingwood"
-  | "essendon"
-  | "fremantle"
-  | "geelong"
-  | "goldcoast"
-  | "gws"
-  | "hawthorn"
-  | "melbourne"
-  | "northmelbourne"
-  | "portadelaide"
-  | "richmond"
-  | "stkilda"
-  | "sydney"
-  | "westcoast"
-  | "westernbulldogs";
-
-function teamNameToSlug(nameRaw: string): TeamSlug | null {
-  const n = (nameRaw || "").toLowerCase().trim();
-
-  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants"))
-    return "gws";
-  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
-  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (
-    n.includes("western bulldogs") ||
-    n.includes("bulldogs") ||
-    n.includes("footscray")
-  )
-    return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos"))
-    return "northmelbourne";
-  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (
-    n.includes("st kilda") ||
-    n.includes("saints") ||
-    n.replace(/\s/g, "") === "stkilda"
-  )
-    return "stkilda";
-
-  if (n.includes("adelaide")) return "adelaide";
-  if (n.includes("brisbane")) return "brisbane";
-  if (n.includes("carlton")) return "carlton";
-  if (n.includes("collingwood")) return "collingwood";
-  if (n.includes("essendon")) return "essendon";
-  if (n.includes("fremantle")) return "fremantle";
-  if (n.includes("geelong")) return "geelong";
-  if (n.includes("hawthorn")) return "hawthorn";
-  if (n.includes("melbourne")) return "melbourne";
-  if (n.includes("richmond")) return "richmond";
-  if (n.includes("sydney") || n.includes("swans")) return "sydney";
-
-  return null;
-}
-
 function splitMatch(match: string): { home: string; away: string } | null {
   const m = (match || "").split(/\s+vs\s+/i);
   if (m.length !== 2) return null;
   return { home: m[0].trim(), away: m[1].trim() };
 }
 
-function logoCandidates(teamSlug: TeamSlug): string[] {
+function quarterLabel(q: number): string {
+  if (!q || q <= 0) return "FULL GAME";
+  return `QUARTER ${q}`;
+}
+
+function extractPlayerName(question: string): string | null {
+  const q = (question || "").trim();
+  if (!q.toLowerCase().startsWith("will ")) return null;
+  const paren = q.match(/^Will\s+(.+?)\s*\(/i);
+  if (paren && paren[1]) return paren[1].trim();
+  const capWords = q.match(/^Will\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/);
+  if (capWords && capWords[1]) return capWords[1].trim();
+  return null;
+}
+
+function isProbablyPlayerName(name: string): boolean {
+  const n = (name || "").trim();
+  if (!n) return false;
+  if (n.split(/\s+/).filter(Boolean).length < 2) return false;
+  if (/\bvs\b/i.test(n)) return false;
+  if (/\d/.test(n)) return false;
+  return true;
+}
+
+function playerImageCandidates(playerName: string): string[] {
+  const slug = slugify(playerName);
   return [
-    `/aflteams/${teamSlug}-logo.jpg`,
-    `/aflteams/${teamSlug}-logo.jpeg`,
-    `/aflteams/${teamSlug}-logo.png`,
+    `/players/${slug}.png`,
+    `/players/${slug}.jpg`,
+    `/players/${slug}.jpeg`,
+    `/players/${slug}.webp`,
   ];
 }
 
-const TeamLogo = React.memo(function TeamLogoInner({
-  teamName,
-  size = 46,
-}: {
-  teamName: string;
-  size?: number;
-}) {
-  const slug = teamNameToSlug(teamName);
+function PlayerAvatar({ playerName, size = 56 }: { playerName: string; size?: number }) {
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
 
-  if (!slug) {
-    const initials = teamName
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((x) => x[0]?.toUpperCase())
-      .join("");
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl border font-black"
-        style={{
-          width: size,
-          height: size,
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(0,0,0,0.35)",
-          color: "rgba(255,255,255,0.90)",
-        }}
-        title={teamName}
-      >
-        {initials || "AFL"}
-      </div>
-    );
-  }
+  const candidates = useMemo(() => playerImageCandidates(playerName), [playerName]);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+  const squircleRadius = 18;
 
   if (dead) {
     return (
       <div
-        className="flex items-center justify-center rounded-2xl border font-black"
+        className="flex items-center justify-center border"
         style={{
           width: size,
           height: size,
+          borderRadius: squircleRadius,
           borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(0,0,0,0.35)",
-          color: "rgba(255,255,255,0.90)",
+          background: "rgba(255,46,77,0.18)",
+          color: "rgba(255,255,255,0.88)",
+          fontWeight: 900,
+          fontSize: 12,
         }}
-        title={teamName}
+        title={playerName}
       >
-        {teamName
-          .split(" ")
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((x) => x[0]?.toUpperCase())
-          .join("") || "AFL"}
+        ?
       </div>
     );
   }
 
-  const candidates = logoCandidates(slug);
-  const src = candidates[Math.min(idx, candidates.length - 1)];
-
   return (
     <div
-      className="relative rounded-2xl border overflow-hidden"
+      className="relative border overflow-hidden"
       style={{
         width: size,
         height: size,
+        borderRadius: squircleRadius,
         borderColor: "rgba(255,255,255,0.14)",
-        background: "rgba(0,0,0,0.35)",
+        background: COLORS.red,
+        boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
       }}
-      title={teamName}
+      title={playerName}
     >
-      <div className="absolute inset-0 p-2">
-        <Image
-          src={src}
-          alt={`${teamName} logo`}
-          fill
-          sizes={`${size}px`}
-          style={{ objectFit: "contain" }}
-          onError={() => {
-            setIdx((p) => {
-              if (p + 1 < candidates.length) return p + 1;
-              setDead(true);
-              return p;
-            });
-          }}
-        />
-      </div>
-    </div>
-  );
-});
-
-function CheckIcon({
-  size = 18,
-  color = COLORS.green,
-}: {
-  size?: number;
-  color?: string;
-}) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M20 6L9 17l-5-5"
-        stroke={color}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+      <Image
+        src={src}
+        alt={playerName}
+        fill
+        sizes={`${size}px`}
+        style={{ objectFit: "cover" }}
+        onError={() => {
+          setIdx((p) => {
+            if (p + 1 < candidates.length) return p + 1;
+            setDead(true);
+            return p;
+          });
+        }}
       />
-    </svg>
-  );
-}
-
-function ProgressTick({ on }: { on: boolean }) {
-  return (
-    <div
-      className="inline-flex items-center justify-center rounded-full border"
-      style={{
-        width: 22,
-        height: 22,
-        borderColor: on ? "rgba(45,255,122,0.55)" : "rgba(255,255,255,0.22)",
-        background: on ? "rgba(45,255,122,0.12)" : "rgba(255,255,255,0.06)",
-      }}
-      aria-label={on ? "picked" : "not picked"}
-    >
-      {on ? <CheckIcon size={16} /> : null}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.08) 55%, rgba(0,0,0,0.22) 100%)",
+        }}
+      />
     </div>
   );
 }
 
-/**
- * ✅ Fix: silhouette MUST be clipped to each card.
- * - Parent cards must have overflow-hidden
- * - This component is absolute inside the card and cannot escape
- * - Opacity tuned so it’s visible but never competes with text/logos
- */
-function CardSilhouetteBg({
-  opacity = 0.25,
-}: {
-  opacity?: number;
-}) {
+function CardTopSilhouette() {
   return (
-    <>
-      <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-        <div className="absolute inset-0" style={{ opacity }}>
-          <Image
-            src="/afl1.png"
-            alt=""
-            fill
-            sizes="(max-width: 1024px) 100vw, 1024px"
-            style={{
-              objectFit: "cover",
-              filter: "grayscale(1) brightness(0.35) contrast(1.35)",
-              transform: "scale(1.04)",
-            }}
-            priority={false}
-          />
-        </div>
-
-        {/* Tight readability layer so logos + match name POP */}
-        <div
-          className="absolute inset-0"
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0" style={{ opacity: 0.12 }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1200px) 100vw, 1200px"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.25)",
+            transform: "scale(1.06)",
           }}
+          priority={false}
         />
       </div>
-    </>
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.72) 70%, rgba(0,0,0,0.92) 100%)",
+        }}
+      />
+    </div>
   );
 }
 
 function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
-
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4">
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.72)" }} onClick={onClose} />
       <div
-        className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
+        className="relative w-full max-w-lg rounded-2xl border overflow-hidden"
         style={{
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(10,10,10,0.96)",
-          boxShadow: "0 30px 90px rgba(0,0,0,0.75)",
+          borderColor: "rgba(255,255,255,0.12)",
+          background: "rgba(15,15,15,0.98)",
+          boxShadow: "0 28px 90px rgba(0,0,0,0.85)",
         }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="How to play"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-xl font-black">How to play</div>
-            <div className="text-white/70 text-sm mt-1">
-              Pick any amount. Locks at bounce. One wrong pick breaks the match streak.
+        <div className="p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[12px] uppercase tracking-widest text-white/60">How to play</div>
+              <div className="mt-1 text-[22px] font-black text-white">Pick. Lock. Survive.</div>
+              <div className="mt-1 text-[13px] text-white/70 leading-snug">Picks auto-lock at bounce. No lock-in button.</div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border px-3 py-1.5 text-[12px] font-black"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="mt-5 space-y-3">
+            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              <div className="text-[12px] uppercase tracking-widest text-white/55">1</div>
+              <div className="mt-1 text-[14px] font-black text-white">Pick any amount</div>
+              <div className="mt-1 text-[12px] text-white/70">Choose 0–12 questions for this match.</div>
+            </div>
+
+            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              <div className="text-[12px] uppercase tracking-widest text-white/55">2</div>
+              <div className="mt-1 text-[14px] font-black text-white">Locks at bounce</div>
+              <div className="mt-1 text-[12px] text-white/70">Once the countdown hits zero, picks are locked.</div>
+            </div>
+
+            <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+              <div className="text-[12px] uppercase tracking-widest text-white/55">3</div>
+              <div className="mt-1 text-[14px] font-black text-white">Clean Sweep</div>
+              <div className="mt-1 text-[12px] text-white/70">One wrong pick wipes this match streak. Voids don’t count.</div>
             </div>
           </div>
 
           <button
-            className="rounded-full px-3 py-2 text-[12px] font-black border"
-            style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
-            }}
+            type="button"
             onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <div className="mt-4 space-y-3 text-sm text-white/85">
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
-            <div className="font-black">1) Pick any amount</div>
-            <div className="text-white/70 mt-1">Pick 0, 1, 5 or all 12 questions.</div>
-          </div>
-
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
-            <div className="font-black">2) Auto-lock</div>
-            <div className="text-white/70 mt-1">No lock-in button. Picks lock at the game start time.</div>
-          </div>
-
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
-            <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
-          </div>
-        </div>
-
-        <div className="mt-5 flex justify-end">
-          <button
-            className="rounded-2xl px-5 py-3 text-[12px] font-black border"
+            className="mt-5 w-full rounded-2xl border px-5 py-4 text-[13px] font-black"
             style={{
-              borderColor: "rgba(255,46,77,0.35)",
-              background: "rgba(255,46,77,0.14)",
+              borderColor: "rgba(255,46,77,0.55)",
+              background: "rgba(255,46,77,0.18)",
               color: "rgba(255,255,255,0.95)",
+              boxShadow: "0 10px 30px rgba(255,46,77,0.18)",
             }}
-            onClick={onClose}
           >
-            Let’s go
+            GOT IT
           </button>
         </div>
       </div>
@@ -392,18 +300,18 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-export default function PicksPage() {
+export default function MatchPicksPage({ params }: { params: { matchSlug: string } }) {
   const { user } = useAuth();
+  const matchSlug = params.matchSlug;
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
-  const [games, setGames] = useState<ApiGame[]>([]);
+  const [game, setGame] = useState<ApiGame | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
 
-  const [currentStreak, setCurrentStreak] = useState<number>(0);
-  const [leaderScore, setLeaderScore] = useState<number | null>(null);
-
-  const [howOpen, setHowOpen] = useState(false);
+  const [localPicks, setLocalPicks] = useState<Record<string, LocalPick>>({});
+  const [revealedSponsor, setRevealedSponsor] = useState<Record<string, boolean>>({});
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -411,21 +319,44 @@ export default function PicksPage() {
     return () => window.clearInterval(id);
   }, []);
 
+  const [howToOpen, setHowToOpen] = useState(false);
   useEffect(() => {
     try {
-      const seen = localStorage.getItem(HOW_TO_PLAY_PICKS_KEY);
-      if (!seen) setHowOpen(true);
+      const seen = localStorage.getItem(HOW_TO_PLAY_KEY);
+      if (!seen) setHowToOpen(true);
     } catch {}
   }, []);
 
-  const closeHow = useCallback(() => {
+  const closeHowTo = useCallback(() => {
     try {
-      localStorage.setItem(HOW_TO_PLAY_PICKS_KEY, "1");
+      localStorage.setItem(HOW_TO_PLAY_KEY, "1");
     } catch {}
-    setHowOpen(false);
+    setHowToOpen(false);
   }, []);
 
-  const loadPicks = useCallback(async () => {
+  const savePick = useCallback(
+    async (questionId: string, pick: LocalPick) => {
+      let authHeader: Record<string, string> = {};
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          authHeader = { Authorization: `Bearer ${token}` };
+        } catch {}
+      }
+
+      const payload = { questionId, pick: pick === "none" ? null : pick };
+      const res = await fetch("/api/picks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+    },
+    [user]
+  );
+
+  const load = useCallback(async () => {
     try {
       setLoading(true);
       setErr("");
@@ -444,338 +375,170 @@ export default function PicksPage() {
       const data = (await res.json()) as PicksApiResponse;
 
       setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
-      setGames(Array.isArray(data.games) ? data.games : []);
 
-      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
-      setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
+      const games: ApiGame[] = Array.isArray(data.games) ? data.games : [];
+      const found: ApiGame | null = games.find((g) => slugify(g.match) === matchSlug) || null;
+
+      setGame(found);
+
+      const next: Record<string, LocalPick> = {};
+      if (found?.questions?.length) for (const q of found.questions) next[q.id] = q.userPick ? q.userPick : "none";
+      setLocalPicks(next);
     } catch (e) {
       console.error(e);
-      setErr("Could not load picks right now.");
+      setErr("Could not load this match right now.");
+      setGame(null);
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [matchSlug, user]);
 
   useEffect(() => {
-    loadPicks();
-  }, [loadPicks]);
+    load();
+  }, [load]);
 
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  const lockMs = useMemo(() => {
+    if (!game) return 0;
+    return new Date(game.startTime).getTime() - nowMs;
+  }, [game, nowMs]);
 
-  const sortedGames = useMemo(() => {
-    return [...games].sort(
-      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    );
-  }, [games]);
+  const isLocked = lockMs <= 0;
 
-  const gamesPicked = useMemo(() => {
-    return games.filter((g) =>
-      (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
-    ).length;
-  }, [games]);
+  const picksSelected = useMemo(() => {
+    return Object.values(localPicks).filter((v) => v === "yes" || v === "no").length;
+  }, [localPicks]);
 
-  const eligible = gamesPicked > 0;
+  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
-  const nextUp = useMemo(() => {
-    const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
-    return upcoming.length ? upcoming[0] : sortedGames[0] || null;
-  }, [sortedGames, nowMs]);
+  const headerTeams = useMemo(() => {
+    if (!game) return { home: "", away: "" };
+    const m = splitMatch(game.match);
+    return { home: m?.home ?? game.match, away: m?.away ?? "" };
+  }, [game]);
 
-  const distanceToLeader = useMemo(() => {
-    if (leaderScore === null) return null;
-    return Math.max(0, leaderScore - currentStreak);
-  }, [leaderScore, currentStreak]);
+  const onPick = useCallback(
+    async (questionId: string, nextPick: LocalPick) => {
+      if (isLocked) return;
+      setLocalPicks((prev) => ({ ...prev, [questionId]: nextPick }));
+      try {
+        await savePick(questionId, nextPick);
+      } catch (e) {
+        console.error(e);
+        load();
+      }
+    },
+    [isLocked, load, savePick]
+  );
 
-  const DashboardStrip = () => {
-    return (
-      <div
-        className="mt-4 rounded-2xl border px-3 py-3"
-        style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
-        }}
-      >
+  const onClear = useCallback((questionId: string) => onPick(questionId, "none"), [onPick]);
+
+  const revealSponsor = useCallback((qid: string) => setRevealedSponsor((p) => ({ ...p, [qid]: true })), []);
+
+  const sortedQuestions = useMemo(() => {
+    if (!game?.questions?.length) return [];
+    return game.questions.slice().sort((a, b) => {
+      if (a.quarter !== b.quarter) return a.quarter - b.quarter;
+      return String(a.id).localeCompare(String(b.id));
+    });
+  }, [game]);
+
+  return (
+    <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.pageBg }}>
+      <HowToPlayModal open={howToOpen} onClose={closeHowTo} />
+
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 pt-6 pb-28">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
-            Dashboard
-          </div>
+          <Link
+            href="/picks"
+            className="rounded-full border px-4 py-2 text-[12px] font-black"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.04)",
+              color: "rgba(255,255,255,0.92)",
+              textDecoration: "none",
+            }}
+          >
+            ← Back
+          </Link>
 
           <button
             type="button"
-            className="rounded-full px-3 py-1.5 text-[11px] font-black border"
+            onClick={() => setHowToOpen(true)}
+            className="rounded-full border px-4 py-2 text-[12px] font-black"
             style={{
               borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
+              background: "rgba(255,255,255,0.04)",
               color: "rgba(255,255,255,0.92)",
             }}
-            onClick={() => setHowOpen(true)}
           >
             How to play
           </button>
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-4 rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}>
           <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
+            className="p-5"
             style={{
-              minWidth: 220,
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
+              background:
+                "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.96) 100%)",
             }}
           >
-            <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">
-              Current streak
-            </div>
-            <div className="mt-2 flex items-center gap-3">
-              <div
-                className="rounded-xl border px-3 py-2"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
-                <span className="text-[18px] font-black text-white">{currentStreak}</span>
-              </div>
-              <div className="min-w-0">
-                <div className="text-[12px] font-black text-white">Keep it alive</div>
-                <div className="text-[11px] text-white/65 font-semibold leading-snug">
-                  One wrong pick in a match resets to 0.
-                </div>
-              </div>
-            </div>
-          </div>
+            {loading ? (
+              <div className="text-white/70 text-sm">Loading match…</div>
+            ) : !game ? (
+              <div className="text-white/70 text-sm">Match not found.</div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[18px] sm:text-[22px] font-black italic tracking-wide text-white leading-tight uppercase">
+                      {game.match}
+                    </div>
+                    <div className="mt-2 text-[12px] text-white/65">{game.venue}</div>
+                    <div className="mt-2 text-[11px] text-white/70 font-semibold">{formatAedt(game.startTime)}</div>
+                  </div>
 
-          <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
-            style={{
-              minWidth: 220,
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
-            <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">
-              Distance to leader
-            </div>
-            <div className="mt-2 flex items-center gap-3">
-              <div
-                className="rounded-xl border px-3 py-2"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
-                <span className="text-[18px] font-black text-white">
-                  {leaderScore === null || distanceToLeader === null ? "—" : distanceToLeader}
-                </span>
-              </div>
-              <div className="min-w-0">
-                <div className="text-[12px] font-black text-white">
-                  {leaderScore === null ? "Leader not loaded" : `Leader at ${leaderScore}`}
-                </div>
-                <div className="text-[11px] text-white/65 font-semibold leading-snug">
-                  Close the gap. Current streak only.
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            className="shrink-0 rounded-2xl border px-4 py-3"
-            style={{
-              minWidth: 240,
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.35)",
-            }}
-          >
-            <div className="text-[10px] uppercase tracking-widest text-white/60 font-black">
-              Eligible to win
-            </div>
-
-            <div className="mt-2 flex items-center gap-3">
-              <div
-                className="rounded-xl border px-3 py-2 flex items-center justify-center"
-                style={{
-                  width: 46,
-                  height: 42,
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
-                {eligible ? <CheckIcon /> : <span className="text-white font-black">—</span>}
-              </div>
-
-              <div className="min-w-0">
-                <div className="text-[12px] font-black text-white">
-                  {eligible ? "Eligible" : "Not yet"}
+                  <div className="text-right shrink-0">
+                    {roundLabel ? (
+                      <div
+                        className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                        style={{
+                          borderColor: "rgba(255,46,77,0.35)",
+                          background: "rgba(255,46,77,0.10)",
+                          color: "rgba(255,255,255,0.92)",
+                        }}
+                      >
+                        {roundLabel}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="mt-1 flex items-center gap-2">
-                  <ProgressTick on={gamesPicked >= 1} />
-                  <ProgressTick on={gamesPicked >= 2} />
-                  <ProgressTick on={gamesPicked >= 3} />
-                  <span className="text-[11px] font-semibold text-white/80 ml-1">
-                    {gamesPicked} games picked
+                <div className="mt-4 flex items-center gap-2 flex-wrap">
+                  <span
+                    className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                    style={{
+                      borderColor: "rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.05)",
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    Picks selected: {picksSelected} / 12
+                  </span>
+
+                  <span
+                    className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                    style={{
+                      borderColor: isLocked ? "rgba(255,46,77,0.55)" : "rgba(255,46,77,0.28)",
+                      background: isLocked ? "rgba(255,46,77,0.16)" : "rgba(255,46,77,0.10)",
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    {isLocked ? "LOCKED (auto)" : `Locks in ${msToCountdown(lockMs)}`}
                   </span>
                 </div>
-              </div>
-            </div>
-
-            <div className="mt-2 text-[11px] text-white/65 font-semibold">
-              Tip: picks lock at bounce.
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const MatchCard = ({ g }: { g: ApiGame }) => {
-    const lockMs = new Date(g.startTime).getTime() - nowMs;
-    const m = splitMatch(g.match);
-    const homeName = m?.home ?? g.match;
-    const awayName = m?.away ?? "";
-    const matchSlug = slugify(g.match);
-
-    const picksCount =
-      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
-
-    const isLocked = lockMs <= 0;
-
-    const badgeStyle = isLocked
-      ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
-      : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
-
-    return (
-      <Link
-        href={`/picks/${matchSlug}`}
-        className="block rounded-2xl overflow-hidden border"
-        style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
-          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
-          textDecoration: "none",
-        }}
-      >
-        {/* ✅ CRITICAL: overflow-hidden here ensures the silhouette cannot escape the card */}
-        <div className="relative p-5 overflow-hidden" style={{ minHeight: 205 }}>
-          <CardSilhouetteBg opacity={1} />
-
-          <div className="relative z-10">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-[11px] text-white/85 font-semibold">
-                {formatAedt(g.startTime)}
-              </div>
-
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  ...badgeStyle,
-                  color: "rgba(255,255,255,0.96)",
-                }}
-              >
-                {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
-              </span>
-            </div>
-
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <TeamLogo teamName={homeName} size={50} />
-              <div className="text-white/80 font-black text-[12px]">vs</div>
-              <TeamLogo teamName={awayName || "AFL"} size={50} />
-            </div>
-
-            <div className="mt-3 text-center">
-              <div
-                className="text-[18px] sm:text-[19px] font-black leading-tight"
-                style={{
-                  color: "rgba(255,255,255,0.98)",
-                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-                }}
-              >
-                {g.match}
-              </div>
-              <div
-                className="mt-1 text-[12px] font-semibold truncate"
-                style={{
-                  color: "rgba(255,255,255,0.78)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.60)",
-                }}
-              >
-                {g.venue}
-              </div>
-            </div>
-
-            <div className="mt-4 flex items-center justify-center gap-2 flex-wrap">
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  borderColor:
-                    picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
-                  background:
-                    picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.95)",
-                }}
-              >
-                {picksCount}/12 picked
-              </span>
-
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-              >
-                {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
-              </span>
-            </div>
-
-            <div className="mt-5 flex items-center justify-center">
-              <span
-                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,46,77,0.32)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
-                  color: "rgba(255,255,255,0.98)",
-                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
-                }}
-              >
-                PLAY NOW
-              </span>
-            </div>
-          </div>
-        </div>
-      </Link>
-    );
-  };
-
-  return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <HowToPlayModal open={howOpen} onClose={closeHow} />
-
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 pb-16">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black">Picks</h1>
-              {roundLabel ? (
-                <span
-                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor: "rgba(255,46,77,0.35)",
-                    background: "rgba(255,46,77,0.10)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                >
-                  {roundLabel}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-1 text-[13px] text-white/65 font-semibold">
-              Pick any amount. Survive the streak.
-            </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -785,127 +548,291 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        <DashboardStrip />
-
-        {!loading && nextUp ? (
-          <div className="mt-6">
-            <Link
-              href={`/picks/${slugify(nextUp.match)}`}
-              className="block rounded-2xl overflow-hidden border"
-              style={{
-                borderColor: "rgba(255,255,255,0.10)",
-                background: "rgba(255,255,255,0.03)",
-                boxShadow: "0 22px 70px rgba(0,0,0,0.65)",
-                textDecoration: "none",
-              }}
-            >
-              {/* ✅ also clip the hero */}
-              <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 180 }}>
-                <CardSilhouetteBg opacity={1} />
-
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between gap-3">
-                    <div
-                      className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
-                      style={{
-                        borderColor: "rgba(255,46,77,0.35)",
-                        background: "rgba(255,46,77,0.12)",
-                        color: "rgba(255,255,255,0.92)",
-                      }}
-                    >
-                      NEXT UP
-                    </div>
-
-                    <div className="text-[11px] text-white/80 font-semibold">
-                      {new Date(nextUp.startTime).getTime() - nowMs <= 0
-                        ? "LIVE / Locked"
-                        : `Locks in ${msToCountdown(new Date(nextUp.startTime).getTime() - nowMs)}`}
-                    </div>
-                  </div>
-
-                  {(() => {
-                    const m = splitMatch(nextUp.match);
-                    const homeName = m?.home ?? nextUp.match;
-                    const awayName = m?.away ?? "";
-                    return (
-                      <div className="mt-4 flex items-center justify-center gap-4">
-                        <TeamLogo teamName={homeName} size={54} />
-                        <div className="text-white/80 font-black text-[13px]">vs</div>
-                        <TeamLogo teamName={awayName || "AFL"} size={54} />
-                      </div>
-                    );
-                  })()}
-
-                  <div className="mt-3 text-center">
-                    <div
-                      className="text-[22px] sm:text-[28px] font-black leading-tight"
-                      style={{
-                        color: "rgba(255,255,255,0.98)",
-                        textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-                      }}
-                    >
-                      {nextUp.match}
-                    </div>
-                    <div
-                      className="mt-2 text-[12px] font-semibold"
-                      style={{
-                        color: "rgba(255,255,255,0.78)",
-                        textShadow: "0 2px 10px rgba(0,0,0,0.60)",
-                      }}
-                    >
-                      {formatAedt(nextUp.startTime)} • {nextUp.venue}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Link>
-          </div>
-        ) : null}
-
-        <div className="mt-8">
-          <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">
-            Scheduled matches
-          </div>
-
+        <div className="mt-5 mx-auto w-full max-w-[1200px]">
           {loading ? (
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Array.from({ length: 6 }).map((_, i) => (
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              {Array.from({ length: 9 }).map((_, i) => (
                 <div
                   key={i}
                   className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.03)",
-                  }}
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: COLORS.cardBg, minHeight: 240 }}
                 >
-                  <div className="h-[205px] bg-white/5" />
+                  <div className="h-[240px] bg-white/5" />
                 </div>
               ))}
             </div>
-          ) : sortedGames.length === 0 ? (
-            <div
-              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
-              style={{
-                borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
-              No games found.
-            </div>
-          ) : (
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sortedGames.map((g) => (
-                <MatchCard key={g.id} g={g} />
-              ))}
+          ) : !game ? null : (
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+              {sortedQuestions.map((q, idx) => {
+                const pick = localPicks[q.id] ?? "none";
+                const sponsor = !!q.isSponsorQuestion;
+                const revealed = !!revealedSponsor[q.id];
+
+                const sponsorName = (q.sponsorName || "Rebel Sport").trim();
+                const prize = (q.sponsorPrize || "$100 Rebel Sport Gift Card").trim();
+                const sponsorLine = `Proudly sponsored by ${sponsorName}. Get this pick correct and go in the draw to win ${prize}.`;
+
+                const playerNameRaw = extractPlayerName(q.question);
+                const playerName = playerNameRaw && isProbablyPlayerName(playerNameRaw) ? playerNameRaw : null;
+
+                const yesPct = typeof q.yesPercent === "number" ? Math.max(0, Math.min(100, q.yesPercent)) : 50;
+                const noPct = typeof q.noPercent === "number" ? Math.max(0, Math.min(100, q.noPercent)) : 50;
+
+                const cardBorder = sponsor && revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.10)";
+
+                // how tall the DARK top section is (where question lives)
+                const topMinHeight = 160;
+
+                return (
+                  <div
+                    key={q.id}
+                    className="relative rounded-2xl border overflow-hidden"
+                    style={{
+                      borderColor: cardBorder,
+                      background: COLORS.cardBg,
+                      boxShadow: "0 12px 36px rgba(0,0,0,0.55)",
+                      minHeight: 240,
+                    }}
+                  >
+                    {/* TOP (DARK): header + avatar + question */}
+                    <div className="relative" style={{ minHeight: topMinHeight }}>
+                      <CardTopSilhouette />
+
+                      <div className="relative z-10 p-3 sm:p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-[11px] uppercase tracking-widest text-white/70 font-black">
+                              {`Q${String(idx + 1).padStart(2, "0")} - ${quarterLabel(q.quarter)}`}
+                            </div>
+
+                            {/* IMPORTANT: keep "open" lowercase from API */}
+                            <div className="mt-0.5 text-[11px] text-white/55">
+                              Status: <span className="font-semibold text-white/70">{q.status}</span>
+                            </div>
+                          </div>
+
+                          {pick !== "none" ? (
+                            <button
+                              type="button"
+                              onClick={() => onClear(q.id)}
+                              disabled={isLocked || (sponsor && !revealed)}
+                              className="shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-black"
+                              style={{
+                                borderColor: "rgba(255,255,255,0.14)",
+                                background: "rgba(0,0,0,0.40)",
+                                color: "rgba(255,255,255,0.92)",
+                                opacity: isLocked || (sponsor && !revealed) ? 0.45 : 1,
+                              }}
+                              title={isLocked ? "Locked" : "Clear pick"}
+                            >
+                              ✕
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {sponsor ? (
+                          <div
+                            className="mt-2 rounded-xl border px-2.5 py-2"
+                            style={{
+                              borderColor: revealed ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.12)",
+                              background: revealed ? "rgba(255,46,77,0.14)" : "rgba(0,0,0,0.35)",
+                              color: "rgba(255,255,255,0.92)",
+                            }}
+                          >
+                            <div className="text-[10px] font-black uppercase tracking-widest">SPONSOR QUESTION - {sponsorName}</div>
+                            <div className="mt-1 text-[11px] text-white/75 leading-snug">{sponsorLine}</div>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 flex flex-col items-center justify-center">
+                          {playerName ? (
+                            <>
+                              <PlayerAvatar playerName={playerName} size={56} />
+                              <div className="mt-2 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
+                                Player pick
+                              </div>
+                            </>
+                          ) : (
+                            <div className="mt-1 text-[10px] uppercase tracking-widest text-white/45 font-semibold text-center">
+                              Match pick
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="mt-3 text-[12px] sm:text-[13px] font-semibold text-white/92 leading-snug">
+                          {q.question}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* BOTTOM (WHITE): buttons + % bar */}
+                    <div
+                      className="relative z-10 px-3 sm:px-4 pt-3 pb-4"
+                      style={{
+                        background: "rgba(255,255,255,0.98)",
+                        borderTop: "1px solid rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onPick(q.id, pick === "yes" ? "none" : "yes")}
+                          disabled={isLocked || (sponsor && !revealed)}
+                          className="flex-1 rounded-2xl border text-[12px] font-black"
+                          style={{
+                            paddingTop: 12,
+                            paddingBottom: 12,
+                            borderColor: pick === "yes" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                            background: pick === "yes" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.80)",
+                            color: "rgba(0,0,0,0.82)",
+                            opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                          }}
+                        >
+                          YES
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onPick(q.id, pick === "no" ? "none" : "no")}
+                          disabled={isLocked || (sponsor && !revealed)}
+                          className="flex-1 rounded-2xl border text-[12px] font-black"
+                          style={{
+                            paddingTop: 12,
+                            paddingBottom: 12,
+                            borderColor: pick === "no" ? "rgba(255,46,77,0.70)" : "rgba(0,0,0,0.14)",
+                            background: pick === "no" ? "rgba(255,46,77,0.18)" : "rgba(255,255,255,0.80)",
+                            color: "rgba(0,0,0,0.82)",
+                            opacity: isLocked || (sponsor && !revealed) ? 0.55 : 1,
+                          }}
+                        >
+                          NO
+                        </button>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between text-[10px] font-semibold">
+                        <span style={{ color: "rgba(0,0,0,0.52)" }}>{`Yes ${Math.round(yesPct)}%`}</span>
+                        <span style={{ color: "rgba(0,0,0,0.52)" }}>{`No ${Math.round(noPct)}%`}</span>
+                      </div>
+
+                      <div
+                        className="mt-1 w-full overflow-hidden"
+                        style={{
+                          height: 3,
+                          borderRadius: 999,
+                          background: "rgba(0,0,0,0.12)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${Math.round(yesPct)}%`,
+                            background: "rgba(255,46,77,0.85)",
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Sponsor reveal overlay MUST fully cover and hide everything */}
+                    {sponsor && !revealed ? (
+                      <button
+                        type="button"
+                        onClick={() => revealSponsor(q.id)}
+                        className="absolute inset-0 z-[60] flex items-center justify-center p-3"
+                        style={{
+                          background: "#000000", // fully opaque (no bleed-through)
+                          color: "rgba(255,255,255,0.94)",
+                          cursor: "pointer",
+                        }}
+                        aria-label="Reveal sponsored question"
+                      >
+                        <div className="absolute inset-0">
+                          {/* subtle texture silhouette */}
+                          <div className="absolute inset-0" style={{ opacity: 0.14 }}>
+                            <Image
+                              src="/afl1.png"
+                              alt=""
+                              fill
+                              sizes="(max-width: 1200px) 100vw, 1200px"
+                              style={{
+                                objectFit: "cover",
+                                filter: "grayscale(1) brightness(0.30) contrast(1.25)",
+                                transform: "scale(1.08)",
+                              }}
+                              priority={false}
+                            />
+                          </div>
+                          <div
+                            className="absolute inset-0"
+                            style={{
+                              background:
+                                "radial-gradient(circle at 30% 20%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.92) 55%, rgba(0,0,0,0.98) 100%)",
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          className="relative z-10 w-full h-full rounded-2xl border p-4 flex flex-col items-center justify-center text-center"
+                          style={{
+                            borderColor: "rgba(255,255,255,0.14)",
+                            background:
+                              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.55) 60%, rgba(0,0,0,0.72) 100%)",
+                            boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
+                          }}
+                        >
+                          <div className="text-[10px] font-black uppercase tracking-widest text-white/70">SPONSOR QUESTION</div>
+                          <div className="mt-2 text-[13px] sm:text-[14px] font-black">Tap to reveal</div>
+                          <div className="mt-2 text-[11px] text-white/80">
+                            Proudly sponsored by <span className="font-black text-white">{sponsorName}</span>
+                          </div>
+                          <div className="mt-2 text-[11px] text-white/70">
+                            Win <span className="font-black text-white">{prize}</span>
+                          </div>
+                          <div
+                            className="mt-3 inline-flex items-center justify-center rounded-2xl border px-4 py-2 text-[11px] font-black"
+                            style={{
+                              borderColor: "rgba(255,46,77,0.55)",
+                              background: "rgba(255,46,77,0.16)",
+                              color: "rgba(255,255,255,0.95)",
+                            }}
+                          >
+                            TAP TO REVEAL
+                          </div>
+                        </div>
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
+      </div>
 
-        <div
-          className="mt-10 pb-8 text-center text-[11px]"
-          style={{ color: "rgba(255,255,255,0.55)" }}
-        >
-          TORPIE © 2026
+      <div className="fixed bottom-0 left-0 right-0 z-[90] px-3 pb-3">
+        <div className="mx-auto max-w-6xl rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <div
+            className="px-4 py-3 flex items-center justify-between gap-3"
+            style={{
+              background: "rgba(0,0,0,0.78)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div className="min-w-0">
+              <div className="text-[12px] font-black text-white">Picks selected: {picksSelected} / 12</div>
+              <div className="text-[11px] text-white/65">{loading ? "Loading…" : isLocked ? "LOCKED — Changes disabled" : `Locks in ${msToCountdown(lockMs)}`}</div>
+            </div>
+
+            <div
+              className="shrink-0 rounded-xl border px-3 py-2 text-[11px] font-black"
+              style={{
+                borderColor: isLocked ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
+                background: isLocked ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.04)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+            >
+              {isLocked ? "LOCKED" : "AUTO-LOCK"}
+            </div>
+          </div>
         </div>
       </div>
     </div>
