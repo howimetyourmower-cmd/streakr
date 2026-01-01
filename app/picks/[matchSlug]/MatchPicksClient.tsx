@@ -8,6 +8,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
+type PickOutcome = "yes" | "no";
+type LocalPick = PickOutcome | "none";
 
 type ApiQuestion = {
   id: string;
@@ -71,13 +73,21 @@ function extractPlayerName(question: string) {
   if (!name) return null;
   if (!name.includes(" ")) return null;
 
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
+  if (
+    /\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(
+      name
+    )
+  )
+    return null;
 
   return name;
 }
 
 function playerSlug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-+|-+$)/g, "");
 }
 
 function safeStatus(s: any): QuestionStatus {
@@ -130,12 +140,24 @@ function PlayerAvatar({ name }: { name: string }) {
 }
 
 function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
-  const src = `/aflteams/${teamKey}-logo.jpg`;
+  // ✅ your folder is /public/afllogos (per screenshots)
+  const primary = `/afllogos/${teamKey}-logo.jpg`;
+  const fallback = `/aflteams/${teamKey}-logo.jpg`; // just in case you still have older path
+  const [src, setSrc] = useState(primary);
 
   return (
     <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px] shadow-sm">
       <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f] flex items-center justify-center">
-        <Image src={src} alt={alt} width={44} height={44} className="object-contain" />
+        <Image
+          src={src}
+          alt={alt}
+          width={44}
+          height={44}
+          className="object-contain"
+          onError={() => {
+            if (src === primary) setSrc(fallback);
+          }}
+        />
       </div>
     </div>
   );
@@ -150,7 +172,9 @@ function GamePickHeader({ match }: { match: string }) {
     <div className="flex flex-col items-center gap-2">
       <div className="flex items-center justify-center gap-3">
         <TeamLogoSquircle teamKey={homeKey} alt={home} />
-        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
+        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">
+          VS
+        </div>
         <TeamLogoSquircle teamKey={awayKey} alt={away} />
       </div>
 
@@ -172,7 +196,10 @@ function PercentBar({ yes, no }: { yes: number; no: number }) {
         <span>No {noPct}%</span>
       </div>
       <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
-        <div className="h-full" style={{ width: `${yesPct}%`, background: "#d11b2f" }} />
+        <div
+          className="h-full"
+          style={{ width: `${yesPct}%`, background: "#d11b2f" }}
+        />
       </div>
     </div>
   );
@@ -188,6 +215,35 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   // sponsor reveal state per question
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
 
+  // ✅ local pick state (YES/NO working)
+  const [picks, setPicks] = useState<Record<string, LocalPick>>({});
+
+  const picksStorageKey = useMemo(() => {
+    const uid = user?.uid || "anon";
+    return `torpie:picks:${uid}:${matchSlug}`;
+  }, [user?.uid, matchSlug]);
+
+  useEffect(() => {
+    // load saved picks
+    try {
+      const raw = localStorage.getItem(picksStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, LocalPick>;
+      if (parsed && typeof parsed === "object") setPicks(parsed);
+    } catch {
+      // ignore
+    }
+  }, [picksStorageKey]);
+
+  useEffect(() => {
+    // persist picks
+    try {
+      localStorage.setItem(picksStorageKey, JSON.stringify(picks));
+    } catch {
+      // ignore
+    }
+  }, [picks, picksStorageKey]);
+
   useEffect(() => {
     let alive = true;
 
@@ -200,11 +256,23 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
         if (!res.ok) throw new Error(`API error (${res.status})`);
 
         const data = (await res.json()) as PicksApiResponse;
-        const found = (data.games || []).find((g) => slugifyMatch(g.match) === matchSlug);
+        const found = (data.games || []).find(
+          (g) => slugifyMatch(g.match) === matchSlug
+        );
         if (!found) throw new Error("Match not found for this slug");
 
         if (!alive) return;
         setGame(found);
+
+        // seed picks from API userPick if local has none yet
+        setPicks((prev) => {
+          if (Object.keys(prev || {}).length > 0) return prev;
+          const seeded: Record<string, LocalPick> = {};
+          for (const q of found.questions || []) {
+            if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
+          }
+          return seeded;
+        });
       } catch (e: any) {
         if (!alive) return;
         setErr(e?.message || "Failed to load picks");
@@ -222,8 +290,27 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
 
   const questions = useMemo(() => {
     const qs = game?.questions || [];
-    return [...qs].sort((a, b) => (a.quarter - b.quarter) || a.id.localeCompare(b.id));
+    return [...qs].sort(
+      (a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id)
+    );
   }, [game]);
+
+  const selectedCount = useMemo(() => {
+    return Object.values(picks).filter((v) => v === "yes" || v === "no").length;
+  }, [picks]);
+
+  function setPick(questionId: string, value: PickOutcome) {
+    setPicks((prev) => {
+      const current = prev[questionId] || "none";
+      // tap same choice again = clear (you said you like X to clear, but this is a nice bonus)
+      const next: LocalPick = current === value ? "none" : value;
+      return { ...prev, [questionId]: next };
+    });
+  }
+
+  function clearPick(questionId: string) {
+    setPicks((prev) => ({ ...prev, [questionId]: "none" }));
+  }
 
   if (loading) {
     return (
@@ -276,7 +363,8 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
 
           <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{0}</span> / 12
+              Picks selected:{" "}
+              <span className="font-semibold text-white">{selectedCount}</span> / 12
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
               Locks: <span className="text-white/60">—</span>
@@ -298,12 +386,23 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
 
             // pick type is based on content (NOT sponsorship)
             const isPlayerPick = !!playerName;
-            const isGamePick = !playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
             const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
             const sponsorName = (q.sponsorName || "REBEL SPORT").toUpperCase();
+
+            const selected = picks[q.id] || "none";
+            const disabledByStatus = status !== "open"; // keep simple
+
+            const yesBtnClass =
+              selected === "yes"
+                ? "bg-[#d11b2f] text-white border-black/10 shadow-[0_0_0_3px_rgba(209,27,47,0.20)]"
+                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
+            const noBtnClass =
+              selected === "no"
+                ? "bg-[#d11b2f] text-white border-black/10 shadow-[0_0_0_3px_rgba(209,27,47,0.20)]"
+                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
               <div
@@ -311,11 +410,20 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                 className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
               >
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
-                  <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
+                  <Image
+                    src="/afl1.png"
+                    alt=""
+                    fill
+                    className="object-cover object-center"
+                  />
                 </div>
 
                 {/* CONTENT (always rendered underneath) */}
-                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+                <div
+                  className={`relative ${
+                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[15px] font-black tracking-wide">
@@ -330,7 +438,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                       type="button"
                       className="h-9 w-9 rounded-full border border-white/15 bg-white/5 hover:bg-white/10 flex items-center justify-center"
                       aria-label="Clear pick"
-                      onClick={() => {}}
+                      onClick={() => clearPick(q.id)}
                     >
                       <span className="text-white/80 font-black">×</span>
                     </button>
@@ -352,15 +460,22 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                     <div className="grid grid-cols-2 gap-4">
                       <button
                         type="button"
-                        className="h-12 rounded-2xl border border-black/15 bg-white text-black/80 font-extrabold tracking-wide hover:bg-black/[0.03]"
-                        onClick={() => {}}
+                        disabled={disabledByStatus}
+                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                          disabledByStatus ? "opacity-50 cursor-not-allowed" : ""
+                        } ${yesBtnClass}`}
+                        onClick={() => setPick(q.id, "yes")}
                       >
                         YES
                       </button>
+
                       <button
                         type="button"
-                        className="h-12 rounded-2xl border border-black/15 bg-white text-black/80 font-extrabold tracking-wide hover:bg-black/[0.03]"
-                        onClick={() => {}}
+                        disabled={disabledByStatus}
+                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                          disabledByStatus ? "opacity-50 cursor-not-allowed" : ""
+                        } ${noBtnClass}`}
+                        onClick={() => setPick(q.id, "no")}
                       >
                         NO
                       </button>
@@ -382,7 +497,8 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                             SPONSOR QUESTION
                           </div>
                           <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by <span className="font-black text-white">{sponsorName}</span>
+                            Proudly by{" "}
+                            <span className="font-black text-white">{sponsorName}</span>
                           </div>
                         </div>
 
@@ -420,7 +536,8 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
         <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-[#0d1117]/90 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{0}</span> / 12
+              Picks selected:{" "}
+              <span className="font-semibold text-white">{selectedCount}</span> / 12
             </div>
             <button
               type="button"
