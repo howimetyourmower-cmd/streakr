@@ -32,13 +32,13 @@ export default function NavBar() {
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[28px] w-[200px]">
+          <div className="relative h-[40px] w-[200px]">
             <Image
               src={LOGO_SRC}
               alt="Torpie"
               fill
               priority
-              className="object-contain"
+              className="object-contain object centre"
             />
           </div>
         </Link>
