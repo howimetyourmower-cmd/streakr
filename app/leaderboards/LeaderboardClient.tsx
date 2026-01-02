@@ -1,7 +1,8 @@
 // /app/leaderboards/page.tsx
 "use client";
 
-import { useEffect, useState, useCallback, useRef, ChangeEvent } from "react";
+import { useEffect, useState, useCallback, useRef, ChangeEvent, useMemo } from "react";
+import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
 
 type Scope =
@@ -39,34 +40,24 @@ type LeaderboardEntry = {
   avatarUrl?: string;
   rank: number;
   currentStreak: number;
-
-  // Phase 2 additions (from API)
-  gamesPlayed?: number; // "≥1 pick once locked" per game
-
-  totalWins: number;
-  totalLosses: number;
-  winPct: number; // kept for lifetime; not shown in table
-  // client-side only – movement vs previous load
-  rankDelta?: number;
+  rankDelta?: number; // client-side only
 };
 
 type UserLifetimeStats = {
   totalWins: number;
   totalLosses: number;
-  winPct: number; // used for lifetime %
+  winPct: number;
 };
 
 type LeaderboardApiResponse = {
   entries: LeaderboardEntry[];
   userEntry: LeaderboardEntry | null;
   userLifetime: UserLifetimeStats | null;
-
-  // Phase 2 addition (from API)
   roundComplete?: boolean;
 };
 
 const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
-  { value: "overall", label: "Overall Live Leaderboard" },
+  { value: "overall", label: "Overall" },
   { value: "opening-round", label: "Opening Round" },
   { value: "round-1", label: "Round 1" },
   { value: "round-2", label: "Round 2" },
@@ -94,12 +85,20 @@ const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
   { value: "finals", label: "Finals" },
 ];
 
-function formatPct(p: number): string {
-  if (p <= 0) return ".000";
-  return p.toFixed(3).replace(/^0/, "");
+const TORPIE_RED = "#FF2E4D";
+const TORPIE_RED_RGB = "255,46,77";
+
+function safeName(s?: string) {
+  const t = (s ?? "").trim();
+  return t.length ? t : "Player";
 }
 
-// Small helper to describe “most common streak band”
+function streakTag(s: number): { label: string; tone: "hot" | "warm" | "cold" } {
+  if (s >= 10) return { label: "ON FIRE", tone: "hot" };
+  if (s >= 5) return { label: "HEATING UP", tone: "warm" };
+  return { label: "ALIVE", tone: "cold" };
+}
+
 function describeStreakBand(entries: LeaderboardEntry[]): string | null {
   if (!entries.length) return null;
 
@@ -133,51 +132,15 @@ function describeStreakBand(entries: LeaderboardEntry[]): string | null {
   return `Most players are sitting on a ${topLabel} streak.`;
 }
 
-const WIN_MIN_STREAK = 5;
-const WIN_MIN_GAMES = 3;
-
-function computeEligibility(entry: LeaderboardEntry): {
-  eligible: boolean;
-  statusLabel: string;
-  detail: string;
-  streak: number;
-  games: number;
-} {
-  const streak = entry.currentStreak ?? 0;
-  const games = typeof entry.gamesPlayed === "number" ? entry.gamesPlayed : 0;
-
-  const missingStreak = Math.max(0, WIN_MIN_STREAK - streak);
-  const missingGames = Math.max(0, WIN_MIN_GAMES - games);
-
-  const eligible = missingStreak === 0 && missingGames === 0;
-
-  if (eligible) {
-    return {
-      eligible: true,
-      statusLabel: "Eligible",
-      detail: `Streak ${streak} • Games ${games}`,
-      streak,
-      games,
-    };
-  }
-
-  // Build small “need” text
-  const parts: string[] = [];
-  if (missingStreak > 0) parts.push(`Need streak ${missingStreak}`);
-  if (missingGames > 0) parts.push(`Need ${missingGames} game${missingGames === 1 ? "" : "s"}`);
-
-  return {
-    eligible: false,
-    statusLabel: "In progress",
-    detail: parts.join(" • "),
-    streak,
-    games,
-  };
+function formatAgo(msAgo: number): string {
+  const s = Math.max(0, Math.floor(msAgo / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  return `${h}h ago`;
 }
-
-// TORPY Fire Engine Red
-const TORPY_RED = "#CE2029";
-const TORPY_RED_RGB = "206,32,41";
 
 export default function LeaderboardsPage() {
   const { user } = useAuth();
@@ -185,17 +148,15 @@ export default function LeaderboardsPage() {
   const [scope, setScope] = useState<Scope>("overall");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null);
-  const [userLifetime, setUserLifetime] = useState<UserLifetimeStats | null>(null);
-
-  const [roundComplete, setRoundComplete] = useState<boolean>(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
 
-  const [showEligibleOnly, setShowEligibleOnly] = useState(false);
-
   const hasLoadedRef = useRef(false);
   const previousEntriesRef = useRef<LeaderboardEntry[]>([]);
+  const lastUpdatedAtRef = useRef<number>(0);
+
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState<string>("");
 
   const loadLeaderboard = useCallback(
     async (selectedScope: Scope, options?: { silent?: boolean }) => {
@@ -230,219 +191,230 @@ export default function LeaderboardsPage() {
         const data: LeaderboardApiResponse = await res.json();
         const incoming = data.entries || [];
 
-        // Compute rankDelta vs previous snapshot
+        // rankDelta vs previous snapshot
         const prevByUid = new Map<string, LeaderboardEntry>();
         previousEntriesRef.current.forEach((e) => prevByUid.set(e.uid, e));
 
         const withDelta: LeaderboardEntry[] = incoming.map((e) => {
           const prev = prevByUid.get(e.uid);
           if (!prev) return { ...e };
-          const delta = prev.rank - e.rank; // positive = moved up
+          const delta = prev.rank - e.rank;
           return { ...e, rankDelta: delta };
         });
 
         previousEntriesRef.current = withDelta;
         setEntries(withDelta);
         setUserEntry(data.userEntry || null);
-        setUserLifetime(data.userLifetime || null);
 
-        setRoundComplete(data.roundComplete === true);
+        lastUpdatedAtRef.current = Date.now();
+        setLastUpdatedLabel("just now");
 
         hasLoadedRef.current = true;
       } catch (err) {
         console.error(err);
-        if (!silent) {
-          setError("Could not load leaderboard right now.");
-        }
+        if (!silent) setError("Could not load leaderboard right now.");
       } finally {
-        if (!silent) {
-          setLoading(false);
-        }
+        if (!silent) setLoading(false);
       }
     },
     [user]
   );
 
-  // initial + scope-change load
   useEffect(() => {
     loadLeaderboard(scope);
   }, [scope, loadLeaderboard]);
 
-  // silent refresh every 15s (no flicker)
+  // silent refresh every 15s
   useEffect(() => {
     if (!hasLoadedRef.current) return;
-
-    const id = setInterval(() => {
-      loadLeaderboard(scope, { silent: true });
-    }, 15000);
-
+    const id = setInterval(() => loadLeaderboard(scope, { silent: true }), 15000);
     return () => clearInterval(id);
   }, [scope, loadLeaderboard]);
+
+  // update "last updated" label
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!lastUpdatedAtRef.current) return;
+      setLastUpdatedLabel(formatAgo(Date.now() - lastUpdatedAtRef.current));
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const handleScopeChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setScope(event.target.value as Scope);
   };
 
-  // Base top 10 list (keep existing)
-  const top10Base = entries.slice(0, 10);
+  const top10 = useMemo(() => entries.slice(0, 10), [entries]);
+  const top3 = useMemo(() => top10.slice(0, 3), [top10]);
 
-  // Eligible filter for display
-  const tableRows = showEligibleOnly
-    ? top10Base.filter((e) => computeEligibility(e).eligible)
-    : top10Base;
-
-  const userOutsideTop10 = userEntry && top10Base.every((e) => e.uid !== userEntry.uid);
-
+  const leader = top10[0] || null;
+  const leaderStreak = leader?.currentStreak ?? 0;
   const totalPlayers = entries.length;
   const streakBandDescription = describeStreakBand(entries);
 
-  const leaderStreak = top10Base[0]?.currentStreak ?? null;
-
-  const top3 = top10Base.slice(0, 3);
+  const yourStreak = userEntry?.currentStreak ?? 0;
+  const yourDistance = userEntry ? Math.max(0, leaderStreak - yourStreak) : null;
+  const userOutsideTop10 = userEntry && top10.every((e) => e.uid !== userEntry.uid);
 
   const renderRankDelta = (delta?: number) => {
-    if (!delta || delta === 0) {
-      return <span className="text-[10px] text-slate-400 flex items-center gap-0.5">•</span>;
-    }
-    if (delta > 0) {
-      return <span className="text-[10px] text-emerald-400 flex items-center gap-0.5">▲ {delta}</span>;
-    }
-    return <span className="text-[10px] text-rose-400 flex items-center gap-0.5">▼ {Math.abs(delta)}</span>;
+    if (!delta || delta === 0) return <span className="text-[10px] text-white/35">•</span>;
+    if (delta > 0) return <span className="text-[10px] text-emerald-300">▲ {delta}</span>;
+    return <span className="text-[10px] text-rose-300">▼ {Math.abs(delta)}</span>;
   };
 
-  const renderStreakPill = (streak: number) => {
-    const s = streak ?? 0;
-    const isHot = s >= 5;
-    const isOnFire = s >= 10;
-
-    return (
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-semibold ${
-          isOnFire
-            ? "bg-gradient-to-r from-[var(--torpy-red)] via-rose-500 to-pink-500 text-black shadow-[0_0_18px_rgba(206,32,41,0.65)]"
-            : isHot
-            ? "bg-[rgba(var(--torpy-red-rgb),0.12)] text-red-100 border border-[rgba(var(--torpy-red-rgb),0.70)]"
-            : "bg-slate-800 text-slate-100 border border-slate-600"
-        }`}
-      >
-        {isOnFire ? "🔥🔥" : isHot ? "🔥" : "●"}
-        <span>Streak {s}</span>
-      </span>
-    );
-  };
-
-  const renderEligibilityPill = (entry: LeaderboardEntry) => {
-    const info = computeEligibility(entry);
-
-    if (info.eligible) {
+  const renderAvatar = (e: LeaderboardEntry, size = 36) => {
+    const hasAvatar = typeof e.avatarUrl === "string" && e.avatarUrl.trim().length > 0;
+    if (hasAvatar) {
+      // eslint-disable-next-line @next/next/no-img-element
       return (
-        <div className="inline-flex flex-col items-start gap-0.5">
-          <span className="inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold bg-[rgba(var(--torpy-red-rgb),0.12)] text-red-100 border border-[rgba(var(--torpy-red-rgb),0.75)] shadow-[0_0_18px_rgba(206,32,41,0.20)]">
-            ✅ Eligible
-          </span>
-          <span className="text-[10px] text-white/55">
-            Games {info.games} • Streak {info.streak}
-          </span>
-        </div>
+        <img
+          src={e.avatarUrl as string}
+          alt={safeName(e.displayName)}
+          className="rounded-full object-cover border border-white/20"
+          style={{ width: size, height: size }}
+        />
       );
     }
-
     return (
-      <div className="inline-flex flex-col items-start gap-0.5">
-        <span className="inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-[11px] font-semibold bg-slate-900/80 text-slate-200 border border-slate-600">
-          ⏳ In progress
-        </span>
-        <span className="text-[10px] text-white/55">{info.detail}</span>
+      <div
+        className="rounded-full bg-white/10 border border-white/10 flex items-center justify-center font-black"
+        style={{ width: size, height: size, fontSize: 12 }}
+      >
+        {safeName(e.displayName).charAt(0).toUpperCase()}
       </div>
     );
   };
 
-  const renderSkeletonRows = () => (
-    <ul className="divide-y divide-slate-800 animate-pulse">
-      {Array.from({ length: 6 }).map((_, idx) => (
-        <li key={idx} className="grid grid-cols-12 px-4 py-3 items-center text-sm">
-          <div className="col-span-2">
-            <div className="h-3 w-10 bg-slate-700 rounded" />
-          </div>
-          <div className="col-span-6 flex items-center gap-2">
-            <div className="h-8 w-8 rounded-full bg-slate-700" />
-            <div className="flex-1">
-              <div className="h-3 w-24 bg-slate-700 rounded mb-1" />
-              <div className="h-2 w-16 bg-slate-800 rounded" />
-            </div>
-          </div>
-          <div className="col-span-2">
-            <div className="h-5 w-24 bg-slate-700 rounded-full" />
-          </div>
-          <div className="col-span-2 flex justify-end">
-            <div className="h-5 w-16 bg-slate-700 rounded-full" />
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-
-  // Winners strip (only when roundComplete AND not overall)
-  const winnersInfo = (() => {
-    if (!roundComplete) return null;
-    if (scope === "overall") return null;
-    if (!entries.length) return null;
-
-    const eligible = entries.filter((e) => computeEligibility(e).eligible);
-    if (!eligible.length) {
-      return {
-        winnersCount: 0,
-        topEligibleStreak: 0,
-      };
+  const tonePill = (text: string, tone: "hot" | "warm" | "cold" | "dark" = "dark") => {
+    const base = "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border";
+    if (tone === "hot") {
+      return (
+        <span
+          className={`${base} text-black`}
+          style={{ background: TORPIE_RED, borderColor: "rgba(0,0,0,0.10)" }}
+        >
+          {text}
+        </span>
+      );
     }
+    if (tone === "warm") {
+      return (
+        <span
+          className={`${base} text-white`}
+          style={{
+            background: `rgba(${TORPIE_RED_RGB},0.16)`,
+            borderColor: `rgba(${TORPIE_RED_RGB},0.55)`,
+          }}
+        >
+          {text}
+        </span>
+      );
+    }
+    if (tone === "cold") {
+      return <span className={`${base} bg-white/5 text-white border-white/10`}>{text}</span>;
+    }
+    return <span className={`${base} bg-black text-white/80 border-white/10`}>{text}</span>;
+  };
 
-    const topEligibleStreak = Math.max(...eligible.map((e) => e.currentStreak ?? 0));
-    const winnersCount = eligible.filter((e) => (e.currentStreak ?? 0) === topEligibleStreak).length;
+  const leaderTag = streakTag(leaderStreak);
 
-    return { winnersCount, topEligibleStreak };
-  })();
+  const renderSkeleton = () => (
+    <div className="rounded-3xl border border-white/10 bg-black overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/10">
+        <div className="h-4 w-40 bg-white/10 rounded animate-pulse" />
+      </div>
+      <div className="p-4 grid gap-3">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div key={i} className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 flex-1">
+              <div className="h-10 w-10 rounded-full bg-white/10 animate-pulse" />
+              <div className="flex-1">
+                <div className="h-3 w-48 bg-white/10 rounded animate-pulse" />
+                <div className="mt-2 h-2 w-28 bg-white/10 rounded animate-pulse" />
+              </div>
+            </div>
+            <div className="h-8 w-16 bg-white/10 rounded-xl animate-pulse" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div
-      className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen"
+      className="w-full max-w-5xl mx-auto px-4 sm:px-6 py-6 text-white min-h-screen pb-24"
       style={
         {
-          ["--torpy-red" as any]: TORPY_RED,
-          ["--torpy-red-rgb" as any]: TORPY_RED_RGB,
+          ["--torpie-red" as any]: TORPIE_RED,
+          ["--torpie-red-rgb" as any]: TORPIE_RED_RGB,
         } as any
       }
     >
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-3xl sm:text-4xl font-bold">Leaderboards</h1>
-          <p className="mt-1 text-sm text-white/70 max-w-md">
-            Live ranking of players with the{" "}
-            <span className="font-semibold text-[var(--torpy-red)]">highest current streak</span>.
-          </p>
+      {/* PAGE TOP: LIVE STRIP */}
+      <div className="sticky top-[56px] sm:top-[64px] z-40 mb-4">
+        <div className="rounded-3xl border border-white/10 bg-black/85 backdrop-blur px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-block h-2.5 w-2.5 rounded-full animate-pulse"
+                style={{ background: TORPIE_RED }}
+              />
+              <span className="text-[11px] font-black uppercase tracking-wide text-white/80">
+                Live
+              </span>
+            </div>
 
-          {/* Win rules strip (always visible, non-gambling language) */}
-          <div className="mt-3 inline-flex flex-wrap items-center gap-2 rounded-full border border-[rgba(var(--torpy-red-rgb),0.45)] bg-[rgba(var(--torpy-red-rgb),0.12)] px-4 py-2 text-[12px] text-red-100">
-            <span className="font-semibold">To win:</span>
-            <span className="font-semibold">Streak {WIN_MIN_STREAK}+</span>
-            <span className="text-red-200/60">•</span>
-            <span className="font-semibold">{WIN_MIN_GAMES}+ games played</span>
-            <span className="text-red-200/60">•</span>
-            <span className="font-semibold">Ties split</span>
+            <div className="hidden sm:flex items-center gap-2 text-[11px] font-bold text-white/55">
+              <span>Updated</span>
+              <span className="text-white/80">{lastUpdatedLabel || "—"}</span>
+            </div>
+
+            <div className="hidden md:flex items-center gap-2 min-w-0">
+              <span className="text-[11px] font-black uppercase tracking-wide text-white/55">
+                Scope
+              </span>
+              <select
+                value={scope}
+                onChange={handleScopeChange}
+                className="rounded-2xl bg-black border px-3 py-2 text-[12px] font-black text-white focus:outline-none"
+                style={{
+                  borderColor: `rgba(${TORPIE_RED_RGB},0.55)`,
+                  boxShadow: `0 0 18px rgba(${TORPIE_RED_RGB},0.12)`,
+                }}
+              >
+                {SCOPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/picks"
+              className="rounded-2xl px-4 py-2 text-[12px] font-black text-white"
+              style={{ background: TORPIE_RED, textDecoration: "none" }}
+            >
+              GO PICK
+            </Link>
           </div>
         </div>
 
-        <div className="flex flex-col items-start md:items-end gap-2">
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] uppercase tracking-wide text-white/60">Scope</span>
+        {/* Mobile scope dropdown (separate row so it doesn’t squash) */}
+        <div className="mt-2 md:hidden">
+          <div className="rounded-3xl border border-white/10 bg-black px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-[11px] font-black uppercase tracking-wide text-white/55">
+              Scope
+            </span>
             <select
               value={scope}
               onChange={handleScopeChange}
-              className="rounded-full bg-[#020617] border px-4 py-1.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(206,32,41,0.28)] focus:outline-none focus:ring-2"
+              className="rounded-2xl bg-black border px-3 py-2 text-[12px] font-black text-white focus:outline-none"
               style={{
-                borderColor: "rgba(206,32,41,0.85)",
-                boxShadow: "0 0 20px rgba(206,32,41,0.28)",
-                outlineColor: TORPY_RED,
+                borderColor: `rgba(${TORPIE_RED_RGB},0.55)`,
+                boxShadow: `0 0 18px rgba(${TORPIE_RED_RGB},0.12)`,
               }}
             >
               {SCOPE_OPTIONS.map((opt) => (
@@ -452,350 +424,341 @@ export default function LeaderboardsPage() {
               ))}
             </select>
           </div>
+        </div>
+      </div>
 
-          {/* Toggle: Eligible only */}
-          <button
-            type="button"
-            onClick={() => setShowEligibleOnly((prev) => !prev)}
-            className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-semibold border transition ${
-              showEligibleOnly
-                ? "bg-[rgba(var(--torpy-red-rgb),0.14)] border-[rgba(var(--torpy-red-rgb),0.75)] text-red-100"
-                : "bg-slate-900/80 border-slate-600 text-slate-200"
-            }`}
-            title="Show only players eligible to win (streak 5+ and 3+ games played)"
-          >
-            <span className="inline-flex h-3 w-6 items-center rounded-full p-0.5 transition bg-slate-700">
-              <span
-                className={`h-2.5 w-2.5 rounded-full bg-white transform transition ${
-                  showEligibleOnly ? "translate-x-3" : "translate-x-0"
-                }`}
+      {/* HERO: SCOREBOARD */}
+      <div className="mb-4 rounded-3xl border border-white/10 bg-gradient-to-b from-black to-black overflow-hidden">
+        <div className="px-5 py-5 sm:px-6 sm:py-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-3xl sm:text-4xl font-black tracking-tight">
+                LEADERBOARD
+              </h1>
+              <p className="mt-1 text-sm text-white/70">
+                Ranked by <span className="font-black" style={{ color: TORPIE_RED }}>CURRENT STREAK</span>.
+                One wrong pick in a match and you’re cooked.
+              </p>
+            </div>
+
+            <div className="hidden sm:flex flex-col items-end gap-2">
+              {tonePill(`${totalPlayers || 0} PLAYERS`, "dark")}
+              {tonePill(`${leaderTag.label}`, leaderTag.tone)}
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {/* LEADER STREAK big */}
+            <div className="sm:col-span-2 rounded-3xl border border-white/10 bg-white/5 p-5 relative overflow-hidden">
+              <div
+                className="absolute -right-16 -top-16 h-56 w-56 rounded-full blur-3xl opacity-40"
+                style={{ background: TORPIE_RED }}
               />
-            </span>
-            Eligible only (✅)
-          </button>
-        </div>
-      </div>
-
-      {/* Winners strip (only when roundComplete + non-overall) */}
-      {winnersInfo && (
-        <div className="mb-5 rounded-2xl bg-gradient-to-r from-[rgba(var(--torpy-red-rgb),0.16)] via-sky-500/10 to-transparent border border-[rgba(var(--torpy-red-rgb),0.55)] px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.75)]">
-          {winnersInfo.winnersCount > 0 ? (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-[var(--torpy-red)]">
-                  Round complete
-                </p>
-                <p className="text-sm text-white/85">
-                  <span className="font-semibold text-red-100">
-                    Winners ({winnersInfo.winnersCount})
-                  </span>{" "}
-                  — prize split between all winners.
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Top eligible streak</p>
-                <p className="text-xl font-bold text-sky-300">{winnersInfo.topEligibleStreak}</p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-[11px] uppercase tracking-wide text-[var(--torpy-red)]">
-                  Round complete
-                </p>
-                <p className="text-sm text-white/80">No eligible winners for this scope.</p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TOP 3 HERO STRIP */}
-      {top3.length > 0 && (
-        <div className="mb-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-700/80 px-4 py-3 shadow-[0_18px_45px_rgba(0,0,0,0.8)]">
-          <div className="flex items-center justify-between mb-3 gap-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-wide text-slate-400">Live leaders</p>
-              <p className="text-xs text-slate-200">Top 3 based on current streak right now.</p>
-            </div>
-            {leaderStreak !== null && (
-              <div className="text-right text-xs text-slate-300">
-                <p>Current top streak</p>
-                <p className="text-xl font-bold text-[var(--torpy-red)]">{leaderStreak}</p>
-              </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {top3.map((entry, index) => {
-              const isYou = user && entry.uid === user.uid;
-              const hasAvatar =
-                typeof entry.avatarUrl === "string" && entry.avatarUrl.trim().length > 0;
-
-              const baseCard =
-                index === 0
-                  ? "border-yellow-400/60 shadow-[0_0_26px_rgba(250,204,21,0.5)]"
-                  : index === 1
-                  ? "border-slate-300/60 shadow-[0_0_20px_rgba(148,163,184,0.45)]"
-                  : "border-amber-500/60 shadow-[0_0_20px_rgba(245,158,11,0.45)]";
-
-              return (
-                <div
-                  key={entry.uid}
-                  className={`rounded-2xl border bg-[#020617]/90 px-3 py-3 flex items-center gap-3 ${baseCard}`}
-                >
-                  <div className="flex-shrink-0">
-                    {hasAvatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={entry.avatarUrl as string}
-                        alt={entry.displayName}
-                        className="h-10 w-10 rounded-full border border-white/30 object-cover"
-                      />
-                    ) : (
-                      <div className="h-10 w-10 rounded-full bg-slate-700 flex items-center justify-center text-sm font-bold">
-                        {entry.displayName.charAt(0).toUpperCase()}
-                      </div>
-                    )}
+              <div className="relative">
+                <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
+                  Leader streak
+                </div>
+                <div className="mt-2 flex items-end gap-3">
+                  <div
+                    className="text-6xl sm:text-7xl font-black leading-none"
+                    style={{ color: TORPIE_RED }}
+                  >
+                    {leaderStreak}
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold truncate">
-                          #{entry.rank} {entry.displayName}
-                          {isYou && (
-                            <span className="ml-1 text-[10px] text-[var(--torpy-red)]">(You)</span>
-                          )}
-                        </p>
-                        {entry.username && (
-                          <p className="text-[10px] text-slate-400 truncate">@{entry.username}</p>
-                        )}
-                        <div className="mt-2">{renderEligibilityPill(entry)}</div>
-                      </div>
-
-                      <div className="flex flex-col items-end">
-                        {renderStreakPill(entry.currentStreak)}
-                        {renderRankDelta(entry.rankDelta)}
-                      </div>
+                  <div className="pb-2">
+                    <div className="text-[12px] text-white/70 font-bold">
+                      {leader ? `Held by ${safeName(leader.displayName)}` : "No leader yet"}
                     </div>
+                    <div className="mt-1">{tonePill(leaderTag.label, leaderTag.tone)}</div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
-      {/* SOCIAL PROOF / CONTEXT LINE */}
-      <div className="mb-4 rounded-xl bg-[#020617] border border-slate-700/80 px-4 py-3 text-xs sm:text-sm text-white/75 flex flex-col gap-1">
-        <span>
-          {totalPlayers > 0
-            ? `${totalPlayers} player${totalPlayers === 1 ? "" : "s"} currently have a streak in this leaderboard.`
-            : "No players on the board yet – first streak takes top spot."}
-        </span>
-        {streakBandDescription && (
-          <span className="text-[11px] text-slate-300">{streakBandDescription}</span>
-        )}
-      </div>
+                <div className="mt-4 text-[12px] text-white/70">
+                  {streakBandDescription ?? "First streak takes top spot."}
+                </div>
+              </div>
+            </div>
 
-      {error && <p className="mb-3 text-sm text-red-400">{error} Try refreshing the page.</p>}
+            {/* CHASE THE LEADER */}
+            <div className="rounded-3xl border border-white/10 bg-black p-5">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
+                Chase the leader
+              </div>
 
-      {/* Top 10 table */}
-      <div className="overflow-hidden rounded-2xl bg-gradient-to-b from-[#020617] to-[#020617] border border-slate-800 shadow-[0_24px_60px_rgba(0,0,0,0.8)] mb-6">
-        {/* Header now includes Status */}
-        <div className="grid grid-cols-12 px-4 py-3 text-[11px] font-semibold text-white/60 border-b border-slate-800">
-          <div className="col-span-2">Rank</div>
-          <div className="col-span-6">Player</div>
-          <div className="col-span-2">Status</div>
-          <div className="col-span-2 text-right sm:text-center">Streak</div>
-        </div>
-
-        {loading && !hasLoadedRef.current && renderSkeletonRows()}
-
-        {!loading && tableRows.length === 0 && (
-          <div className="px-4 py-6 text-sm text-white/70">
-            {showEligibleOnly
-              ? "No eligible players in the top 10 right now."
-              : "No players on the board yet. Make a streak to claim top spot."}
-          </div>
-        )}
-
-        {!loading && tableRows.length > 0 && (
-          <ul className="divide-y divide-slate-800">
-            {tableRows.map((entry) => {
-              const isYou = user && entry.uid === user.uid;
-              const hasAvatar =
-                typeof entry.avatarUrl === "string" && entry.avatarUrl.trim().length > 0;
-
-              const rankClass =
-                entry.rank === 1
-                  ? "bg-gradient-to-r from-yellow-500/15 via-yellow-400/10 to-transparent"
-                  : entry.rank === 2
-                  ? "bg-gradient-to-r from-slate-300/10 via-slate-400/5 to-transparent"
-                  : entry.rank === 3
-                  ? "bg-gradient-to-r from-amber-500/10 via-amber-400/5 to-transparent"
-                  : "bg-transparent";
-
-              return (
-                <li
-                  key={entry.uid}
-                  className={`grid grid-cols-12 px-4 py-3 items-center text-sm transform transition-all duration-300 ease-out hover:-translate-y-0.5 hover:bg-slate-800/40 ${
-                    isYou ? "ring-1 ring-[rgba(var(--torpy-red-rgb),0.65)]" : ""
-                  } ${rankClass}`}
-                >
-                  {/* Rank + movement */}
-                  <div className="col-span-2 font-semibold text-white/80 flex flex-col gap-0.5">
-                    <div className="flex items-center gap-1">
-                      <span>#{entry.rank}</span>
-                      {entry.rank === 1 && (
-                        <span className="text-yellow-300 text-lg" aria-label="Leader">
-                          👑
-                        </span>
-                      )}
+              {user ? (
+                userEntry ? (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[12px] text-white/60 font-black uppercase">Your streak</div>
+                        <div className="text-4xl font-black" style={{ color: TORPIE_RED }}>
+                          {yourStreak}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[12px] text-white/60 font-black uppercase">Distance</div>
+                        <div className="text-4xl font-black">
+                          {yourDistance ?? "—"}
+                        </div>
+                      </div>
                     </div>
-                    {renderRankDelta(entry.rankDelta)}
-                  </div>
 
-                  {/* Player + avatar */}
-                  <div className="col-span-6 flex items-center gap-2 min-w-0">
-                    {hasAvatar ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={entry.avatarUrl as string}
-                        alt={entry.displayName}
-                        className="h-8 w-8 rounded-full border border-white/20 object-cover"
-                      />
+                    {yourDistance === 0 ? (
+                      <div className="mt-3 text-[12px] font-bold text-emerald-300">
+                        You’re tied for the lead. Keep it clean.
+                      </div>
                     ) : (
-                      <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-[11px] font-bold">
-                        {entry.displayName.charAt(0).toUpperCase()}
+                      <div className="mt-3 text-[12px] text-white/70">
+                        You need{" "}
+                        <span className="font-black" style={{ color: TORPIE_RED }}>
+                          {yourDistance}
+                        </span>{" "}
+                        more to catch the top.
                       </div>
                     )}
-                    <div className="flex flex-col min-w-0">
-                      <span className="font-medium truncate">
-                        {entry.displayName}
-                        {isYou && (
-                          <span className="ml-1 text-[11px] text-[var(--torpy-red)] font-semibold">
-                            (You)
-                          </span>
-                        )}
-                      </span>
-                      {entry.username && (
-                        <span className="text-[11px] text-white/60 truncate">@{entry.username}</span>
-                      )}
+
+                    <div className="mt-3 text-[12px] text-white/55">
+                      Current rank: <span className="font-black text-white">#{userEntry.rank}</span>
                     </div>
                   </div>
-
-                  {/* Status (Eligibility) */}
-                  <div className="col-span-2">{renderEligibilityPill(entry)}</div>
-
-                  {/* Current streak pill */}
-                  <div className="col-span-2 text-right sm:text-center">
-                    {renderStreakPill(entry.currentStreak)}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-
-      {/* Your position if outside top 10 */}
-      {user ? (
-        userOutsideTop10 && userEntry ? (
-          <div className="mb-4 rounded-2xl bg-gradient-to-r from-[rgba(var(--torpy-red-rgb),0.16)] via-sky-500/10 to-transparent border border-[rgba(var(--torpy-red-rgb),0.65)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.8)] transform transition-all duration-300 ease-out">
-            <p className="text-xs uppercase tracking-wide text-[var(--torpy-red)] mb-1">
-              Your position
-            </p>
-
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-2">
-                {userEntry.avatarUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={userEntry.avatarUrl}
-                    alt={userEntry.displayName}
-                    className="h-8 w-8 rounded-full border border-white/20 object-cover"
-                  />
                 ) : (
-                  <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-[11px] font-bold">
-                    {userEntry.displayName.charAt(0).toUpperCase()}
+                  <div className="mt-3 text-sm text-white/70">
+                    Make a pick and you’ll show up here.
                   </div>
-                )}
-
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold flex items-center gap-1">
-                    #{userEntry.rank}
-                    {userEntry.rank === 1 && (
-                      <span className="text-yellow-300 text-lg" aria-label="Leader">
-                        👑
-                      </span>
-                    )}
-                    <span className="truncate">– {userEntry.displayName}</span>
-                  </p>
-
-                  <div className="mt-2">{renderEligibilityPill(userEntry)}</div>
+                )
+              ) : (
+                <div className="mt-3 text-sm text-white/70">
+                  Log in to see your rank + distance.
                 </div>
+              )}
+
+              <div className="mt-4">
+                <Link
+                  href="/picks"
+                  className="inline-flex w-full items-center justify-center rounded-2xl px-4 py-3 text-[13px] font-black text-white"
+                  style={{ background: TORPIE_RED, textDecoration: "none" }}
+                >
+                  GO PICK NOW
+                </Link>
               </div>
-
-              <div className="text-right">
-                <p className="text-[11px] text-white/60">Current streak</p>
-                <p className="text-xl font-bold text-sky-300">{userEntry.currentStreak}</p>
-
-                {leaderStreak !== null && leaderStreak > userEntry.currentStreak && (
-                  <p className="mt-1 text-[11px] text-slate-300">
-                    Need{" "}
-                    <span className="font-semibold text-[var(--torpy-red)]">
-                      {leaderStreak - userEntry.currentStreak}
-                    </span>{" "}
-                    more to catch the leaders.
-                  </p>
-                )}
-
-                {leaderStreak !== null && leaderStreak === userEntry.currentStreak && (
-                  <p className="mt-1 text-[11px] text-emerald-300">You’re tied with the leaders.</p>
-                )}
-              </div>
-            </div>
-
-            {/* Small eligibility reminder for non-eligible users */}
-            {!computeEligibility(userEntry).eligible && (
-              <div className="mt-3 text-[11px] text-white/65">
-                To win: streak{" "}
-                <span className="font-semibold text-red-100">{WIN_MIN_STREAK}+</span> and{" "}
-                <span className="font-semibold text-red-100">{WIN_MIN_GAMES}+ games</span> played.
-              </div>
-            )}
-          </div>
-        ) : (
-          <p className="mb-4 text-xs text-white/60">
-            {userEntry ? "You’re in the top 10 – nice work!" : "Make some picks to appear on the leaderboard."}
-          </p>
-        )
-      ) : (
-        <p className="mb-4 text-xs text-white/60">Log in to see where you sit on the leaderboard.</p>
-      )}
-
-      {/* Lifetime box – WINS / LOSSES / LIFETIME WIN % */}
-      {user && userLifetime && (
-        <div className="rounded-2xl bg-[#020617] border border-slate-700/80 px-4 py-4 shadow-[0_16px_40px_rgba(0,0,0,0.8)]">
-          <p className="text-xs uppercase tracking-wide text-white/60 mb-2">Lifetime record</p>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-xs text-white/60 mb-1">Wins</p>
-              <p className="text-2xl font-bold text-sky-300">{userLifetime.totalWins}</p>
-            </div>
-            <div>
-              <p className="text-xs text-white/60 mb-1">Losses</p>
-              <p className="text-2xl font-bold text-rose-300">{userLifetime.totalLosses}</p>
-            </div>
-            <div>
-              <p className="text-xs text-white/60 mb-1">Win %</p>
-              <p className="text-2xl font-bold text-emerald-300 font-mono">{formatPct(userLifetime.winPct)}</p>
             </div>
           </div>
         </div>
+      </div>
+
+      {/* CONTENT */}
+      {error ? (
+        <div className="mb-4 rounded-3xl border border-white/10 bg-black px-4 py-3 text-sm font-bold text-rose-300">
+          {error} Refresh and try again.
+        </div>
+      ) : null}
+
+      {loading && !hasLoadedRef.current ? (
+        renderSkeleton()
+      ) : (
+        <>
+          {/* TOP 3 PODIUM */}
+          {top3.length > 0 ? (
+            <div className="mb-4 rounded-3xl border border-white/10 bg-black overflow-hidden">
+              <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                <div className="text-[12px] font-black uppercase tracking-wide text-white/70">
+                  Podium
+                </div>
+                <div className="text-[12px] font-black text-white/55">
+                  Updated {lastUpdatedLabel || "—"}
+                </div>
+              </div>
+
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {top3.map((e, idx) => {
+                  const isYou = user && e.uid === user.uid;
+                  const ring =
+                    idx === 0
+                      ? `rgba(${TORPIE_RED_RGB},0.75)`
+                      : "rgba(255,255,255,0.12)";
+
+                  return (
+                    <div
+                      key={e.uid}
+                      className="rounded-3xl border bg-white/5 p-4"
+                      style={{
+                        borderColor: ring,
+                        boxShadow: idx === 0 ? `0 0 30px rgba(${TORPIE_RED_RGB},0.18)` : "none",
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {renderAvatar(e, 44)}
+                          <div className="min-w-0">
+                            <div className="text-sm font-black truncate">
+                              #{e.rank} {safeName(e.displayName)}
+                              {isYou ? (
+                                <span className="ml-2 text-[12px] font-black" style={{ color: TORPIE_RED }}>
+                                  YOU
+                                </span>
+                              ) : null}
+                            </div>
+                            {e.username ? (
+                              <div className="text-[12px] text-white/55 truncate">@{e.username}</div>
+                            ) : null}
+                            <div className="mt-2 flex items-center gap-2">
+                              {idx === 0 ? tonePill("👑 #1", "hot") : tonePill(`TOP ${e.rank}`, "cold")}
+                              {tonePill("LIVE", "warm")}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] text-white/55 font-black uppercase">Streak</div>
+                          <div className="text-3xl font-black" style={{ color: TORPIE_RED }}>
+                            {e.currentStreak ?? 0}
+                          </div>
+                          <div className="mt-1">{renderRankDelta(e.rankDelta)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {/* TOP 10 LIST */}
+          <div className="rounded-3xl border border-white/10 bg-black overflow-hidden">
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between">
+              <div className="text-[12px] font-black uppercase tracking-wide text-white/70">
+                Top 10
+              </div>
+              <div className="text-[12px] font-black text-white/55">
+                {totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}
+              </div>
+            </div>
+
+            {top10.length === 0 ? (
+              <div className="p-4 text-sm text-white/70">
+                No players yet. Be the first — go pick.
+              </div>
+            ) : (
+              <ul className="divide-y divide-white/10">
+                {top10.map((e) => {
+                  const isYou = user && e.uid === user.uid;
+
+                  return (
+                    <li
+                      key={e.uid}
+                      className="px-4 py-3 hover:bg-white/5 transition"
+                      style={{
+                        outline: isYou ? `2px solid rgba(${TORPIE_RED_RGB},0.55)` : "none",
+                        outlineOffset: isYou ? "-2px" : 0,
+                      }}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-[54px] flex flex-col">
+                            <div className="text-sm font-black text-white/85">
+                              #{e.rank}
+                              {e.rank === 1 ? <span className="ml-1">👑</span> : null}
+                            </div>
+                            {renderRankDelta(e.rankDelta)}
+                          </div>
+
+                          {renderAvatar(e, 36)}
+
+                          <div className="min-w-0">
+                            <div className="text-sm font-black truncate">
+                              {safeName(e.displayName)}
+                              {isYou ? (
+                                <span className="ml-2 text-[12px] font-black" style={{ color: TORPIE_RED }}>
+                                  YOU
+                                </span>
+                              ) : null}
+                            </div>
+                            {e.username ? (
+                              <div className="text-[12px] text-white/55 truncate">@{e.username}</div>
+                            ) : (
+                              <div className="text-[12px] text-white/35 truncate">&nbsp;</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] text-white/55 font-black uppercase">Current</div>
+                          <div className="text-3xl font-black leading-none" style={{ color: TORPIE_RED }}>
+                            {e.currentStreak ?? 0}
+                          </div>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* YOUR POSITION IF OUTSIDE TOP10 */}
+          {user && userOutsideTop10 && userEntry ? (
+            <div className="mt-4 rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="text-[12px] font-black uppercase tracking-wide text-white/70">
+                Your position
+              </div>
+
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  {renderAvatar(userEntry, 40)}
+                  <div className="min-w-0">
+                    <div className="text-sm font-black truncate">
+                      #{userEntry.rank} {safeName(userEntry.displayName)}
+                    </div>
+                    {userEntry.username ? (
+                      <div className="text-[12px] text-white/55 truncate">@{userEntry.username}</div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className="text-[10px] text-white/55 font-black uppercase">Current</div>
+                  <div className="text-3xl font-black" style={{ color: TORPIE_RED }}>
+                    {userEntry.currentStreak ?? 0}
+                  </div>
+                  {leaderStreak > (userEntry.currentStreak ?? 0) ? (
+                    <div className="mt-1 text-[12px] text-white/65">
+                      Need{" "}
+                      <span className="font-black" style={{ color: TORPIE_RED }}>
+                        {leaderStreak - (userEntry.currentStreak ?? 0)}
+                      </span>{" "}
+                      to catch the lead.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
+
+      {/* FIXED MOBILE CTA BAR (always visible) */}
+      <div className="fixed left-0 right-0 bottom-0 z-50 md:hidden">
+        <div className="mx-3 mb-3 rounded-3xl border border-white/10 bg-black/85 backdrop-blur px-3 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.65)]">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
+                Leader streak
+              </div>
+              <div className="text-[18px] font-black truncate" style={{ color: TORPIE_RED }}>
+                {leaderStreak}
+              </div>
+            </div>
+
+            <Link
+              href="/picks"
+              className="inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[13px] font-black text-white"
+              style={{ background: TORPIE_RED, textDecoration: "none" }}
+            >
+              GO PICK
+            </Link>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
