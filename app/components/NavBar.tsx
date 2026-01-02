@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import MobileNav from "@/components/MobileNav";
+import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
