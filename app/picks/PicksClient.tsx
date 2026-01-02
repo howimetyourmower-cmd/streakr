@@ -3,7 +3,7 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
@@ -281,11 +281,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center px-4"
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
@@ -329,9 +325,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
 
           <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">
-              One wrong pick resets your streak for that match. Voids don’t count.
-            </div>
+            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
           </div>
         </div>
 
@@ -461,10 +455,27 @@ export default function PicksPage() {
     return sortedGames[0] || null;
   }, [sortedGames, nowMs]);
 
+  /**
+   * ✅ FIX: prevent Next Up flicker on refresh
+   * We keep the last known Next Up so it never unmounts just because `loading` flips true.
+   */
+  const lastNextUpRef = useRef<ApiGame | null>(null);
+  const [nextUpStable, setNextUpStable] = useState<ApiGame | null>(null);
+
+  useEffect(() => {
+    if (nextUp) {
+      lastNextUpRef.current = nextUp;
+      setNextUpStable(nextUp);
+    } else if (!nextUpStable && lastNextUpRef.current) {
+      setNextUpStable(lastNextUpRef.current);
+    }
+  }, [nextUp, nextUpStable]);
+
   const nextUpLockMs = useMemo(() => {
-    if (!nextUp) return null;
-    return new Date(nextUp.startTime).getTime() - nowMs;
-  }, [nextUp, nowMs]);
+    const g = nextUpStable;
+    if (!g) return null;
+    return new Date(g.startTime).getTime() - nowMs;
+  }, [nextUpStable, nowMs]);
 
   const gamesPicked = useMemo(() => {
     return games.filter((g) => (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")).length;
@@ -503,7 +514,6 @@ export default function PicksPage() {
         else unsettled += 1;
       }
 
-      // ✅ Clean Sweep running streak across games: wrong breaks to 0; otherwise add correct (voids don't add)
       if (wrong > 0) runningStreak = 0;
       else runningStreak += correct;
 
@@ -523,30 +533,24 @@ export default function PicksPage() {
   }, [sortedGames]);
 
   const StickyChaseBar = () => {
-    if (!nextUp) return null;
+    const g = nextUpStable;
+    if (!g) return null;
 
-    const href = `/picks/${slugify(nextUp.match)}`;
+    const href = `/picks/${slugify(g.match)}`;
     const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
     const lockText =
-      nextUpLockMs === null
-        ? ""
-        : isNextUpLive
-        ? "Locked"
-        : `Locks in ${msToCountdown(nextUpLockMs)}`;
+      nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
 
     const chaseText =
-      leaderScore === null
-        ? "Leader loading…"
-        : distanceToLeader === 0
-        ? "Equal lead"
-        : `Need ${distanceToLeader}`;
+      leaderScore === null ? "Leader loading…" : distanceToLeader === 0 ? "Equal lead" : `Need ${distanceToLeader}`;
 
     return (
       <div className="fixed bottom-0 left-0 right-0 z-[60] md:hidden">
         <div
           className="px-3 pb-3 pt-2"
           style={{
-            background: "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.78) 35%, rgba(0,0,0,0.96) 100%)",
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.78) 35%, rgba(0,0,0,0.96) 100%)",
           }}
         >
           <div
@@ -578,11 +582,14 @@ export default function PicksPage() {
                     {lockText || "Next up"}
                   </span>
 
-                  <span className="text-[11px] text-white/60 font-semibold truncate">{nextUp.match}</span>
+                  <span className="text-[11px] text-white/60 font-semibold truncate">{g.match}</span>
                 </div>
 
                 <div className="mt-2 flex items-center gap-3">
-                  <div className="rounded-xl border px-3 py-1.5" style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}>
+                  <div
+                    className="rounded-xl border px-3 py-1.5"
+                    style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}
+                  >
                     <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
                     <div className="text-[16px] font-black" style={{ color: COLORS.red }}>
                       {currentStreak}
@@ -619,9 +626,6 @@ export default function PicksPage() {
     );
   };
 
-  /**
-   * ✅ Match HQ: White pop cards for stats (grabs attention), but stays in a dark wrapper.
-   */
   const DashboardStrip = () => {
     const leaderText =
       leaderScore === null ? "Leader loading…" : leaderName ? `${leaderName} leads` : "Leader";
@@ -795,7 +799,13 @@ export default function PicksPage() {
 
             <div className="mt-2 flex items-center gap-2">
               <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
-                {eligible ? <CheckIcon size={16} color={COLORS.red} /> : <span className="font-black" style={{ color: "rgba(0,0,0,0.55)" }}>—</span>}
+                {eligible ? (
+                  <CheckIcon size={16} color={COLORS.red} />
+                ) : (
+                  <span className="font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+                    —
+                  </span>
+                )}
               </div>
 
               <div className="min-w-0">
@@ -824,7 +834,10 @@ export default function PicksPage() {
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
           </div>
 
-          <div className="hidden md:block mt-3 overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <div
+            className="hidden md:block mt-3 overflow-hidden rounded-2xl border"
+            style={{ borderColor: "rgba(255,255,255,0.10)" }}
+          >
             <table className="w-full text-left">
               <thead>
                 <tr style={{ background: "rgba(255,255,255,0.05)" }}>
@@ -834,7 +847,9 @@ export default function PicksPage() {
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Unsettled</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Streak after</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Streak after
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -842,10 +857,10 @@ export default function PicksPage() {
                   const anyWrong = r.wrong > 0;
                   const pillState =
                     anyWrong
-                      ? { label: "DEAD", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
+                      ? { label: "BROKEN", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
                       : r.unsettled > 0
                       ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
-                      : { label: "ALIVE", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
+                      : { label: "CLEAN", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
                     <tr key={r.gameId} style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}>
@@ -859,7 +874,11 @@ export default function PicksPage() {
                           </div>
                           <span
                             className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
-                            style={{ borderColor: pillState.border, background: pillState.bg, color: "rgba(255,255,255,0.92)" }}
+                            style={{
+                              borderColor: pillState.border,
+                              background: pillState.bg,
+                              color: "rgba(255,255,255,0.92)",
+                            }}
                           >
                             {pillState.label}
                           </span>
@@ -937,7 +956,8 @@ export default function PicksPage() {
     const awayName = m?.away ?? "";
     const matchSlug = slugify(g.match);
 
-    const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+    const picksCount =
+      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
 
     const isLocked = lockMs <= 0;
 
@@ -1044,8 +1064,6 @@ export default function PicksPage() {
   return (
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howOpen} onClose={closeHow} />
-
-      {/* ✅ Mobile always has a fat GO PICK bar */}
       <StickyChaseBar />
 
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 md:pb-14">
@@ -1066,9 +1084,7 @@ export default function PicksPage() {
                 </span>
               ) : null}
             </div>
-            <div className="mt-1 text-[13px] text-white/65 font-semibold">
-              Pick any amount. Survive the streak.
-            </div>
+            <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
           </div>
 
           <button
@@ -1092,11 +1108,11 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* ✅ 1) NEXT UP (TOP) */}
-        {!loading && nextUp ? (
-          <div className="mt-4">
+        {/* ✅ NEXT UP (NO FLICKER): render stable card even while loading */}
+        {nextUpStable ? (
+          <div className="mt-4 transition-opacity duration-200" style={{ opacity: loading ? 0.75 : 1 }}>
             <Link
-              href={`/picks/${slugify(nextUp.match)}`}
+              href={`/picks/${slugify(nextUpStable.match)}`}
               className="block rounded-3xl overflow-hidden border"
               style={{
                 borderColor: "rgba(255,46,77,0.35)",
@@ -1106,7 +1122,6 @@ export default function PicksPage() {
               }}
             >
               <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
-                {/* attention: hot edge glow */}
                 <div
                   className="absolute inset-0 pointer-events-none"
                   style={{
@@ -1138,15 +1153,17 @@ export default function PicksPage() {
                     </div>
 
                     <div className="text-[11px] text-white/80 font-semibold">
-                      {new Date(nextUp.startTime).getTime() - nowMs <= 0
+                      {nextUpLockMs === null
+                        ? ""
+                        : nextUpLockMs <= 0
                         ? "LIVE / Locked"
-                        : `Locks in ${msToCountdown(new Date(nextUp.startTime).getTime() - nowMs)}`}
+                        : `Locks in ${msToCountdown(nextUpLockMs)}`}
                     </div>
                   </div>
 
                   {(() => {
-                    const m = splitMatch(nextUp.match);
-                    const homeName = m?.home ?? nextUp.match;
+                    const m = splitMatch(nextUpStable.match);
+                    const homeName = m?.home ?? nextUpStable.match;
                     const awayName = m?.away ?? "";
                     return (
                       <div className="mt-4 flex items-center justify-center gap-4">
@@ -1162,13 +1179,13 @@ export default function PicksPage() {
                       className="text-[22px] sm:text-[28px] font-black leading-tight"
                       style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
                     >
-                      {nextUp.match}
+                      {nextUpStable.match}
                     </div>
                     <div
                       className="mt-2 text-[12px] font-semibold"
                       style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
                     >
-                      {formatAedt(nextUp.startTime)} • {nextUp.venue}
+                      {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
                     </div>
                   </div>
 
@@ -1191,10 +1208,8 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* ✅ 2) DASHBOARD */}
         <DashboardStrip />
 
-        {/* ✅ 3) SCHEDULED MATCHES */}
         <div className="mt-6">
           <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
 
