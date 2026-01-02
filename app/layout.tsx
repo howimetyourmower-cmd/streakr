@@ -7,6 +7,32 @@ export const metadata: Metadata = {
   title: "Torpie",
   description: "Torpie – Streak prediction game",
 };
+// /app/layout.tsx
+import MobileNav from "@/components/MobileNav";
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body className="bg-black text-white">
+        <header className="sticky top-0 z-50 flex items-center justify-between p-3">
+          <div className="font-black">TORPIE</div>
+
+          <MobileNav
+            items={[
+              { href: "/", label: "Home" },
+              { href: "/picks", label: "Picks" },
+              { href: "/leaderboards", label: "Leaderboards" },
+              { href: "/locker-room", label: "Locker Room" },
+              { href: "/account", label: "Account" },
+            ]}
+          />
+        </header>
+
+        {children}
+      </body>
+    </html>
+  );
+}
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
