@@ -1,3 +1,4 @@
+// /app/layout.tsx
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
@@ -7,38 +8,12 @@ export const metadata: Metadata = {
   title: "Torpie",
   description: "Torpie – Streak prediction game",
 };
-// /app/layout.tsx
-import MobileNav from "@/components/MobileNav";
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en">
-      <body className="bg-black text-white">
-        <header className="sticky top-0 z-50 flex items-center justify-between p-3">
-          <div className="font-black">TORPIE</div>
-
-          <MobileNav
-            items={[
-              { href: "/", label: "Home" },
-              { href: "/picks", label: "Picks" },
-              { href: "/leaderboards", label: "Leaderboards" },
-              { href: "/locker-room", label: "Locker Room" },
-              { href: "/account", label: "Account" },
-            ]}
-          />
-        </header>
-
-        {children}
-      </body>
-    </html>
-  );
-}
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="bg-black">
       <body className="min-h-screen bg-black text-white antialiased">
-        {/* NAVIGATION */}
+        {/* NAVIGATION (includes mobile burger) */}
         <NavBar />
 
         {/* ✅ COMPACT GLOBAL SPONSOR BANNER (LOW HEIGHT) */}
@@ -56,7 +31,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </p>
 
             {/* Optional CTA button */}
-            <button className="hidden md:inline-flex rounded-full bg-yellow-300 px-3 py-[4px] text-[10px] font-black text-sky-950 hover:bg-yellow-200 transition">
+            <button className="hidden md:inline-flex rounded-full bg-yellow-300 px-3 py-[4px] text-[10px] font-black text-sky-950 transition hover:bg-yellow-200">
               Learn more
             </button>
           </div>
