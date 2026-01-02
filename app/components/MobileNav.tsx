@@ -1,3 +1,4 @@
+// /src/components/MobileNav.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -37,8 +38,19 @@ export default function MobileNav({
         aria-label="Open menu"
         aria-expanded={open}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 7h16M4 12h16M4 17h16" stroke="white" strokeWidth="2.4" strokeLinecap="round" />
+        <svg
+          width="22"
+          height="22"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 7h16M4 12h16M4 17h16"
+            stroke="white"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
         </svg>
       </button>
 
@@ -68,6 +80,7 @@ export default function MobileNav({
         >
           <div className="flex items-center justify-between">
             <div className="text-white font-black text-[14px]">TORPIE</div>
+
             <button
               type="button"
               onClick={() => setOpen(false)}
@@ -103,7 +116,9 @@ export default function MobileNav({
 
           <div
             className="mt-3 h-[10px] w-full rounded-full"
-            style={{ background: `linear-gradient(90deg, ${accent} 0%, rgba(255,46,77,0.25) 100%)` }}
+            style={{
+              background: `linear-gradient(90deg, ${accent} 0%, rgba(255,46,77,0.25) 100%)`,
+            }}
           />
         </div>
       </div>
