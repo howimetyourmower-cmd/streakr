@@ -8,7 +8,7 @@ import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
-const LOGO_SRC = "/Torpielogo.png"; // ✅ confirmed from /public
+const LOGO_SRC = "/Torpielogo.png"; // confirmed
 
 export default function NavBar() {
   const items: NavItem[] = useMemo(
@@ -23,7 +23,7 @@ export default function NavBar() {
   );
 
   return (
-    <header className="sticky top-0 z-[80] w-full border-b border-white/10 bg-black/55 backdrop-blur">
+    <header className="sticky top-0 z-[80] w-full border-b border-black/10 bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
         {/* LEFT: LOGO */}
         <Link
@@ -49,7 +49,7 @@ export default function NavBar() {
             <Link
               key={it.href}
               href={it.href}
-              className="rounded-xl px-3 py-2 text-[12px] font-black text-white/85 hover:text-white hover:bg-white/5"
+              className="rounded-xl px-3 py-2 text-[12px] font-black text-black/80 hover:text-black hover:bg-black/5"
               style={{ textDecoration: "none" }}
             >
               {it.label}
@@ -59,7 +59,10 @@ export default function NavBar() {
           <Link
             href="/picks"
             className="ml-2 rounded-xl px-4 py-2 text-[12px] font-black text-white"
-            style={{ background: "#FF2E4D", textDecoration: "none" }}
+            style={{
+              background: "#FF2E4D",
+              textDecoration: "none",
+            }}
           >
             GO PICK
           </Link>
