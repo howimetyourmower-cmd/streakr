@@ -107,16 +107,14 @@ type TeamSlug =
 function teamNameToSlug(nameRaw: string): TeamSlug | null {
   const n = (nameRaw || "").toLowerCase().trim();
 
-  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants"))
-    return "gws";
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
   if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
     return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
-    return "stkilda";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
   if (n.includes("brisbane")) return "brisbane";
@@ -272,7 +270,7 @@ function CardSilhouetteBg({ opacity = 1 }: { opacity?: number }) {
         className="absolute inset-0"
         style={{
           background:
-            "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
+            "linear-gradient(180deg, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
         }}
       />
     </div>
@@ -283,7 +281,11 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
@@ -327,7 +329,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
 
           <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
+            <div className="text-white/70 mt-1">
+              One wrong pick resets your streak for that match. Voids don’t count.
+            </div>
           </div>
         </div>
 
@@ -437,8 +441,15 @@ export default function PicksPage() {
     loadPicks();
   }, [loadPicks]);
 
-  const roundLabel =
-    roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
+  // silent refresh (keeps “LIVE / Locked” + stats feeling real)
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      loadPicks();
+    }, 15000);
+    return () => window.clearInterval(id);
+  }, [loadPicks]);
+
+  const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   const sortedGames = useMemo(() => {
     return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
@@ -446,13 +457,17 @@ export default function PicksPage() {
 
   const nextUp = useMemo(() => {
     const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
-    return upcoming.length ? upcoming[0] : sortedGames[0] || null;
+    if (upcoming.length) return upcoming[0];
+    return sortedGames[0] || null;
   }, [sortedGames, nowMs]);
 
+  const nextUpLockMs = useMemo(() => {
+    if (!nextUp) return null;
+    return new Date(nextUp.startTime).getTime() - nowMs;
+  }, [nextUp, nowMs]);
+
   const gamesPicked = useMemo(() => {
-    return games.filter((g) =>
-      (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
-    ).length;
+    return games.filter((g) => (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")).length;
   }, [games]);
 
   const eligible = gamesPicked > 0;
@@ -466,6 +481,8 @@ export default function PicksPage() {
     if (leaderScore === null || leaderScore <= 0) return 0;
     return clamp((currentStreak / leaderScore) * 100, 0, 100);
   }, [leaderScore, currentStreak]);
+
+  const isNextUpLive = nextUpLockMs !== null ? nextUpLockMs <= 0 : false;
 
   const gameStatusRows = useMemo((): GameStatusRow[] => {
     let runningStreak = 0;
@@ -505,16 +522,109 @@ export default function PicksPage() {
     });
   }, [sortedGames]);
 
+  const StickyChaseBar = () => {
+    if (!nextUp) return null;
+
+    const href = `/picks/${slugify(nextUp.match)}`;
+    const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
+    const lockText =
+      nextUpLockMs === null
+        ? ""
+        : isNextUpLive
+        ? "Locked"
+        : `Locks in ${msToCountdown(nextUpLockMs)}`;
+
+    const chaseText =
+      leaderScore === null
+        ? "Leader loading…"
+        : distanceToLeader === 0
+        ? "Equal lead"
+        : `Need ${distanceToLeader}`;
+
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-[60] md:hidden">
+        <div
+          className="px-3 pb-3 pt-2"
+          style={{
+            background: "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.78) 35%, rgba(0,0,0,0.96) 100%)",
+          }}
+        >
+          <div
+            className="rounded-2xl border p-3 shadow-[0_18px_60px_rgba(0,0,0,0.80)]"
+            style={{
+              borderColor: "rgba(255,255,255,0.12)",
+              background: "rgba(10,10,10,0.92)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+                    style={{
+                      borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
+                      background: isNextUpLive ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        background: isNextUpLive ? COLORS.red : "rgba(255,255,255,0.55)",
+                        boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                      }}
+                    />
+                    {lockText || "Next up"}
+                  </span>
+
+                  <span className="text-[11px] text-white/60 font-semibold truncate">{nextUp.match}</span>
+                </div>
+
+                <div className="mt-2 flex items-center gap-3">
+                  <div className="rounded-xl border px-3 py-1.5" style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}>
+                    <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
+                    <div className="text-[16px] font-black" style={{ color: COLORS.red }}>
+                      {currentStreak}
+                    </div>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
+                    <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
+                    <div className="text-[11px] text-white/55 font-semibold truncate">
+                      {leaderScore === null ? "" : `Leader ${leaderScore}${leaderName ? ` • ${leaderName}` : ""}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Link
+                href={href}
+                className="shrink-0 inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 12px 30px rgba(255,46,77,0.18)",
+                  textDecoration: "none",
+                }}
+              >
+                {label}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   /**
-   * ✅ Match HQ: WHITE cards, BLACK text, RED numbers, smaller / tighter
+   * ✅ Match HQ: White pop cards for stats (grabs attention), but stays in a dark wrapper.
    */
   const DashboardStrip = () => {
     const leaderText =
-      leaderScore === null
-        ? "Leader loading…"
-        : leaderName
-        ? `${leaderName} leads`
-        : "Leader";
+      leaderScore === null ? "Leader loading…" : leaderName ? `${leaderName} leads` : "Leader";
 
     const leaderHint =
       leaderScore === null
@@ -541,15 +651,33 @@ export default function PicksPage() {
 
     return (
       <div
-        className="mt-4 rounded-2xl border px-3 py-3"
+        className="mt-4 rounded-3xl border px-3 py-3"
         style={{
           borderColor: "rgba(255,255,255,0.10)",
           background: "rgba(255,255,255,0.03)",
         }}
       >
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
-            Match HQ
+          <div className="flex items-center gap-2">
+            <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Match HQ</div>
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+              style={{
+                borderColor: "rgba(255,46,77,0.28)",
+                background: "rgba(255,46,77,0.10)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              title="Torpie is live and updating"
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: COLORS.red,
+                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
+                }}
+              />
+              LIVE
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -581,9 +709,7 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* tighter grid */}
         <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
-          {/* Current streak */}
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
             <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
               Current streak
@@ -603,7 +729,6 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Leader */}
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
             <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
               Leader
@@ -622,7 +747,6 @@ export default function PicksPage() {
               </div>
             </div>
 
-            {/* mini progress */}
             <div
               className="mt-2 h-[8px] w-full rounded-full border overflow-hidden"
               style={{
@@ -645,7 +769,6 @@ export default function PicksPage() {
             </div>
           </div>
 
-          {/* Distance */}
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
             <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
               Distance
@@ -659,23 +782,19 @@ export default function PicksPage() {
               <div className="min-w-0">
                 <div className="text-[12px] font-black">{leaderScore === null ? "Waiting on data" : "Close the gap"}</div>
                 <div className="text-[11px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.62)" }}>
-                  Streak only (not best).
+                  Current streak only.
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Eligible */}
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
             <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
               Eligible
             </div>
 
             <div className="mt-2 flex items-center gap-2">
-              <div
-                className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center"
-                style={pill}
-              >
+              <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
                 {eligible ? <CheckIcon size={16} color={COLORS.red} /> : <span className="font-black" style={{ color: "rgba(0,0,0,0.55)" }}>—</span>}
               </div>
 
@@ -693,7 +812,6 @@ export default function PicksPage() {
           </div>
         </div>
 
-        {/* Game status dashboard (tighter) */}
         <div
           className="mt-3 rounded-2xl border p-3 sm:p-3.5"
           style={{
@@ -819,8 +937,7 @@ export default function PicksPage() {
     const awayName = m?.away ?? "";
     const matchSlug = slugify(g.match);
 
-    const picksCount =
-      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+    const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
 
     const isLocked = lockMs <= 0;
 
@@ -848,10 +965,7 @@ export default function PicksPage() {
 
               <span
                 className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  ...badgeStyle,
-                  color: "rgba(255,255,255,0.96)",
-                }}
+                style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}
               >
                 {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
               </span>
@@ -913,8 +1027,7 @@ export default function PicksPage() {
                 className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
                 style={{
                   borderColor: "rgba(255,46,77,0.32)",
-                  background:
-                    "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
                   color: "rgba(255,255,255,0.98)",
                   boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
                 }}
@@ -932,7 +1045,10 @@ export default function PicksPage() {
     <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <HowToPlayModal open={howOpen} onClose={closeHow} />
 
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-14">
+      {/* ✅ Mobile always has a fat GO PICK bar */}
+      <StickyChaseBar />
+
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 md:pb-14">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-3">
@@ -950,8 +1066,24 @@ export default function PicksPage() {
                 </span>
               ) : null}
             </div>
-            <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
+            <div className="mt-1 text-[13px] text-white/65 font-semibold">
+              Pick any amount. Survive the streak.
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={loadPicks}
+            className="rounded-full px-3 py-2 text-[11px] font-black border"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.92)",
+            }}
+            title="Refresh"
+          >
+            Refresh
+          </button>
         </div>
 
         {err ? (
@@ -965,15 +1097,23 @@ export default function PicksPage() {
           <div className="mt-4">
             <Link
               href={`/picks/${slugify(nextUp.match)}`}
-              className="block rounded-2xl overflow-hidden border"
+              className="block rounded-3xl overflow-hidden border"
               style={{
-                borderColor: "rgba(255,255,255,0.10)",
+                borderColor: "rgba(255,46,77,0.35)",
                 background: "rgba(255,255,255,0.03)",
-                boxShadow: "0 22px 70px rgba(0,0,0,0.65)",
+                boxShadow: "0 26px 90px rgba(0,0,0,0.70)",
                 textDecoration: "none",
               }}
             >
-              <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 165 }}>
+              <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
+                {/* attention: hot edge glow */}
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    background:
+                      "radial-gradient(1200px 240px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 65%)",
+                  }}
+                />
                 <CardSilhouetteBg opacity={1} />
 
                 <div className="relative z-10">
@@ -981,11 +1121,19 @@ export default function PicksPage() {
                     <div
                       className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
                       style={{
-                        borderColor: "rgba(255,46,77,0.35)",
-                        background: "rgba(255,46,77,0.12)",
+                        borderColor: "rgba(255,46,77,0.55)",
+                        background: "rgba(255,46,77,0.14)",
                         color: "rgba(255,255,255,0.92)",
+                        boxShadow: "0 0 24px rgba(255,46,77,0.16)",
                       }}
                     >
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{
+                          background: isNextUpLive ? COLORS.red : "rgba(255,255,255,0.55)",
+                          boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                        }}
+                      />
                       NEXT UP
                     </div>
 
@@ -1002,9 +1150,9 @@ export default function PicksPage() {
                     const awayName = m?.away ?? "";
                     return (
                       <div className="mt-4 flex items-center justify-center gap-4">
-                        <TeamLogo teamName={homeName} size={54} />
+                        <TeamLogo teamName={homeName} size={56} />
                         <div className="text-white/80 font-black text-[13px]">vs</div>
-                        <TeamLogo teamName={awayName || "AFL"} size={54} />
+                        <TeamLogo teamName={awayName || "AFL"} size={56} />
                       </div>
                     );
                   })()}
@@ -1026,13 +1174,12 @@ export default function PicksPage() {
 
                   <div className="mt-4 flex items-center justify-center">
                     <span
-                      className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
+                      className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-[12px] font-black border"
                       style={{
                         borderColor: "rgba(255,46,77,0.32)",
-                        background:
-                          "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                        background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
                         color: "rgba(255,255,255,0.98)",
-                        boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+                        boxShadow: "0 14px 34px rgba(255,46,77,0.18)",
                       }}
                     >
                       GO PICK
@@ -1062,7 +1209,7 @@ export default function PicksPage() {
                     background: "rgba(255,255,255,0.03)",
                   }}
                 >
-                  <div className="h-[190px] bg-white/5" />
+                  <div className="h-[190px] bg-white/5 animate-pulse" />
                 </div>
               ))}
             </div>
