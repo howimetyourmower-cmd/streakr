@@ -248,7 +248,7 @@ function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: strin
 /**
  * silhouette MUST be clipped to each card.
  */
-function CardSilhouetteBg({ opacity = 1 }: { opacity?: number }) {
+function CardSilhouetteBg({ opacity = 1.5 }: { opacity?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
