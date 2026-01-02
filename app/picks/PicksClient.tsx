@@ -842,10 +842,10 @@ export default function PicksPage() {
                   const anyWrong = r.wrong > 0;
                   const pillState =
                     anyWrong
-                      ? { label: "BROKEN", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
+                      ? { label: "DEAD", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
                       : r.unsettled > 0
                       ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
-                      : { label: "CLEAN", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
+                      : { label: "ALIVE", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
                     <tr key={r.gameId} style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}>
