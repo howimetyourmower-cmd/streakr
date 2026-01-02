@@ -24,20 +24,22 @@ export default function NavBar() {
 
   return (
     <header className="sticky top-0 z-[80] w-full border-b border-black/10 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-        {/* LEFT: LOGO */}
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-2">
+        {/* LEFT: BIGGER LOGO */}
         <Link
           href="/"
           aria-label="Torpie Home"
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[40px] w-[180px]">
+          {/* Bigger box = bigger logo. Responsive sizes. */}
+          <div className="relative h-[40px] w-[160px] sm:h-[44px] sm:w-[180px] md:h-[52px] md:w-[220px]">
             <Image
               src={LOGO_SRC}
               alt="Torpie"
               fill
               priority
+              sizes="(max-width: 768px) 160px, 220px"
               className="object-contain"
             />
           </div>
