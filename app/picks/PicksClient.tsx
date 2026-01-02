@@ -44,6 +44,17 @@ const COLORS = {
   white: "#FFFFFF",
 };
 
+// ✅ Match HQ (light grey) palette
+const MATCH_HQ = {
+  card: "#F2F2F2",
+  border: "#E5E5E5",
+  pill: "#EAEAEA",
+  pillBorder: "#DADADA",
+  text: "#0A0A0A",
+  muted: "#555555",
+  muted2: "#666666",
+};
+
 const HOW_TO_PLAY_PICKS_KEY = "torpie_seen_how_to_play_picks_v1";
 
 function formatAedt(dateIso: string): string {
@@ -637,16 +648,17 @@ export default function PicksPage() {
         ? "Equal lead — keep it alive."
         : `Gap: ${distanceToLeader}`;
 
+    // ✅ Match HQ cards: light grey (less polarising)
     const cardBase: React.CSSProperties = {
-      borderColor: "rgba(0,0,0,0.10)",
-      background: "#FFFFFF",
-      color: "#000000",
+      borderColor: MATCH_HQ.border,
+      background: MATCH_HQ.card,
+      color: MATCH_HQ.text,
     };
 
     const pill: React.CSSProperties = {
-      borderColor: "rgba(0,0,0,0.12)",
-      background: "rgba(0,0,0,0.04)",
-      color: "#000000",
+      borderColor: MATCH_HQ.pillBorder,
+      background: MATCH_HQ.pill,
+      color: MATCH_HQ.text,
     };
 
     const numStyle: React.CSSProperties = {
@@ -715,7 +727,10 @@ export default function PicksPage() {
 
         <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+            <div
+              className="text-[10px] uppercase tracking-widest font-black"
+              style={{ color: MATCH_HQ.muted2 }}
+            >
               Current streak
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -726,7 +741,7 @@ export default function PicksPage() {
               </div>
               <div className="min-w-0">
                 <div className="text-[12px] font-black">Keep it alive</div>
-                <div className="text-[11px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.62)" }}>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   One wrong pick resets to 0.
                 </div>
               </div>
@@ -734,7 +749,10 @@ export default function PicksPage() {
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+            <div
+              className="text-[10px] uppercase tracking-widest font-black"
+              style={{ color: MATCH_HQ.muted2 }}
+            >
               Leader
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -745,7 +763,7 @@ export default function PicksPage() {
               </div>
               <div className="min-w-0">
                 <div className="text-[12px] font-black truncate">{leaderText}</div>
-                <div className="text-[11px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.62)" }}>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   Top streak right now.
                 </div>
               </div>
@@ -768,13 +786,16 @@ export default function PicksPage() {
               />
             </div>
 
-            <div className="mt-2 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.62)" }}>
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
               {leaderHint}
             </div>
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+            <div
+              className="text-[10px] uppercase tracking-widest font-black"
+              style={{ color: MATCH_HQ.muted2 }}
+            >
               Distance
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -785,7 +806,7 @@ export default function PicksPage() {
               </div>
               <div className="min-w-0">
                 <div className="text-[12px] font-black">{leaderScore === null ? "Waiting on data" : "Close the gap"}</div>
-                <div className="text-[11px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.62)" }}>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   Current streak only.
                 </div>
               </div>
@@ -793,7 +814,10 @@ export default function PicksPage() {
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+            <div
+              className="text-[10px] uppercase tracking-widest font-black"
+              style={{ color: MATCH_HQ.muted2 }}
+            >
               Eligible
             </div>
 
@@ -802,7 +826,7 @@ export default function PicksPage() {
                 {eligible ? (
                   <CheckIcon size={16} color={COLORS.red} />
                 ) : (
-                  <span className="font-black" style={{ color: "rgba(0,0,0,0.55)" }}>
+                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
                     —
                   </span>
                 )}
@@ -810,13 +834,13 @@ export default function PicksPage() {
 
               <div className="min-w-0">
                 <div className="text-[12px] font-black">{eligible ? "Eligible to win" : "Not yet"}</div>
-                <div className="text-[11px] font-semibold leading-snug" style={{ color: "rgba(0,0,0,0.62)" }}>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   {gamesPicked} games picked
                 </div>
               </div>
             </div>
 
-            <div className="mt-2 text-[11px] font-semibold" style={{ color: "rgba(0,0,0,0.62)" }}>
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
               Tip: locks at bounce.
             </div>
           </div>
