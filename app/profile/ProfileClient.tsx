@@ -237,23 +237,36 @@ export default function ProfileClient() {
     setSuccessMessage(null);
 
     try {
-      const storageRef = ref(storage, `avatars/${user.uid}/${file.name}`);
-      await uploadBytes(storageRef, file);
+      // ✅ IMPORTANT: always overwrite to a stable path so caching works and old files don't build up
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext) ? ext : "jpg";
+      const storageRef = ref(storage, `avatars/${user.uid}/avatar.${safeExt}`);
+
+      await uploadBytes(storageRef, file, {
+        contentType: file.type || `image/${safeExt}`,
+      });
+
       const url = await getDownloadURL(storageRef);
 
       const userRef = doc(db, "users", user.uid);
-      await updateDoc(userRef, { avatarUrl: url });
+
+      // store BOTH avatarUrl and photoURL (legacy) so other parts of app keep working
+      await updateDoc(userRef, { avatarUrl: url, photoURL: url });
 
       setProfile((prev) => ({
         ...prev,
         avatarUrl: url,
+        photoURL: url,
       }));
+
       setSuccessMessage("Profile picture updated.");
     } catch (err) {
       console.error("Avatar upload failed", err);
       setError("Could not upload picture. Please try again.");
     } finally {
       setUploadingAvatar(false);
+      // allow uploading same file twice in a row
+      if (e.target) e.target.value = "";
     }
   };
 
@@ -307,7 +320,7 @@ export default function ProfileClient() {
           <p className="text-sm text-white/70">
             Welcome back,{" "}
             <span className="font-semibold">
-              {authUser.displayName || profile.username || "Streaker"}
+              {authUser.displayName || profile.username || "Torpie"}
             </span>
             . Track your streak, lifetime record, badges and details here.
           </p>
@@ -318,10 +331,11 @@ export default function ProfileClient() {
           <div className="flex items-center gap-3">
             <div className="relative h-12 w-12 rounded-full overflow-hidden border border-white/20 bg-slate-900">
               {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
               ) : (
                 <div className="h-full w-full flex items-center justify-center text-xl">
-                  {authUser.displayName?.[0]?.toUpperCase() ?? "S"}
+                  {authUser.displayName?.[0]?.toUpperCase() ?? "T"}
                 </div>
               )}
             </div>
@@ -396,7 +410,7 @@ export default function ProfileClient() {
               <p className="text-[11px] text-white/60 mb-1">Best streak</p>
               <p className="text-3xl font-bold text-sky-300">{lifetimeBestStreak}</p>
               <p className="text-[11px] text-white/60 mt-1">
-                Your all-time longest STREAKr run.
+                Your all-time longest Torpie run.
               </p>
             </div>
             <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
@@ -412,7 +426,7 @@ export default function ProfileClient() {
           <div className="rounded-2xl bg-slate-950/90 border border-slate-700 px-4 py-4 mb-6">
             <h2 className="text-sm font-semibold mb-1">Lifetime record</h2>
             <p className="text-[11px] text-white/60 mb-3">
-              Every pick you&apos;ve ever made on STREAKr across all rounds and seasons.
+              Every pick you&apos;ve ever made across all rounds and seasons.
             </p>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
@@ -444,16 +458,40 @@ export default function ProfileClient() {
           <div>
             <h2 className="text-sm font-semibold mb-1">Streak badges</h2>
             <p className="text-[11px] text-white/60 mb-3">
-              Unlock footy card–style badges as your streak climbs. These match the big
-              animation you see on the picks page.
+              Unlock footy card–style badges as your streak climbs.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              <BadgeCard level={3} title="3 in a row" subtitle="Keep building 😎" unlocked={!!localBadges["3"]} />
-              <BadgeCard level={5} title="On Fire" subtitle="Bang! You're on the money! 🔥" unlocked={!!localBadges["5"]} />
-              <BadgeCard level={10} title="Elite" subtitle="That's elite. 10 straight 🏆" unlocked={!!localBadges["10"]} />
-              <BadgeCard level={15} title="Dominance" subtitle="This run is getting ridiculous 💪" unlocked={!!localBadges["15"]} />
-              <BadgeCard level={20} title="Legendary" subtitle="20 straight. GOAT status. 🐐" unlocked={!!localBadges["20"]} />
+              <BadgeCard
+                level={3}
+                title="3 in a row"
+                subtitle="Keep building 😎"
+                unlocked={!!localBadges["3"]}
+              />
+              <BadgeCard
+                level={5}
+                title="On Fire"
+                subtitle="Bang! You're on the money! 🔥"
+                unlocked={!!localBadges["5"]}
+              />
+              <BadgeCard
+                level={10}
+                title="Elite"
+                subtitle="That's elite. 10 straight 🏆"
+                unlocked={!!localBadges["10"]}
+              />
+              <BadgeCard
+                level={15}
+                title="Dominance"
+                subtitle="This run is getting ridiculous 💪"
+                unlocked={!!localBadges["15"]}
+              />
+              <BadgeCard
+                level={20}
+                title="Legendary"
+                subtitle="20 straight. GOAT status. 🐐"
+                unlocked={!!localBadges["20"]}
+              />
             </div>
           </div>
         </section>
@@ -462,20 +500,74 @@ export default function ProfileClient() {
         <section className="rounded-2xl bg-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] p-4 sm:p-6">
           <h2 className="text-lg font-semibold mb-1">Personal details</h2>
           <p className="text-xs text-white/60 mb-4">
-            Update your details so we can personalise your STREAKr experience. Some
-            fields (like username and date of birth) can&apos;t be changed here – contact
-            support if you need help.
+            Update your details so we can personalise your Torpie experience. Some
+            fields (like username and date of birth) can&apos;t be changed here.
           </p>
 
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-            <Field label="Username" name="username" value={formValues.username ?? ""} onChange={handleFieldChange} disabled />
-            <Field label="First name" name="firstName" value={formValues.firstName ?? ""} onChange={handleFieldChange} disabled={!isEditing} />
-            <Field label="Surname" name="lastName" value={formValues.lastName ?? ""} onChange={handleFieldChange} disabled={!isEditing} />
-            <Field label="Date of birth" name="dateOfBirth" type="date" value={formValues.dateOfBirth ?? ""} onChange={handleFieldChange} disabled />
-            <Field label="Suburb" name="suburb" value={formValues.suburb ?? ""} onChange={handleFieldChange} disabled={!isEditing} />
-            <Field label="State" name="state" value={formValues.state ?? ""} onChange={handleFieldChange} disabled={!isEditing} placeholder="VIC, NSW, QLD…" />
-            <Field label="Phone" name="phone" type="tel" value={formValues.phone ?? ""} onChange={handleFieldChange} disabled={!isEditing} />
-            <Field label="Gender" name="gender" value={formValues.gender ?? ""} onChange={handleFieldChange} disabled={!isEditing} placeholder="Optional" />
+          <form
+            onSubmit={handleSubmit}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm"
+          >
+            <Field
+              label="Username"
+              name="username"
+              value={formValues.username ?? ""}
+              onChange={handleFieldChange}
+              disabled
+            />
+            <Field
+              label="First name"
+              name="firstName"
+              value={formValues.firstName ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+            />
+            <Field
+              label="Surname"
+              name="lastName"
+              value={formValues.lastName ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+            />
+            <Field
+              label="Date of birth"
+              name="dateOfBirth"
+              type="date"
+              value={formValues.dateOfBirth ?? ""}
+              onChange={handleFieldChange}
+              disabled
+            />
+            <Field
+              label="Suburb"
+              name="suburb"
+              value={formValues.suburb ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+            />
+            <Field
+              label="State"
+              name="state"
+              value={formValues.state ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+              placeholder="VIC, NSW, QLD…"
+            />
+            <Field
+              label="Phone"
+              name="phone"
+              type="tel"
+              value={formValues.phone ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+            />
+            <Field
+              label="Gender"
+              name="gender"
+              value={formValues.gender ?? ""}
+              onChange={handleFieldChange}
+              disabled={!isEditing}
+              placeholder="Optional"
+            />
 
             <div className="sm:col-span-2">
               <label className="block text-[11px] text-white/60 mb-1">
@@ -576,6 +668,7 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
       }`}
     >
       <div className="relative mb-2 h-24 w-20">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageSrc}
           alt={`Streak badge level ${level}`}
@@ -584,7 +677,11 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
       </div>
       <p className="text-xs font-semibold mb-0.5">{title}</p>
       <p className="text-[11px] text-white/70 mb-1">{subtitle}</p>
-      <p className={`text-[11px] font-semibold ${unlocked ? "text-emerald-300" : "text-slate-400"}`}>
+      <p
+        className={`text-[11px] font-semibold ${
+          unlocked ? "text-emerald-300" : "text-slate-400"
+        }`}
+      >
         {unlocked ? "Unlocked" : "Locked"}
       </p>
     </div>
