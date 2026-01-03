@@ -87,6 +87,10 @@ type GameLockDoc = {
 
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
@@ -132,53 +136,77 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   }
 }
 
-/**
- * ✅ Fast + round-accurate pick stats:
- * Only counts picks for the questionIds in this round.
- */
-async function getPickStatsForQuestionIds(params: {
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// ─────────────────────────────────────────────
+// ✅ Optimised pick reads (NO full collection scans)
+// - pulls only picks for THIS round's questionIds
+// - builds: pickStats, userPicks, picksByUser
+// ─────────────────────────────────────────────
+
+async function fetchPicksForQuestionIds(params: {
   questionIds: Set<string>;
   currentUserId: string | null;
 }): Promise<{
   pickStats: Record<string, { yes: number; no: number; total: number }>;
   userPicks: Record<string, "yes" | "no">;
+  picksByUser: Record<string, Record<string, "yes" | "no">>;
 }> {
   const { questionIds, currentUserId } = params;
 
   const pickStats: Record<string, { yes: number; no: number; total: number }> = {};
   const userPicks: Record<string, "yes" | "no"> = {};
+  const picksByUser: Record<string, Record<string, "yes" | "no">> = {};
 
-  if (!questionIds.size) return { pickStats, userPicks };
+  if (!questionIds.size) return { pickStats, userPicks, picksByUser };
+
+  // Firestore "in" supports up to 10 values per query
+  const qidList = Array.from(questionIds);
+  const chunks = chunkArray(qidList, 10);
 
   try {
-    const snap = await db.collection("picks").get();
+    for (const ch of chunks) {
+      const snap = await db.collection("picks").where("questionId", "in", ch).get();
 
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as {
-        userId?: string;
-        questionId?: string;
-        pick?: "yes" | "no";
-      };
+      snap.forEach((docSnap) => {
+        const data = docSnap.data() as {
+          userId?: string;
+          questionId?: string;
+          pick?: "yes" | "no";
+        };
 
-      const qid = data.questionId;
-      const pick = data.pick;
+        const uid = data.userId;
+        const qid = data.questionId;
+        const pick = data.pick;
 
-      if (!qid || (pick !== "yes" && pick !== "no")) return;
-      if (!questionIds.has(qid)) return;
+        if (!uid || !qid) return;
+        if (pick !== "yes" && pick !== "no") return;
+        if (!questionIds.has(qid)) return;
 
-      if (!pickStats[qid]) pickStats[qid] = { yes: 0, no: 0, total: 0 };
-      pickStats[qid][pick] += 1;
-      pickStats[qid].total += 1;
+        // stats
+        if (!pickStats[qid]) pickStats[qid] = { yes: 0, no: 0, total: 0 };
+        pickStats[qid][pick] += 1;
+        pickStats[qid].total += 1;
 
-      if (currentUserId && data.userId === currentUserId) {
-        userPicks[qid] = pick;
-      }
-    });
+        // current user picks
+        if (currentUserId && uid === currentUserId) {
+          userPicks[qid] = pick;
+        }
+
+        // all user picks (for leader calc)
+        if (!picksByUser[uid]) picksByUser[uid] = {};
+        picksByUser[uid][qid] = pick;
+      });
+    }
   } catch (error) {
-    console.error("[/api/picks] Error fetching picks", error);
+    console.error("[/api/picks] Error fetching picks for questionIds", error);
   }
 
-  return { pickStats, userPicks };
+  return { pickStats, userPicks, picksByUser };
 }
 
 async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null> {
@@ -223,7 +251,10 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
 async function getQuestionStatusForRound(
   roundNumber: number
 ): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
+  const temp: Record<
+    string,
+    { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
+  > = {};
 
   try {
     const snap = await db
@@ -273,8 +304,7 @@ async function getGameLocksForRound(
   const gameIds = Array.from(new Set(roundRows.map((r) => `${roundCode}-G${r.Game}`)));
   if (!gameIds.length) return map;
 
-  const chunks: string[][] = [];
-  for (let i = 0; i < gameIds.length; i += 10) chunks.push(gameIds.slice(i, i + 10));
+  const chunks = chunkArray(gameIds, 10);
 
   try {
     for (const chunk of chunks) {
@@ -324,40 +354,13 @@ function computeMatchStreak(game: ApiGame, picksForUser: Record<string, "yes" | 
   return correctCount;
 }
 
-function computeBestStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
+function computeBestStreakAcrossGames(
+  games: ApiGame[],
+  picksForUser: Record<string, "yes" | "no">
+): number {
   let best = 0;
   for (const g of games) best = Math.max(best, computeMatchStreak(g, picksForUser));
   return best;
-}
-
-async function loadPicksByUserForQuestionIds(
-  questionIds: Set<string>
-): Promise<Record<string, Record<string, "yes" | "no">>> {
-  const out: Record<string, Record<string, "yes" | "no">> = {};
-  if (!questionIds.size) return out;
-
-  try {
-    const snap = await db.collection("picks").get();
-
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as {
-        userId?: string;
-        questionId?: string;
-        pick?: "yes" | "no";
-      };
-
-      if (!data.userId || !data.questionId) return;
-      if (data.pick !== "yes" && data.pick !== "no") return;
-      if (!questionIds.has(data.questionId)) return;
-
-      if (!out[data.userId]) out[data.userId] = {};
-      out[data.userId][data.questionId] = data.pick;
-    });
-  } catch (e) {
-    console.error("[/api/picks] Error building picksByUser map", e);
-  }
-
-  return out;
 }
 
 async function readUserDisplayName(uid: string): Promise<string | null> {
@@ -418,15 +421,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // Build stable questionIds for THIS round (so pickStats stays round-only)
     const questionIdsForRound = new Set<string>();
-    const gameIdsForRound = new Set<string>();
 
-    // We must replicate the questionId generation logic exactly:
+    // Must replicate questionId generation logic exactly:
     // `${roundCode}-G${Game}-Q${index+1}` where index is per-game order of rows.
     const perGameIndex: Record<string, number> = {};
 
     for (const r of roundRows) {
       const gameId = `${roundCode}-G${r.Game}`;
-      gameIdsForRound.add(gameId);
 
       if (perGameIndex[gameId] === undefined) perGameIndex[gameId] = 0;
       const idx = perGameIndex[gameId]++;
@@ -435,15 +436,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       questionIdsForRound.add(qid);
     }
 
-    const sponsorConfig = await getSponsorQuestionConfig();
-    const commentCounts = await getCommentCountsForRound(roundNumber);
-    const statusOverrides = await getQuestionStatusForRound(roundNumber);
-    const gameLocks = await getGameLocksForRound(roundCode, roundRows);
+    // parallel-ish reads (safe)
+    const [sponsorConfig, commentCounts, statusOverrides, gameLocks, picksData] =
+      await Promise.all([
+        getSponsorQuestionConfig(),
+        getCommentCountsForRound(roundNumber),
+        getQuestionStatusForRound(roundNumber),
+        getGameLocksForRound(roundCode, roundRows),
+        fetchPicksForQuestionIds({ questionIds: questionIdsForRound, currentUserId }),
+      ]);
 
-    const { pickStats, userPicks } = await getPickStatsForQuestionIds({
-      questionIds: questionIdsForRound,
-      currentUserId,
-    });
+    const { pickStats, userPicks, picksByUser } = picksData;
 
     // Build games + questions
     const gamesById: Record<string, ApiGame> = {};
@@ -493,7 +496,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       if (effectiveStatus === "void" || correctOutcome === "void") {
         correctPick = null;
         finalOutcome = "void";
-      } else if ((effectiveStatus === "final") && finalOutcome && userPick) {
+      } else if (effectiveStatus === "final" && finalOutcome && userPick) {
         correctPick = userPick === finalOutcome;
       }
 
@@ -535,8 +538,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     let leaderScore = 0;
     let leaderUid: string | null = null;
-
-    const picksByUser = await loadPicksByUserForQuestionIds(questionIdsForRound);
 
     for (const uid of Object.keys(picksByUser)) {
       const score = computeBestStreakAcrossGames(games, picksByUser[uid]);
