@@ -17,7 +17,7 @@ export default function NavBar() {
       { href: "/picks", label: "Picks" },
       { href: "/leaderboards", label: "Leaderboards" },
       { href: "/locker-room", label: "Locker Room" },
-      { href: "/account", label: "Account" },
+      { href: "/profile", label: "Profile" },
     ],
     []
   );
