@@ -1,7 +1,7 @@
 // /app/profile/ProfileClient.tsx
 "use client";
 
-import { useEffect, useState, ChangeEvent, FormEvent } from "react";
+import { useEffect, useMemo, useState, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
@@ -53,6 +53,13 @@ const AFL_TEAMS = [
   "Western Bulldogs",
 ];
 
+const TORPIE = {
+  bg: "#000000",
+  red: "#d11b2f",
+  red2: "#FF2E4D",
+  white: "#FFFFFF",
+};
+
 export default function ProfileClient() {
   const router = useRouter();
   const { user } = useAuth();
@@ -60,10 +67,13 @@ export default function ProfileClient() {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<ProfileData>({});
   const [loading, setLoading] = useState(true);
+
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
   const [isEditing, setIsEditing] = useState(false);
   const [formValues, setFormValues] = useState<ProfileData>({});
   const [localBadges, setLocalBadges] = useState<Record<string, boolean>>({});
@@ -86,6 +96,7 @@ export default function ProfileClient() {
         setLoading(false);
         return;
       }
+
       try {
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
@@ -156,6 +167,7 @@ export default function ProfileClient() {
         setLoading(false);
       }
     };
+
     load();
   }, [user]);
 
@@ -217,8 +229,11 @@ export default function ProfileClient() {
         gender: formValues.gender || "",
         favouriteAflTeam: formValues.favouriteAflTeam || "",
       }));
+
       setIsEditing(false);
       setSuccessMessage("Profile updated.");
+      // auto clear toast
+      window.setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       console.error("Failed to save profile", err);
       setError("Could not save changes. Please try again.");
@@ -232,41 +247,40 @@ export default function ProfileClient() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // quick client validation (UI-only)
+    if (!file.type.startsWith("image/")) {
+      setError("Please select an image file.");
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setError("Image too large. Please use an image under 6MB.");
+      return;
+    }
+
     setUploadingAvatar(true);
     setError(null);
     setSuccessMessage(null);
 
     try {
-      // ✅ IMPORTANT: always overwrite to a stable path so caching works and old files don't build up
-      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const safeExt = ["jpg", "jpeg", "png", "webp"].includes(ext) ? ext : "jpg";
-      const storageRef = ref(storage, `avatars/${user.uid}/avatar.${safeExt}`);
-
-      await uploadBytes(storageRef, file, {
-        contentType: file.type || `image/${safeExt}`,
-      });
-
+      const storageRef = ref(storage, `avatars/${user.uid}/${file.name}`);
+      await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
       const userRef = doc(db, "users", user.uid);
-
-      // store BOTH avatarUrl and photoURL (legacy) so other parts of app keep working
-      await updateDoc(userRef, { avatarUrl: url, photoURL: url });
+      await updateDoc(userRef, { avatarUrl: url });
 
       setProfile((prev) => ({
         ...prev,
         avatarUrl: url,
-        photoURL: url,
       }));
 
       setSuccessMessage("Profile picture updated.");
+      window.setTimeout(() => setSuccessMessage(null), 2500);
     } catch (err) {
       console.error("Avatar upload failed", err);
       setError("Could not upload picture. Please try again.");
     } finally {
       setUploadingAvatar(false);
-      // allow uploading same file twice in a row
-      if (e.target) e.target.value = "";
     }
   };
 
@@ -279,7 +293,7 @@ export default function ProfileClient() {
     }
   };
 
-  // Derived stats
+  // Derived stats (UI-only — backend comes later)
   const currentStreak = profile.currentStreak ?? 0;
   const longestStreak = profile.longestStreak ?? 0;
   const lifetimeBestStreak = profile.lifetimeBestStreak ?? longestStreak;
@@ -291,7 +305,16 @@ export default function ProfileClient() {
     totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
 
   // Avatar source
-  const avatarUrl = profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
+  const avatarUrl =
+    profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
+
+  const displayName = useMemo(() => {
+    const name =
+      authUser?.displayName ||
+      profile.username ||
+      [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
+    return name || "Torpie Player";
+  }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
 
   if (loading) {
     return (
@@ -312,68 +335,98 @@ export default function ProfileClient() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-black text-white">
-      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
-        {/* PAGE TITLE */}
-        <div className="mb-6">
-          <h1 className="text-3xl sm:text-4xl font-bold mb-1">Profile</h1>
-          <p className="text-sm text-white/70">
-            Welcome back,{" "}
-            <span className="font-semibold">
-              {authUser.displayName || profile.username || "Torpie"}
-            </span>
-            . Track your streak, lifetime record, badges and details here.
-          </p>
+    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
+      {/* top sponsor strip (Torpie style) */}
+      <div
+        className="w-full border-b"
+        style={{
+          borderColor: "rgba(255,255,255,0.08)",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.00) 100%)",
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">
+            OFFICIAL PARTNER
+          </div>
+          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">
+            Proudly supporting TORPIE all season long
+          </div>
         </div>
+      </div>
 
-        {/* Top strip */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="relative h-12 w-12 rounded-full overflow-hidden border border-white/20 bg-slate-900">
-              {avatarUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
-              ) : (
-                <div className="h-full w-full flex items-center justify-center text-xl">
-                  {authUser.displayName?.[0]?.toUpperCase() ?? "T"}
-                </div>
-              )}
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl sm:text-4xl font-black">Profile</h1>
+              <span
+                className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black"
+                style={{
+                  borderColor: "rgba(209,27,47,0.35)",
+                  background: "rgba(209,27,47,0.12)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                TORPIE
+              </span>
             </div>
-            <div className="text-xs">
-              <p className="text-[11px] uppercase tracking-wide text-white/60">
-                Logged in as
-              </p>
-              <p className="font-semibold">{authUser.email ?? "No email"}</p>
-              {profile.favouriteAflTeam && (
-                <p className="text-[11px] text-orange-300 mt-0.5">
-                  Favourite team: {profile.favouriteAflTeam}
-                </p>
-              )}
-            </div>
+            <p className="mt-1 text-sm text-white/65">
+              Welcome back, <span className="font-semibold text-white">{displayName}</span>.
+              Track streaks, badges and details here.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <label className="inline-flex items-center justify-center rounded-full border border-white/20 px-3 py-1.5 text-[11px] cursor-pointer hover:border-orange-400 hover:text-orange-300">
-              {uploadingAvatar ? "Uploading…" : "Change picture"}
-              <input
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleAvatarChange}
-                disabled={uploadingAvatar}
-              />
-            </label>
+            <a
+              href="/picks"
+              className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Go to Picks
+            </a>
+
+            <a
+              href="/leaderboards"
+              className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Leaderboards
+            </a>
+
             <button
               type="button"
               onClick={toggleEditing}
-              className="inline-flex items-center justify-center rounded-full bg-orange-500 px-4 py-1.5 text-[11px] font-semibold text-black hover:bg-orange-400"
+              className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
+              style={{
+                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(209,27,47,0.35)",
+                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(209,27,47,0.14)",
+                color: "rgba(255,255,255,0.95)",
+              }}
             >
-              {isEditing ? "Cancel edit" : "Edit profile"}
+              {isEditing ? "Cancel" : "Edit profile"}
             </button>
+
             <button
               type="button"
               onClick={handleLogout}
-              className="inline-flex items-center justify-center rounded-full border border-red-500/60 px-3 py-1.5 text-[11px] font-semibold text-red-300 hover:bg-red-600/20"
+              className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,46,77,0.45)",
+                background: "rgba(255,46,77,0.12)",
+                color: "rgba(255,255,255,0.92)",
+              }}
             >
               Log out
             </button>
@@ -381,192 +434,363 @@ export default function ProfileClient() {
         </div>
 
         {(error || successMessage) && (
-          <div className="mb-4">
+          <div className="mb-5 space-y-2">
             {error && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/40 rounded-md px-3 py-2">
+              <div
+                className="rounded-2xl border px-4 py-3 text-sm"
+                style={{
+                  borderColor: "rgba(255,46,77,0.40)",
+                  background: "rgba(255,46,77,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
                 {error}
-              </p>
+              </div>
             )}
             {successMessage && (
-              <p className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-md px-3 py-2">
+              <div
+                className="rounded-2xl border px-4 py-3 text-sm"
+                style={{
+                  borderColor: "rgba(45,255,122,0.28)",
+                  background: "rgba(45,255,122,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
                 {successMessage}
-              </p>
+              </div>
             )}
           </div>
         )}
 
-        {/* PANEL 1 – STATS, LIFETIME, BADGES */}
-        <section className="rounded-2xl bg-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] p-4 sm:p-6 mb-6">
-          {/* top 3 cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5 text-sm">
-            <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
-              <p className="text-[11px] text-white/60 mb-1">Current streak</p>
-              <p className="text-3xl font-bold text-orange-400">{currentStreak}</p>
-              <p className="text-[11px] text-white/60 mt-1">
-                How many correct picks in a row you&apos;re on right now.
-              </p>
+        {/* Identity strip */}
+        <div
+          className="rounded-3xl border p-4 sm:p-5 mb-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div
+                  className="h-14 w-14 rounded-2xl p-[3px]"
+                  style={{
+                    background: "linear-gradient(180deg, rgba(209,27,47,0.95) 0%, rgba(209,27,47,0.55) 100%)",
+                    boxShadow: "0 12px 28px rgba(209,27,47,0.18)",
+                  }}
+                >
+                  <div
+                    className="h-full w-full overflow-hidden rounded-[14px]"
+                    style={{
+                      background: "rgba(0,0,0,0.40)",
+                      border: "1px solid rgba(255,255,255,0.10)",
+                    }}
+                  >
+                    {avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center text-xl font-black">
+                        {(displayName?.[0] || "T").toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {uploadingAvatar && (
+                  <div
+                    className="absolute inset-0 rounded-2xl flex items-center justify-center text-[11px] font-black"
+                    style={{
+                      background: "rgba(0,0,0,0.65)",
+                      border: "1px solid rgba(255,255,255,0.10)",
+                    }}
+                  >
+                    Uploading…
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
+                  Logged in as
+                </div>
+                <div className="mt-1 text-[14px] font-black text-white truncate">
+                  {authUser.email ?? "No email"}
+                </div>
+                <div className="mt-1 text-[12px] text-white/55 font-semibold truncate">
+                  {profile.favouriteAflTeam ? `Favourite: ${profile.favouriteAflTeam}` : "Set your favourite team below"}
+                </div>
+              </div>
             </div>
-            <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
-              <p className="text-[11px] text-white/60 mb-1">Best streak</p>
-              <p className="text-3xl font-bold text-sky-300">{lifetimeBestStreak}</p>
-              <p className="text-[11px] text-white/60 mt-1">
-                Your all-time longest Torpie run.
-              </p>
+
+            <div className="flex flex-wrap gap-2">
+              <label
+                className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black cursor-pointer"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {uploadingAvatar ? "Uploading…" : "Change picture"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAvatarChange}
+                  disabled={uploadingAvatar}
+                />
+              </label>
             </div>
-            <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-700 px-4 py-3">
-              <p className="text-[11px] text-white/60 mb-1">Rounds played</p>
-              <p className="text-3xl font-bold text-emerald-300">{roundsPlayed}</p>
-              <p className="text-[11px] text-white/60 mt-1">
-                Total rounds you&apos;ve taken part in this season.
-              </p>
+          </div>
+        </div>
+
+        {/* Stats + Badges */}
+        <section
+          className="rounded-3xl border p-4 sm:p-6 mb-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
+                Match stats
+              </div>
+              <div className="mt-1 text-[14px] font-black text-white">Your season snapshot</div>
             </div>
+
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
+              style={{
+                borderColor: "rgba(209,27,47,0.32)",
+                background: "rgba(209,27,47,0.10)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              title="Torpie theme"
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: TORPIE.red,
+                  boxShadow: "0 0 14px rgba(209,27,47,0.55)",
+                }}
+              />
+              LIVE
+            </span>
+          </div>
+
+          {/* top cards */}
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <StatCard
+              label="Current streak"
+              value={String(currentStreak)}
+              hint="Correct picks in a row right now."
+              accent="red"
+            />
+            <StatCard
+              label="Best streak"
+              value={String(lifetimeBestStreak)}
+              hint="Your best Torpie run."
+              accent="white"
+            />
+            <StatCard
+              label="Rounds played"
+              value={String(roundsPlayed)}
+              hint="How many rounds you've played."
+              accent="white"
+            />
           </div>
 
           {/* lifetime record */}
-          <div className="rounded-2xl bg-slate-950/90 border border-slate-700 px-4 py-4 mb-6">
-            <h2 className="text-sm font-semibold mb-1">Lifetime record</h2>
-            <p className="text-[11px] text-white/60 mb-3">
-              Every pick you&apos;ve ever made across all rounds and seasons.
-            </p>
+          <div
+            className="mt-4 rounded-3xl border p-4 sm:p-5"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(0,0,0,0.28)",
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
+                  Lifetime record
+                </div>
+                <div className="mt-1 text-[14px] font-black text-white">
+                  All-time picks
+                </div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">
+                  (UI-only for now — we’ll wire real computed stats in step 2)
+                </div>
+              </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="text-[11px] text-white/60 mb-0.5">Best streak</p>
-                <p className="text-xl font-bold text-orange-400">{lifetimeBestStreak}</p>
+              <div
+                className="rounded-2xl border px-3 py-2 text-center"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.06)",
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">
+                  Correct
+                </div>
+                <div className="text-[18px] font-black" style={{ color: TORPIE.red }}>
+                  {correctPercent}%
+                </div>
               </div>
-              <div>
-                <p className="text-[11px] text-white/60 mb-0.5">Wins</p>
-                <p className="text-xl font-bold text-emerald-300">{lifetimeWins}</p>
-              </div>
-              <div>
-                <p className="text-[11px] text-white/60 mb-0.5">Losses</p>
-                <p className="text-xl font-bold text-red-300">{lifetimeLosses}</p>
-              </div>
-              <div>
-                <p className="text-[11px] text-white/60 mb-0.5">Total picks</p>
-                <p className="text-xl font-bold text-sky-300">{totalPicks}</p>
-                {totalPicks > 0 && (
-                  <p className="text-[11px] text-white/60 mt-0.5">
-                    Correct picks: {correctPercent}%.
-                  </p>
-                )}
-              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MiniStat label="Best streak" value={String(lifetimeBestStreak)} />
+              <MiniStat label="Wins" value={String(lifetimeWins)} good />
+              <MiniStat label="Losses" value={String(lifetimeLosses)} bad />
+              <MiniStat label="Total picks" value={String(totalPicks)} />
             </div>
           </div>
 
           {/* badges */}
-          <div>
-            <h2 className="text-sm font-semibold mb-1">Streak badges</h2>
-            <p className="text-[11px] text-white/60 mb-3">
-              Unlock footy card–style badges as your streak climbs.
-            </p>
+          <div className="mt-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
+                  Streak badges
+                </div>
+                <div className="mt-1 text-[14px] font-black text-white">
+                  Unlock as you climb
+                </div>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              <BadgeCard
-                level={3}
-                title="3 in a row"
-                subtitle="Keep building 😎"
-                unlocked={!!localBadges["3"]}
-              />
-              <BadgeCard
-                level={5}
-                title="On Fire"
-                subtitle="Bang! You're on the money! 🔥"
-                unlocked={!!localBadges["5"]}
-              />
-              <BadgeCard
-                level={10}
-                title="Elite"
-                subtitle="That's elite. 10 straight 🏆"
-                unlocked={!!localBadges["10"]}
-              />
-              <BadgeCard
-                level={15}
-                title="Dominance"
-                subtitle="This run is getting ridiculous 💪"
-                unlocked={!!localBadges["15"]}
-              />
-              <BadgeCard
-                level={20}
-                title="Legendary"
-                subtitle="20 straight. GOAT status. 🐐"
-                unlocked={!!localBadges["20"]}
-              />
+              <div className="text-[11px] text-white/55 font-semibold">
+                Tip: badges match the big streak animation
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <BadgeCard level={3} title="3 in a row" subtitle="Keep building 😎" unlocked={!!localBadges["3"]} />
+              <BadgeCard level={5} title="On Fire" subtitle="Bang! You're on 🔥" unlocked={!!localBadges["5"]} />
+              <BadgeCard level={10} title="Elite" subtitle="10 straight 🏆" unlocked={!!localBadges["10"]} />
+              <BadgeCard level={15} title="Dominance" subtitle="Ridiculous run 💪" unlocked={!!localBadges["15"]} />
+              <BadgeCard level={20} title="Legendary" subtitle="GOAT status 🐐" unlocked={!!localBadges["20"]} />
             </div>
           </div>
         </section>
 
-        {/* PANEL 2 – PERSONAL DETAILS */}
-        <section className="rounded-2xl bg-[#020617] border border-slate-800 shadow-[0_16px_40px_rgba(0,0,0,0.7)] p-4 sm:p-6">
-          <h2 className="text-lg font-semibold mb-1">Personal details</h2>
-          <p className="text-xs text-white/60 mb-4">
-            Update your details so we can personalise your Torpie experience. Some
-            fields (like username and date of birth) can&apos;t be changed here.
-          </p>
+        {/* Personal details */}
+        <section
+          className="rounded-3xl border p-4 sm:p-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
+                Personal details
+              </div>
+              <div className="mt-1 text-[18px] font-black text-white">Your info</div>
+              <div className="mt-1 text-[12px] text-white/60 font-semibold">
+                Username & DOB are locked here.
+              </div>
+            </div>
+
+            {isEditing ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={toggleEditing}
+                  className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  form="profile-form"
+                  disabled={saving}
+                  className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+                  style={{
+                    borderColor: "rgba(209,27,47,0.35)",
+                    background: "rgba(209,27,47,0.18)",
+                    color: "rgba(255,255,255,0.95)",
+                    opacity: saving ? 0.7 : 1,
+                  }}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {/* locked rows */}
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <ReadOnlyRow label="Username" value={profile.username || authUser.displayName || "—"} />
+            <ReadOnlyRow label="Date of birth" value={profile.dateOfBirth || "—"} />
+          </div>
 
           <form
+            id="profile-form"
             onSubmit={handleSubmit}
-            className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm"
+            className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm"
           >
-            <Field
-              label="Username"
-              name="username"
-              value={formValues.username ?? ""}
-              onChange={handleFieldChange}
-              disabled
-            />
             <Field
               label="First name"
               name="firstName"
-              value={formValues.firstName ?? ""}
+              value={String(formValues.firstName ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
+              tone={isEditing ? "edit" : "view"}
             />
             <Field
               label="Surname"
               name="lastName"
-              value={formValues.lastName ?? ""}
+              value={String(formValues.lastName ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
-            />
-            <Field
-              label="Date of birth"
-              name="dateOfBirth"
-              type="date"
-              value={formValues.dateOfBirth ?? ""}
-              onChange={handleFieldChange}
-              disabled
+              tone={isEditing ? "edit" : "view"}
             />
             <Field
               label="Suburb"
               name="suburb"
-              value={formValues.suburb ?? ""}
+              value={String(formValues.suburb ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
+              tone={isEditing ? "edit" : "view"}
             />
             <Field
               label="State"
               name="state"
-              value={formValues.state ?? ""}
+              value={String(formValues.state ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
               placeholder="VIC, NSW, QLD…"
+              tone={isEditing ? "edit" : "view"}
             />
             <Field
               label="Phone"
               name="phone"
               type="tel"
-              value={formValues.phone ?? ""}
+              value={String(formValues.phone ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
+              tone={isEditing ? "edit" : "view"}
             />
             <Field
               label="Gender"
               name="gender"
-              value={formValues.gender ?? ""}
+              value={String(formValues.gender ?? "")}
               onChange={handleFieldChange}
               disabled={!isEditing}
               placeholder="Optional"
+              tone={isEditing ? "edit" : "view"}
             />
 
             <div className="sm:col-span-2">
@@ -575,36 +799,48 @@ export default function ProfileClient() {
               </label>
               <select
                 name="favouriteAflTeam"
-                value={formValues.favouriteAflTeam ?? ""}
+                value={String(formValues.favouriteAflTeam ?? "")}
                 onChange={handleFieldChange}
                 disabled={!isEditing}
-                className="w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-70"
+                className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
+                style={{
+                  borderColor: isEditing ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)",
+                  background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
               >
                 <option value="">Select team…</option>
                 {AFL_TEAMS.map((team) => (
-                  <option key={team} value={team}>
+                  <option key={team} value={team} style={{ color: "#000" }}>
                     {team}
                   </option>
                 ))}
               </select>
             </div>
-
-            {isEditing && (
-              <div className="sm:col-span-2 flex justify-end mt-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="inline-flex items-center justify-center rounded-full bg-orange-500 px-5 py-2 text-sm font-semibold text-black hover:bg-orange-400 disabled:opacity-60"
-                >
-                  {saving ? "Saving…" : "Save changes"}
-                </button>
-              </div>
-            )}
           </form>
 
           {/* Sponsor placeholder */}
-          <div className="mt-6 rounded-2xl bg-gradient-to-r from-orange-500/20 to-orange-600/10 p-4 border border-orange-500/30 text-center text-sm">
-            Sponsor banner placeholder
+          <div
+            className="mt-6 rounded-3xl border p-4 text-center"
+            style={{
+              borderColor: "rgba(209,27,47,0.28)",
+              background:
+                "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
+            }}
+          >
+            <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">
+              Sponsor banner placeholder
+            </div>
+            <div className="mt-1 text-[13px] font-black text-white">
+              Put your major partner here
+            </div>
+            <div className="mt-1 text-[12px] text-white/55 font-semibold">
+              (Clickable image / CTA in phase 2)
+            </div>
+          </div>
+
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">
+            TORPIE © 2026
           </div>
         </section>
       </div>
@@ -614,6 +850,91 @@ export default function ProfileClient() {
 
 /* ───────── Helper components ───────── */
 
+function StatCard({
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  accent: "red" | "white";
+}) {
+  const vColor = accent === "red" ? TORPIE.red : "rgba(255,255,255,0.92)";
+
+  return (
+    <div
+      className="rounded-3xl border p-4"
+      style={{
+        borderColor: "rgba(255,255,255,0.10)",
+        background: "rgba(0,0,0,0.28)",
+      }}
+    >
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">
+        {label}
+      </div>
+      <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
+        {value}
+      </div>
+      <div className="mt-1 text-[12px] text-white/55 font-semibold">{hint}</div>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+  good,
+  bad,
+}: {
+  label: string;
+  value: string;
+  good?: boolean;
+  bad?: boolean;
+}) {
+  const color = good
+    ? "rgba(45,255,122,0.92)"
+    : bad
+    ? "rgba(255,46,77,0.92)"
+    : "rgba(255,255,255,0.92)";
+
+  return (
+    <div
+      className="rounded-2xl border p-3"
+      style={{
+        borderColor: "rgba(255,255,255,0.10)",
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">
+        {label}
+      </div>
+      <div className="mt-1 text-[18px] font-black" style={{ color }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="rounded-3xl border p-4"
+      style={{
+        borderColor: "rgba(255,255,255,0.10)",
+        background: "rgba(0,0,0,0.28)",
+      }}
+    >
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">
+        {label}
+      </div>
+      <div className="mt-2 text-[14px] font-black text-white">{value}</div>
+      <div className="mt-1 text-[11px] text-white/45 font-semibold">Locked</div>
+    </div>
+  );
+}
+
 type FieldProps = {
   label: string;
   name: string;
@@ -621,6 +942,7 @@ type FieldProps = {
   disabled?: boolean;
   type?: string;
   placeholder?: string;
+  tone: "edit" | "view";
   onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
 };
 
@@ -632,10 +954,18 @@ function Field({
   disabled,
   type = "text",
   placeholder,
+  tone,
 }: FieldProps) {
+  const borderColor =
+    tone === "edit" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)";
+  const bg =
+    tone === "edit" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)";
+
   return (
     <div>
-      <label className="block text-[11px] text-white/60 mb-1">{label}</label>
+      <label className="block text-[11px] text-white/60 mb-1 font-semibold tracking-wide">
+        {label}
+      </label>
       <input
         name={name}
         type={type}
@@ -643,7 +973,12 @@ function Field({
         onChange={onChange}
         disabled={disabled}
         placeholder={placeholder}
-        className="w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 disabled:opacity-70"
+        className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
+        style={{
+          borderColor,
+          background: bg,
+          color: "rgba(255,255,255,0.92)",
+        }}
       />
     </div>
   );
@@ -661,29 +996,63 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
 
   return (
     <div
-      className={`relative rounded-2xl px-3 py-3 text-xs flex flex-col items-center text-center ${
-        unlocked
-          ? "border border-amber-400/70 bg-gradient-to-b from-amber-500/10 via-slate-900 to-slate-950 shadow-[0_0_30px_rgba(245,158,11,0.4)]"
-          : "border border-slate-700 bg-slate-900/70 opacity-80"
-      }`}
+      className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
+      style={{
+        borderColor: unlocked ? "rgba(209,27,47,0.40)" : "rgba(255,255,255,0.10)",
+        background: unlocked
+          ? "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
+          : "rgba(0,0,0,0.28)",
+        boxShadow: unlocked ? "0 18px 60px rgba(209,27,47,0.10)" : "none",
+      }}
     >
+      <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
+        {/* subtle texture */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)",
+          }}
+        />
+      </div>
+
       <div className="relative mb-2 h-24 w-20">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageSrc}
           alt={`Streak badge level ${level}`}
-          className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`}
+          className={`h-full w-full object-contain ${
+            unlocked ? "" : "grayscale opacity-70"
+          }`}
         />
+        {!unlocked && (
+          <div
+            className="absolute inset-0 flex items-center justify-center text-[10px] font-black tracking-[0.18em]"
+            style={{
+              color: "rgba(255,255,255,0.75)",
+              textShadow: "0 2px 12px rgba(0,0,0,0.70)",
+            }}
+          >
+            LOCKED
+          </div>
+        )}
       </div>
-      <p className="text-xs font-semibold mb-0.5">{title}</p>
-      <p className="text-[11px] text-white/70 mb-1">{subtitle}</p>
-      <p
-        className={`text-[11px] font-semibold ${
-          unlocked ? "text-emerald-300" : "text-slate-400"
-        }`}
-      >
-        {unlocked ? "Unlocked" : "Locked"}
+
+      <p className="relative text-[12px] font-black text-white">{title}</p>
+      <p className="relative text-[11px] text-white/65 font-semibold mt-0.5">
+        {subtitle}
       </p>
+
+      <div
+        className="relative mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black tracking-[0.18em]"
+        style={{
+          borderColor: unlocked ? "rgba(45,255,122,0.22)" : "rgba(255,255,255,0.12)",
+          background: unlocked ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+          color: unlocked ? "rgba(45,255,122,0.92)" : "rgba(255,255,255,0.75)",
+        }}
+      >
+        {unlocked ? "UNLOCKED" : "LOCKED"}
+      </div>
     </div>
   );
 }
