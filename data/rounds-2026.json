@@ -1,1 +1,1692 @@
-
+[
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Charlie Curnow (Syd) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Patrick Cripps (Car) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Errol Gulden  (Syd) have 7 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Joel Amartey (Syd) kick 1 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Isaac Heeney (Syd) have 7 or more disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will 5 goals or more be kick in total in th 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Tom Papley (Syd) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Sam Walsh (Car) have 6 or more disposals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Will Hayward (Car) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Nick Blakey (Syd) have 5 disposals or less in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Chad Warner (Syd) have  5 or more disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 1,
+    "Match": "Sydney vs Carlton",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-05T19.30:00+11:00",
+    "Question": "Will Adam Cerra (Car) have 6 or more disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Jeremy Cameron (Gee) kick a goal in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Ben King (GC) kick a goal in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Christian Petracca (GC) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will 5 or more goals be kicked in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Tyson Stengle (Gee) kick a goal in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Gryan Miers (Gee) have 6 or less disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will John Noble (GC) have 7 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Matt Rowell (GC) have 5 or more disposals in 3rd quarter",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Bailey Smith (Gee) kick a goal in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Shannon Neale (Gee) kick a goal in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Patrick Dangerfield (Gee) kick a goal in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 2,
+    "Match": "Gold Coast vs Geelong",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-06T20:05:00+11:00",
+    "Question": "Will Noah Anderson (GC) have 7 disposals or less in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Connor Nash (Haw) have 5 or more disposals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Dylan Moore (Haw) kick a goal in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Jake Riccardi (GWS) kick a goal in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Lachie Whitfield (GWS) have 6 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Toby Green (GWS) kick a goal in 2nd Quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Jai Newcombe (Haw) have 6 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will 6 or more goals be kicked in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Jesse Hogan (GWS) kick a goal in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Calsher Dear (Haw) have 3 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Jack Ginnivan (Haw) kick 2 or more goals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will James Sicily (Haw) have 6 or less disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 3,
+    "Match": "GWS Giants vs Hawthorn",
+    "Venue": "ES, Sydney",
+    "StartTime": "2026-03-07T16:15:00+11:00",
+    "Question": "Will Josh Battle (Haw) have 4 or more disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Logan Morris (Bris) kick 2 or more goals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Aaron Naughton (WB) kick a goal in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Josh Dunkley (Bris) have 3 or more tackles in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Tom Liberatore (WB) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Cam Rayner (Bris) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Marcus Bontempelli (WB) have 6 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Cody Weightman(WB) kick 1 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Darcy Wilmot (Bris) have 5 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Logan Morris (Bris) kick 1 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Harris Andrews (Bris) have 3 or more marks in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will James Harmes (WB) have 4 or disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 4,
+    "Match": "Brisbane vs Western Bulldogs",
+    "Venue": "Gabba, Brisbane",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Hugh McCluggage (Bris) have 5 or more disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Collingwood kick the first goal of the game?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Jack Silvangi (Coll) have 2 or more marks in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Jordan De Goey(Coll) have 5 or more disposals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "will Tom De Koning (STK) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Nick Daicos (Coll) have 8 disposals or more in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Jamie Elliot (Coll) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Patrick Lipinski (Coll) have 5 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Jack Higgins (STK) kick 1 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Bobby Hill (Coll) kick 1 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will 5 or more goals be kicked in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Isaac Quaynor (Coll) have 3 or more disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": "OR",
+    "Game": 5,
+    "Match": "St Kilda vs Collingwood",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-07T19:20:00+11:00",
+    "Question": "Will Max King (STK) kick 1 or more goals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Carlton kick the first goal of the game?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Adam Cerra (Car) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Maurice Rioli (Rich) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Toby Nankervis (Rich) have 4 marks in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Jesse Motlop (Car) kick 1 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Jayden Short (Rich) have 5 or less disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Richmond kick 3 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Oliver Florent (Car) have 6 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Sam Banks (Rich) have 5 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Carlton kick a goal in first 5 minutes of the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Harry McKay(Car) kick 1 or more goals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 1,
+    "Match": "Carlton vs Richmond",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-12T19:30:00+11:00",
+    "Question": "Will Sam Walsh (Car) have 6 or more disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Zach Merrett (Ess) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Jai Newcombe (Haw) have 6 or more disposals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Peter Wright (Ess) kick 1 or more goals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Hawthorn kick the 1st goal of the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Will Day (Haw) have 5 or less disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Sam Durham (Ess) have 5 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Massimo D'Ambrosio (Haw) have 4 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Nate Caddy (Ess) kick 2 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Josh Weddle (Haw) have 5 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will either Mabio Chol (Haw) or Jack Gunton (Haw) kick first goal of 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Kyle Langfor(Ess) kick 1 or more goals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 2,
+    "Match": "Essendon vs Hawthorn",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-13T19:30:00+11:00",
+    "Question": "Will Nik Cox (Ess) have 6 or less disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will either Aaron Naughton (WB) or Toby Green (GWS) kick first goal in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Marcus Bontempelli (WB) have 6 or more disposals in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Rory Lobb (WB have 3 or more marks in 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Sam Darcy (WB) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Aaron Cadman (GWS) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Brent Daniels (GWS) kick 1 or ore goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Jesse Hogan (GWS) kick the 1st goal in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Tom Liberatore (WB) have 6 or less dispoals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Rylee West (WB) kick a goal in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Aaron Treloar (WB) make 2 or more tackles in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Connor Idun (GWS) take 3 or more marks in 4th quarter",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Ed Richards (WB) have 8 or more disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 3,
+    "Match": "Western Bulldogs vs GWS Giants",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-14T13:15:00+11:00",
+    "Question": "Will Kieran Briggs (GWS) have 4 or less disposals in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Fremantle kick 3 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Brad Close (Gee) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Caleb Serong (Fre) have 7or more dispoasls in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Jeremy Cameron (Gee) kick 2 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Ollie Henry (Gee) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Max Holmes (Gee) have 6 or more disposal in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Andrew Brayshaw (Fre) have 7 or less disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Luke Jackson (Fre) kick 1 or more goals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Ollie Dempsey (Gee) have 4 or less marks in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Sean Darcy (Fre) or Josh Treacy (Fre) kick Fremantoes first goal of the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Patrick Dangerfield (Gee) kick a goal in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 4,
+    "Match": "Geelong vs Fremantle ",
+    "Venue": "GMHBA, Geelong",
+    "StartTime": "2026-03-14T16:15:00+11:00",
+    "Question": "Will Shannon Neale (Gee) kick a goal in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Brisbane win the 1st quarter by 9 or more points?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Charlie Curnow (Syd) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Charlie Cameron (Bris) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Errol Gulden  (Syd) have 7 or more disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Dayne Zorko (Bris) have 5 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Cam Rayner (Bris) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Isaac Heeney (Syd) have 6 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Lachie Neale (Bris) have 6 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Oscar Allen (Bris) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will either Logan Morris (Bris) or Logan McDonald (Syd) kick a goal in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Levi Ashcroft (Bris) have 6 or less disposals in 4th quarter? ",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 5,
+    "Match": "Sydney vs Brisbane",
+    "Venue": "SCG, Sydney",
+    "StartTime": "2026-03-14T19:10:00+11:00",
+    "Question": "Will Tom Papley (Syd) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Collingwoood win or draw the first quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Dan McStay (Coll) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Scott Pendlebury (Coll) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Josh Rachele (Ade) have 5 or less disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Jordan Dawson have 7 or more disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Izak Rankine kick 1 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Ben Keays (Ade) or Darcy Fogarty (Ade) kick the 1st goal of 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Jack Crisp (Coll) and Josh Daicos combine for 13 or more disposals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Jeremy Howe (Coll) take 2 or more marks in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Dan Houston (Coll) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Alex Neale-Bullen (Ade) have 5 or less disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 6,
+    "Match": "Collingwood vs Adelaide",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-14T19:35:00+11:00",
+    "Question": "Will Darcy Fogarty (Ade) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will North Melbourne win or draw the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Harry Sheezel (NM) have 7 or more disposals  in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Mitch Georgiadies (PA) kick 1 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Nick Larkey (NM) kick 2 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Toby Pink (NM) have 3 or less disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Paul Curtis (NM) kick 1 or more goals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Port Adelaide kick the first goal of the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Luke Davies-Uniacke (NM) have 6 or more disposals in 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Jason Horne-Francis (PA) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Esava Ratugolea (PA) take 3 or more marks in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Jack Darling (NM) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 7,
+    "Match": "North Melbourne vs Port Adelaide",
+    "Venue": "Marvel Stadium, Melbourne",
+    "StartTime": "2026-03-15T13:10:00+11:00",
+    "Question": "Will Connor Rozee (NM) have 8 or less disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will St Kilda kick a goal in the first 5 minutes of the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will either Bayley Fritsch (Melb) or Max King (STK) kick the first goal of the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Kysaiah Pickett (Melb) have 6 or more disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Mason Wood (Stk) have 2 or more marks in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Jack Sinclair (Stk) have 7 or more disposals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Ed Langdon (Melb) make 1 or more tackles in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Brody Mihochek (Melb) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Jack Steele (Melb) have 6 or less disposals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Jacob Van Rooyen (Melb) kick 1 or more goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will either Jake Melksham (Melb) or Liam Ryan (Stk) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Nasiah Wanganeen-Milera have 5 or more disposals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 8,
+    "Match": "Melbourne vs St Kilda",
+    "Venue": "MCG, Melbourne",
+    "StartTime": "2026-03-15T15:15:00+11:00",
+    "Question": "Will Rohan Marshall (Stk) kick 1 or more goals in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Gold Coast win the 1st quarter by 21 points or more?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Ben King (GC) kick 2 or more goals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Harley Reid (WCE) have 4 or less disposals in the 1st quarter?",
+    "Quarter": 1,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Jake Waterman kick 1 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Jamara Ugle-Hagan kick 1 or more goals in the 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will John Noble (GC) have 7 or more disposals in 2nd quarter?",
+    "Quarter": 2,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will West Coast kick 3 goals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Matt Rowell (GC) make 4 or more tackles in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Tom Cole (WCE) have 3 or less disposals in the 3rd quarter?",
+    "Quarter": 3,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Noah Anderson (GC) have 7 disposals or less in 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Gold Coast win the 4th quarter by 18 points?",
+    "Quarter": 4,
+    "Status": "Open"
+  },
+  {
+    "Round": 1,
+    "Game": 9,
+    "Match": "Gold Coast vs West Coast Eagles",
+    "Venue": "People First, Gold Coast",
+    "StartTime": "2026-03-15T18:10:00+11:00",
+    "Question": "Will Mac Andrew (GC) make 1 or more tackles in the 4th quarter?",
+    "Quarter": 4,
+    "Status": "Open"
+  }
+]
