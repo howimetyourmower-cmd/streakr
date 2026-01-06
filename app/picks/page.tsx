@@ -1,6 +1,6 @@
 // /app/picks/page.tsx
-import PicksPage from "./PicksPage";
+import PicksClient from "./PicksClient";
 
 export default function Page() {
-  return <PicksPage />;
+  return <PicksClient />;
 }
