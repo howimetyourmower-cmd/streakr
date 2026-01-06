@@ -1,8 +1,6 @@
-// /app/picks/[gameId]/page.tsx
-export const dynamic = "force-dynamic";
+// /app/picks/page.tsx
+import PicksPage from "./PicksPage";
 
-import MatchPicksClient from "./MatchPicksClient";
-
-export default function Page({ params }: { params: { gameId: string } }) {
-  return <MatchPicksClient gameId={params.gameId} />;
+export default function Page() {
+  return <PicksPage />;
 }
