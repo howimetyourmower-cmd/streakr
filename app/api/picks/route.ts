@@ -26,18 +26,15 @@ type ApiQuestion = {
   question: string;
   status: QuestionStatus;
 
-  // ✅ user + community fields
   userPick?: "yes" | "no";
   yesPercent?: number;
   noPercent?: number;
   commentCount?: number;
 
-  // ✅ sponsor fields
   isSponsorQuestion?: boolean;
   sponsorName?: string;
   sponsorBlurb?: string;
 
-  // ✅ outcome / result pill fields
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null; // true=correct, false=wrong, null=void
@@ -56,10 +53,10 @@ type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
 
-  // ✅ dashboard fields (ROUND ONLY — resets each round automatically)
-  currentStreak: number; // best match streak for THIS round
-  leaderScore: number; // leader best match streak for THIS round
-  leaderName: string | null; // ✅ MUST BE username only
+  // ✅ Torpie truth: running streak across matches (current streak), NOT best streak.
+  currentStreak: number;
+  leaderScore: number;
+  leaderName: string | null; // username only
 };
 
 type SponsorQuestionConfig = {
@@ -90,6 +87,43 @@ const rows: JsonRow[] = rounds2026 as JsonRow[];
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
+}
+
+function parseRoundNumberFromCode(code: string): number | null {
+  const c = String(code || "").trim().toUpperCase();
+  if (c === "OR") return 0;
+  if (c.startsWith("R")) {
+    const n = Number(c.slice(1));
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return null;
+}
+
+// ✅ Auto-pick “current round” if no ?round provided:
+// choose the round containing the NEXT upcoming game; if none upcoming, choose latest round.
+function autoDetectRoundNumber(nowMs: number): number {
+  let nextRow: JsonRow | null = null;
+
+  for (const r of rows) {
+    const t = new Date(r.StartTime).getTime();
+    if (!Number.isFinite(t)) continue;
+    if (t >= nowMs) {
+      if (!nextRow || t < new Date(nextRow.StartTime).getTime()) nextRow = r;
+    }
+  }
+
+  if (nextRow) {
+    const rn = parseRoundNumberFromCode(nextRow.Round);
+    return rn ?? 0;
+  }
+
+  // no future games: pick max round we have
+  let max = 0;
+  for (const r of rows) {
+    const rn = parseRoundNumberFromCode(r.Round);
+    if (rn !== null) max = Math.max(max, rn);
+  }
+  return max;
 }
 
 function normaliseStatusValue(val: unknown): QuestionStatus {
@@ -133,8 +167,9 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 }
 
 /**
- * ✅ Fast + round-accurate pick stats:
+ * ✅ Round-only pick stats:
  * Only counts picks for the questionIds in this round.
+ * Also returns the current user's picks (if logged in).
  */
 async function getPickStatsForQuestionIds(params: {
   questionIds: Set<string>;
@@ -187,8 +222,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
-    const sponsorQuestion =
-      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
+    const sponsorQuestion = (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
 
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
     return sponsorQuestion;
@@ -202,10 +236,7 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
   const commentCounts: Record<string, number> = {};
 
   try {
-    const snap = await db
-      .collection("comments")
-      .where("roundNumber", "==", roundNumber)
-      .get();
+    const snap = await db.collection("comments").where("roundNumber", "==", roundNumber).get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as { questionId?: string };
@@ -223,26 +254,17 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
 async function getQuestionStatusForRound(
   roundNumber: number
 ): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<
-    string,
-    { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
-  > = {};
+  const temp: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
 
   try {
-    const snap = await db
-      .collection("questionStatus")
-      .where("roundNumber", "==", roundNumber)
-      .get();
+    const snap = await db.collection("questionStatus").where("roundNumber", "==", roundNumber).get();
 
     snap.forEach((docSnap) => {
       const data = docSnap.data() as QuestionStatusDoc;
 
       if (!data.questionId || !data.status) return;
 
-      const rawOutcome =
-        (data.outcome as string | undefined) ??
-        (data.result as string | undefined);
-
+      const rawOutcome = (data.outcome as string | undefined) ?? (data.result as string | undefined);
       const outcome = normaliseOutcomeValue(rawOutcome);
 
       const updatedAtMs =
@@ -259,8 +281,7 @@ async function getQuestionStatusForRound(
     console.error("[/api/picks] Error fetching questionStatus", error);
   }
 
-  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> =
-    {};
+  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
   Object.entries(temp).forEach(([qid, value]) => {
     finalMap[qid] = { status: value.status, outcome: value.outcome };
   });
@@ -268,10 +289,7 @@ async function getQuestionStatusForRound(
   return finalMap;
 }
 
-async function getGameLocksForRound(
-  roundCode: string,
-  roundRows: JsonRow[]
-): Promise<Record<string, boolean>> {
+async function getGameLocksForRound(roundCode: string, roundRows: JsonRow[]): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
 
   const gameIds = Array.from(new Set(roundRows.map((r) => `${roundCode}-G${r.Game}`)));
@@ -294,44 +312,6 @@ async function getGameLocksForRound(
   }
 
   return map;
-}
-
-// ─────────────────────────────────────────────
-// ✅ Streak helpers (Clean Sweep per match)
-// ─────────────────────────────────────────────
-
-function computeMatchStreak(game: ApiGame, picksForUser: Record<string, "yes" | "no">): number {
-  let correctCount = 0;
-
-  for (const q of game.questions || []) {
-    const pick = picksForUser[q.id];
-    if (!pick) continue;
-
-    const status = q.status;
-    const outcome = (q.correctOutcome ?? q.outcome) as QuestionOutcome | undefined;
-
-    // only settled questions affect streak
-    if (status !== "final" && status !== "void") continue;
-
-    // voids don't count
-    if (status === "void" || outcome === "void" || !outcome) continue;
-
-    if (pick === outcome) {
-      correctCount += 1;
-      continue;
-    }
-
-    // ❌ any wrong = match streak becomes 0 (Clean Sweep)
-    return 0;
-  }
-
-  return correctCount;
-}
-
-function computeBestStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
-  let best = 0;
-  for (const g of games) best = Math.max(best, computeMatchStreak(g, picksForUser));
-  return best;
 }
 
 async function loadPicksByUserForQuestionIds(
@@ -366,7 +346,7 @@ async function loadPicksByUserForQuestionIds(
 
 /**
  * ✅ Torpie rule:
- * LeaderName MUST be username only (never firstName/lastName).
+ * LeaderName MUST be username only.
  */
 async function readUsername(uid: string): Promise<string | null> {
   try {
@@ -376,7 +356,6 @@ async function readUsername(uid: string): Promise<string | null> {
     const data = (snap.data() as any) || {};
     const username = (data?.username as string) || "";
 
-    // If no username, return null (UI can show "—" or omit)
     const cleaned = String(username).trim();
     if (!cleaned) return null;
 
@@ -388,6 +367,43 @@ async function readUsername(uid: string): Promise<string | null> {
 }
 
 // ─────────────────────────────────────────────
+// ✅ Streak: running across games (Clean Sweep per match)
+// ─────────────────────────────────────────────
+
+function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
+  const sorted = [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+
+  let running = 0;
+
+  for (const g of sorted) {
+    const pickedQs = (g.questions || []).filter((q) => {
+      const pick = picksForUser[q.id];
+      return pick === "yes" || pick === "no";
+    });
+
+    // no picks => streak unchanged
+    if (pickedQs.length === 0) continue;
+
+    // if any picked question unsettled, don't apply this game yet
+    const anyUnsettled = pickedQs.some((q) => q.status !== "final" && q.status !== "void");
+    if (anyUnsettled) continue;
+
+    // if any wrong => reset to 0
+    const anyWrong = pickedQs.some((q) => q.correctPick === false);
+    if (anyWrong) {
+      running = 0;
+      continue;
+    }
+
+    // add correct only (voids are correctPick null, don't add)
+    const correct = pickedQs.filter((q) => q.correctPick === true).length;
+    running += correct;
+  }
+
+  return running;
+}
+
+// ─────────────────────────────────────────────
 // Main GET handler (AFL only)
 // ─────────────────────────────────────────────
 
@@ -395,20 +411,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
 
-    // ✅ AFL only (Torpie)
+    // ✅ round param optional
     const roundParam = url.searchParams.get("round");
-    let roundNumber: number | null = null;
 
-    if (roundParam !== null) {
+    let roundNumber: number;
+    if (roundParam === null) {
+      roundNumber = autoDetectRoundNumber(Date.now());
+    } else {
       const parsed = Number(roundParam);
-      if (!Number.isNaN(parsed) && parsed >= 0) roundNumber = parsed;
+      roundNumber = !Number.isNaN(parsed) && parsed >= 0 ? parsed : 0;
     }
-    if (roundNumber === null) roundNumber = 0;
 
     const currentUserId = await getUserIdFromRequest(req);
-
     const roundCode = getRoundCode(roundNumber);
-    const roundRows = rows.filter((r) => r.Round === roundCode);
+    const roundRows = rows.filter((r) => String(r.Round).toUpperCase().trim() === roundCode);
 
     if (!roundRows.length) {
       const empty: PicksApiResponse = {
@@ -421,22 +437,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json(empty);
     }
 
-    // Build stable questionIds for THIS round (so pickStats stays round-only)
+    // Build stable questionIds for THIS round
     const questionIdsForRound = new Set<string>();
-    const gameIdsForRound = new Set<string>();
 
-    // We must replicate the questionId generation logic exactly:
-    // `${roundCode}-G${Game}-Q${index+1}` where index is per-game order of rows.
+    // questionId generation: `${roundCode}-G${Game}-Q${index+1}` where index is per-game order of rows.
     const perGameIndex: Record<string, number> = {};
-
     for (const r of roundRows) {
       const gameId = `${roundCode}-G${r.Game}`;
-      gameIdsForRound.add(gameId);
-
       if (perGameIndex[gameId] === undefined) perGameIndex[gameId] = 0;
       const idx = perGameIndex[gameId]++;
       const qid = `${gameId}-Q${idx + 1}`;
-
       questionIdsForRound.add(qid);
     }
 
@@ -483,13 +493,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       // outcome only meaningful when final/void
       const correctOutcome =
-        effectiveStatus === "final" || effectiveStatus === "void"
-          ? statusInfo?.outcome
-          : undefined;
+        effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
       const userPick = userPicks[questionId];
 
-      // ✅ correctPick rules:
+      // correctPick rules:
       // - void status or void outcome => null
       // - otherwise compare pick vs outcome
       let correctPick: boolean | null | undefined = undefined;
@@ -503,9 +511,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
 
       const isSponsorQuestion =
-        !!sponsorConfig &&
-        sponsorConfig.roundNumber === roundNumber &&
-        sponsorConfig.questionId === questionId;
+        !!sponsorConfig && sponsorConfig.roundNumber === roundNumber && sponsorConfig.questionId === questionId;
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
@@ -520,7 +526,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         commentCount: commentCounts[questionId] ?? 0,
 
         isSponsorQuestion,
-        sponsorName: isSponsorQuestion ? (sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER") : undefined,
+        sponsorName: isSponsorQuestion ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER" : undefined,
         sponsorBlurb: isSponsorQuestion ? sponsorConfig?.sponsorBlurb : undefined,
 
         correctOutcome: finalOutcome,
@@ -533,25 +539,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const games = Object.values(gamesById);
 
-    // ✅ ROUND-ONLY streak + leader (resets automatically because games are per round)
-    const currentStreak = currentUserId
-      ? computeBestStreakAcrossGames(games, userPicks)
-      : 0;
+    // ✅ CURRENT user running streak (across games)
+    const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
+    // ✅ Leader running streak (across games)
     let leaderScore = 0;
     let leaderUid: string | null = null;
 
     const picksByUser = await loadPicksByUserForQuestionIds(questionIdsForRound);
 
     for (const uid of Object.keys(picksByUser)) {
-      const score = computeBestStreakAcrossGames(games, picksByUser[uid]);
+      const score = computeRunningStreakAcrossGames(games, picksByUser[uid]);
       if (score > leaderScore) {
         leaderScore = score;
         leaderUid = uid;
       }
     }
 
-    // ✅ Torpie rule enforced here:
     const leaderName = leaderUid ? await readUsername(leaderUid) : null;
 
     const response: PicksApiResponse = {
