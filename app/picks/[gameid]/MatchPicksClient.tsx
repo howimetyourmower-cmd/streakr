@@ -1,6 +1,6 @@
 "use client";
 
-// /app/picks/[matchSlug]/MatchPicksClient.tsx
+// /app/picks/[gameId]/MatchPicksClient.tsx
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
@@ -52,13 +52,17 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-function slugifyMatch(match: string) {
-  return match
-    .toLowerCase()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
+// ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
+function roundNumberFromGameId(gameId: string): number {
+  const s = String(gameId || "").toUpperCase().trim();
+  if (s.startsWith("OR-")) return 0;
+  if (s.startsWith("R")) {
+    const dash = s.indexOf("-");
+    const prefix = dash === -1 ? s : s.slice(0, dash); // "R12"
+    const n = Number(prefix.replace("R", ""));
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 0;
 }
 
 function normaliseTeamKey(team: string) {
@@ -234,7 +238,7 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
+export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
   // ✅ FIX: separate initial-load vs background refresh (prevents “black flash”)
@@ -248,10 +252,12 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
+  const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
+
   const picksStorageKey = useMemo(() => {
     const uid = user?.uid || "anon";
-    return `torpie:picks:${uid}:${matchSlug}`;
-  }, [user?.uid, matchSlug]);
+    return `torpie:picks:${uid}:${gameId}`;
+  }, [user?.uid, gameId]);
 
   // localStorage (anon/offline fallback)
   useEffect(() => {
@@ -286,12 +292,16 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
         headers.Authorization = `Bearer ${token}`;
       }
 
-      const res = await fetch("/api/picks", { cache: "no-store", headers });
+      // ✅ ALWAYS read from /api/picks (round-aware)
+      const res = await fetch(`/api/picks?round=${roundNumber}`, {
+        cache: "no-store",
+        headers,
+      });
       if (!res.ok) throw new Error(`API error (${res.status})`);
 
       const data = (await res.json()) as PicksApiResponse;
-      const found = (data.games || []).find((g) => slugifyMatch(g.match) === matchSlug);
-      if (!found) throw new Error("Match not found for this slug");
+      const found = (data.games || []).find((g) => g.id === gameId);
+      if (!found) throw new Error("Game not found for this gameId");
 
       setGame(found);
       lastGameRef.current = found;
@@ -333,7 +343,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
     };
     // refetch when login state changes so we get userPick/correctPick
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchSlug, user?.uid]);
+  }, [gameId, user?.uid]);
 
   const stableGame = game ?? lastGameRef.current;
 
@@ -428,7 +438,7 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
           <div className="text-lg font-black tracking-wide">Couldn’t load match</div>
           <div className="mt-2 text-white/70 text-sm">{err || "Unknown error"}</div>
           <div className="mt-4 text-white/40 text-xs">
-            Slug: <span className="font-mono">{matchSlug}</span>
+            GameId: <span className="font-mono">{gameId}</span>
           </div>
           <button
             type="button"
@@ -451,8 +461,12 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
       style={{ opacity: refreshing ? 0.78 : 1, transition: "opacity 120ms ease" }}
     >
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
-        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting TORPIE all season long</div>
+        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">
+          OFFICIAL PARTNER
+        </div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">
+          Proudly supporting TORPIE all season long
+        </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -461,7 +475,9 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
               {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
+                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">
+                  REFRESHING…
+                </div>
               ) : null}
               <button
                 type="button"
@@ -520,7 +536,10 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
-              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4">
+              <div
+                key={q.id}
+                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
+              >
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
@@ -548,7 +567,9 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                         />
 
                         {isSaving && (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
+                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">
+                            SAVING…
+                          </span>
                         )}
                       </div>
                     </div>
@@ -567,10 +588,16 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                   </div>
 
                   <div className="mt-4 flex justify-center">
-                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
+                    {isPlayerPick ? (
+                      <PlayerAvatar name={playerName!} />
+                    ) : (
+                      <GamePickHeader match={stableGame.match} />
+                    )}
                   </div>
 
-                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
+                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">
+                    {q.question}
+                  </div>
 
                   <div className="mt-4 rounded-2xl bg-[#f3efe6] p-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -608,9 +635,12 @@ export default function MatchPicksClient({ matchSlug }: { matchSlug: string }) {
                     <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
+                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">
+                            SPONSOR QUESTION
+                          </div>
                           <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by <span className="font-black text-white">{sponsorName}</span>
+                            Proudly by{" "}
+                            <span className="font-black text-white">{sponsorName}</span>
                           </div>
                         </div>
 
