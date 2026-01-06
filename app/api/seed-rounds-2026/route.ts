@@ -7,29 +7,6 @@ import rows from "@/data/rounds-2026.json";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
-type Question = {
-  id: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
-};
-
-type Game = {
-  id: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  sport: "AFL";
-  questions: Question[];
-};
-
-type RoundDoc = {
-  season: number;
-  roundNumber: number;
-  label: string;
-  games: Game[];
-};
-
 type RawRow = {
   [key: string]: any;
 };
@@ -51,19 +28,10 @@ function get(row: RawRow, key: string): any {
 }
 
 function roundLabelToNumber(labelRaw: any): number {
-  const label = String(labelRaw ?? "").trim();
-  const up = label.toUpperCase();
-  if (up === "OR" || up === "OPENING" || up === "OPENING ROUND") return 0;
-
+  const label = String(labelRaw ?? "").trim().toUpperCase();
+  if (label === "OR" || label === "OPENING" || label === "OPENING ROUND") return 0;
   const n = Number(label);
   return Number.isFinite(n) ? n : 0;
-}
-
-function slugifyMatch(match: string): string {
-  return match
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
 }
 
 // ---------- handler ----------
@@ -76,89 +44,65 @@ export async function GET() {
     );
   }
 
-  type RoundInternal = RoundDoc & { _gameIndex: Map<string, Game> };
+  const batch = db.batch();
 
-  const roundMap = new Map<string, RoundInternal>();
+  // Track per-round + per-game question index
+  const questionIndex: Record<string, number> = {};
 
   for (const row of rows as RawRow[]) {
     const roundLabel = get(row, "Round");
     const roundNumber = roundLabelToNumber(roundLabel);
-    const roundKey = `${SEASON}-${roundNumber}`;
+    const roundCode = roundNumber === 0 ? "OR" : `R${roundNumber}`;
 
-    const gameNo = String(get(row, "Game") ?? "").trim();
+    const gameNo = Number(get(row, "Game"));
     const match = String(get(row, "Match") ?? "").trim();
     const venue = String(get(row, "Venue") ?? "").trim();
     const startTime = String(get(row, "StartTime") ?? "").trim();
     const questionText = String(get(row, "Question") ?? "").trim();
-    const quarterRaw = get(row, "Quarter");
-    const quarterVal = Number(quarterRaw ?? 1);
+    const quarter = Number(get(row, "Quarter") ?? 1);
     const statusRaw = String(get(row, "Status") ?? "open").toLowerCase();
 
-    if (!roundLabel || !gameNo || !match || !questionText || !startTime) {
-      console.log("Skipping incomplete row:", row);
-      continue;
-    }
+    if (!roundLabel || !gameNo || !match || !questionText || !startTime) continue;
 
     const status: QuestionStatus =
-      statusRaw === "final" ||
-      statusRaw === "pending" ||
-      statusRaw === "void"
+      statusRaw === "final" || statusRaw === "pending" || statusRaw === "void"
         ? (statusRaw as QuestionStatus)
         : "open";
 
-    // get or create round
-    let round = roundMap.get(roundKey);
-    if (!round) {
-      round = {
-        season: SEASON,
-        roundNumber,
-        label: roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`,
-        games: [],
-        _gameIndex: new Map<string, Game>(),
-      };
-      roundMap.set(roundKey, round);
-    }
+    const gameId = `${roundCode}-G${gameNo}`;
 
-    // get or create game within round
-    let game = round._gameIndex.get(gameNo);
-    if (!game) {
-      game = {
-        id: slugifyMatch(match),
+    // Stable per-game index
+    const key = `${roundCode}-${gameNo}`;
+    if (!questionIndex[key]) questionIndex[key] = 0;
+    questionIndex[key] += 1;
+
+    const questionId = `${gameId}-Q${questionIndex[key]}`;
+
+    const questionRef = db.collection("questions").doc(questionId);
+
+    batch.set(
+      questionRef,
+      {
+        id: questionId,
+        roundNumber,
+        gameId,
         match,
         venue,
         startTime,
-        sport: "AFL",
-        questions: [],
-      };
-      round._gameIndex.set(gameNo, game);
-      round.games.push(game);
-    }
-
-    const quarter = quarterVal > 0 ? quarterVal : 1;
-    const questionId = `${game.id}-q${quarter}-${game.questions.length + 1}`;
-
-    game.questions.push({
-      id: questionId,
-      quarter,
-      question: questionText,
-      status,
-    });
-  }
-
-  // write to Firestore in a batch
-  const batch = db.batch();
-  const roundsCol = db.collection("rounds");
-
-  for (const [docId, data] of roundMap.entries()) {
-    const { _gameIndex, ...rest } = data;
-    batch.set(roundsCol.doc(docId), rest, { merge: false });
+        quarter,
+        question: questionText, // ✅ THIS WILL UPDATE SPELLING
+        status,
+        season: SEASON,
+        updatedAt: new Date(),
+      },
+      { merge: true } // 🔥 critical
+    );
   }
 
   await batch.commit();
 
   return NextResponse.json({
     ok: true,
-    message: "Rounds seeded",
-    docs: Array.from(roundMap.keys()),
+    message: "Questions seeded (safe overwrite)",
   });
 }
