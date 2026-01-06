@@ -547,7 +547,8 @@ export default function PicksPage() {
     const g = nextUpStable;
     if (!g) return null;
 
-    const href = `/picks/${slugify(g.match)}`;
+    // ✅ use gameId routing (no slug)
+    const href = `/picks/${g.id}`;
     const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
     const lockText =
       nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
@@ -727,10 +728,7 @@ export default function PicksPage() {
 
         <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div
-              className="text-[10px] uppercase tracking-widest font-black"
-              style={{ color: MATCH_HQ.muted2 }}
-            >
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
               Current streak
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -749,10 +747,7 @@ export default function PicksPage() {
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div
-              className="text-[10px] uppercase tracking-widest font-black"
-              style={{ color: MATCH_HQ.muted2 }}
-            >
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
               Leader
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -792,10 +787,7 @@ export default function PicksPage() {
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div
-              className="text-[10px] uppercase tracking-widest font-black"
-              style={{ color: MATCH_HQ.muted2 }}
-            >
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
               Distance
             </div>
             <div className="mt-2 flex items-center gap-2">
@@ -814,10 +806,7 @@ export default function PicksPage() {
           </div>
 
           <div className="rounded-2xl border px-3 py-2" style={cardBase}>
-            <div
-              className="text-[10px] uppercase tracking-widest font-black"
-              style={{ color: MATCH_HQ.muted2 }}
-            >
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
               Eligible
             </div>
 
@@ -858,10 +847,7 @@ export default function PicksPage() {
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
           </div>
 
-          <div
-            className="hidden md:block mt-3 overflow-hidden rounded-2xl border"
-            style={{ borderColor: "rgba(255,255,255,0.10)" }}
-          >
+          <div className="hidden md:block mt-3 overflow-hidden rounded-2xl border" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <table className="w-full text-left">
               <thead>
                 <tr style={{ background: "rgba(255,255,255,0.05)" }}>
@@ -978,7 +964,6 @@ export default function PicksPage() {
     const m = splitMatch(g.match);
     const homeName = m?.home ?? g.match;
     const awayName = m?.away ?? "";
-    const matchSlug = slugify(g.match);
 
     const picksCount =
       (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
@@ -989,9 +974,12 @@ export default function PicksPage() {
       ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
       : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
 
+    // ✅ use gameId routing (no slug)
+    const href = `/picks/${g.id}`;
+
     return (
       <Link
-        href={`/picks/${matchSlug}`}
+        href={href}
         className="block rounded-2xl overflow-hidden border"
         style={{
           borderColor: "rgba(255,255,255,0.10)",
@@ -1136,7 +1124,8 @@ export default function PicksPage() {
         {nextUpStable ? (
           <div className="mt-4 transition-opacity duration-200" style={{ opacity: loading ? 0.75 : 1 }}>
             <Link
-              href={`/picks/${slugify(nextUpStable.match)}`}
+              // ✅ use gameId routing (no slug)
+              href={`/picks/${nextUpStable.id}`}
               className="block rounded-3xl overflow-hidden border"
               style={{
                 borderColor: "rgba(255,46,77,0.35)",
