@@ -33,7 +33,7 @@ type ApiQuestion = {
   sponsorName?: string;
   sponsorBlurb?: string;
 
-  // comes from /api/picks
+  // ✅ comes from /api/picks
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null;
@@ -52,7 +52,10 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-// derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
+const BRAND_RED = "#FF2E4D";
+const BRAND_BG = "#000000";
+
+// ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
@@ -81,7 +84,8 @@ function extractPlayerName(question: string) {
   if (!name) return null;
   if (!name.includes(" ")) return null;
 
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name))
+    return null;
 
   return name;
 }
@@ -106,6 +110,9 @@ function formatQuarterLabel(q: number) {
 function parseTeams(match: string) {
   const parts = match.split(" vs ");
   if (parts.length === 2) return { home: parts[0].trim(), away: parts[1].trim() };
+  // tolerate " VS "
+  const parts2 = match.split(/\s+vs\s+/i);
+  if (parts2.length === 2) return { home: parts2[0].trim(), away: parts2[1].trim() };
   return { home: match.trim(), away: "" };
 }
 
@@ -116,8 +123,8 @@ function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px] shadow-sm">
-        <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f]">
+      <div className="h-16 w-16 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
+        <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_RED }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
@@ -141,8 +148,11 @@ function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
   const [src, setSrc] = useState(primary);
 
   return (
-    <div className="h-16 w-16 rounded-[18px] bg-[#d11b2f] p-[3px] shadow-sm">
-      <div className="h-full w-full overflow-hidden rounded-[15px] bg-[#d11b2f] flex items-center justify-center">
+    <div className="h-16 w-16 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
+      <div
+        className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
+        style={{ background: BRAND_RED }}
+      >
         <Image
           src={src}
           alt={alt}
@@ -187,7 +197,7 @@ function PercentBar({ yes, no }: { yes: number; no: number }) {
         <span>No {noPct}%</span>
       </div>
       <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
-        <div className="h-full" style={{ width: `${yesPct}%`, background: "#d11b2f" }} />
+        <div className="h-full" style={{ width: `${yesPct}%`, background: BRAND_RED }} />
       </div>
     </div>
   );
@@ -228,7 +238,9 @@ function ResultPill({
 
   if (correctPick === false) {
     return (
-      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>❌ WRONG</span>
+      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>
+        ❌ WRONG
+      </span>
     );
   }
 
@@ -238,8 +250,9 @@ function ResultPill({
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
+  // ✅ FIX: separate initial-load vs background refresh (prevents “black flash”)
   const [loading, setLoading] = useState(true); // first load only
-  const [refreshing, setRefreshing] = useState(false); // background refresh
+  const [refreshing, setRefreshing] = useState(false); // background refresh, keep UI
   const [err, setErr] = useState<string | null>(null);
   const [game, setGame] = useState<ApiGame | null>(null);
   const lastGameRef = useRef<ApiGame | null>(null);
@@ -255,19 +268,24 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return `torpie:picks:${uid}:${gameId}`;
   }, [user?.uid, gameId]);
 
+  // localStorage (anon/offline fallback)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(picksStorageKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, LocalPick>;
       if (parsed && typeof parsed === "object") setPicks(parsed);
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [picksStorageKey]);
 
   useEffect(() => {
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [picks, picksStorageKey]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
@@ -276,46 +294,28 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     setErr(null);
 
-    const headers: Record<string, string> = {};
     try {
+      const headers: Record<string, string> = {};
       if (user) {
         const token = await user.getIdToken();
         headers.Authorization = `Bearer ${token}`;
       }
-    } catch {}
 
-    // ✅ Try multiple query param names in case your API expects a different one
-    const urls = [
-      `/api/picks?round=${roundNumber}`,
-      `/api/picks?roundNumber=${roundNumber}`,
-      `/api/picks?r=${roundNumber}`,
-      `/api/picks`,
-    ];
+      // ✅ ALWAYS read from /api/picks (round-aware)
+      const res = await fetch(`/api/picks?round=${roundNumber}`, {
+        cache: "no-store",
+        headers,
+      });
+      if (!res.ok) throw new Error(`API error (${res.status})`);
 
-    let lastError: string | null = null;
-
-    try {
-      let found: ApiGame | null = null;
-
-      for (const url of urls) {
-        const res = await fetch(url, { cache: "no-store", headers });
-        if (!res.ok) {
-          lastError = `API error (${res.status})`;
-          continue;
-        }
-
-        const data = (await res.json()) as PicksApiResponse;
-        found = (data.games || []).find((g) => g.id === gameId) || null;
-
-        if (found) break;
-      }
-
-      if (!found) throw new Error(lastError || "Game not found for this gameId");
+      const data = (await res.json()) as PicksApiResponse;
+      const found = (data.games || []).find((g) => g.id === gameId);
+      if (!found) throw new Error("Game not found for this gameId");
 
       setGame(found);
       lastGameRef.current = found;
 
-      // if logged in, trust server userPick
+      // ✅ if logged in, trust server userPick as source of truth
       if (user) {
         const seeded: Record<string, LocalPick> = {};
         for (const q of found.questions || []) {
@@ -323,11 +323,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
         setPicks((prev) => ({ ...prev, ...seeded }));
       } else {
-        // anon: only seed if no local picks
+        // anon: if no local picks yet, seed from api (usually empty)
         setPicks((prev) => {
           if (Object.keys(prev || {}).length > 0) return prev;
           const seeded: Record<string, LocalPick> = {};
-          for (const q of found!.questions || []) {
+          for (const q of found.questions || []) {
             if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
           }
           return seeded;
@@ -350,6 +350,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return () => {
       alive = false;
     };
+    // refetch when login state changes so we get userPick/correctPick
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, user?.uid]);
 
@@ -369,6 +370,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [questions]);
 
   async function persistPick(questionId: string, next: LocalPick) {
+    // anon: local only
     if (!user) return;
 
     setSaving((prev) => ({ ...prev, [questionId]: true }));
@@ -390,6 +392,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         );
       }
 
+      // ✅ background refresh (NO full-screen loading)
       void fetchMatch("refresh");
     } catch (e) {
       console.error("[MatchPicksClient] failed to persist pick", e);
@@ -404,7 +407,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setPicks((prev) => {
       const current = prev[questionId] || "none";
       const next: LocalPick = current === value ? "none" : value;
+
+      // optimistic update
       void persistPick(questionId, next);
+
       return { ...prev, [questionId]: next };
     });
   }
@@ -418,9 +424,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
+  // ✅ only show skeleton if first load and we have no stable game yet
   if (loading && !stableGame) {
     return (
-      <div className="min-h-[70vh] bg-[#0d1117] text-white px-4 py-8">
+      <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
         <div className="max-w-6xl mx-auto">
           <div className="h-8 w-72 rounded bg-white/10 animate-pulse" />
           <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -435,7 +442,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   if ((err && !stableGame) || !stableGame) {
     return (
-      <div className="min-h-[70vh] bg-[#0d1117] text-white px-4 py-10">
+      <div className="min-h-[70vh] text-white px-4 py-10" style={{ background: BRAND_BG }}>
         <div className="max-w-3xl mx-auto rounded-2xl border border-white/10 bg-white/5 p-6">
           <div className="text-lg font-black tracking-wide">Couldn’t load match</div>
           <div className="mt-2 text-white/70 text-sm">{err || "Unknown error"}</div>
@@ -459,12 +466,20 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   return (
     <div
-      className="min-h-screen bg-[#0d1117] text-white"
-      style={{ opacity: refreshing ? 0.78 : 1, transition: "opacity 120ms ease" }}
+      className="min-h-screen text-white"
+      style={{
+        background: BRAND_BG,
+        opacity: refreshing ? 0.78 : 1,
+        transition: "opacity 120ms ease",
+      }}
     >
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
-        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting TORPIE all season long</div>
+        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">
+          OFFICIAL PARTNER
+        </div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">
+          Proudly supporting TORPIE all season long
+        </div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -473,7 +488,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
               {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
+                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">
+                  REFRESHING…
+                </div>
               ) : null}
               <button
                 type="button"
@@ -510,6 +527,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const playerName = extractPlayerName(q.question);
             const isSponsored = !!q.isSponsorQuestion;
             const isRevealed = !!revealed[q.id];
+
             const isPlayerPick = !!playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
@@ -523,20 +541,27 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             const yesBtnClass =
               selected === "yes"
-                ? "bg-[#d11b2f] text-white border-black/10 shadow-[0_0_0_3px_rgba(209,27,47,0.20)]"
+                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
             const noBtnClass =
               selected === "no"
-                ? "bg-[#d11b2f] text-white border-black/10 shadow-[0_0_0_3px_rgba(209,27,47,0.20)]"
+                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
-              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4">
+              <div
+                key={q.id}
+                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4"
+              >
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
-                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+                <div
+                  className={`relative ${
+                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
+                  }`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[15px] font-black tracking-wide">
@@ -555,7 +580,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         />
 
                         {isSaving && (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
+                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">
+                            SAVING…
+                          </span>
                         )}
                       </div>
                     </div>
@@ -574,12 +601,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   </div>
 
                   <div className="mt-4 flex justify-center">
-                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
+                    {isPlayerPick ? (
+                      <PlayerAvatar name={playerName!} />
+                    ) : (
+                      <GamePickHeader match={stableGame.match} />
+                    )}
                   </div>
 
-                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
+                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">
+                    {q.question}
+                  </div>
 
-                  <div className="mt-4 rounded-2xl bg-[#f3efe6] p-4">
+                  <div className="mt-4 rounded-2xl bg-[#F2F2F2] p-4">
                     <div className="grid grid-cols-2 gap-4">
                       <button
                         type="button"
@@ -587,6 +620,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
                           isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${yesBtnClass}`}
+                        style={selected === "yes" ? { background: BRAND_RED } : undefined}
                         onClick={() => void setPick(q.id, "yes", status)}
                       >
                         YES
@@ -598,6 +632,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
                           isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${noBtnClass}`}
+                        style={selected === "no" ? { background: BRAND_RED } : undefined}
                         onClick={() => void setPick(q.id, "no", status)}
                       >
                         NO
@@ -610,14 +645,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                 {isSponsored && !isRevealed && (
                   <div className="absolute inset-0 z-20 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-[#0d1117]/55 backdrop-blur-[2px]" />
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
 
                     <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
+                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">
+                            SPONSOR QUESTION
+                          </div>
                           <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by <span className="font-black text-white">{sponsorName}</span>
+                            Proudly by{" "}
+                            <span className="font-black text-white">{sponsorName}</span>
                           </div>
                         </div>
 
@@ -626,14 +664,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         </div>
                       </div>
 
-                      <div className="mt-5 flex-1 rounded-2xl bg-[#f3efe6] p-4 flex flex-col items-center justify-center text-center">
+                      <div className="mt-5 flex-1 rounded-2xl bg-[#F2F2F2] p-4 flex flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                          {q.sponsorBlurb ||
+                            "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
                         </div>
 
                         <button
                           type="button"
-                          className="mt-4 inline-flex items-center justify-center rounded-full border border-black/15 bg-[#d6a6b8] px-6 py-2 text-sm font-extrabold text-black/85"
+                          className="mt-4 inline-flex items-center justify-center rounded-full border border-black/15 px-6 py-2 text-sm font-extrabold text-black/85"
+                          style={{ background: "rgba(255,46,77,0.20)" }}
                           onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
                         >
                           Tap to reveal
@@ -649,7 +689,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           })}
         </div>
 
-        <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-[#0d1117]/90 backdrop-blur">
+        <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
               Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 12
