@@ -1,15 +1,8 @@
-// /app/picks/page.tsx
+// /app/picks/[gameId]/page.tsx
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const fetchCache = "force-no-store";
 
-import { Suspense } from "react";
-import PicksClient from "./PicksClient";
+import MatchPicksClient from "./MatchPicksClient";
 
-export default function PicksPage() {
-  return (
-    <Suspense fallback={null}>
-      <PicksClient />
-    </Suspense>
-  );
+export default function Page({ params }: { params: { gameId: string } }) {
+  return <MatchPicksClient gameId={params.gameId} />;
 }
