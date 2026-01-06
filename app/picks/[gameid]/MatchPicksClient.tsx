@@ -33,7 +33,7 @@ type ApiQuestion = {
   sponsorName?: string;
   sponsorBlurb?: string;
 
-  // ✅ comes from /api/picks
+  // comes from /api/picks
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null;
@@ -52,7 +52,7 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-// ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
+// derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
@@ -81,8 +81,7 @@ function extractPlayerName(question: string) {
   if (!name) return null;
   if (!name.includes(" ")) return null;
 
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name))
-    return null;
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
 
   return name;
 }
@@ -229,9 +228,7 @@ function ResultPill({
 
   if (correctPick === false) {
     return (
-      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>
-        ❌ WRONG
-      </span>
+      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>❌ WRONG</span>
     );
   }
 
@@ -241,9 +238,8 @@ function ResultPill({
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
-  // ✅ FIX: separate initial-load vs background refresh (prevents “black flash”)
   const [loading, setLoading] = useState(true); // first load only
-  const [refreshing, setRefreshing] = useState(false); // background refresh, keep UI
+  const [refreshing, setRefreshing] = useState(false); // background refresh
   const [err, setErr] = useState<string | null>(null);
   const [game, setGame] = useState<ApiGame | null>(null);
   const lastGameRef = useRef<ApiGame | null>(null);
@@ -259,24 +255,19 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return `torpie:picks:${uid}:${gameId}`;
   }, [user?.uid, gameId]);
 
-  // localStorage (anon/offline fallback)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(picksStorageKey);
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, LocalPick>;
       if (parsed && typeof parsed === "object") setPicks(parsed);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [picksStorageKey]);
 
   useEffect(() => {
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [picks, picksStorageKey]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
@@ -285,28 +276,46 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     setErr(null);
 
+    const headers: Record<string, string> = {};
     try {
-      const headers: Record<string, string> = {};
       if (user) {
         const token = await user.getIdToken();
         headers.Authorization = `Bearer ${token}`;
       }
+    } catch {}
 
-      // ✅ ALWAYS read from /api/picks (round-aware)
-      const res = await fetch(`/api/picks?round=${roundNumber}`, {
-        cache: "no-store",
-        headers,
-      });
-      if (!res.ok) throw new Error(`API error (${res.status})`);
+    // ✅ Try multiple query param names in case your API expects a different one
+    const urls = [
+      `/api/picks?round=${roundNumber}`,
+      `/api/picks?roundNumber=${roundNumber}`,
+      `/api/picks?r=${roundNumber}`,
+      `/api/picks`,
+    ];
 
-      const data = (await res.json()) as PicksApiResponse;
-      const found = (data.games || []).find((g) => g.id === gameId);
-      if (!found) throw new Error("Game not found for this gameId");
+    let lastError: string | null = null;
+
+    try {
+      let found: ApiGame | null = null;
+
+      for (const url of urls) {
+        const res = await fetch(url, { cache: "no-store", headers });
+        if (!res.ok) {
+          lastError = `API error (${res.status})`;
+          continue;
+        }
+
+        const data = (await res.json()) as PicksApiResponse;
+        found = (data.games || []).find((g) => g.id === gameId) || null;
+
+        if (found) break;
+      }
+
+      if (!found) throw new Error(lastError || "Game not found for this gameId");
 
       setGame(found);
       lastGameRef.current = found;
 
-      // ✅ if logged in, trust server userPick as source of truth
+      // if logged in, trust server userPick
       if (user) {
         const seeded: Record<string, LocalPick> = {};
         for (const q of found.questions || []) {
@@ -314,11 +323,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
         setPicks((prev) => ({ ...prev, ...seeded }));
       } else {
-        // anon: if no local picks yet, seed from api (usually empty)
+        // anon: only seed if no local picks
         setPicks((prev) => {
           if (Object.keys(prev || {}).length > 0) return prev;
           const seeded: Record<string, LocalPick> = {};
-          for (const q of found.questions || []) {
+          for (const q of found!.questions || []) {
             if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
           }
           return seeded;
@@ -341,7 +350,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return () => {
       alive = false;
     };
-    // refetch when login state changes so we get userPick/correctPick
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, user?.uid]);
 
@@ -361,7 +369,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [questions]);
 
   async function persistPick(questionId: string, next: LocalPick) {
-    // anon: local only
     if (!user) return;
 
     setSaving((prev) => ({ ...prev, [questionId]: true }));
@@ -383,7 +390,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         );
       }
 
-      // ✅ background refresh (NO full-screen loading)
       void fetchMatch("refresh");
     } catch (e) {
       console.error("[MatchPicksClient] failed to persist pick", e);
@@ -398,10 +404,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setPicks((prev) => {
       const current = prev[questionId] || "none";
       const next: LocalPick = current === value ? "none" : value;
-
-      // optimistic update
       void persistPick(questionId, next);
-
       return { ...prev, [questionId]: next };
     });
   }
@@ -415,7 +418,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  // ✅ only show skeleton if first load and we have no stable game yet
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] bg-[#0d1117] text-white px-4 py-8">
@@ -461,12 +463,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       style={{ opacity: refreshing ? 0.78 : 1, transition: "opacity 120ms ease" }}
     >
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
-        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">
-          OFFICIAL PARTNER
-        </div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">
-          Proudly supporting TORPIE all season long
-        </div>
+        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting TORPIE all season long</div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -475,9 +473,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
               {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">
-                  REFRESHING…
-                </div>
+                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
               ) : null}
               <button
                 type="button"
@@ -514,7 +510,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const playerName = extractPlayerName(q.question);
             const isSponsored = !!q.isSponsorQuestion;
             const isRevealed = !!revealed[q.id];
-
             const isPlayerPick = !!playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
@@ -536,19 +531,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
-              <div
-                key={q.id}
-                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4"
-              >
+              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#161b22] p-4">
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
-                <div
-                  className={`relative ${
-                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
-                  }`}
-                >
+                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[15px] font-black tracking-wide">
@@ -567,9 +555,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         />
 
                         {isSaving && (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">
-                            SAVING…
-                          </span>
+                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
                         )}
                       </div>
                     </div>
@@ -588,16 +574,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   </div>
 
                   <div className="mt-4 flex justify-center">
-                    {isPlayerPick ? (
-                      <PlayerAvatar name={playerName!} />
-                    ) : (
-                      <GamePickHeader match={stableGame.match} />
-                    )}
+                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
                   </div>
 
-                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">
-                    {q.question}
-                  </div>
+                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
 
                   <div className="mt-4 rounded-2xl bg-[#f3efe6] p-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -635,12 +615,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">
-                            SPONSOR QUESTION
-                          </div>
+                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
                           <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by{" "}
-                            <span className="font-black text-white">{sponsorName}</span>
+                            Proudly by <span className="font-black text-white">{sponsorName}</span>
                           </div>
                         </div>
 
@@ -651,8 +628,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                       <div className="mt-5 flex-1 rounded-2xl bg-[#f3efe6] p-4 flex flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb ||
-                            "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
                         </div>
 
                         <button
