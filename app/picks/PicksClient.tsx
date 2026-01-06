@@ -16,8 +16,7 @@ type ApiQuestion = {
   status: "open" | "final" | "pending" | "void";
   userPick?: "yes" | "no";
 
-  // from /api/picks (optional)
-  correctPick?: boolean | null; // true=correct, false=wrong, null=void
+  correctPick?: boolean | null;
   outcome?: "yes" | "no" | "void";
 };
 
@@ -44,7 +43,6 @@ const COLORS = {
   white: "#FFFFFF",
 };
 
-// ✅ Match HQ (light grey) palette
 const MATCH_HQ = {
   card: "#F2F2F2",
   border: "#E5E5E5",
@@ -83,16 +81,6 @@ function msToCountdown(ms: number): string {
   const pad = (x: number) => String(x).padStart(2, "0");
   if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
-}
-
-function slugify(text: string): string {
-  return (text || "")
-    .toLowerCase()
-    .trim()
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
 }
 
 type TeamSlug =
@@ -256,10 +244,7 @@ function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: strin
   );
 }
 
-/**
- * silhouette MUST be clipped to each card.
- */
-function CardSilhouetteBg({ opacity = 1.5 }: { opacity?: number }) {
+function CardSilhouetteBg({ opacity = 1.0 }: { opacity?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
@@ -379,10 +364,15 @@ export default function PicksPage() {
   const { user } = useAuth();
 
   const [roundNumber, setRoundNumber] = useState<number | null>(null);
-  const [games, setGames] = useState<ApiGame[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  // ✅ Split initial load vs background refresh to stop “disappearing”
+  const [loading, setLoading] = useState(true); // first load
+  const [refreshing, setRefreshing] = useState(false); // background refresh
+
   const [err, setErr] = useState("");
 
+  const [games, setGames] = useState<ApiGame[]>([]);
+  const gamesRef = useRef<ApiGame[]>([]);
   const [currentStreak, setCurrentStreak] = useState<number>(0);
   const [leaderScore, setLeaderScore] = useState<number | null>(null);
   const [leaderName, setLeaderName] = useState<string | null>(null);
@@ -409,56 +399,72 @@ export default function PicksPage() {
     setHowOpen(false);
   }, []);
 
-  const loadPicks = useCallback(async () => {
-    try {
-      setLoading(true);
-      setErr("");
+  const loadPicks = useCallback(
+    async (mode: "initial" | "refresh" = "refresh") => {
+      try {
+        if (mode === "initial") setLoading(true);
+        else setRefreshing(true);
 
-      let authHeader: Record<string, string> = {};
-      if (user) {
-        try {
-          const token = await user.getIdToken();
-          authHeader = { Authorization: `Bearer ${token}` };
-        } catch {}
+        // ✅ Don’t nuke UI during refresh
+        if (mode === "initial") setErr("");
+
+        let authHeader: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch {}
+        }
+
+        const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+
+        const data = (await res.json()) as PicksApiResponse;
+
+        const nextGames = Array.isArray(data.games) ? data.games : [];
+
+        // ✅ Only update if we actually got games back (prevents brief empty state)
+        if (nextGames.length > 0) {
+          setGames(nextGames);
+          gamesRef.current = nextGames;
+        } else if (gamesRef.current.length === 0) {
+          setGames([]);
+        }
+
+        setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
+        setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+        setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
+        setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
+      } catch (e) {
+        console.error(e);
+        setErr("Could not load picks right now.");
+      } finally {
+        if (mode === "initial") setLoading(false);
+        setRefreshing(false);
       }
-
-      const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
-      if (!res.ok) throw new Error(await res.text());
-
-      const data = (await res.json()) as PicksApiResponse;
-
-      setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
-      setGames(Array.isArray(data.games) ? data.games : []);
-
-      setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
-
-      setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
-      setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
-    } catch (e) {
-      console.error(e);
-      setErr("Could not load picks right now.");
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
+    },
+    [user]
+  );
 
   useEffect(() => {
-    loadPicks();
+    void loadPicks("initial");
   }, [loadPicks]);
 
-  // silent refresh (keeps “LIVE / Locked” + stats feeling real)
+  // ✅ silent refresh without nuking the UI
   useEffect(() => {
     const id = window.setInterval(() => {
-      loadPicks();
+      void loadPicks("refresh");
     }, 15000);
     return () => window.clearInterval(id);
   }, [loadPicks]);
 
+  const gamesStable = games.length > 0 ? games : gamesRef.current;
+
   const roundLabel = roundNumber === null ? "" : roundNumber === 0 ? "Opening Round" : `Round ${roundNumber}`;
 
   const sortedGames = useMemo(() => {
-    return [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-  }, [games]);
+    return [...(gamesStable || [])].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  }, [gamesStable]);
 
   const nextUp = useMemo(() => {
     const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
@@ -466,10 +472,6 @@ export default function PicksPage() {
     return sortedGames[0] || null;
   }, [sortedGames, nowMs]);
 
-  /**
-   * ✅ FIX: prevent Next Up flicker on refresh
-   * We keep the last known Next Up so it never unmounts just because `loading` flips true.
-   */
   const lastNextUpRef = useRef<ApiGame | null>(null);
   const [nextUpStable, setNextUpStable] = useState<ApiGame | null>(null);
 
@@ -489,8 +491,10 @@ export default function PicksPage() {
   }, [nextUpStable, nowMs]);
 
   const gamesPicked = useMemo(() => {
-    return games.filter((g) => (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")).length;
-  }, [games]);
+    return (gamesStable || []).filter((g) =>
+      (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
+    ).length;
+  }, [gamesStable]);
 
   const eligible = gamesPicked > 0;
 
@@ -547,8 +551,7 @@ export default function PicksPage() {
     const g = nextUpStable;
     if (!g) return null;
 
-    // ✅ use gameId routing (no slug)
-    const href = `/picks/${g.id}`;
+    const href = `/picks/${encodeURIComponent(g.id)}`;
     const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
     const lockText =
       nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
@@ -639,8 +642,7 @@ export default function PicksPage() {
   };
 
   const DashboardStrip = () => {
-    const leaderText =
-      leaderScore === null ? "Leader loading…" : leaderName ? `${leaderName} leads` : "Leader";
+    const leaderText = leaderScore === null ? "Leader loading…" : leaderName ? `${leaderName} leads` : "Leader";
 
     const leaderHint =
       leaderScore === null
@@ -649,7 +651,6 @@ export default function PicksPage() {
         ? "Equal lead — keep it alive."
         : `Gap: ${distanceToLeader}`;
 
-    // ✅ Match HQ cards: light grey (less polarising)
     const cardBase: React.CSSProperties = {
       borderColor: MATCH_HQ.border,
       background: MATCH_HQ.card,
@@ -672,6 +673,8 @@ export default function PicksPage() {
         style={{
           borderColor: "rgba(255,255,255,0.10)",
           background: "rgba(255,255,255,0.03)",
+          opacity: refreshing ? 0.9 : 1,
+          transition: "opacity 120ms ease",
         }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -686,13 +689,7 @@ export default function PicksPage() {
               }}
               title="Torpie is live and updating"
             >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{
-                  background: COLORS.red,
-                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
-                }}
-              />
+              <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
               LIVE
             </span>
           </div>
@@ -766,10 +763,7 @@ export default function PicksPage() {
 
             <div
               className="mt-2 h-[8px] w-full rounded-full border overflow-hidden"
-              style={{
-                borderColor: "rgba(0,0,0,0.10)",
-                background: "rgba(0,0,0,0.06)",
-              }}
+              style={{ borderColor: "rgba(0,0,0,0.10)", background: "rgba(0,0,0,0.06)" }}
               aria-label="progress to leader"
             >
               <div
@@ -812,13 +806,7 @@ export default function PicksPage() {
 
             <div className="mt-2 flex items-center gap-2">
               <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
-                {eligible ? (
-                  <CheckIcon size={16} color={COLORS.red} />
-                ) : (
-                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
-                    —
-                  </span>
-                )}
+                {eligible ? <CheckIcon size={16} color={COLORS.red} /> : <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>—</span>}
               </div>
 
               <div className="min-w-0">
@@ -837,10 +825,7 @@ export default function PicksPage() {
 
         <div
           className="mt-3 rounded-2xl border p-3 sm:p-3.5"
-          style={{
-            borderColor: "rgba(255,255,255,0.10)",
-            background: "rgba(0,0,0,0.28)",
-          }}
+          style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}
         >
           <div className="flex items-center justify-between gap-3">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
@@ -857,9 +842,7 @@ export default function PicksPage() {
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Unsettled</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
-                    Streak after
-                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Streak after</th>
                 </tr>
               </thead>
               <tbody>
@@ -884,11 +867,7 @@ export default function PicksPage() {
                           </div>
                           <span
                             className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
-                            style={{
-                              borderColor: pillState.border,
-                              background: pillState.bg,
-                              color: "rgba(255,255,255,0.92)",
-                            }}
+                            style={{ borderColor: pillState.border, background: pillState.bg, color: "rgba(255,255,255,0.92)" }}
                           >
                             {pillState.label}
                           </span>
@@ -897,17 +876,11 @@ export default function PicksPage() {
 
                       <td className="px-3 py-2 text-[13px] font-black text-white">{r.picks}</td>
 
-                      <td
-                        className="px-3 py-2 text-[13px] font-black"
-                        style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}
-                      >
+                      <td className="px-3 py-2 text-[13px] font-black" style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}>
                         {r.correct}
                       </td>
 
-                      <td
-                        className="px-3 py-2 text-[13px] font-black"
-                        style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)" }}
-                      >
+                      <td className="px-3 py-2 text-[13px] font-black" style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)" }}>
                         {r.wrong}
                       </td>
 
@@ -935,11 +908,7 @@ export default function PicksPage() {
 
           <div className="md:hidden mt-3 space-y-2">
             {gameStatusRows.map((r) => (
-              <div
-                key={r.gameId}
-                className="rounded-2xl border p-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}
-              >
+              <div key={r.gameId} className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}>
                 <div className="text-[13px] font-black text-white">{r.match}</div>
                 <div className="text-[11px] text-white/60 font-semibold">
                   {formatAedt(r.startTime)} • {r.venue}
@@ -965,8 +934,7 @@ export default function PicksPage() {
     const homeName = m?.home ?? g.match;
     const awayName = m?.away ?? "";
 
-    const picksCount =
-      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+    const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
 
     const isLocked = lockMs <= 0;
 
@@ -974,18 +942,17 @@ export default function PicksPage() {
       ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
       : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
 
-    // ✅ use gameId routing (no slug)
-    const href = `/picks/${g.id}`;
-
     return (
       <Link
-        href={href}
+        href={`/picks/${encodeURIComponent(g.id)}`}
         className="block rounded-2xl overflow-hidden border"
         style={{
           borderColor: "rgba(255,255,255,0.10)",
           background: "rgba(255,255,255,0.03)",
           boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
           textDecoration: "none",
+          opacity: refreshing ? 0.92 : 1,
+          transition: "opacity 120ms ease",
         }}
       >
         <div className="relative p-4 overflow-hidden" style={{ minHeight: 190 }}>
@@ -995,10 +962,7 @@ export default function PicksPage() {
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] text-white/85 font-semibold">{formatAedt(g.startTime)}</div>
 
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}
-              >
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}>
                 {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
               </span>
             </div>
@@ -1010,22 +974,10 @@ export default function PicksPage() {
             </div>
 
             <div className="mt-3 text-center">
-              <div
-                className="text-[17px] sm:text-[18px] font-black leading-tight"
-                style={{
-                  color: "rgba(255,255,255,0.98)",
-                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-                }}
-              >
+              <div className="text-[17px] sm:text-[18px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                 {g.match}
               </div>
-              <div
-                className="mt-1 text-[12px] font-semibold truncate"
-                style={{
-                  color: "rgba(255,255,255,0.78)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.60)",
-                }}
-              >
+              <div className="mt-1 text-[12px] font-semibold truncate" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                 {g.venue}
               </div>
             </div>
@@ -1086,11 +1038,7 @@ export default function PicksPage() {
               {roundLabel ? (
                 <span
                   className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                  style={{
-                    borderColor: "rgba(255,46,77,0.35)",
-                    background: "rgba(255,46,77,0.10)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
+                  style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,46,77,0.10)", color: "rgba(255,255,255,0.92)" }}
                 >
                   {roundLabel}
                 </span>
@@ -1101,16 +1049,12 @@ export default function PicksPage() {
 
           <button
             type="button"
-            onClick={loadPicks}
+            onClick={() => void loadPicks("refresh")}
             className="rounded-full px-3 py-2 text-[11px] font-black border"
-            style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
-            }}
+            style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.92)" }}
             title="Refresh"
           >
-            Refresh
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
 
@@ -1120,12 +1064,10 @@ export default function PicksPage() {
           </div>
         ) : null}
 
-        {/* ✅ NEXT UP (NO FLICKER): render stable card even while loading */}
         {nextUpStable ? (
           <div className="mt-4 transition-opacity duration-200" style={{ opacity: loading ? 0.75 : 1 }}>
             <Link
-              // ✅ use gameId routing (no slug)
-              href={`/picks/${nextUpStable.id}`}
+              href={`/picks/${encodeURIComponent(nextUpStable.id)}`}
               className="block rounded-3xl overflow-hidden border"
               style={{
                 borderColor: "rgba(255,46,77,0.35)",
@@ -1166,11 +1108,7 @@ export default function PicksPage() {
                     </div>
 
                     <div className="text-[11px] text-white/80 font-semibold">
-                      {nextUpLockMs === null
-                        ? ""
-                        : nextUpLockMs <= 0
-                        ? "LIVE / Locked"
-                        : `Locks in ${msToCountdown(nextUpLockMs)}`}
+                      {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`}
                     </div>
                   </div>
 
@@ -1188,16 +1126,10 @@ export default function PicksPage() {
                   })()}
 
                   <div className="mt-3 text-center">
-                    <div
-                      className="text-[22px] sm:text-[28px] font-black leading-tight"
-                      style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
-                    >
+                    <div className="text-[22px] sm:text-[28px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                       {nextUpStable.match}
                     </div>
-                    <div
-                      className="mt-2 text-[12px] font-semibold"
-                      style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
-                    >
+                    <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                       {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
                     </div>
                   </div>
@@ -1226,29 +1158,20 @@ export default function PicksPage() {
         <div className="mt-6">
           <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
 
-          {loading ? (
+          {loading && gamesRef.current.length === 0 ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <div
                   key={i}
                   className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.03)",
-                  }}
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.03)" }}
                 >
                   <div className="h-[190px] bg-white/5 animate-pulse" />
                 </div>
               ))}
             </div>
           ) : sortedGames.length === 0 ? (
-            <div
-              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
-              style={{
-                borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,255,255,0.03)",
-              }}
-            >
+            <div className="mt-4 rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,46,77,0.35)", background: "rgba(255,255,255,0.03)" }}>
               No games found.
             </div>
           ) : (
