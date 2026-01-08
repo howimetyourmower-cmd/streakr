@@ -20,7 +20,7 @@ type JsonRow = {
 };
 
 type ApiQuestion = {
-  id: string;
+  id: string; // ✅ stable
   gameId: string;
   quarter: number;
   question: string;
@@ -41,7 +41,7 @@ type ApiQuestion = {
 };
 
 type ApiGame = {
-  id: string;
+  id: string; // e.g. R1-G2
   match: string;
   venue: string;
   startTime: string;
@@ -53,15 +53,14 @@ type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
 
-  // ✅ Torpie truth: running streak across matches (current streak), NOT best streak.
   currentStreak: number;
   leaderScore: number;
-  leaderName: string | null; // username only
+  leaderName: string | null;
 };
 
 type SponsorQuestionConfig = {
   roundNumber: number;
-  questionId: string;
+  questionId: string; // must match ApiQuestion.id
   sponsorName?: string;
   sponsorBlurb?: string;
 };
@@ -93,14 +92,6 @@ function getRoundCode(roundNumber: number): string {
   return `R${roundNumber}`;
 }
 
-/**
- * ✅ tolerant round parsing
- * Accepts:
- * - "OR" => 0
- * - "R1" => 1
- * - "1"  => 1
- * - 1    => 1
- */
 function parseRoundNumber(val: unknown): number | null {
   if (typeof val === "number" && Number.isFinite(val) && val >= 0) return val;
 
@@ -115,7 +106,6 @@ function parseRoundNumber(val: unknown): number | null {
     return null;
   }
 
-  // allow plain numeric strings e.g. "1"
   const n = Number(c);
   if (Number.isFinite(n) && n >= 0) return n;
 
@@ -124,14 +114,10 @@ function parseRoundNumber(val: unknown): number | null {
 
 /**
  * Fix common non-ISO time "T19.30:00+11:00" -> "T19:30:00+11:00"
- * Leaves valid ISO unchanged.
  */
 function sanitiseStartTime(input: string): string {
   const s = String(input ?? "").trim();
   if (!s) return s;
-
-  // Replace ONLY the hour.minute right after the 'T'
-  // Example: 2026-03-05T19.30:00+11:00 -> 2026-03-05T19:30:00+11:00
   return s.replace(/T(\d{2})\.(\d{2}):/g, "T$1:$2:");
 }
 
@@ -179,6 +165,37 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
     console.error("[/api/picks] Failed to verify ID token", error);
     return null;
   }
+}
+
+/**
+ * ✅ Stable hash for IDs (small, fast)
+ */
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  // unsigned 32-bit -> base36
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * ✅ STABLE questionId based on content (order-independent)
+ * If you change the question text, the id changes (that’s OK — it’s truly a “new” question).
+ * If you just reorder rows or insert rows, ids stay the same.
+ */
+function stableQuestionId(params: {
+  roundNumber: number;
+  gameId: string;
+  quarter: number;
+  question: string;
+}): string {
+  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(params.question || "")
+    .trim()
+    .toLowerCase()}`;
+  const hash = fnv1a(base);
+  return `${params.gameId}-Q${params.quarter}-${hash}`;
 }
 
 /**
@@ -359,10 +376,6 @@ async function loadPicksByUserForQuestionIds(
   return out;
 }
 
-/**
- * ✅ Torpie rule:
- * LeaderName MUST be username only.
- */
 async function readUsername(uid: string): Promise<string | null> {
   try {
     const snap = await db.collection("users").doc(uid).get();
@@ -370,7 +383,6 @@ async function readUsername(uid: string): Promise<string | null> {
 
     const data = (snap.data() as any) || {};
     const username = (data?.username as string) || "";
-
     const cleaned = String(username).trim();
     if (!cleaned) return null;
 
@@ -381,13 +393,9 @@ async function readUsername(uid: string): Promise<string | null> {
   }
 }
 
-// ─────────────────────────────────────────────
-// ✅ Streak: running across games (Clean Sweep per match)
-// ─────────────────────────────────────────────
-
+// ✅ Clean Sweep per match, running across games
 function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
   const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
-
   let running = 0;
 
   for (const g of sorted) {
@@ -396,32 +404,24 @@ function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<
       return pick === "yes" || pick === "no";
     });
 
-    // no picks => streak unchanged
     if (pickedQs.length === 0) continue;
 
-    // if any picked question unsettled, don't apply this game yet
+    // if any picked unsettled => don't apply this game yet
     const anyUnsettled = pickedQs.some((q) => q.status !== "final" && q.status !== "void");
     if (anyUnsettled) continue;
 
-    // if any wrong => reset to 0
     const anyWrong = pickedQs.some((q) => q.correctPick === false);
     if (anyWrong) {
       running = 0;
       continue;
     }
 
-    // add correct only (voids are correctPick null, don't add)
     const correct = pickedQs.filter((q) => q.correctPick === true).length;
     running += correct;
   }
 
   return running;
 }
-
-// ─────────────────────────────────────────────
-// ✅ Auto-pick “current round” if no ?round provided:
-// choose the round containing the NEXT upcoming game; if none upcoming, choose latest round.
-// ─────────────────────────────────────────────
 
 function autoDetectRoundNumber(nowMs: number): number {
   let nextRow: JsonRow | null = null;
@@ -442,7 +442,6 @@ function autoDetectRoundNumber(nowMs: number): number {
     return rn ?? 0;
   }
 
-  // no future games: pick max round we have
   let max = 0;
   for (const r of rows) {
     const rn = parseRoundNumber(r.Round);
@@ -452,13 +451,12 @@ function autoDetectRoundNumber(nowMs: number): number {
 }
 
 // ─────────────────────────────────────────────
-// Main GET handler (AFL only)
+// Main GET handler
 // ─────────────────────────────────────────────
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
-
     const roundParam = url.searchParams.get("round");
 
     let roundNumber: number;
@@ -472,7 +470,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const currentUserId = await getUserIdFromRequest(req);
     const roundCode = getRoundCode(roundNumber);
 
-    // ✅ FIX: match rows by parsed round number (tolerant), not by string code only
     const roundRows = rows.filter((r) => parseRoundNumber(r.Round) === roundNumber);
 
     if (!roundRows.length) {
@@ -483,20 +480,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         leaderScore: 0,
         leaderName: null,
       };
-      return NextResponse.json(empty);
-    }
-
-    // Build stable questionIds for THIS round
-    const questionIdsForRound = new Set<string>();
-
-    // questionId generation: `${roundCode}-G${Game}-Q${index+1}` where index is per-game order of rows.
-    const perGameIndex: Record<string, number> = {};
-    for (const r of roundRows) {
-      const gameId = `${roundCode}-G${r.Game}`;
-      if (perGameIndex[gameId] === undefined) perGameIndex[gameId] = 0;
-      const idx = perGameIndex[gameId]++;
-      const qid = `${gameId}-Q${idx + 1}`;
-      questionIdsForRound.add(qid);
+      return NextResponse.json(empty, { headers: { "Cache-Control": "no-store" } });
     }
 
     const sponsorConfig = await getSponsorQuestionConfig();
@@ -504,14 +488,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const statusOverrides = await getQuestionStatusForRound(roundNumber);
     const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
+    // ✅ Build ALL stable questionIds for this round first
+    const questionIdsForRound = new Set<string>();
+    for (const r of roundRows) {
+      const gameId = `${roundCode}-G${r.Game}`;
+      const qid = stableQuestionId({
+        roundNumber,
+        gameId,
+        quarter: Number(r.Quarter ?? 1),
+        question: String(r.Question ?? ""),
+      });
+      questionIdsForRound.add(qid);
+    }
+
     const { pickStats, userPicks } = await getPickStatsForQuestionIds({
       questionIds: questionIdsForRound,
       currentUserId,
     });
 
-    // Build games + questions
+    // Build games map
     const gamesById: Record<string, ApiGame> = {};
-    const questionIndexByGame: Record<string, number> = {};
 
     for (const r of roundRows) {
       const gameId = `${roundCode}-G${r.Game}`;
@@ -521,16 +517,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           id: gameId,
           match: r.Match,
           venue: r.Venue,
-          // ✅ FIX: return sanitised startTime so client parsing is stable
           startTime: sanitiseStartTime(r.StartTime),
           isUnlockedForPicks: !!gameLocks[gameId],
           questions: [],
         };
-        questionIndexByGame[gameId] = 0;
       }
 
-      const qIndex = questionIndexByGame[gameId]++;
-      const questionId = `${gameId}-Q${qIndex + 1}`;
+      const questionId = stableQuestionId({
+        roundNumber,
+        gameId,
+        quarter: Number(r.Quarter ?? 1),
+        question: String(r.Question ?? ""),
+      });
 
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
@@ -539,21 +537,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const statusInfo = statusOverrides[questionId];
-      const effectiveStatus = statusInfo?.status ?? normaliseStatusValue(r.Status || "Open");
 
-      // outcome only meaningful when final/void
-      const correctOutcome =
+      const effectiveStatus: QuestionStatus =
+        statusInfo?.status ?? normaliseStatusValue(r.Status || "Open");
+
+      const effectiveOutcome =
         effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
       const userPick = userPicks[questionId];
 
-      // correctPick rules:
-      // - void status or void outcome => null
-      // - otherwise compare pick vs outcome
       let correctPick: boolean | null | undefined = undefined;
-      let finalOutcome: QuestionOutcome | undefined = correctOutcome;
+      let finalOutcome: QuestionOutcome | undefined = effectiveOutcome;
 
-      if (effectiveStatus === "void" || correctOutcome === "void") {
+      if (effectiveStatus === "void" || finalOutcome === "void") {
         correctPick = null;
         finalOutcome = "void";
       } else if (effectiveStatus === "final" && finalOutcome && userPick) {
@@ -561,13 +557,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       }
 
       const isSponsorQuestion =
-        !!sponsorConfig && sponsorConfig.roundNumber === roundNumber && sponsorConfig.questionId === questionId;
+        !!sponsorConfig &&
+        sponsorConfig.roundNumber === roundNumber &&
+        sponsorConfig.questionId === questionId;
 
       const apiQuestion: ApiQuestion = {
         id: questionId,
         gameId,
-        quarter: r.Quarter,
-        question: r.Question,
+        quarter: Number(r.Quarter ?? 1),
+        question: String(r.Question ?? ""),
         status: effectiveStatus,
 
         userPick,
@@ -587,12 +585,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       gamesById[gameId].questions.push(apiQuestion);
     }
 
-    const games = Object.values(gamesById);
+    // ✅ sort games by time and questions by quarter + question
+    const games: ApiGame[] = Object.values(gamesById)
+      .sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime))
+      .map((g) => ({
+        ...g,
+        questions: [...g.questions].sort(
+          (a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question)
+        ),
+      }));
 
-    // ✅ CURRENT user running streak (across games)
     const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
-    // ✅ Leader running streak (across games)
+    // leader (within this round)
     let leaderScore = 0;
     let leaderUid: string | null = null;
 
@@ -616,7 +621,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       leaderName,
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+        Pragma: "no-cache",
+        Expires: "0",
+      },
+    });
   } catch (error) {
     console.error("[/api/picks] Unexpected error", error);
     return NextResponse.json(
@@ -628,7 +639,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         leaderScore: 0,
         leaderName: null,
       },
-      { status: 500 }
+      { status: 500, headers: { "Cache-Control": "no-store" } }
     );
   }
 }
