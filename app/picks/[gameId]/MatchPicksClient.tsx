@@ -110,7 +110,6 @@ function formatQuarterLabel(q: number) {
 function parseTeams(match: string) {
   const parts = match.split(" vs ");
   if (parts.length === 2) return { home: parts[0].trim(), away: parts[1].trim() };
-  // tolerate " VS "
   const parts2 = match.split(/\s+vs\s+/i);
   if (parts2.length === 2) return { home: parts2[0].trim(), away: parts2[1].trim() };
   return { home: match.trim(), away: "" };
@@ -229,19 +228,11 @@ function ResultPill({
   }
 
   if (correctPick === true) {
-    return (
-      <span className={`${base} border-emerald-400/30 bg-emerald-400/10 text-emerald-200`}>
-        ✅ CORRECT
-      </span>
-    );
+    return <span className={`${base} border-emerald-400/30 bg-emerald-400/10 text-emerald-200`}>✅ CORRECT</span>;
   }
 
   if (correctPick === false) {
-    return (
-      <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>
-        ❌ WRONG
-      </span>
-    );
+    return <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>❌ WRONG</span>;
   }
 
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
@@ -275,17 +266,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       if (!raw) return;
       const parsed = JSON.parse(raw) as Record<string, LocalPick>;
       if (parsed && typeof parsed === "object") setPicks(parsed);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [picksStorageKey]);
 
   useEffect(() => {
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [picks, picksStorageKey]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
@@ -296,18 +283,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     try {
       const headers: Record<string, string> = {};
-
-      // ✅ FIXED: removed the accidental extra "}" that broke the build
       if (user) {
-        try {
-          const token = await user.getIdToken();
-          headers.Authorization = `Bearer ${token}`;
-        } catch {
-          // ignore token issues
-        }
+        const token = await user.getIdToken();
+        headers.Authorization = `Bearer ${token}`;
       }
 
-      // ✅ ALWAYS read from /api/picks (round-aware)
       const res = await fetch(`/api/picks?round=${roundNumber}`, {
         cache: "no-store",
         headers,
@@ -321,7 +301,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setGame(found);
       lastGameRef.current = found;
 
-      // ✅ if logged in, trust server userPick as source of truth
+      // ✅ if logged in, merge server userPick into local picks (never wipe)
       if (user) {
         const seeded: Record<string, LocalPick> = {};
         for (const q of found.questions || []) {
@@ -329,7 +309,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
         setPicks((prev) => ({ ...prev, ...seeded }));
       } else {
-        // anon: if no local picks yet, seed from api (usually empty)
+        // anon: only seed if nothing exists locally
         setPicks((prev) => {
           if (Object.keys(prev || {}).length > 0) return prev;
           const seeded: Record<string, LocalPick> = {};
@@ -348,15 +328,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
-      await fetchMatch("initial");
-    })();
-    return () => {
-      alive = false;
-    };
-    // refetch when login state changes so we get userPick/correctPick
+    void fetchMatch("initial");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, user?.uid]);
 
@@ -376,7 +348,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [questions]);
 
   async function persistPick(questionId: string, next: LocalPick) {
-    // anon: local only
     if (!user) return;
 
     setSaving((prev) => ({ ...prev, [questionId]: true }));
@@ -398,7 +369,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         );
       }
 
-      // ✅ background refresh (NO full-screen loading)
       void fetchMatch("refresh");
     } catch (e) {
       console.error("[MatchPicksClient] failed to persist pick", e);
@@ -413,10 +383,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setPicks((prev) => {
       const current = prev[questionId] || "none";
       const next: LocalPick = current === value ? "none" : value;
-
-      // optimistic update
       void persistPick(questionId, next);
-
       return { ...prev, [questionId]: next };
     });
   }
@@ -430,7 +397,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  // ✅ only show skeleton if first load and we have no stable game yet
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -489,9 +455,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="flex items-end justify-between gap-3">
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
-              {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
-              ) : null}
+              {refreshing ? <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div> : null}
               <button
                 type="button"
                 className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
@@ -527,7 +491,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const playerName = extractPlayerName(q.question);
             const isSponsored = !!q.isSponsorQuestion;
             const isRevealed = !!revealed[q.id];
-
             const isPlayerPick = !!playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
@@ -549,22 +512,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
-              <div
-                key={q.id}
-                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4"
-              >
+              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4">
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
-                <div
-                  className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}
-                >
+                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[15px] font-black tracking-wide">
                         Q{qNum} - {formatQuarterLabel(q.quarter)}
                       </div>
+
                       <div className="mt-1 flex items-center gap-2">
                         <div className="text-[12px] text-white/60">
                           Status: <span className="text-white/60">{status}</span>
@@ -640,9 +599,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">
-                            SPONSOR QUESTION
-                          </div>
+                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
                           <div className="mt-1 text-[12px] font-semibold text-white/70">
                             Proudly by <span className="font-black text-white">{sponsorName}</span>
                           </div>
