@@ -9,18 +9,18 @@ type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
 type JsonRow = {
-  Round: string | number; // tolerant: "OR", "R1", "1", 1, ...
+  Round: string | number;
   Game: number;
   Match: string;
   Venue: string;
-  StartTime: string; // may be slightly non-ISO ("19.30")
+  StartTime: string;
   Question: string;
   Quarter: number;
-  Status: string; // tolerant: "Open"/"Final"/etc
+  Status: string;
 };
 
 type ApiQuestion = {
-  id: string; // ✅ stable
+  id: string;
   gameId: string;
   quarter: number;
   question: string;
@@ -37,11 +37,11 @@ type ApiQuestion = {
 
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
-  correctPick?: boolean | null; // true=correct, false=wrong, null=void
+  correctPick?: boolean | null;
 };
 
 type ApiGame = {
-  id: string; // e.g. R1-G2
+  id: string;
   match: string;
   venue: string;
   startTime: string;
@@ -52,7 +52,6 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
-
   currentStreak: number;
   leaderScore: number;
   leaderName: string | null;
@@ -60,14 +59,14 @@ type PicksApiResponse = {
 
 type SponsorQuestionConfig = {
   roundNumber: number;
-  questionId: string; // must match ApiQuestion.id
+  questionId: string;
   sponsorName?: string;
   sponsorBlurb?: string;
 };
 
 type QuestionStatusDoc = {
   roundNumber?: number;
-  questionId: string;
+  questionId?: string; // may be omitted if docId is questionId
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock" | string;
   result?: QuestionOutcome | "lock" | string;
@@ -88,8 +87,7 @@ const rows: JsonRow[] = rounds2026 as JsonRow[];
 // ─────────────────────────────────────────────
 
 function getRoundCode(roundNumber: number): string {
-  if (roundNumber === 0) return "OR";
-  return `R${roundNumber}`;
+  return roundNumber === 0 ? "OR" : `R${roundNumber}`;
 }
 
 function parseRoundNumber(val: unknown): number | null {
@@ -97,24 +95,17 @@ function parseRoundNumber(val: unknown): number | null {
 
   const c = String(val ?? "").trim().toUpperCase();
   if (!c) return null;
-
   if (c === "OR") return 0;
 
   if (c.startsWith("R")) {
     const n = Number(c.slice(1));
-    if (Number.isFinite(n) && n >= 0) return n;
-    return null;
+    return Number.isFinite(n) && n >= 0 ? n : null;
   }
 
   const n = Number(c);
-  if (Number.isFinite(n) && n >= 0) return n;
-
-  return null;
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-/**
- * Fix common non-ISO time "T19.30:00+11:00" -> "T19:30:00+11:00"
- */
 function sanitiseStartTime(input: string): string {
   const s = String(input ?? "").trim();
   if (!s) return s;
@@ -122,8 +113,7 @@ function sanitiseStartTime(input: string): string {
 }
 
 function safeTimeMs(startTime: string): number {
-  const fixed = sanitiseStartTime(startTime);
-  const t = new Date(fixed).getTime();
+  const t = new Date(sanitiseStartTime(startTime)).getTime();
   return Number.isFinite(t) ? t : NaN;
 }
 
@@ -143,11 +133,9 @@ function normaliseStatusValue(val: unknown): QuestionStatus {
 function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   if (typeof val !== "string") return undefined;
   const s = val.trim().toLowerCase();
-
   if (["yes", "y", "correct", "win", "winner"].includes(s)) return "yes";
   if (["no", "n", "wrong", "loss", "loser"].includes(s)) return "no";
   if (["void", "cancelled", "canceled"].includes(s)) return "void";
-
   return undefined;
 }
 
@@ -167,24 +155,15 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   }
 }
 
-/**
- * ✅ Stable hash for IDs (small, fast)
- */
 function fnv1a(str: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  // unsigned 32-bit -> base36
   return (h >>> 0).toString(36);
 }
 
-/**
- * ✅ STABLE questionId based on content (order-independent)
- * If you change the question text, the id changes (that’s OK — it’s truly a “new” question).
- * If you just reorder rows or insert rows, ids stay the same.
- */
 function stableQuestionId(params: {
   roundNumber: number;
   gameId: string;
@@ -198,11 +177,10 @@ function stableQuestionId(params: {
   return `${params.gameId}-Q${params.quarter}-${hash}`;
 }
 
-/**
- * ✅ Round-only pick stats:
- * Only counts picks for the questionIds in this round.
- * Also returns the current user's picks (if logged in).
- */
+// ─────────────────────────────────────────────
+// Firestore reads
+// ─────────────────────────────────────────────
+
 async function getPickStatsForQuestionIds(params: {
   questionIds: Set<string>;
   currentUserId: string | null;
@@ -269,7 +247,6 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
 
   try {
     const snap = await db.collection("comments").where("roundNumber", "==", roundNumber).get();
-
     snap.forEach((docSnap) => {
       const data = docSnap.data() as { questionId?: string };
       const qid = data.questionId;
@@ -283,47 +260,48 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
   return commentCounts;
 }
 
-async function getQuestionStatusForRound(
-  roundNumber: number
+/**
+ * ✅ CRITICAL FIX:
+ * Fetch status overrides by questionId doc ID, NOT by roundNumber.
+ * This makes "reopen" instantly affect streak even if roundNumber field is missing.
+ */
+async function getQuestionStatusForQuestionIds(
+  questionIds: Set<string>
 ): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
+  const out: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
+  const ids = Array.from(questionIds);
+  if (!ids.length) return out;
+
+  // Admin SDK supports db.getAll(...docRefs)
+  const refs = ids.map((qid) => db.collection("questionStatus").doc(qid));
 
   try {
-    const snap = await db.collection("questionStatus").where("roundNumber", "==", roundNumber).get();
+    // @ts-ignore - Firestore admin types allow getAll
+    const snaps: FirebaseFirestore.DocumentSnapshot[] = await db.getAll(...refs);
 
-    snap.forEach((docSnap) => {
-      const data = docSnap.data() as QuestionStatusDoc;
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
 
-      if (!data.questionId || !data.status) return;
+      const data = (snap.data() as QuestionStatusDoc) || {};
+      const qid = (data.questionId as string) || snap.id;
+
+      const status = data.status ? (data.status as QuestionStatus) : undefined;
+      if (!qid || !status) continue;
 
       const rawOutcome = (data.outcome as string | undefined) ?? (data.result as string | undefined);
       const outcome = normaliseOutcomeValue(rawOutcome);
 
-      const updatedAtMs =
-        data.updatedAt && typeof (data.updatedAt as any).toMillis === "function"
-          ? (data.updatedAt as any).toMillis()
-          : 0;
-
-      const existing = temp[data.questionId];
-      if (!existing || updatedAtMs >= existing.updatedAtMs) {
-        temp[data.questionId] = { status: data.status, outcome, updatedAtMs };
-      }
-    });
+      out[qid] = { status, outcome };
+    }
   } catch (error) {
-    console.error("[/api/picks] Error fetching questionStatus", error);
+    console.error("[/api/picks] Error fetching questionStatus by ids", error);
   }
 
-  const finalMap: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
-  Object.entries(temp).forEach(([qid, value]) => {
-    finalMap[qid] = { status: value.status, outcome: value.outcome };
-  });
-
-  return finalMap;
+  return out;
 }
 
 async function getGameLocksForRound(roundCode: string, roundRows: JsonRow[]): Promise<Record<string, boolean>> {
   const map: Record<string, boolean> = {};
-
   const gameIds = Array.from(new Set(roundRows.map((r) => `${roundCode}-G${r.Game}`)));
   if (!gameIds.length) return map;
 
@@ -384,16 +362,17 @@ async function readUsername(uid: string): Promise<string | null> {
     const data = (snap.data() as any) || {};
     const username = (data?.username as string) || "";
     const cleaned = String(username).trim();
-    if (!cleaned) return null;
-
-    return cleaned;
+    return cleaned ? cleaned : null;
   } catch (e) {
     console.warn("[/api/picks] Failed to read username", e);
     return null;
   }
 }
 
-// ✅ Clean Sweep per match, running across games
+// ─────────────────────────────────────────────
+// Streak
+// ─────────────────────────────────────────────
+
 function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
   const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
   let running = 0;
@@ -406,7 +385,6 @@ function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<
 
     if (pickedQs.length === 0) continue;
 
-    // if any picked unsettled => don't apply this game yet
     const anyUnsettled = pickedQs.some((q) => q.status !== "final" && q.status !== "void");
     if (anyUnsettled) continue;
 
@@ -437,10 +415,7 @@ function autoDetectRoundNumber(nowMs: number): number {
     }
   }
 
-  if (nextRow) {
-    const rn = parseRoundNumber(nextRow.Round);
-    return rn ?? 0;
-  }
+  if (nextRow) return parseRoundNumber(nextRow.Round) ?? 0;
 
   let max = 0;
   for (const r of rows) {
@@ -460,9 +435,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const roundParam = url.searchParams.get("round");
 
     let roundNumber: number;
-    if (roundParam === null) {
-      roundNumber = autoDetectRoundNumber(Date.now());
-    } else {
+    if (roundParam === null) roundNumber = autoDetectRoundNumber(Date.now());
+    else {
       const parsed = Number(roundParam);
       roundNumber = !Number.isNaN(parsed) && parsed >= 0 ? parsed : 0;
     }
@@ -485,28 +459,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const sponsorConfig = await getSponsorQuestionConfig();
     const commentCounts = await getCommentCountsForRound(roundNumber);
-    const statusOverrides = await getQuestionStatusForRound(roundNumber);
-    const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
-    // ✅ Build ALL stable questionIds for this round first
+    // Build stable questionIds for the round
     const questionIdsForRound = new Set<string>();
     for (const r of roundRows) {
       const gameId = `${roundCode}-G${r.Game}`;
-      const qid = stableQuestionId({
-        roundNumber,
-        gameId,
-        quarter: Number(r.Quarter ?? 1),
-        question: String(r.Question ?? ""),
-      });
-      questionIdsForRound.add(qid);
+      questionIdsForRound.add(
+        stableQuestionId({
+          roundNumber,
+          gameId,
+          quarter: Number(r.Quarter ?? 1),
+          question: String(r.Question ?? ""),
+        })
+      );
     }
+
+    // ✅ fetch overrides by ids (fix reopen)
+    const statusOverrides = await getQuestionStatusForQuestionIds(questionIdsForRound);
+
+    const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
     const { pickStats, userPicks } = await getPickStatsForQuestionIds({
       questionIds: questionIdsForRound,
       currentUserId,
     });
 
-    // Build games map
     const gamesById: Record<string, ApiGame> = {};
 
     for (const r of roundRows) {
@@ -532,12 +509,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
       const stats = pickStats[questionId] ?? { yes: 0, no: 0, total: 0 };
       const total = stats.total;
-
       const yesPercent = total > 0 ? Math.round((stats.yes / total) * 100) : 0;
       const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const statusInfo = statusOverrides[questionId];
-
       const effectiveStatus: QuestionStatus =
         statusInfo?.status ?? normaliseStatusValue(r.Status || "Open");
 
@@ -561,7 +536,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         sponsorConfig.roundNumber === roundNumber &&
         sponsorConfig.questionId === questionId;
 
-      const apiQuestion: ApiQuestion = {
+      gamesById[gameId].questions.push({
         id: questionId,
         gameId,
         quarter: Number(r.Quarter ?? 1),
@@ -580,12 +555,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         correctOutcome: finalOutcome,
         outcome: finalOutcome,
         correctPick,
-      };
-
-      gamesById[gameId].questions.push(apiQuestion);
+      });
     }
 
-    // ✅ sort games by time and questions by quarter + question
     const games: ApiGame[] = Object.values(gamesById)
       .sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime))
       .map((g) => ({
@@ -597,7 +569,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
-    // leader (within this round)
     let leaderScore = 0;
     let leaderUid: string | null = null;
 
