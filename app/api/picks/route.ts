@@ -9,11 +9,11 @@ type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
 type JsonRow = {
-  Round: string; // "OR", "R1", "R2", ...
+  Round: string | number; // tolerant: "OR", "R1", "1", 1, ...
   Game: number;
   Match: string;
   Venue: string;
-  StartTime: string; // ISO string
+  StartTime: string; // may be slightly non-ISO ("19.30")
   Question: string;
   Quarter: number;
   Status: string; // tolerant: "Open"/"Final"/etc
@@ -84,46 +84,61 @@ type GameLockDoc = {
 
 const rows: JsonRow[] = rounds2026 as JsonRow[];
 
+// ─────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────
+
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
 }
 
-function parseRoundNumberFromCode(code: string): number | null {
-  const c = String(code || "").trim().toUpperCase();
+/**
+ * ✅ tolerant round parsing
+ * Accepts:
+ * - "OR" => 0
+ * - "R1" => 1
+ * - "1"  => 1
+ * - 1    => 1
+ */
+function parseRoundNumber(val: unknown): number | null {
+  if (typeof val === "number" && Number.isFinite(val) && val >= 0) return val;
+
+  const c = String(val ?? "").trim().toUpperCase();
+  if (!c) return null;
+
   if (c === "OR") return 0;
+
   if (c.startsWith("R")) {
     const n = Number(c.slice(1));
     if (Number.isFinite(n) && n >= 0) return n;
+    return null;
   }
+
+  // allow plain numeric strings e.g. "1"
+  const n = Number(c);
+  if (Number.isFinite(n) && n >= 0) return n;
+
   return null;
 }
 
-// ✅ Auto-pick “current round” if no ?round provided:
-// choose the round containing the NEXT upcoming game; if none upcoming, choose latest round.
-function autoDetectRoundNumber(nowMs: number): number {
-  let nextRow: JsonRow | null = null;
+/**
+ * Fix common non-ISO time "T19.30:00+11:00" -> "T19:30:00+11:00"
+ * Leaves valid ISO unchanged.
+ */
+function sanitiseStartTime(input: string): string {
+  const s = String(input ?? "").trim();
+  if (!s) return s;
 
-  for (const r of rows) {
-    const t = new Date(r.StartTime).getTime();
-    if (!Number.isFinite(t)) continue;
-    if (t >= nowMs) {
-      if (!nextRow || t < new Date(nextRow.StartTime).getTime()) nextRow = r;
-    }
-  }
+  // Replace ONLY the hour.minute right after the 'T'
+  // Example: 2026-03-05T19.30:00+11:00 -> 2026-03-05T19:30:00+11:00
+  return s.replace(/T(\d{2})\.(\d{2}):/g, "T$1:$2:");
+}
 
-  if (nextRow) {
-    const rn = parseRoundNumberFromCode(nextRow.Round);
-    return rn ?? 0;
-  }
-
-  // no future games: pick max round we have
-  let max = 0;
-  for (const r of rows) {
-    const rn = parseRoundNumberFromCode(r.Round);
-    if (rn !== null) max = Math.max(max, rn);
-  }
-  return max;
+function safeTimeMs(startTime: string): number {
+  const fixed = sanitiseStartTime(startTime);
+  const t = new Date(fixed).getTime();
+  return Number.isFinite(t) ? t : NaN;
 }
 
 function normaliseStatusValue(val: unknown): QuestionStatus {
@@ -371,7 +386,7 @@ async function readUsername(uid: string): Promise<string | null> {
 // ─────────────────────────────────────────────
 
 function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
-  const sorted = [...games].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
 
   let running = 0;
 
@@ -404,6 +419,39 @@ function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<
 }
 
 // ─────────────────────────────────────────────
+// ✅ Auto-pick “current round” if no ?round provided:
+// choose the round containing the NEXT upcoming game; if none upcoming, choose latest round.
+// ─────────────────────────────────────────────
+
+function autoDetectRoundNumber(nowMs: number): number {
+  let nextRow: JsonRow | null = null;
+  let nextMs = Infinity;
+
+  for (const r of rows) {
+    const t = safeTimeMs(r.StartTime);
+    if (!Number.isFinite(t)) continue;
+
+    if (t >= nowMs && t < nextMs) {
+      nextMs = t;
+      nextRow = r;
+    }
+  }
+
+  if (nextRow) {
+    const rn = parseRoundNumber(nextRow.Round);
+    return rn ?? 0;
+  }
+
+  // no future games: pick max round we have
+  let max = 0;
+  for (const r of rows) {
+    const rn = parseRoundNumber(r.Round);
+    if (rn !== null) max = Math.max(max, rn);
+  }
+  return max;
+}
+
+// ─────────────────────────────────────────────
 // Main GET handler (AFL only)
 // ─────────────────────────────────────────────
 
@@ -411,7 +459,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const url = new URL(req.url);
 
-    // ✅ round param optional
     const roundParam = url.searchParams.get("round");
 
     let roundNumber: number;
@@ -424,7 +471,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const currentUserId = await getUserIdFromRequest(req);
     const roundCode = getRoundCode(roundNumber);
-    const roundRows = rows.filter((r) => String(r.Round).toUpperCase().trim() === roundCode);
+
+    // ✅ FIX: match rows by parsed round number (tolerant), not by string code only
+    const roundRows = rows.filter((r) => parseRoundNumber(r.Round) === roundNumber);
 
     if (!roundRows.length) {
       const empty: PicksApiResponse = {
@@ -472,7 +521,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           id: gameId,
           match: r.Match,
           venue: r.Venue,
-          startTime: r.StartTime,
+          // ✅ FIX: return sanitised startTime so client parsing is stable
+          startTime: sanitiseStartTime(r.StartTime),
           isUnlockedForPicks: !!gameLocks[gameId],
           questions: [],
         };
