@@ -8,7 +8,7 @@ import rounds2026 from "@/data/rounds-2026.json";
 import {
   inferRoundNumberFromQuestionId,
   questionStatusDocId,
-} from "@/lib/questionStatusKey";
+} from "@/app/lib/questionStatusKey";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
