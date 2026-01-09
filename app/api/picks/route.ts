@@ -66,11 +66,11 @@ type SponsorQuestionConfig = {
 
 type QuestionStatusDoc = {
   roundNumber?: number;
-  questionId?: string; // may be omitted if docId is questionId
+  questionId?: string;
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock" | string;
   result?: QuestionOutcome | "lock" | string;
-  updatedAt?: FirebaseFirestore.Timestamp;
+  updatedAt?: FirebaseFirestore.Timestamp | any;
 };
 
 type GameLockDoc = {
@@ -155,6 +155,10 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   }
 }
 
+// ─────────────────────────────────────────────
+// ✅ Stable questionId (keep your approach)
+// ─────────────────────────────────────────────
+
 function fnv1a(str: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < str.length; i++) {
@@ -170,7 +174,9 @@ function stableQuestionId(params: {
   quarter: number;
   question: string;
 }): string {
-  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(params.question || "")
+  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(
+    params.question || ""
+  )
     .trim()
     .toLowerCase()}`;
   const hash = fnv1a(base);
@@ -232,7 +238,8 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
-    const sponsorQuestion = (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
+    const sponsorQuestion =
+      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
 
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
     return sponsorQuestion;
@@ -260,44 +267,77 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
   return commentCounts;
 }
 
-/**
- * ✅ CRITICAL FIX:
- * Fetch status overrides by questionId doc ID, NOT by roundNumber.
- * This makes "reopen" instantly affect streak even if roundNumber field is missing.
- */
-async function getQuestionStatusForQuestionIds(
-  questionIds: Set<string>
-): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const out: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
-  const ids = Array.from(questionIds);
-  if (!ids.length) return out;
+function questionStatusDocId(roundNumber: number, questionId: string) {
+  // ✅ MUST match /app/api/settlement/route.ts
+  return `${roundNumber}__${questionId}`;
+}
 
-  // Admin SDK supports db.getAll(...docRefs)
-  const refs = ids.map((qid) => db.collection("questionStatus").doc(qid));
+function toMs(ts: any): number {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  const d = ts instanceof Date ? ts : new Date(ts);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * ✅ FIXED: read the correct docs (roundNumber__questionId)
+ * and map them back to questionId.
+ *
+ * Also: if multiple docs ever exist, we pick the newest by updatedAt.
+ */
+async function getQuestionStatusForQuestionIds(params: {
+  roundNumber: number;
+  questionIds: Set<string>;
+}): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
+  const { roundNumber, questionIds } = params;
+  const out: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
+
+  const ids = Array.from(questionIds);
+  if (!ids.length) return {};
+
+  const refs = ids.map((qid) =>
+    db.collection("questionStatus").doc(questionStatusDocId(roundNumber, qid))
+  );
 
   try {
-    // @ts-ignore - Firestore admin types allow getAll
+    // @ts-ignore admin supports getAll
     const snaps: FirebaseFirestore.DocumentSnapshot[] = await db.getAll(...refs);
 
     for (const snap of snaps) {
       if (!snap.exists) continue;
 
       const data = (snap.data() as QuestionStatusDoc) || {};
-      const qid = (data.questionId as string) || snap.id;
 
-      const status = data.status ? (data.status as QuestionStatus) : undefined;
+      // Primary key is the questionId stored in doc; fallback: parse from docId
+      const qid =
+        (typeof data.questionId === "string" && data.questionId) ||
+        snap.id.split("__").slice(1).join("__"); // safe even if questionId contains "__" (unlikely)
+
+      const status = data.status as QuestionStatus | undefined;
       if (!qid || !status) continue;
 
-      const rawOutcome = (data.outcome as string | undefined) ?? (data.result as string | undefined);
+      const rawOutcome = (data.outcome as any) ?? (data.result as any);
       const outcome = normaliseOutcomeValue(rawOutcome);
 
-      out[qid] = { status, outcome };
+      const updatedAtMs = toMs((data as any).updatedAt);
+
+      const existing = out[qid];
+      if (!existing || updatedAtMs >= existing.updatedAtMs) {
+        out[qid] = { status, outcome, updatedAtMs };
+      }
     }
   } catch (error) {
     console.error("[/api/picks] Error fetching questionStatus by ids", error);
   }
 
-  return out;
+  // Strip updatedAtMs for return type
+  const clean: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
+  Object.entries(out).forEach(([qid, v]) => {
+    clean[qid] = { status: v.status, outcome: v.outcome };
+  });
+
+  return clean;
 }
 
 async function getGameLocksForRound(roundCode: string, roundRows: JsonRow[]): Promise<Record<string, boolean>> {
@@ -373,7 +413,10 @@ async function readUsername(uid: string): Promise<string | null> {
 // Streak
 // ─────────────────────────────────────────────
 
-function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
+function computeRunningStreakAcrossGames(
+  games: ApiGame[],
+  picksForUser: Record<string, "yes" | "no">
+): number {
   const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
   let running = 0;
 
@@ -474,8 +517,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ✅ fetch overrides by ids (fix reopen)
-    const statusOverrides = await getQuestionStatusForQuestionIds(questionIdsForRound);
+    // ✅ FIX: read overrides from questionStatus/{round__qid}
+    const statusOverrides = await getQuestionStatusForQuestionIds({
+      roundNumber,
+      questionIds: questionIdsForRound,
+    });
 
     const gameLocks = await getGameLocksForRound(roundCode, roundRows);
 
@@ -513,9 +559,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const noPercent = total > 0 ? Math.round((stats.no / total) * 100) : 0;
 
       const statusInfo = statusOverrides[questionId];
+
       const effectiveStatus: QuestionStatus =
         statusInfo?.status ?? normaliseStatusValue(r.Status || "Open");
 
+      // Only meaningful if settled
       const effectiveOutcome =
         effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
@@ -549,7 +597,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         commentCount: commentCounts[questionId] ?? 0,
 
         isSponsorQuestion,
-        sponsorName: isSponsorQuestion ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER" : undefined,
+        sponsorName: isSponsorQuestion
+          ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER"
+          : undefined,
         sponsorBlurb: isSponsorQuestion ? sponsorConfig?.sponsorBlurb : undefined,
 
         correctOutcome: finalOutcome,
