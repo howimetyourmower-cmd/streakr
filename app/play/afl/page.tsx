@@ -94,7 +94,7 @@ function formatStartLine(iso: string) {
   return `${date} • ${time} AEDT`;
 }
 
-/** ✅ TORPIE palette: Black / Fire Engine Red / White */
+/** ✅ JOOSE palette: Black / Fire Engine Red / White */
 const COLORS = {
   bg: "#05060A",
   darkPanel: "#0B0D14",
@@ -252,7 +252,7 @@ export default function AflHubPage() {
   return (
     <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
-        @keyframes torpiePing {
+        @keyframes joosePing {
           0% { transform: scale(1); opacity: .55; }
           80% { transform: scale(1.6); opacity: 0; }
           100% { transform: scale(1.6); opacity: 0; }
@@ -277,7 +277,7 @@ export default function AflHubPage() {
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
-                <span className="block">TORPIE.</span>
+                <span className="block">JOOSE.</span>
                 <span className="block">PREDICT.</span>
                 <span className="block">PLAY.</span>
                 <span className="block" style={{ color: COLORS.red }}>
@@ -524,7 +524,7 @@ export default function AflHubPage() {
                                   className="absolute inline-flex h-full w-full rounded-full"
                                   style={{
                                     background: rgbaFromHex(COLORS.red, 0.85),
-                                    animation: "torpiePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
+                                    animation: "joosePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
                                   }}
                                 />
                                 <span
@@ -590,7 +590,7 @@ export default function AflHubPage() {
           {/* FOOTER */}
           <footer className="mt-12 border-t pt-6" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/45">
-              <p>TORPIE is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.</p>
+              <p>JOOSE is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.</p>
               <div className="flex items-center gap-4">
                 <Link href="/terms" className="hover:underline underline-offset-2">
                   Terms
@@ -624,7 +624,7 @@ export default function AflHubPage() {
             </div>
 
             <p className="text-sm text-white/65 mb-4">
-              You need a free TORPIE account to make picks, build your streak and appear on the leaderboard.
+              You need a free JOOSE account to make picks, build your streak and appear on the leaderboard.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3">
