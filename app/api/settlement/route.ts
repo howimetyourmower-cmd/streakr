@@ -1,33 +1,18 @@
 // /app/api/settlement/route.ts
+export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import rounds2026 from "@/data/rounds-2026.json";
 
-export const dynamic = "force-dynamic";
-
 type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
-type SportKey = "AFL" | "BBL";
 
 type RequestBody = {
-  // AFL (required for AFL)
-  roundNumber?: number;
-
-  // Shared
-  sport?: SportKey;
+  roundNumber: number; // ✅ required (AFL)
   questionId: string;
-  action:
-    | "lock"
-    | "reopen"
-    | "final_yes"
-    | "final_no"
-    | "final_void"
-    | "void";
-
-  // BBL
-  docId?: string; // cricketRounds/{docId}
+  action: "lock" | "reopen" | "final_yes" | "final_no" | "final_void" | "void";
 };
 
 type JsonRow = {
@@ -75,19 +60,6 @@ function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   return undefined;
 }
 
-function normaliseStatusValue(val: unknown): QuestionStatus {
-  const s = String(val ?? "open").trim().toLowerCase();
-  if (s === "open") return "open";
-  if (s === "final") return "final";
-  if (s === "pending") return "pending";
-  if (s === "void") return "void";
-  if (s.includes("open")) return "open";
-  if (s.includes("final")) return "final";
-  if (s.includes("pend")) return "pending";
-  if (s.includes("void")) return "void";
-  return "open";
-}
-
 /**
  * 🚨 IMPORTANT (AFL):
  * Must match /app/api/picks/route.ts questionId generation exactly.
@@ -100,7 +72,10 @@ function buildRoundStructure(roundNumber: number): {
 } {
   const roundCode = getRoundCode(roundNumber);
   const rows = rounds2026 as JsonRow[];
-  const roundRows = rows.filter((r) => r.Round === roundCode);
+
+  // ✅ tolerant: allow JSON rows to store Round as "R1" or "1" etc in future
+  // For now, your JSON appears to store "OR","R1","R2"... so we match exactly.
+  const roundRows = rows.filter((r) => String(r.Round).trim().toUpperCase() === roundCode);
 
   const gameIdsInOrder: string[] = [];
   const questionIdsByGame: Record<string, string[]> = {};
@@ -126,15 +101,9 @@ function buildRoundStructure(roundNumber: number): {
 async function getLatestQuestionStatusMap(
   roundNumber: number
 ): Promise<Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<
-    string,
-    { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
-  > = {};
+  const temp: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
 
-  const snap = await db
-    .collection("questionStatus")
-    .where("roundNumber", "==", roundNumber)
-    .get();
+  const snap = await db.collection("questionStatus").where("roundNumber", "==", roundNumber).get();
 
   snap.forEach((docSnap) => {
     const d = docSnap.data() as QuestionStatusDoc;
@@ -154,8 +123,7 @@ async function getLatestQuestionStatusMap(
     }
   });
 
-  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> =
-    {};
+  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> = {};
   for (const [qid, v] of Object.entries(temp)) {
     finalMap[qid] = { status: v.status, outcome: v.outcome };
   }
@@ -181,13 +149,6 @@ async function getAffectedUserIdsForQuestion(questionId: string): Promise<string
   });
 
   return Array.from(set);
-}
-
-async function getUserPicksAll(): Promise<
-  Record<string, Record<string, "yes" | "no">>
-> {
-  // Not used; left here intentionally (no-op placeholder).
-  return {};
 }
 
 async function getUserPicksForRound(
@@ -223,11 +184,11 @@ async function getUserPicksForRound(
 }
 
 /**
- * AFL recompute (existing logic)
+ * ✅ AFL recompute streak for the round
+ * Clean Sweep per game; running across games.
  */
 async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
-  const { roundCode, gameIdsInOrder, questionIdsByGame } =
-    buildRoundStructure(roundNumber);
+  const { roundCode, gameIdsInOrder, questionIdsByGame } = buildRoundStructure(roundNumber);
 
   const [statusMap, userPicks] = await Promise.all([
     getLatestQuestionStatusMap(roundNumber),
@@ -238,10 +199,9 @@ async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
 
   for (const gameId of gameIdsInOrder) {
     const qids = questionIdsByGame[gameId] || [];
-    const pickedQids = qids.filter(
-      (qid) => userPicks[qid] === "yes" || userPicks[qid] === "no"
-    );
+    const pickedQids = qids.filter((qid) => userPicks[qid] === "yes" || userPicks[qid] === "no");
 
+    // no picks => does not affect streak
     if (!pickedQids.length) continue;
 
     let gameBusted = false;
@@ -251,10 +211,14 @@ async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
       const pick = userPicks[qid];
       const st = statusMap[qid];
 
+      // Only settled questions affect scoring
       const settledOutcome =
         st?.status === "final" || st?.status === "void" ? st?.outcome : undefined;
 
+      // Unsettled => ignore for now (do not bust, do not add)
       if (!settledOutcome) continue;
+
+      // void => ignore for now (do not bust, do not add)
       if (settledOutcome === "void") continue;
 
       if (pick !== settledOutcome) {
@@ -296,277 +260,24 @@ async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
   });
 }
 
-/**
- * BBL helpers: your Firestore doc in screenshot is:
- * cricketRounds/{docId} with fields like:
- *  - matchId
- *  - match
- *  - questions: [{id, quarter, question, status, outcome?}]
- *
- * We update that question in-place and recompute streak by scanning
- * ALL cricketRounds docs for league/sport "BBL" (small scale, but works now).
- */
-
-type BblQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status?: QuestionStatus | string;
-  outcome?: QuestionOutcome | null | string;
-  isSponsorQuestion?: boolean;
-};
-
-type BblRoundDoc = {
-  League?: string; // in your screenshot
-  sport?: string; // optional
-  match?: string;
-  matchId?: string;
-  venue?: string;
-  startTime?: string;
-  questions?: BblQuestion[];
-
-  // (optional future shape) games array
-  games?: Array<{
-    id?: string;
-    match?: string;
-    venue?: string;
-    startTime?: string;
-    sport?: string;
-    questions?: BblQuestion[];
-  }>;
-};
-
-function getBblDocLeague(d: BblRoundDoc): string {
-  const league = String(d.League ?? d.sport ?? "BBL").toUpperCase();
-  return league === "CRICKET" ? "BBL" : league;
-}
-
-function extractAllBblQuestions(docId: string, d: BblRoundDoc): BblQuestion[] {
-  // Support both shapes:
-  if (Array.isArray(d.questions)) return d.questions;
-
-  // games[] shape (if you ever move to it)
-  const fromGames: BblQuestion[] = [];
-  if (Array.isArray(d.games)) {
-    d.games.forEach((g) => {
-      (g.questions || []).forEach((q) => fromGames.push(q));
-    });
-  }
-  return fromGames;
-}
-
-async function updateBblQuestionInDoc(params: {
-  docId: string;
-  questionId: string;
-  nextStatus: QuestionStatus;
-  nextOutcome: QuestionOutcome | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
-  const { docId, questionId, nextStatus, nextOutcome } = params;
-
-  const ref = db.collection("cricketRounds").doc(docId);
-  const snap = await ref.get();
-
-  if (!snap.exists) {
-    return { ok: false, error: `BBL doc not found: cricketRounds/${docId}` };
-  }
-
-  const data = snap.data() as BblRoundDoc;
-
-  // Update in questions[] if present
-  if (Array.isArray(data.questions)) {
-    let found = false;
-    const nextQuestions = data.questions.map((q) => {
-      if (q.id === questionId) {
-        found = true;
-        return {
-          ...q,
-          status: nextStatus,
-          outcome: nextOutcome,
-        };
-      }
-      return q;
-    });
-
-    if (!found) {
-      return { ok: false, error: `Question not found in questions[]: ${questionId}` };
-    }
-
-    await ref.set(
-      {
-        questions: nextQuestions,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    return { ok: true };
-  }
-
-  // Update in games[].questions[] if you ever use it
-  if (Array.isArray(data.games)) {
-    let found = false;
-
-    const nextGames = data.games.map((g) => {
-      const qs = Array.isArray(g.questions) ? g.questions : [];
-      const nextQs = qs.map((q) => {
-        if (q.id === questionId) {
-          found = true;
-          return {
-            ...q,
-            status: nextStatus,
-            outcome: nextOutcome,
-          };
-        }
-        return q;
-      });
-
-      return { ...g, questions: nextQs };
-    });
-
-    if (!found) {
-      return { ok: false, error: `Question not found in games[].questions[]: ${questionId}` };
-    }
-
-    await ref.set(
-      {
-        games: nextGames,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    return { ok: true };
-  }
-
-  return { ok: false, error: `BBL doc has no questions[] (and no games[])` };
-}
-
-async function getUserPicksForBBL(uid: string): Promise<Record<string, "yes" | "no">> {
-  const map: Record<string, "yes" | "no"> = {};
-
-  const [picksSnap, legacySnap] = await Promise.all([
-    db.collection("picks").where("userId", "==", uid).get(),
-    db.collection("userPicks").where("userId", "==", uid).get(),
-  ]);
-
-  picksSnap.forEach((docSnap) => {
-    const d = docSnap.data() as PickDoc;
-    const qid = d.questionId;
-    const pick = d.pick;
-    if (!qid || (pick !== "yes" && pick !== "no")) return;
-    map[qid] = pick;
-  });
-
-  legacySnap.forEach((docSnap) => {
-    const d = docSnap.data() as PickDoc;
-    const qid = d.questionId;
-    const out = d.outcome;
-    if (!qid || (out !== "yes" && out !== "no")) return;
-    if (!map[qid]) map[qid] = out;
-  });
-
-  return map;
-}
-
-async function recomputeUserStreakForBBL(uid: string) {
-  // Scan cricketRounds for BBL docs. This is fine for MVP scale.
-  const snap = await db.collection("cricketRounds").get();
-
-  const docs: Array<{ id: string; data: BblRoundDoc }> = [];
-  snap.forEach((d) => {
-    const data = d.data() as BblRoundDoc;
-    const league = getBblDocLeague(data);
-    if (league === "BBL") docs.push({ id: d.id, data });
-  });
-
-  // Stable order: startTime if available, else docId
-  docs.sort((a, b) => {
-    const aT = String(a.data.startTime || "").trim();
-    const bT = String(b.data.startTime || "").trim();
-    if (aT && bT) return aT.localeCompare(bT);
-    return a.id.localeCompare(b.id);
-  });
-
-  const userPicks = await getUserPicksForBBL(uid);
-
-  let rollingStreak = 0;
-
-  for (const doc of docs) {
-    const allQs = extractAllBblQuestions(doc.id, doc.data);
-    if (!allQs.length) continue;
-
-    const picked = allQs.filter((q) => {
-      const p = userPicks[q.id];
-      return p === "yes" || p === "no";
-    });
-
-    if (!picked.length) continue;
-
-    let busted = false;
-    let add = 0;
-
-    for (const q of picked) {
-      const pick = userPicks[q.id];
-      const st = normaliseStatusValue(q.status ?? "open");
-      const out = normaliseOutcomeValue(q.outcome);
-
-      // only settled affects score
-      const settled = st === "final" || st === "void" ? out : undefined;
-      if (!settled) continue;
-      if (settled === "void") continue;
-
-      if (pick !== settled) {
-        busted = true;
-        break;
-      }
-
-      add += 1;
-    }
-
-    if (busted) {
-      rollingStreak = 0;
-      continue;
-    }
-
-    rollingStreak += add;
-  }
-
-  const userRef = db.collection("users").doc(uid);
-
-  await db.runTransaction(async (tx) => {
-    const snap = await tx.get(userRef);
-    const existingLongest =
-      snap.exists && typeof (snap.data() as any).longestStreak === "number"
-        ? (snap.data() as any).longestStreak
-        : 0;
-
-    const newLongest = Math.max(existingLongest, rollingStreak);
-
-    tx.set(
-      userRef,
-      {
-        currentStreak: rollingStreak,
-        longestStreak: newLongest,
-        lastUpdatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-  });
-}
-
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
 
-    const sport: SportKey = (String(body.sport ?? "AFL").toUpperCase() as SportKey) || "AFL";
+    const roundNumber =
+      typeof body.roundNumber === "number" && !Number.isNaN(body.roundNumber)
+        ? body.roundNumber
+        : null;
+
     const questionId = String(body.questionId ?? "").trim();
     const action = body.action;
 
+    if (roundNumber === null) {
+      return NextResponse.json({ error: "roundNumber is required" }, { status: 400 });
+    }
+
     if (!questionId || !action) {
-      return NextResponse.json(
-        { error: "questionId and action are required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "questionId and action are required" }, { status: 400 });
     }
 
     // Resolve status/outcome from action
@@ -599,62 +310,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
 
-    // ─────────────────────────────
-    // BBL: write into cricketRounds/{docId}
-    // ─────────────────────────────
-    if (sport === "BBL") {
-      const docId = String(body.docId ?? "").trim();
-      if (!docId) {
-        return NextResponse.json(
-          { error: "docId is required for BBL settlement" },
-          { status: 400 }
-        );
-      }
+    // ✅ One canonical doc per (roundNumber, questionId)
+    const qsRef = db.collection("questionStatus").doc(questionStatusDocId(roundNumber, questionId));
 
-      const updated = await updateBblQuestionInDoc({
-        docId,
-        questionId,
-        nextStatus: status,
-        nextOutcome: outcome,
-      });
-
-      if (!updated.ok) {
-        return NextResponse.json({ error: updated.error }, { status: 404 });
-      }
-
-      // Recompute streaks for users who picked this question
-      const affectedUserIds = await getAffectedUserIdsForQuestion(questionId);
-      if (affectedUserIds.length) {
-        await Promise.all(affectedUserIds.map((uid) => recomputeUserStreakForBBL(uid)));
-      }
-
-      return NextResponse.json({ ok: true });
-    }
-
-    // ─────────────────────────────
-    // AFL: existing questionStatus collection flow
-    // ─────────────────────────────
-    const roundNumber =
-      typeof body.roundNumber === "number" && !Number.isNaN(body.roundNumber)
-        ? body.roundNumber
-        : null;
-
-    if (roundNumber === null) {
-      return NextResponse.json(
-        { error: "roundNumber is required for AFL settlement" },
-        { status: 400 }
-      );
-    }
-
-    const qsRef = db
-      .collection("questionStatus")
-      .doc(questionStatusDocId(roundNumber, questionId));
-
+    // ✅ CRITICAL FIX:
+    // Use a real timestamp to avoid "snap back" when /api/picks re-reads immediately.
     const payload: any = {
       roundNumber,
       questionId,
       status,
-      updatedAt: FieldValue.serverTimestamp(),
+      updatedAt: new Date(),
     };
 
     if (outcome) payload.outcome = outcome;
@@ -662,11 +327,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     await qsRef.set(payload, { merge: true });
 
+    // Recompute streaks for users who picked this question
     const affectedUserIds = await getAffectedUserIdsForQuestion(questionId);
     if (affectedUserIds.length) {
-      await Promise.all(
-        affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber))
-      );
+      await Promise.all(affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber)));
     }
 
     return NextResponse.json({ ok: true });
