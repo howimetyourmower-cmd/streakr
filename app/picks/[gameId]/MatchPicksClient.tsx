@@ -155,8 +155,8 @@ function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
         <Image
           src={src}
           alt={alt}
-          width={44}
-          height={44}
+          width={54}
+          height={48}
           className="object-contain"
           onError={() => {
             if (src === primary) setSrc(fallback);
