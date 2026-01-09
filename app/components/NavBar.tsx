@@ -32,7 +32,7 @@ export default function NavBar() {
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[100px] w-[200px]">
+          <div className="relative h-[80px] w-[200px]">
             <Image
               src={LOGO_SRC}
               alt="Joose"
