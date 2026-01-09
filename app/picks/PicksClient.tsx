@@ -1256,9 +1256,9 @@ export default function PicksClient() {
                     const awayName = m?.away ?? "";
                     return (
                       <div className="mt-4 flex items-center justify-center gap-4">
-                        <TeamLogo teamName={homeName} size={56} />
+                        <TeamLogo teamName={homeName} size={72} />
                         <div className="text-white/80 font-black text-[13px]">vs</div>
-                        <TeamLogo teamName={awayName || "AFL"} size={56} />
+                        <TeamLogo teamName={awayName || "AFL"} size={72} />
                       </div>
                     );
                   })()}
