@@ -522,7 +522,7 @@ export default function PicksClient() {
     ).length;
   }, [stableGames]);
 
-  const eligible = gamesPicked > 0;
+  const eligible = gamesPicked >=3;
 
   const distanceToLeader = useMemo(() => {
     if (stableLeaderScore === null) return null;
