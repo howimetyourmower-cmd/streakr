@@ -10,7 +10,7 @@ type QuestionStatus = "open" | "final" | "pending" | "void";
 type QuestionOutcome = "yes" | "no" | "void";
 
 type RequestBody = {
-  roundNumber: number; // ✅ required (AFL)
+  roundNumber: number; // ✅ required (AFL) - but we will verify against questionId
   questionId: string;
   action: "lock" | "reopen" | "final_yes" | "final_no" | "final_void" | "void";
 };
@@ -50,6 +50,25 @@ function questionStatusDocId(roundNumber: number, questionId: string) {
 function getRoundCode(roundNumber: number): string {
   if (roundNumber === 0) return "OR";
   return `R${roundNumber}`;
+}
+
+/**
+ * ✅ Critical: infer roundNumber from questionId, so admin UI can't break leaderboard.
+ * questionId format: "OR-G1-Q1-xxxx" or "R1-G1-Q1-xxxx"
+ */
+function inferRoundNumberFromQuestionId(questionId: string): number | null {
+  const q = String(questionId || "").trim().toUpperCase();
+  if (!q) return null;
+
+  if (q.startsWith("OR-")) return 0;
+
+  const m = q.match(/^R(\d+)-/);
+  if (m?.[1]) {
+    const n = Number(m[1]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
 }
 
 function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
@@ -317,7 +336,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const body = (await req.json()) as RequestBody;
 
-    const roundNumber =
+    const bodyRoundNumber =
       typeof body.roundNumber === "number" && !Number.isNaN(body.roundNumber)
         ? body.roundNumber
         : null;
@@ -325,7 +344,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const questionId = String(body.questionId ?? "").trim();
     const action = body.action;
 
-    if (roundNumber === null) {
+    if (bodyRoundNumber === null) {
       return NextResponse.json({ error: "roundNumber is required" }, { status: 400 });
     }
 
@@ -335,6 +354,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 400 }
       );
     }
+
+    // ✅ Infer round from questionId to prevent desync (leaderboard showing 0)
+    const inferredRound = inferRoundNumberFromQuestionId(questionId);
+    const roundNumber = inferredRound ?? bodyRoundNumber;
 
     // Resolve status/outcome from action
     let status: QuestionStatus;
@@ -391,7 +414,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({
+      ok: true,
+      roundNumberUsed: roundNumber,
+      roundNumberFromBody: bodyRoundNumber,
+      roundNumberInferred: inferredRound,
+    });
   } catch (error) {
     console.error("[/api/settlement] Unexpected error", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
