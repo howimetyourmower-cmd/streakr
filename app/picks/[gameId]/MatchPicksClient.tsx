@@ -122,7 +122,7 @@ function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="h-16 w-16 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
+      <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
         <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_RED }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
