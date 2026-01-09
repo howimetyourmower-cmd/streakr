@@ -956,7 +956,7 @@ export default function PicksClient() {
               <div className="min-w-0">
                 <div className="text-[12px] font-black">{eligible ? "Eligible to win" : "Not yet"}</div>
                 <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
-                  {gamesPicked} games picked
+                  {gamesPicked} /3 games picked (or "Need 3 games picked")
                 </div>
               </div>
             </div>
