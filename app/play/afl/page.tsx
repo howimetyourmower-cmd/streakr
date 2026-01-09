@@ -586,7 +586,7 @@ export default function PicksClient() {
     ).length;
   }, [stableGames]);
 
-  const eligible = gamesPicked > 0;
+  const eligible = gamesPicked > 3;
 
   // ✅ distance only computed when leaderScore is known
   const distanceToLeader = useMemo(() => {
