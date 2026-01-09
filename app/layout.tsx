@@ -21,7 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-1 sm:py-1">
             {/* Left badge */}
             <div className="inline-flex items-center gap-2 rounded-full bg-yellow-300 px-2.5 py-[2px] text-[9px] font-black uppercase tracking-wide text-sky-950 shadow-sm">
-              <span className="h-1.5 w-1.5 rounded-full bg-sky-950" />
+              <span className="h-2.5 w-1.5 rounded-full bg-sky-950" />
               Official Partner
             </div>
 
