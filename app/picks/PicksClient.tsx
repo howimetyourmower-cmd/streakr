@@ -220,7 +220,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
   );
 });
 
-function CheckIcon({ size = 18, color = COLORS.green }: { size?: number; color?: string }) {
+function CheckIcon({ size = 22, color = COLORS.green }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path
