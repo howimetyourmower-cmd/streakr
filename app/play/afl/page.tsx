@@ -277,11 +277,11 @@ export default function AflHubPage() {
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
               <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
-                <span className="block">JOOSE.</span>
                 <span className="block">PREDICT.</span>
                 <span className="block">PLAY.</span>
+                <span className="block">WIN.</span>
                 <span className="block" style={{ color: COLORS.red }}>
-                  WIN.
+                  JOOSE.
                 </span>
               </h1>
 
