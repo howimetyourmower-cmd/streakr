@@ -8,7 +8,7 @@ import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
-const LOGO_SRC = "/Torpielogo.png"; // confirmed
+const LOGO_SRC = "/Joose-logo.png"; // confirmed
 
 export default function NavBar() {
   const items: NavItem[] = useMemo(
@@ -28,14 +28,14 @@ export default function NavBar() {
         {/* LEFT: LOGO */}
         <Link
           href="/"
-          aria-label="Torpie Home"
+          aria-label="Joose Home"
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
           <div className="relative h-[40px] w-[200px]">
             <Image
               src={LOGO_SRC}
-              alt="Torpie"
+              alt="Joose"
               fill
               priority
               className="object-contain object centre"
