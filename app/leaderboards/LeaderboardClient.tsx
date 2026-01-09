@@ -752,7 +752,7 @@ export default function LeaderboardsPage() {
             <Link
               href="/picks"
               className="inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[13px] font-black text-white"
-              style={{ background: TORPIE_RED, textDecoration: "none" }}
+              style={{ background: JOOSE_RED, textDecoration: "none" }}
             >
               GO PICK
             </Link>
