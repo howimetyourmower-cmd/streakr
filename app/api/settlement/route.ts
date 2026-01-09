@@ -32,7 +32,7 @@ type QuestionStatusDoc = {
   status?: QuestionStatus;
   outcome?: QuestionOutcome | "lock" | string;
   result?: QuestionOutcome | "lock" | string; // legacy
-  updatedAt?: FirebaseFirestore.Timestamp;
+  updatedAt?: any; // Timestamp (preferred), but tolerate Date/number
 };
 
 type PickDoc = {
@@ -43,6 +43,7 @@ type PickDoc = {
 };
 
 function questionStatusDocId(roundNumber: number, questionId: string) {
+  // ✅ Must match picks + settlement reader logic
   return `${roundNumber}__${questionId}`;
 }
 
@@ -60,10 +61,52 @@ function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
   return undefined;
 }
 
+function toMs(ts: any): number {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === "function") return ts.toMillis();
+  if (ts instanceof Date) {
+    const ms = ts.getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  if (typeof ts === "number") return Number.isFinite(ts) ? ts : 0;
+  const d = new Date(ts);
+  const ms = d.getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+// ─────────────────────────────────────────────
+// ✅ MUST MATCH /app/api/picks/route.ts stableQuestionId()
+// ─────────────────────────────────────────────
+
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function stableQuestionId(params: {
+  roundNumber: number;
+  gameId: string;
+  quarter: number;
+  question: string;
+}): string {
+  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(
+    params.question || ""
+  )
+    .trim()
+    .toLowerCase()}`;
+  const hash = fnv1a(base);
+  return `${params.gameId}-Q${params.quarter}-${hash}`;
+}
+
 /**
- * 🚨 IMPORTANT (AFL):
- * Must match /app/api/picks/route.ts questionId generation exactly.
- * No sorting.
+ * ✅ IMPORTANT (AFL):
+ * This MUST produce the same questionIds as /api/picks.
+ * We build from rounds2026 rows and generate stableQuestionId per row.
+ * No sorting within a game (keeps JSON order).
  */
 function buildRoundStructure(roundNumber: number): {
   roundCode: string;
@@ -73,26 +116,29 @@ function buildRoundStructure(roundNumber: number): {
   const roundCode = getRoundCode(roundNumber);
   const rows = rounds2026 as JsonRow[];
 
-  // ✅ tolerant: allow JSON rows to store Round as "R1" or "1" etc in future
-  // For now, your JSON appears to store "OR","R1","R2"... so we match exactly.
-  const roundRows = rows.filter((r) => String(r.Round).trim().toUpperCase() === roundCode);
+  const roundRows = rows.filter(
+    (r) => String(r.Round).trim().toUpperCase() === roundCode
+  );
 
   const gameIdsInOrder: string[] = [];
   const questionIdsByGame: Record<string, string[]> = {};
-  const questionIndexByGame: Record<string, number> = {};
 
   for (const row of roundRows) {
     const gameId = `${roundCode}-G${row.Game}`;
 
     if (!questionIdsByGame[gameId]) {
       questionIdsByGame[gameId] = [];
-      questionIndexByGame[gameId] = 0;
       gameIdsInOrder.push(gameId);
     }
 
-    const idx = questionIndexByGame[gameId]++;
-    const questionId = `${gameId}-Q${idx + 1}`;
-    questionIdsByGame[gameId].push(questionId);
+    const qid = stableQuestionId({
+      roundNumber,
+      gameId,
+      quarter: Number(row.Quarter ?? 1),
+      question: String(row.Question ?? ""),
+    });
+
+    questionIdsByGame[gameId].push(qid);
   }
 
   return { roundCode, gameIdsInOrder, questionIdsByGame };
@@ -101,9 +147,15 @@ function buildRoundStructure(roundNumber: number): {
 async function getLatestQuestionStatusMap(
   roundNumber: number
 ): Promise<Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }>> {
-  const temp: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
+  const temp: Record<
+    string,
+    { status?: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
+  > = {};
 
-  const snap = await db.collection("questionStatus").where("roundNumber", "==", roundNumber).get();
+  const snap = await db
+    .collection("questionStatus")
+    .where("roundNumber", "==", roundNumber)
+    .get();
 
   snap.forEach((docSnap) => {
     const d = docSnap.data() as QuestionStatusDoc;
@@ -112,10 +164,7 @@ async function getLatestQuestionStatusMap(
     const rawOutcome = (d.outcome as any) ?? (d.result as any);
     const outcome = normaliseOutcomeValue(rawOutcome);
 
-    const updatedAtMs =
-      d.updatedAt && typeof (d.updatedAt as any).toMillis === "function"
-        ? (d.updatedAt as any).toMillis()
-        : 0;
+    const updatedAtMs = toMs(d.updatedAt);
 
     const existing = temp[d.questionId];
     if (!existing || updatedAtMs >= existing.updatedAtMs) {
@@ -123,7 +172,8 @@ async function getLatestQuestionStatusMap(
     }
   });
 
-  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> = {};
+  const finalMap: Record<string, { status?: QuestionStatus; outcome?: QuestionOutcome }> =
+    {};
   for (const [qid, v] of Object.entries(temp)) {
     finalMap[qid] = { status: v.status, outcome: v.outcome };
   }
@@ -188,7 +238,8 @@ async function getUserPicksForRound(
  * Clean Sweep per game; running across games.
  */
 async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
-  const { roundCode, gameIdsInOrder, questionIdsByGame } = buildRoundStructure(roundNumber);
+  const { roundCode, gameIdsInOrder, questionIdsByGame } =
+    buildRoundStructure(roundNumber);
 
   const [statusMap, userPicks] = await Promise.all([
     getLatestQuestionStatusMap(roundNumber),
@@ -199,7 +250,9 @@ async function recomputeUserStreakForRound(uid: string, roundNumber: number) {
 
   for (const gameId of gameIdsInOrder) {
     const qids = questionIdsByGame[gameId] || [];
-    const pickedQids = qids.filter((qid) => userPicks[qid] === "yes" || userPicks[qid] === "no");
+    const pickedQids = qids.filter(
+      (qid) => userPicks[qid] === "yes" || userPicks[qid] === "no"
+    );
 
     // no picks => does not affect streak
     if (!pickedQids.length) continue;
@@ -277,7 +330,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     if (!questionId || !action) {
-      return NextResponse.json({ error: "questionId and action are required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "questionId and action are required" },
+        { status: 400 }
+      );
     }
 
     // Resolve status/outcome from action
@@ -311,15 +367,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     // ✅ One canonical doc per (roundNumber, questionId)
-    const qsRef = db.collection("questionStatus").doc(questionStatusDocId(roundNumber, questionId));
+    const qsRef = db
+      .collection("questionStatus")
+      .doc(questionStatusDocId(roundNumber, questionId));
 
-    // ✅ CRITICAL FIX:
-    // Use a real timestamp to avoid "snap back" when /api/picks re-reads immediately.
     const payload: any = {
       roundNumber,
       questionId,
       status,
-      updatedAt: new Date(),
+      updatedAt: FieldValue.serverTimestamp(),
     };
 
     if (outcome) payload.outcome = outcome;
@@ -330,7 +386,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Recompute streaks for users who picked this question
     const affectedUserIds = await getAffectedUserIdsForQuestion(questionId);
     if (affectedUserIds.length) {
-      await Promise.all(affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber)));
+      await Promise.all(
+        affectedUserIds.map((uid) => recomputeUserStreakForRound(uid, roundNumber))
+      );
     }
 
     return NextResponse.json({ ok: true });
