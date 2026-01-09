@@ -1,24 +1,22 @@
-// /app/play/afl/page.tsx
+// /app/picks/PicksClient.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useRef, useState, MouseEvent } from "react";
-import Image from "next/image";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
-
-type QuestionStatus = "open" | "final" | "pending" | "void";
 
 type ApiQuestion = {
   id: string;
+  gameId?: string;
   quarter: number;
   question: string;
-  status: any; // API may send "Open"/"Final" etc
-  match: string;
-  venue: string;
-  startTime: string;
+  status: "open" | "final" | "pending" | "void";
+  userPick?: "yes" | "no";
+  correctPick?: boolean | null; // true=correct, false=wrong, null=void
+  outcome?: "yes" | "no" | "void";
 };
 
 type ApiGame = {
@@ -32,627 +30,1391 @@ type ApiGame = {
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  currentStreak?: number;
+
+  // may be missing/undefined briefly
+  leaderScore?: number;
+  leaderName?: string | null;
 };
 
-type QuestionRow = {
-  id: string;
+type LeaderboardApiResponse = {
+  leaderScore?: number;
+  leaderName?: string | null;
+  // tolerate extra fields
+  [k: string]: any;
+};
+
+const COLORS = {
+  bg: "#000000",
+  red: "#FF2E4D",
+  green: "#2DFF7A",
+  white: "#FFFFFF",
+};
+
+const MATCH_HQ = {
+  card: "#F2F2F2",
+  border: "#E5E5E5",
+  pill: "#EAEAEA",
+  pillBorder: "#DADADA",
+  text: "#0A0A0A",
+  muted: "#555555",
+  muted2: "#666666",
+};
+
+const HOW_TO_PLAY_PICKS_KEY = "JOOSE_seen_how_to_play_picks_v1";
+
+function formatAedt(dateIso: string): string {
+  try {
+    const d = new Date(dateIso);
+    return d.toLocaleString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+  } catch {
+    return dateIso;
+  }
+}
+
+function msToCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+type TeamSlug =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "goldcoast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "northmelbourne"
+  | "portadelaide"
+  | "richmond"
+  | "stkilda"
+  | "sydney"
+  | "westcoast"
+  | "westernbulldogs";
+
+function teamNameToSlug(nameRaw: string): TeamSlug | null {
+  const n = (nameRaw || "").toLowerCase().trim();
+
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
+  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
+    return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
+    return "stkilda";
+
+  if (n.includes("adelaide")) return "adelaide";
+  if (n.includes("brisbane")) return "brisbane";
+  if (n.includes("carlton")) return "carlton";
+  if (n.includes("collingwood")) return "collingwood";
+  if (n.includes("essendon")) return "essendon";
+  if (n.includes("fremantle")) return "fremantle";
+  if (n.includes("geelong")) return "geelong";
+  if (n.includes("hawthorn")) return "hawthorn";
+  if (n.includes("melbourne")) return "melbourne";
+  if (n.includes("richmond")) return "richmond";
+  if (n.includes("sydney") || n.includes("swans")) return "sydney";
+
+  return null;
+}
+
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
+}
+
+function logoCandidates(teamSlug: TeamSlug): string[] {
+  return [
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
+    `/afllogos/${teamSlug}-logo.jpg`,
+    `/afllogos/${teamSlug}-logo.png`,
+  ];
+}
+
+const TeamLogo = React.memo(function TeamLogoInner({
+  teamName,
+  size = 75,
+}: {
+  teamName: string;
+  size?: number;
+}) {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const fallbackInitials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  if (!slug || dead) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-2xl border font-black"
+        style={{
+          width: size,
+          height: size,
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
+        }}
+        title={teamName}
+      >
+        {fallbackInitials || "AFL"}
+      </div>
+    );
+  }
+
+  const candidates = logoCandidates(slug);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
+      }}
+      title={teamName}
+    >
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+
+function CheckIcon({ size = 22, color = COLORS.green }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M20 6L9 17l-5-5"
+        stroke={color}
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke={color}
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function CardSilhouetteBg({ opacity = 1.5 }: { opacity?: number }) {
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0" style={{ opacity }}>
+        <Image
+          src="/afl1.png"
+          alt=""
+          fill
+          sizes="(max-width: 1024px) 100vw, 1024px"
+          style={{
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.35)",
+            transform: "scale(1.04)",
+          }}
+          priority={false}
+        />
+      </div>
+
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.22) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.86) 100%)",
+        }}
+      />
+    </div>
+  );
+}
+
+function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center px-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="absolute inset-0"
+        style={{ background: "rgba(0,0,0,0.75)" }}
+        onClick={onClose}
+      />
+      <div
+        className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
+        style={{
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(10,10,10,0.96)",
+          boxShadow: "0 30px 90px rgba(0,0,0,0.75)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xl font-black">How to play</div>
+            <div className="text-white/70 text-sm mt-1">
+              Pick any amount. Locks at bounce. One wrong pick kills that match.
+            </div>
+          </div>
+
+          <button
+            className="rounded-full px-3 py-2 text-[12px] font-black border"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.92)",
+            }}
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3 text-sm text-white/85">
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">1) Pick any amount</div>
+            <div className="text-white/70 mt-1">Pick 0, 1, 5 or all 12 questions.</div>
+          </div>
+
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">2) Auto-lock</div>
+            <div className="text-white/70 mt-1">No lock-in button. Picks lock at the game start time.</div>
+          </div>
+
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">3) Clean Sweep</div>
+            <div className="text-white/70 mt-1">
+              One wrong pick resets your streak for that match. Voids don’t count.
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 flex justify-end">
+          <button
+            className="rounded-2xl px-5 py-3 text-[12px] font-black border"
+            style={{
+              borderColor: "rgba(255,46,77,0.35)",
+              background: "rgba(255,46,77,0.14)",
+              color: "rgba(255,255,255,0.95)",
+            }}
+            onClick={onClose}
+          >
+            Let’s go
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type GameStatusRow = {
+  gameId: string;
   match: string;
   venue: string;
   startTime: string;
-  quarter: number;
-  question: string;
-  status: QuestionStatus;
+  picks: number;
+  correct: number;
+  wrong: number;
+  voided: number;
+  unsettled: number;
+  streakAfter: number | null;
 };
 
-type PreviewFocusPayload = {
-  sport: "AFL";
-  questionId: string;
-  intendedPick: "yes" | "no";
-  createdAt: number;
-};
-
-const PREVIEW_FOCUS_KEY = "torpy_preview_focus_v1";
-
-/** Helpers */
-function normaliseStatus(val: any): QuestionStatus {
-  const s = String(val ?? "").toLowerCase().trim();
-  if (s === "open") return "open";
-  if (s === "final") return "final";
-  if (s === "pending") return "pending";
-  if (s === "void") return "void";
-  return "open";
-}
-
-function rgbaFromHex(hex: string, alpha: number): string {
-  const h = (hex || "").replace("#", "").trim();
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  if (full.length !== 6) return `rgba(255,255,255,${alpha})`;
-
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-
-  const a = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
-  return `rgba(${r},${g},${b},${a})`;
-}
-
-function formatStartLine(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const date = d.toLocaleDateString("en-AU", {
-    weekday: "short",
-    day: "2-digit",
-    month: "short",
-    timeZone: "Australia/Melbourne",
-  });
-  const time = d.toLocaleTimeString("en-AU", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone: "Australia/Melbourne",
-  });
-  return `${date} • ${time} AEDT`;
-}
-
-/** ✅ JOOSE palette: Black / Fire Engine Red / White */
-const COLORS = {
-  bg: "#05060A",
-  darkPanel: "#0B0D14",
-  darkPanel2: "#070911",
-  red: "#CE2029",
-  redDeep: "#8B0F16",
-};
-
-export default function AflHubPage() {
+export default function PicksClient() {
   const { user } = useAuth();
-  const router = useRouter();
-  const howRef = useRef<HTMLDivElement | null>(null);
 
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [err, setErr] = useState("");
+
+  const [roundNumber, setRoundNumber] = useState<number | null>(null);
   const [games, setGames] = useState<ApiGame[]>([]);
-  const [openQuestions, setOpenQuestions] = useState<QuestionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
 
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  // ✅ IMPORTANT: leaderScore stays NULL until we *really* have it.
+  const [leaderScore, setLeaderScore] = useState<number | null>(null);
+  const [leaderName, setLeaderName] = useState<string | null>(null);
 
-  const picksHref = "/picks?sport=AFL";
-  const encodedReturnTo = encodeURIComponent(picksHref);
+  const lastGoodRef = useRef<{
+    roundNumber: number | null;
+    games: ApiGame[];
+    currentStreak: number;
+    leaderScore: number | null;
+    leaderName: string | null;
+  } | null>(null);
 
+  const [howOpen, setHowOpen] = useState(false);
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const load = async () => {
-      try {
-        setError("");
-        setLoading(true);
-
-        const res = await fetch("/api/picks?sport=AFL", { cache: "no-store" });
-        if (!res.ok) throw new Error("API error");
-
-        const data: PicksApiResponse = await res.json();
-
-        const g = Array.isArray(data.games) ? data.games : [];
-        setGames(g);
-
-        const flat: QuestionRow[] = g.flatMap((game) =>
-          (game.questions || []).map((q) => {
-            const status = normaliseStatus(q.status);
-            return {
-              id: q.id,
-              match: game.match,
-              venue: game.venue,
-              startTime: game.startTime,
-              quarter: q.quarter,
-              question: q.question,
-              status,
-            };
-          })
-        );
-
-        const openOnly = flat.filter((q) => q.status === "open");
-        openOnly.sort((a, b) => {
-          const da = new Date(a.startTime).getTime();
-          const db = new Date(b.startTime).getTime();
-          if (da !== db) return da - db;
-          return a.quarter - b.quarter;
-        });
-
-        setOpenQuestions(openOnly);
-      } catch (e) {
-        console.error(e);
-        setError("Failed to load matches.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
   }, []);
 
-  const featuredMatches = useMemo(() => {
-    const now = Date.now();
-    const sorted = [...games].sort(
+  useEffect(() => {
+    try {
+      const seen = localStorage.getItem(HOW_TO_PLAY_PICKS_KEY);
+      if (!seen) setHowOpen(true);
+    } catch {}
+  }, []);
+
+  const closeHow = useCallback(() => {
+    try {
+      localStorage.setItem(HOW_TO_PLAY_PICKS_KEY, "1");
+    } catch {}
+    setHowOpen(false);
+  }, []);
+
+  const applyData = useCallback((data: PicksApiResponse) => {
+    const rn = typeof data.roundNumber === "number" ? data.roundNumber : null;
+    const gs = Array.isArray(data.games) ? data.games : [];
+    const cs = typeof data.currentStreak === "number" ? data.currentStreak : 0;
+
+    // ✅ Do NOT coerce missing leaderScore into 0
+    const ls =
+      typeof data.leaderScore === "number" && Number.isFinite(data.leaderScore) ? data.leaderScore : null;
+    const ln = typeof data.leaderName === "string" ? data.leaderName : null;
+
+    setRoundNumber(rn);
+    setGames(gs);
+    setCurrentStreak(cs);
+
+    // only update leader state if provided (or explicitly null)
+    setLeaderScore(ls);
+    setLeaderName(ln);
+
+    lastGoodRef.current = {
+      roundNumber: rn,
+      games: gs,
+      currentStreak: cs,
+      leaderScore: ls,
+      leaderName: ln,
+    };
+  }, []);
+
+  const loadLeaderboardFallback = useCallback(async () => {
+    try {
+      let authHeader: Record<string, string> = {};
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          authHeader = { Authorization: `Bearer ${token}` };
+        } catch {}
+      }
+
+      // ✅ fallback endpoint (overall scope)
+      const res = await fetch("/api/leaderboard?scope=overall", { headers: authHeader, cache: "no-store" });
+      if (!res.ok) return;
+
+      const data = (await res.json()) as LeaderboardApiResponse;
+
+      const ls =
+        typeof data.leaderScore === "number" && Number.isFinite(data.leaderScore) ? data.leaderScore : null;
+      const ln = typeof data.leaderName === "string" ? data.leaderName : null;
+
+      if (ls !== null) setLeaderScore(ls);
+      if (ln !== null) setLeaderName(ln);
+
+      // keep lastGoodRef in sync if it exists
+      if (lastGoodRef.current) {
+        lastGoodRef.current = {
+          ...lastGoodRef.current,
+          leaderScore: ls !== null ? ls : lastGoodRef.current.leaderScore,
+          leaderName: ln !== null ? ln : lastGoodRef.current.leaderName,
+        };
+      }
+    } catch (e) {
+      // silent
+      console.error("[picks] leaderboard fallback failed", e);
+    }
+  }, [user]);
+
+  const loadPicks = useCallback(
+    async (mode: "initial" | "refresh" = "refresh") => {
+      if (mode === "initial") setInitialLoading(true);
+      else setRefreshing(true);
+
+      setErr("");
+
+      try {
+        let authHeader: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch {}
+        }
+
+        const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+
+        const data = (await res.json()) as PicksApiResponse;
+        applyData(data);
+
+        // ✅ if picks API didn't supply leader yet, fetch fallback
+        const gotLeader =
+          typeof data.leaderScore === "number" && Number.isFinite(data.leaderScore) && data.leaderScore >= 0;
+        if (!gotLeader) {
+          await loadLeaderboardFallback();
+        }
+      } catch (e) {
+        console.error(e);
+        setErr("Could not load picks right now.");
+      } finally {
+        if (mode === "initial") setInitialLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [applyData, loadLeaderboardFallback, user]
+  );
+
+  useEffect(() => {
+    loadPicks("initial");
+  }, [loadPicks]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => loadPicks("refresh"), 15000);
+    return () => window.clearInterval(id);
+  }, [loadPicks]);
+
+  const stable = lastGoodRef.current;
+  const stableGames = stable?.games ?? games;
+  const stableRoundNumber = stable?.roundNumber ?? roundNumber;
+  const stableCurrentStreak = stable?.currentStreak ?? currentStreak;
+
+  // ✅ key: prefer stable leader values if they exist
+  const stableLeaderScore = (stable?.leaderScore ?? leaderScore) as number | null;
+  const stableLeaderName = (stable?.leaderName ?? leaderName) as string | null;
+
+  const roundLabel =
+    stableRoundNumber === null ? "" : stableRoundNumber === 0 ? "Opening Round" : `Round ${stableRoundNumber}`;
+
+  const sortedGames = useMemo(() => {
+    return [...(stableGames || [])].sort(
       (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
     );
+  }, [stableGames]);
 
-    const upcoming = sorted.filter(
-      (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
-    );
-    return (upcoming.length ? upcoming : sorted).slice(0, 3);
-  }, [games]);
+  const nextUp = useMemo(() => {
+    const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
+    if (upcoming.length) return upcoming[0];
+    return sortedGames[0] || null;
+  }, [sortedGames, nowMs]);
 
-  const previewQuestions = useMemo(() => openQuestions.slice(0, 6), [openQuestions]);
+  const lastNextUpRef = useRef<ApiGame | null>(null);
+  const [nextUpStable, setNextUpStable] = useState<ApiGame | null>(null);
 
-  const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
+  useEffect(() => {
+    if (nextUp) {
+      lastNextUpRef.current = nextUp;
+      setNextUpStable(nextUp);
+    } else if (!nextUpStable && lastNextUpRef.current) {
+      setNextUpStable(lastNextUpRef.current);
     }
+  }, [nextUp, nextUpStable]);
 
-    try {
-      const payload: PreviewFocusPayload = {
-        sport: "AFL",
-        questionId,
-        intendedPick,
-        createdAt: Date.now(),
+  const nextUpLockMs = useMemo(() => {
+    const g = nextUpStable;
+    if (!g) return null;
+    return new Date(g.startTime).getTime() - nowMs;
+  }, [nextUpStable, nowMs]);
+
+  const isNextUpLive = nextUpLockMs !== null ? nextUpLockMs <= 0 : false;
+
+  const gamesPicked = useMemo(() => {
+    return (stableGames || []).filter((g) =>
+      (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
+    ).length;
+  }, [stableGames]);
+
+  const eligible = gamesPicked > 0;
+
+  // ✅ distance only computed when leaderScore is known
+  const distanceToLeader = useMemo(() => {
+    if (stableLeaderScore === null) return null;
+    return Math.max(0, stableLeaderScore - stableCurrentStreak);
+  }, [stableLeaderScore, stableCurrentStreak]);
+
+  const leaderProgress = useMemo(() => {
+    if (stableLeaderScore === null || stableLeaderScore <= 0) return 0;
+    return clamp((stableCurrentStreak / stableLeaderScore) * 100, 0, 100);
+  }, [stableLeaderScore, stableCurrentStreak]);
+
+  const gameStatusRows = useMemo((): GameStatusRow[] => {
+    let runningStreak = 0;
+
+    return sortedGames.map((g) => {
+      const pickedQs = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no");
+      const picks = pickedQs.length;
+
+      let correct = 0;
+      let wrong = 0;
+      let voided = 0;
+      let unsettled = 0;
+
+      for (const q of pickedQs) {
+        if (q.correctPick === true) correct += 1;
+        else if (q.correctPick === false) wrong += 1;
+        else if (q.correctPick === null) voided += 1;
+        else unsettled += 1;
+      }
+
+      if (picks === 0) {
+        return {
+          gameId: g.id,
+          match: g.match,
+          venue: g.venue,
+          startTime: g.startTime,
+          picks,
+          correct,
+          wrong,
+          voided,
+          unsettled,
+          streakAfter: runningStreak,
+        };
+      }
+
+      if (unsettled > 0) {
+        return {
+          gameId: g.id,
+          match: g.match,
+          venue: g.venue,
+          startTime: g.startTime,
+          picks,
+          correct,
+          wrong,
+          voided,
+          unsettled,
+          streakAfter: null,
+        };
+      }
+
+      if (wrong > 0) runningStreak = 0;
+      else runningStreak += correct;
+
+      return {
+        gameId: g.id,
+        match: g.match,
+        venue: g.venue,
+        startTime: g.startTime,
+        picks,
+        correct,
+        wrong,
+        voided,
+        unsettled,
+        streakAfter: runningStreak,
       };
-      window.localStorage.setItem(PREVIEW_FOCUS_KEY, JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
+    });
+  }, [sortedGames]);
 
-    router.push(picksHref);
-  };
+  const StickyChaseBar = () => {
+    const g = nextUpStable;
+    if (!g) return null;
 
-  const requireAuthForPicks = (e: MouseEvent) => {
-    if (!user) {
-      e.preventDefault();
-      setShowAuthModal(true);
-    }
-  };
+    const href = `/picks/${g.id}`;
+    const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
+    const lockText =
+      nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
 
-  const scrollToHow = () => {
-    const el = howRef.current;
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
+    const chaseText =
+      stableLeaderScore === null
+        ? "Leader loading…"
+        : distanceToLeader === 0
+        ? "Equal lead"
+        : `Need ${distanceToLeader}`;
 
-  // Shared styles
-  const darkCardStyle = {
-    borderColor: "rgba(255,255,255,0.10)",
-    background: `linear-gradient(180deg, ${COLORS.darkPanel} 0%, ${COLORS.darkPanel2} 100%)`,
-    boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
-  } as const;
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-[60] md:hidden">
+        <div
+          className="px-3 pb-3 pt-2"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.78) 35%, rgba(0,0,0,0.96) 100%)",
+          }}
+        >
+          <div
+            className="rounded-2xl border p-3 shadow-[0_18px_60px_rgba(0,0,0,0.80)]"
+            style={{
+              borderColor: "rgba(255,255,255,0.12)",
+              background: "rgba(10,10,10,0.92)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+                    style={{
+                      borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
+                      background: isNextUpLive ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        background: isNextUpLive ? COLORS.red : "rgba(255,255,255,0.55)",
+                        boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                      }}
+                    />
+                    {lockText || "Next up"}
+                  </span>
 
-  const primaryBtn = {
-    borderColor: rgbaFromHex(COLORS.red, 0.65),
-    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.98)}, ${rgbaFromHex(
-      COLORS.redDeep,
-      0.96
-    )})`,
-    color: "rgba(255,255,255,0.98)",
-    boxShadow: `0 0 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
-  } as const;
+                  <span className="text-[11px] text-white/60 font-semibold truncate">{g.match}</span>
+                </div>
 
-  const yesBtnStyle = {
-    borderColor: "rgba(255,255,255,0.40)",
-    background: "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78))",
-    color: "rgba(0,0,0,0.92)",
-    boxShadow: "0 0 18px rgba(255,255,255,0.10)",
-  } as const;
-
-  const noBtnStyle = {
-    borderColor: rgbaFromHex(COLORS.red, 0.78),
-    background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.96)}, ${rgbaFromHex(
-      COLORS.redDeep,
-      0.92
-    )})`,
-    color: "rgba(255,255,255,0.98)",
-    boxShadow: `0 0 18px ${rgbaFromHex(COLORS.red, 0.14)}`,
-  } as const;
-
-  return (
-    <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
-      <style>{`
-        @keyframes joosePing {
-          0% { transform: scale(1); opacity: .55; }
-          80% { transform: scale(1.6); opacity: 0; }
-          100% { transform: scale(1.6); opacity: 0; }
-        }
-      `}</style>
-
-      {/* ======= HERO ======= */}
-      <section className="relative">
-        <div className="relative w-full h-[520px] sm:h-[600px]">
-          <Image
-            src="/afl2.png"
-            alt="AFL hero"
-            fill
-            priority
-            className="object-cover object-top"
-          />
-          <div className="absolute inset-0 bg-black/35" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/35 to-transparent" />
-        </div>
-
-        <div className="absolute inset-0">
-          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
-            <div className="max-w-2xl">
-              <h1 className="text-4xl sm:text-6xl font-extrabold leading-[1.02] tracking-tight">
-                <span className="block">PREDICT.</span>
-                <span className="block">PLAY.</span>
-                <span className="block">WIN.</span>
-                <span className="block" style={{ color: COLORS.red }}>
-                  JOOSE.
-                </span>
-              </h1>
-
-              <p className="mt-4 text-sm sm:text-base text-white/75 max-w-xl">
-                Live AFL yes/no picks tied to each match. Pick as many as you want.
-                One wrong call in a game and your streak is cooked.
-              </p>
-
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={primaryBtn}
-                >
-                  PLAY NOW
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={scrollToHow}
-                  className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.25)",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "rgba(255,255,255,0.92)",
-                  }}
-                >
-                  LEARN MORE
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ======= CONTENT ======= */}
-      <section className="bg-[#171A22]">
-        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          {/* HOW IT WORKS */}
-          <div ref={howRef} className="mb-10">
-            <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
-
-            <div className="grid sm:grid-cols-3 gap-4">
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">1. PICK OUTCOMES</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Tap <span className="font-black text-white/85">YES</span> or{" "}
-                  <span className="font-black" style={{ color: COLORS.red }}>
-                    NO
-                  </span>{" "}
-                  on any question. Pick 0, 1, 5 or all 12 — your call.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">2. PLAY LIVE</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Picks lock at bounce. Live questions drop during the match.
-                  Clear a pick any time before lock.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">3. KEEP YOUR STREAK</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Clean sweep per match to keep your streak alive. Any wrong = cooked. Voids don’t count.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* NEXT FEATURED MATCHES (3 cards) */}
-          <div className="mb-10">
-            <div className="flex items-end justify-between gap-3 mb-4">
-              <div className="text-[12px] font-black text-white/75">NEXT FEATURED MATCHES</div>
-              <Link
-                href={picksHref}
-                onClick={requireAuthForPicks}
-                className="text-[12px] font-black hover:underline underline-offset-2"
-                style={{ color: COLORS.red }}
-              >
-                GO TO PICKS →
-              </Link>
-            </div>
-
-            {loading ? (
-              <div className="grid md:grid-cols-3 gap-4">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
-                    <div className="h-28 bg-white/5 animate-pulse" />
-                    <div className="p-5 bg-white">
-                      <div className="h-4 w-3/4 bg-black/10 rounded animate-pulse mb-2" />
-                      <div className="h-3 w-1/2 bg-black/10 rounded animate-pulse mb-4" />
-                      <div className="h-9 w-28 bg-black/10 rounded animate-pulse" />
+                <div className="mt-2 flex items-center gap-3">
+                  <div
+                    className="rounded-xl border px-3 py-1.5"
+                    style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}
+                  >
+                    <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
+                    <div className="text-[16px] font-black" style={{ color: COLORS.red }}>
+                      {stableCurrentStreak}
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : featuredMatches.length ? (
-              <div className="grid md:grid-cols-3 gap-4">
-                {featuredMatches.map((g) => {
-                  const line = formatStartLine(g.startTime);
-                  const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
 
-                  return (
-                    <div
-                      key={g.id}
-                      className="rounded-2xl border overflow-hidden"
-                      style={{
-                        borderColor: "rgba(255,255,255,0.10)",
-                        boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
-                      }}
-                    >
-                      {/* Image section */}
-                      <div className="relative h-32">
-                        <Image
-                          src="/afl.png"
-                          alt="Match hero"
-                          fill
-                          className="object-cover object-top"
-                          sizes="(max-width: 768px) 100vw, 33vw"
-                        />
-                        <div className="absolute inset-0 bg-black/55" />
-                        <div className="absolute left-4 bottom-3 right-4">
-                          <div className="text-xs text-white/75 font-semibold">{line}</div>
-                          <div className="text-sm font-black text-white/95">{g.match}</div>
-                        </div>
-                      </div>
-
-                      {/* Bottom section (WHITE) */}
-                      <div className="p-5 bg-white text-black">
-                        <div className="text-sm font-extrabold text-black/85">{g.venue}</div>
-                        <div className="text-[12px] text-black/55 mt-1">
-                          {qCount} questions (pick any amount)
-                        </div>
-
-                        <div className="mt-4">
-                          <Link
-                            href={picksHref}
-                            onClick={requireAuthForPicks}
-                            className="inline-flex items-center justify-center rounded-md px-4 py-2 text-[12px] font-black border"
-                            style={{
-                              borderColor: rgbaFromHex(COLORS.red, 0.7),
-                              background: COLORS.red,
-                              color: "white",
-                            }}
-                          >
-                            PLAY NOW
-                          </Link>
-                        </div>
-                      </div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
+                    <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
+                    <div className="text-[11px] text-white/55 font-semibold truncate">
+                      {stableLeaderScore === null
+                        ? ""
+                        : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
-                <div className="text-[12px] text-white/55">
-                  Once rounds are seeded, featured matches show here automatically.
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* PICKS AVAILABLE RIGHT NOW */}
-          <div className="mb-2">
-            <div className="flex items-end justify-between gap-3 mb-4">
-              <div>
-                <div className="text-[12px] font-black text-white/75">PICKS AVAILABLE RIGHT NOW</div>
-                <div className="text-sm text-white/70">
-                  Tap Yes/No to jump into Picks. (We’ll focus that question for you.)
+                  </div>
                 </div>
               </div>
 
               <Link
-                href={picksHref}
-                onClick={requireAuthForPicks}
-                className="text-[12px] font-black hover:underline underline-offset-2"
-                style={{ color: COLORS.red }}
-              >
-                VIEW ALL OPEN →
-              </Link>
-            </div>
-
-            {error ? (
-              <div
-                className="rounded-2xl border px-5 py-4 mb-4"
+                href={href}
+                className="shrink-0 inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
                 style={{
-                  borderColor: rgbaFromHex(COLORS.red, 0.3),
-                  background: rgbaFromHex(COLORS.red, 0.1),
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 12px 30px rgba(255,46,77,0.18)",
+                  textDecoration: "none",
                 }}
               >
-                <p className="text-sm" style={{ color: "rgba(255,255,255,0.92)" }}>
-                  {error}
-                </p>
+                {label}
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const DashboardStrip = () => {
+    const leaderText =
+      stableLeaderScore === null
+        ? "Leader loading…"
+        : stableLeaderName
+        ? `${stableLeaderName} leads`
+        : "Leader leads";
+
+    // ✅ only say equal lead if leaderScore is known
+    const leaderHint =
+      stableLeaderScore === null
+        ? "Waiting for leaderScore…"
+        : distanceToLeader === 0
+        ? "Equal lead — keep it alive."
+        : `Gap: ${distanceToLeader}`;
+
+    const cardBase: React.CSSProperties = {
+      borderColor: MATCH_HQ.border,
+      background: MATCH_HQ.card,
+      color: MATCH_HQ.text,
+    };
+
+    const pill: React.CSSProperties = {
+      borderColor: MATCH_HQ.pillBorder,
+      background: MATCH_HQ.pill,
+      color: MATCH_HQ.text,
+    };
+
+    const numStyle: React.CSSProperties = { color: COLORS.red };
+
+    return (
+      <div
+        className="mt-4 rounded-3xl border px-3 py-3"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Match HQ</div>
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+              style={{
+                borderColor: "rgba(255,46,77,0.28)",
+                background: "rgba(255,46,77,0.10)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              title="JOOSE is live and updating"
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: COLORS.red,
+                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
+                }}
+              />
+              LIVE
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/leaderboards"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Leaderboards
+            </Link>
+
+            <button
+              type="button"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              onClick={() => setHowOpen(true)}
+            >
+              How to play
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Current streak
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableCurrentStreak}
+                </span>
               </div>
-            ) : null}
-
-            {!loading && previewQuestions.length === 0 && !error ? (
-              <div className="rounded-2xl border px-6 py-6 text-center" style={darkCardStyle}>
-                <p className="text-sm text-white/65 mb-4">
-                  No open questions right now. Check back closer to bounce.
-                </p>
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-md px-5 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={primaryBtn}
-                >
-                  GO TO PICKS ANYWAY
-                </Link>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">Keep it alive</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  One wrong pick resets to 0.
+                </div>
               </div>
-            ) : null}
+            </div>
+          </div>
 
-            <div className="space-y-3">
-              {loading
-                ? [1, 2, 3].map((i) => (
-                    <div key={i} className="rounded-2xl border px-5 py-4 animate-pulse" style={darkCardStyle}>
-                      <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
-                      <div className="h-3 bg-white/5 rounded w-1/2" />
-                    </div>
-                  ))
-                : previewQuestions.map((q) => (
-                    <div key={q.id} className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
-                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
-                            <span
-                              className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
-                              style={{
-                                borderColor: rgbaFromHex(COLORS.red, 0.35),
-                                background: rgbaFromHex(COLORS.red, 0.08),
-                                color: "rgba(255,255,255,0.92)",
-                              }}
-                            >
-                              <span className="relative flex h-2 w-2">
-                                <span
-                                  className="absolute inline-flex h-full w-full rounded-full"
-                                  style={{
-                                    background: rgbaFromHex(COLORS.red, 0.85),
-                                    animation: "joosePing 1.6s cubic-bezier(0,0,0.2,1) infinite",
-                                  }}
-                                />
-                                <span
-                                  className="relative inline-flex h-2 w-2 rounded-full"
-                                  style={{ background: rgbaFromHex(COLORS.red, 0.95) }}
-                                />
-                              </span>
-                              Q{q.quarter}
-                            </span>
-
-                            <span className="text-white/35">•</span>
-                            <span className="font-semibold text-white/70">{formatStartLine(q.startTime)}</span>
-                            <span className="text-white/35">•</span>
-                            <span className="text-white/70">{q.venue}</span>
-                          </div>
-
-                          <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
-                          <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
-                        </div>
-
-                        <div className="flex items-center gap-3 lg:ml-6 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
-                            className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                            style={yesBtnStyle}
-                          >
-                            YES
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
-                            className="rounded-xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                            style={noBtnStyle}
-                          >
-                            NO
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Leader
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableLeaderScore === null ? "—" : stableLeaderScore}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black truncate">{leaderText}</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  Current streak right now.
+                </div>
+              </div>
             </div>
 
-            {!loading && openQuestions.length > 0 ? (
-              <div className="mt-6 text-center">
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-md px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
+            <div
+              className="mt-2 h-[8px] w-full rounded-full border overflow-hidden"
+              style={{
+                borderColor: "rgba(0,0,0,0.10)",
+                background: "rgba(0,0,0,0.06)",
+              }}
+              aria-label="progress to leader"
+            >
+              <div
+                className="h-full"
+                style={{
+                  width: `${leaderProgress}%`,
+                  background: `linear-gradient(90deg, ${COLORS.red} 0%, rgba(255,46,77,0.45) 100%)`,
+                }}
+              />
+            </div>
+
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
+              {leaderHint}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Distance
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableLeaderScore === null || distanceToLeader === null ? "—" : distanceToLeader}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">
+                  {stableLeaderScore === null ? "Waiting on data" : "Close the gap"}
+                </div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  Current streak only.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Eligible
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
+                {eligible ? (
+                  <CheckIcon size={16} color={COLORS.red} />
+                ) : (
+                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
+                    —
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">{eligible ? "Eligible to win" : "Not yet"}</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  {gamesPicked} games picked
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
+              Tip: locks at bounce.
+            </div>
+          </div>
+        </div>
+
+        {/* GAME STATUS */}
+        <div
+          className="mt-3 rounded-2xl border p-3 sm:p-3.5"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(0,0,0,0.28)",
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
+            <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
+          </div>
+
+          <div
+            className="hidden md:block mt-3 overflow-hidden rounded-2xl border"
+            style={{ borderColor: "rgba(255,255,255,0.10)" }}
+          >
+            <table className="w-full text-left">
+              <thead>
+                <tr style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Game</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Picks</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Correct
+                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Unsettled
+                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Streak after
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {gameStatusRows.map((r, i) => {
+                  const anyWrong = r.wrong > 0;
+                  const anyUnsettled = r.unsettled > 0;
+
+                  const pillState =
+                    anyWrong
+                      ? { label: "DEAD ☠️", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
+                      : anyUnsettled && r.picks > 0
+                      ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
+                      : { label: "ALIVE ✅", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
+
+                  return (
+                    <tr
+                      key={r.gameId}
+                      style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-black text-white truncate">{r.match}</div>
+                            <div className="text-[11px] text-white/60 font-semibold truncate">
+                              {formatAedt(r.startTime)} • {r.venue}
+                            </div>
+                          </div>
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
+                            style={{
+                              borderColor: pillState.border,
+                              background: pillState.bg,
+                              color: "rgba(255,255,255,0.92)",
+                            }}
+                          >
+                            {pillState.label}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-3 py-2 text-[13px] font-black text-white">{r.picks}</td>
+
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}
+                      >
+                        {r.correct}
+                      </td>
+
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)" }}
+                      >
+                        {r.wrong}
+                      </td>
+
+                      <td className="px-3 py-2 text-[13px] font-black text-white/80">{r.voided}</td>
+                      <td className="px-3 py-2 text-[13px] font-black text-white/80">{r.unsettled}</td>
+
+                      <td className="px-3 py-2">
+                        <div
+                          className="inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5"
+                          style={{
+                            borderColor: anyWrong ? "rgba(255,46,77,0.35)" : "rgba(255,255,255,0.14)",
+                            background: anyWrong ? "rgba(255,46,77,0.10)" : "rgba(255,255,255,0.06)",
+                          }}
+                        >
+                          {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
+                          <span className="text-[14px] font-black text-white">
+                            {r.streakAfter === null ? "—" : r.streakAfter}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="md:hidden mt-3 space-y-2">
+            {gameStatusRows.map((r) => (
+              <div
+                key={r.gameId}
+                className="rounded-2xl border p-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}
+              >
+                <div className="text-[13px] font-black text-white">{r.match}</div>
+                <div className="text-[11px] text-white/60 font-semibold">
+                  {formatAedt(r.startTime)} • {r.venue}
+                </div>
+                <div className="mt-2 text-[12px] text-white/80 font-semibold">
+                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter === null ? "—" : r.streakAfter}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 text-[11px] text-white/55 font-semibold">
+            Clean Sweep: any wrong pick in a game resets streak to 0. Voids don’t add.
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const MatchCard = ({ g }: { g: ApiGame }) => {
+    const lockMs = new Date(g.startTime).getTime() - nowMs;
+    const m = splitMatch(g.match);
+    const homeName = m?.home ?? g.match;
+    const awayName = m?.away ?? "";
+
+    const picksCount =
+      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+
+    const isLocked = lockMs <= 0;
+
+    const badgeStyle = isLocked
+      ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
+      : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
+
+    const href = `/picks/${g.id}`;
+
+    return (
+      <Link
+        href={href}
+        className="block rounded-2xl overflow-hidden border"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
+          textDecoration: "none",
+        }}
+      >
+        <div className="relative p-4 overflow-hidden" style={{ minHeight: 190 }}>
+          <CardSilhouetteBg opacity={1} />
+
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] text-white/85 font-semibold">{formatAedt(g.startTime)}</div>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}
+              >
+                {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              </span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-3">
+              <TeamLogo teamName={homeName} size={72} />
+              <div className="text-white/80 font-black text-[12px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={72} />
+            </div>
+
+            <div className="mt-3 text-center">
+              <div
+                className="text-[17px] sm:text-[18px] font-black leading-tight"
+                style={{
+                  color: "rgba(255,255,255,0.98)",
+                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
+                }}
+              >
+                {g.match}
+              </div>
+              <div
+                className="mt-1 text-[12px] font-semibold truncate"
+                style={{
+                  color: "rgba(255,255,255,0.78)",
+                  textShadow: "0 2px 10px rgba(0,0,0,0.60)",
+                }}
+              >
+                {g.venue}
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
+                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.95)",
+                }}
+              >
+                {picksCount}/12 picked
+              </span>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
+              </span>
+            </div>
+
+            <div className="mt-4 flex items-center justify-center">
+              <span
+                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+                }}
+              >
+                PLAY NOW
+              </span>
+            </div>
+          </div>
+        </div>
+      </Link>
+    );
+  };
+
+  return (
+    <div
+      className="min-h-screen text-white"
+      style={{
+        backgroundColor: COLORS.bg,
+        opacity: refreshing ? 0.9 : 1,
+        transition: "opacity 120ms ease",
+      }}
+    >
+      <HowToPlayModal open={howOpen} onClose={closeHow} />
+      <StickyChaseBar />
+
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 md:pb-14">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl sm:text-4xl font-black">Picks</h1>
+              {roundLabel ? (
+                <span
+                  className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                   style={{
-                    borderColor: "rgba(255,255,255,0.18)",
-                    background: "rgba(255,255,255,0.06)",
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.10)",
                     color: "rgba(255,255,255,0.92)",
                   }}
                 >
-                  VIEW ALL {openQuestions.length} OPEN PICKS →
-                </Link>
-              </div>
-            ) : null}
+                  {roundLabel}
+                </span>
+              ) : null}
+              {refreshing ? (
+                <span className="mt-1 text-[11px] font-black tracking-[0.14em] text-white/35">REFRESHING…</span>
+              ) : null}
+            </div>
+
+            <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
           </div>
 
-          {/* FOOTER */}
-          <footer className="mt-12 border-t pt-6" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/45">
-              <p>JOOSE is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.</p>
-              <div className="flex items-center gap-4">
-                <Link href="/terms" className="hover:underline underline-offset-2">
-                  Terms
-                </Link>
-                <Link href="/privacy" className="hover:underline underline-offset-2">
-                  Privacy
-                </Link>
-                <Link href="/faq" className="hover:underline underline-offset-2" style={{ color: COLORS.red }}>
-                  FAQ
-                </Link>
-              </div>
-            </div>
-          </footer>
+          <button
+            type="button"
+            onClick={() => loadPicks("refresh")}
+            className="rounded-full px-3 py-2 text-[11px] font-black border"
+            style={{
+              borderColor: "rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.06)",
+              color: "rgba(255,255,255,0.92)",
+            }}
+            title="Refresh"
+          >
+            Refresh
+          </button>
         </div>
-      </section>
 
-      {/* ========= AUTH MODAL ========= */}
-      {showAuthModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-sm rounded-2xl border p-6" style={darkCardStyle}>
-            <div className="flex items-start justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">Log in to play AFL</h2>
-              <button
-                type="button"
-                onClick={() => setShowAuthModal(false)}
-                className="text-sm transition-colors hover:text-white"
-                style={{ color: "rgba(255,255,255,0.65)" }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <p className="text-sm text-white/65 mb-4">
-              You need a free JOOSE account to make picks, build your streak and appear on the leaderboard.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Link
-                href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
-                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-black border active:scale-[0.99] transition flex-1"
-                style={primaryBtn}
-                onClick={() => setShowAuthModal(false)}
-              >
-                Login
-              </Link>
-
-              <Link
-                href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
-                className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-black border active:scale-[0.99] transition flex-1"
-                style={{
-                  borderColor: "rgba(255,255,255,0.16)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-                onClick={() => setShowAuthModal(false)}
-              >
-                Sign up
-              </Link>
-            </div>
+        {err ? (
+          <div className="mt-3 text-sm" style={{ color: COLORS.red }}>
+            {err} Try refreshing.
           </div>
+        ) : null}
+
+        {nextUpStable ? (
+          <div className="mt-4 transition-opacity duration-200" style={{ opacity: initialLoading ? 0.75 : 1 }}>
+            <Link
+              href={`/picks/${nextUpStable.id}`}
+              className="block rounded-3xl overflow-hidden border"
+              style={{
+                borderColor: "rgba(255,46,77,0.35)",
+                background: "rgba(255,255,255,0.03)",
+                boxShadow: "0 26px 90px rgba(0,0,0,0.70)",
+                textDecoration: "none",
+              }}
+            >
+              <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
+                <div
+                  className="absolute inset-0 pointer-events-none"
+                  style={{
+                    background:
+                      "radial-gradient(1200px 240px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 65%)",
+                  }}
+                />
+                <CardSilhouetteBg opacity={1} />
+
+                <div className="relative z-10">
+                  <div className="flex items-center justify-between gap-3">
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
+                      style={{
+                        borderColor: "rgba(255,46,77,0.55)",
+                        background: "rgba(255,46,77,0.14)",
+                        color: "rgba(255,255,255,0.92)",
+                        boxShadow: "0 0 24px rgba(255,46,77,0.16)",
+                      }}
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{
+                          background: isNextUpLive ? COLORS.red : "rgba(255,255,255,0.55)",
+                          boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                        }}
+                      />
+                      NEXT UP
+                    </div>
+
+                    <div className="text-[11px] text-white/80 font-semibold">
+                      {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`}
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const m = splitMatch(nextUpStable.match);
+                    const homeName = m?.home ?? nextUpStable.match;
+                    const awayName = m?.away ?? "";
+                    return (
+                      <div className="mt-4 flex items-center justify-center gap-4">
+                        <TeamLogo teamName={homeName} size={72} />
+                        <div className="text-white/80 font-black text-[13px]">vs</div>
+                        <TeamLogo teamName={awayName || "AFL"} size={72} />
+                      </div>
+                    );
+                  })()}
+
+                  <div className="mt-3 text-center">
+                    <div
+                      className="text-[22px] sm:text-[28px] font-black leading-tight"
+                      style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
+                    >
+                      {nextUpStable.match}
+                    </div>
+                    <div
+                      className="mt-2 text-[12px] font-semibold"
+                      style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
+                    >
+                      {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-center">
+                    <span
+                      className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-[12px] font-black border"
+                      style={{
+                        borderColor: "rgba(255,46,77,0.32)",
+                        background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                        color: "rgba(255,255,255,0.98)",
+                        boxShadow: "0 14px 34px rgba(255,46,77,0.18)",
+                      }}
+                    >
+                      GO PICK
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </Link>
+          </div>
+        ) : null}
+
+        <DashboardStrip />
+
+        <div className="mt-6">
+          <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
+
+          {initialLoading && sortedGames.length === 0 ? (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-2xl border overflow-hidden"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.03)",
+                  }}
+                >
+                  <div className="h-[190px] bg-white/5 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : sortedGames.length === 0 ? (
+            <div
+              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
+              style={{
+                borderColor: "rgba(255,46,77,0.35)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              No games found.
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sortedGames.map((g) => (
+                <MatchCard key={g.id} g={g} />
+              ))}
+            </div>
+          )}
         </div>
-      )}
-    </main>
+
+        <div className="mt-8 pb-6 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+          JOOSE © 2026
+        </div>
+      </div>
+    </div>
   );
 }
