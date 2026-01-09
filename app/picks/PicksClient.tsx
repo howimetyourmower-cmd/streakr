@@ -152,7 +152,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
 
 const TeamLogo = React.memo(function TeamLogoInner({
   teamName,
-  size = 55,
+  size = 75,
 }: {
   teamName: string;
   size?: number;
