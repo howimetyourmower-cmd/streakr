@@ -136,7 +136,7 @@ export default function MarketingClient() {
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = "streakr-marketing-optin.csv";
+    a.download = "joose-marketing-optin.csv";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -163,7 +163,7 @@ export default function MarketingClient() {
         <div className="max-w-md rounded-2xl bg-gradient-to-br from-slate-900/90 to-slate-800/90 px-6 py-8 shadow-xl border border-slate-700/70">
           <h1 className="text-2xl font-semibold mb-3">Admin access only</h1>
           <p className="text-sm text-slate-400 mb-4">
-            This page is restricted to STREAKr admins.
+            This page is restricted to Joose admins.
           </p>
           <Link
             href="/"
@@ -188,7 +188,7 @@ export default function MarketingClient() {
             Marketing opt-in list
           </h1>
           <p className="text-sm md:text-base text-slate-400 max-w-2xl">
-            View all STREAKr players who have opted in to receive marketing and
+            View all JOOSE players who have opted in to receive marketing and
             news. Export the list for your email platform.
           </p>
         </div>
