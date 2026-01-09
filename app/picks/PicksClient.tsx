@@ -1068,9 +1068,9 @@ export default function PicksClient() {
             </div>
 
             <div className="mt-3 flex items-center justify-center gap-3">
-              <TeamLogo teamName={homeName} size={48} />
+              <TeamLogo teamName={homeName} size={72} />
               <div className="text-white/80 font-black text-[12px]">vs</div>
-              <TeamLogo teamName={awayName || "AFL"} size={48} />
+              <TeamLogo teamName={awayName || "AFL"} size={72} />
             </div>
 
             <div className="mt-3 text-center">
