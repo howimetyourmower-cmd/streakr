@@ -156,7 +156,7 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
 }
 
 // ─────────────────────────────────────────────
-// ✅ Stable questionId (keep your approach)
+// ✅ Stable questionId
 // ─────────────────────────────────────────────
 
 function fnv1a(str: string): string {
@@ -280,12 +280,6 @@ function toMs(ts: any): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-/**
- * ✅ FIXED: read the correct docs (roundNumber__questionId)
- * and map them back to questionId.
- *
- * Also: if multiple docs ever exist, we pick the newest by updatedAt.
- */
 async function getQuestionStatusForQuestionIds(params: {
   roundNumber: number;
   questionIds: Set<string>;
@@ -309,10 +303,9 @@ async function getQuestionStatusForQuestionIds(params: {
 
       const data = (snap.data() as QuestionStatusDoc) || {};
 
-      // Primary key is the questionId stored in doc; fallback: parse from docId
       const qid =
         (typeof data.questionId === "string" && data.questionId) ||
-        snap.id.split("__").slice(1).join("__"); // safe even if questionId contains "__" (unlikely)
+        snap.id.split("__").slice(1).join("__");
 
       const status = data.status as QuestionStatus | undefined;
       if (!qid || !status) continue;
@@ -331,7 +324,6 @@ async function getQuestionStatusForQuestionIds(params: {
     console.error("[/api/picks] Error fetching questionStatus by ids", error);
   }
 
-  // Strip updatedAtMs for return type
   const clean: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }> = {};
   Object.entries(out).forEach(([qid, v]) => {
     clean[qid] = { status: v.status, outcome: v.outcome };
@@ -468,6 +460,33 @@ function autoDetectRoundNumber(nowMs: number): number {
   return max;
 }
 
+// ✅ deterministic leader selection when scores tie or are all zero
+function chooseLeader(
+  scores: Array<{ uid: string; score: number }>
+): { uid: string; score: number } | null {
+  if (!scores.length) return null;
+
+  // highest score wins
+  let best = scores[0];
+
+  for (let i = 1; i < scores.length; i++) {
+    const s = scores[i];
+
+    if (s.score > best.score) {
+      best = s;
+      continue;
+    }
+
+    // ✅ tie-break: pick lexicographically smallest uid
+    // (stable across devices; avoids "leader null" when all = 0)
+    if (s.score === best.score && s.uid < best.uid) {
+      best = s;
+    }
+  }
+
+  return best;
+}
+
 // ─────────────────────────────────────────────
 // Main GET handler
 // ─────────────────────────────────────────────
@@ -517,7 +536,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // ✅ FIX: read overrides from questionStatus/{round__qid}
     const statusOverrides = await getQuestionStatusForQuestionIds({
       roundNumber,
       questionIds: questionIdsForRound,
@@ -563,7 +581,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       const effectiveStatus: QuestionStatus =
         statusInfo?.status ?? normaliseStatusValue(r.Status || "Open");
 
-      // Only meaningful if settled
       const effectiveOutcome =
         effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
@@ -619,18 +636,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
-    let leaderScore = 0;
-    let leaderUid: string | null = null;
-
+    // ✅ Leader computation: deterministic even if all scores are 0
     const picksByUser = await loadPicksByUserForQuestionIds(questionIdsForRound);
 
+    const scoreList: Array<{ uid: string; score: number }> = [];
     for (const uid of Object.keys(picksByUser)) {
       const score = computeRunningStreakAcrossGames(games, picksByUser[uid]);
-      if (score > leaderScore) {
-        leaderScore = score;
-        leaderUid = uid;
-      }
+      scoreList.push({ uid, score });
     }
+
+    const chosen = chooseLeader(scoreList);
+    const leaderUid = chosen?.uid ?? null;
+    const leaderScore = chosen?.score ?? 0;
 
     const leaderName = leaderUid ? await readUsername(leaderUid) : null;
 
