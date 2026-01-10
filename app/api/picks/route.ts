@@ -268,7 +268,6 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
 }
 
 function questionStatusDocId(roundNumber: number, questionId: string) {
-  // ✅ MUST match /app/api/settlement/route.ts
   return `${roundNumber}__${questionId}`;
 }
 
@@ -402,7 +401,7 @@ async function readUsername(uid: string): Promise<string | null> {
 }
 
 // ─────────────────────────────────────────────
-// Streak
+// ✅ Streak (FIXED: no dependency on q.correctPick)
 // ─────────────────────────────────────────────
 
 function computeRunningStreakAcrossGames(
@@ -420,16 +419,42 @@ function computeRunningStreakAcrossGames(
 
     if (pickedQs.length === 0) continue;
 
+    // If any picked question is not settled, skip this game for streak (don’t change running)
     const anyUnsettled = pickedQs.some((q) => q.status !== "final" && q.status !== "void");
     if (anyUnsettled) continue;
 
-    const anyWrong = pickedQs.some((q) => q.correctPick === false);
+    // Evaluate wrong/correct using outcome + that user's pick
+    const anyWrong = pickedQs.some((q) => {
+      const pick = picksForUser[q.id];
+      if (!pick) return false;
+
+      // voids don't count as wrong
+      if (q.status === "void" || q.outcome === "void") return false;
+
+      const outcome = q.outcome;
+      if (outcome !== "yes" && outcome !== "no") return false;
+
+      return pick !== outcome;
+    });
+
     if (anyWrong) {
       running = 0;
       continue;
     }
 
-    const correct = pickedQs.filter((q) => q.correctPick === true).length;
+    const correct = pickedQs.filter((q) => {
+      const pick = picksForUser[q.id];
+      if (!pick) return false;
+
+      // voids don't add
+      if (q.status === "void" || q.outcome === "void") return false;
+
+      const outcome = q.outcome;
+      if (outcome !== "yes" && outcome !== "no") return false;
+
+      return pick === outcome;
+    }).length;
+
     running += correct;
   }
 
@@ -458,33 +483,6 @@ function autoDetectRoundNumber(nowMs: number): number {
     if (rn !== null) max = Math.max(max, rn);
   }
   return max;
-}
-
-// ✅ deterministic leader selection when scores tie or are all zero
-function chooseLeader(
-  scores: Array<{ uid: string; score: number }>
-): { uid: string; score: number } | null {
-  if (!scores.length) return null;
-
-  // highest score wins
-  let best = scores[0];
-
-  for (let i = 1; i < scores.length; i++) {
-    const s = scores[i];
-
-    if (s.score > best.score) {
-      best = s;
-      continue;
-    }
-
-    // ✅ tie-break: pick lexicographically smallest uid
-    // (stable across devices; avoids "leader null" when all = 0)
-    if (s.score === best.score && s.uid < best.uid) {
-      best = s;
-    }
-  }
-
-  return best;
 }
 
 // ─────────────────────────────────────────────
@@ -522,7 +520,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const sponsorConfig = await getSponsorQuestionConfig();
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    // Build stable questionIds for the round
     const questionIdsForRound = new Set<string>();
     for (const r of roundRows) {
       const gameId = `${roundCode}-G${r.Game}`;
@@ -634,20 +631,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         ),
       }));
 
+    // ✅ current streak now uses outcome-based scoring too (works regardless of correctPick)
     const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
-    // ✅ Leader computation: deterministic even if all scores are 0
+    let leaderScore = 0;
+    let leaderUid: string | null = null;
+
     const picksByUser = await loadPicksByUserForQuestionIds(questionIdsForRound);
 
-    const scoreList: Array<{ uid: string; score: number }> = [];
     for (const uid of Object.keys(picksByUser)) {
       const score = computeRunningStreakAcrossGames(games, picksByUser[uid]);
-      scoreList.push({ uid, score });
+      if (score > leaderScore) {
+        leaderScore = score;
+        leaderUid = uid;
+      }
     }
-
-    const chosen = chooseLeader(scoreList);
-    const leaderUid = chosen?.uid ?? null;
-    const leaderScore = chosen?.score ?? 0;
 
     const leaderName = leaderUid ? await readUsername(leaderUid) : null;
 
