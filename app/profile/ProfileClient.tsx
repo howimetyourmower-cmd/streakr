@@ -22,9 +22,10 @@ type ProfileData = {
   avatarUrl?: string; // new name
   photoURL?: string; // legacy
 
+  // Stats (may be computed later; UI should be resilient)
   currentStreak?: number;
-  longestStreak?: number;
-  lifetimeBestStreak?: number;
+  longestStreak?: number; // legacy / might mean "season best" in some setups
+  lifetimeBestStreak?: number; // preferred all-time best
   lifetimeWins?: number;
   lifetimeLosses?: number;
   roundsPlayed?: number;
@@ -55,9 +56,13 @@ const AFL_TEAMS = [
 
 const JOOSE = {
   bg: "#000000",
-  red: "#FF2E4D", // main brand red (match Picks)
+  red: "#FF2E4D",
   white: "#FFFFFF",
 };
+
+function toNum(v: unknown, fallback = 0) {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
 
 export default function ProfileClient() {
   const router = useRouter();
@@ -292,12 +297,17 @@ export default function ProfileClient() {
   };
 
   // Derived stats (UI-only — backend comes later)
-  const currentStreak = profile.currentStreak ?? 0;
-  const longestStreak = profile.longestStreak ?? 0;
-  const lifetimeBestStreak = profile.lifetimeBestStreak ?? longestStreak;
-  const lifetimeWins = profile.lifetimeWins ?? 0;
-  const lifetimeLosses = profile.lifetimeLosses ?? 0;
-  const roundsPlayed = profile.roundsPlayed ?? 0;
+  const currentStreak = toNum(profile.currentStreak, 0);
+  const longestStreak = toNum(profile.longestStreak, 0);
+  const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
+
+  // ✅ IMPORTANT: “Best streak” should never be lower than current streak in UI.
+  // It represents all-time peak, including right now if you're currently above your recorded best.
+  const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
+
+  const lifetimeWins = toNum(profile.lifetimeWins, 0);
+  const lifetimeLosses = toNum(profile.lifetimeLosses, 0);
+  const roundsPlayed = toNum(profile.roundsPlayed, 0);
   const totalPicks = lifetimeWins + lifetimeLosses;
   const correctPercent =
     totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
@@ -606,13 +616,13 @@ export default function ProfileClient() {
             <StatCard
               label="Current streak"
               value={String(currentStreak)}
-              hint="Correct picks in a row right now."
+              hint="What you're on right now."
               accent="red"
             />
             <StatCard
               label="Best streak"
-              value={String(lifetimeBestStreak)}
-              hint="Your best Joose run."
+              value={String(bestStreakDisplay)}
+              hint="Your all-time peak (includes your current streak if higher)."
               accent="white"
             />
             <StatCard
@@ -661,7 +671,7 @@ export default function ProfileClient() {
             </div>
 
             <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MiniStat label="Best streak" value={String(lifetimeBestStreak)} />
+              <MiniStat label="Best streak" value={String(bestStreakDisplay)} />
               <MiniStat label="Wins" value={String(lifetimeWins)} good />
               <MiniStat label="Losses" value={String(lifetimeLosses)} bad />
               <MiniStat label="Total picks" value={String(totalPicks)} />
