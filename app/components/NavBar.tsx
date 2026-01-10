@@ -49,7 +49,7 @@ export default function NavBar() {
             <Link
               key={it.href}
               href={it.href}
-              className="rounded-xl px-3 py-2 text-[12px] font-black text-black/80 hover:text-black hover:bg-black/5"
+              className="rounded-xl px-3 py-2 text-[14px] font-black text-black/80 hover:text-black hover:bg-black/5"
               style={{ textDecoration: "none" }}
             >
               {it.label}
