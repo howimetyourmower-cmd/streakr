@@ -68,10 +68,6 @@ function roundNumberFromGameId(gameId: string): number {
   return 0;
 }
 
-function normaliseTeamKey(team: string) {
-  return team.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
-}
-
 function extractPlayerName(question: string) {
   const q = question.trim();
   if (!q.toLowerCase().startsWith("will ")) return null;
@@ -84,8 +80,7 @@ function extractPlayerName(question: string) {
   if (!name) return null;
   if (!name.includes(" ")) return null;
 
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name))
-    return null;
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
 
   return name;
 }
@@ -115,6 +110,136 @@ function parseTeams(match: string) {
   return { home: match.trim(), away: "" };
 }
 
+/* ✅ MATCH PicksClient team slug + logo candidates logic */
+
+type TeamSlug =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "goldcoast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "northmelbourne"
+  | "portadelaide"
+  | "richmond"
+  | "stkilda"
+  | "sydney"
+  | "westcoast"
+  | "westernbulldogs";
+
+function teamNameToSlug(nameRaw: string): TeamSlug | null {
+  const n = (nameRaw || "").toLowerCase().trim();
+
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
+  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+
+  if (n.includes("adelaide")) return "adelaide";
+  if (n.includes("brisbane")) return "brisbane";
+  if (n.includes("carlton")) return "carlton";
+  if (n.includes("collingwood")) return "collingwood";
+  if (n.includes("essendon")) return "essendon";
+  if (n.includes("fremantle")) return "fremantle";
+  if (n.includes("geelong")) return "geelong";
+  if (n.includes("hawthorn")) return "hawthorn";
+  if (n.includes("melbourne")) return "melbourne";
+  if (n.includes("richmond")) return "richmond";
+  if (n.includes("sydney") || n.includes("swans")) return "sydney";
+
+  return null;
+}
+
+function logoCandidates(teamSlug: TeamSlug): string[] {
+  return [
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
+    `/afllogos/${teamSlug}-logo.jpg`,
+    `/afllogos/${teamSlug}-logo.png`,
+  ];
+}
+
+const TeamLogo = ({
+  teamName,
+  size = 72,
+}: {
+  teamName: string;
+  size?: number;
+}) => {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const fallbackInitials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  if (!slug || dead) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-2xl border font-black"
+        style={{
+          width: size,
+          height: size,
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
+        }}
+        title={teamName}
+      >
+        {fallbackInitials || "AFL"}
+      </div>
+    );
+  }
+
+  const candidates = logoCandidates(slug);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
+      }}
+      title={teamName}
+    >
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/* UI bits */
+
 function PlayerAvatar({ name }: { name: string }) {
   const exact = `/players/${encodeURIComponent(name)}.jpg`;
   const slug = `/players/${playerSlug(name)}.jpg`;
@@ -141,27 +266,14 @@ function PlayerAvatar({ name }: { name: string }) {
   );
 }
 
-function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
-  const primary = `/afllogos/${teamKey}-logo.jpg`;
-  const fallback = `/aflteams/${teamKey}-logo.jpg`;
-  const [src, setSrc] = useState(primary);
-
+function TeamLogoSquircle({ teamName }: { teamName: string }) {
   return (
     <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
       <div
         className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
         style={{ background: BRAND_RED }}
       >
-        <Image
-          src={src}
-          alt={alt}
-          width={54}
-          height={48}
-          className="object-contain"
-          onError={() => {
-            if (src === primary) setSrc(fallback);
-          }}
-        />
+        <TeamLogo teamName={teamName} size={72} />
       </div>
     </div>
   );
@@ -169,15 +281,13 @@ function TeamLogoSquircle({ teamKey, alt }: { teamKey: string; alt: string }) {
 
 function GamePickHeader({ match }: { match: string }) {
   const { home, away } = parseTeams(match);
-  const homeKey = normaliseTeamKey(home);
-  const awayKey = normaliseTeamKey(away);
 
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="flex items-center justify-center gap-3">
-        <TeamLogoSquircle teamKey={homeKey} alt={home} />
+        <TeamLogoSquircle teamName={home} />
         <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
-        <TeamLogoSquircle teamKey={awayKey} alt={away} />
+        <TeamLogoSquircle teamName={away || "AFL"} />
       </div>
 
       <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">GAME PICK</div>
@@ -455,7 +565,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="flex items-end justify-between gap-3">
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
-              {refreshing ? <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div> : null}
+              {refreshing ? (
+                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
+              ) : null}
               <button
                 type="button"
                 className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
@@ -612,8 +724,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                       <div className="mt-5 flex-1 rounded-2xl bg-[#F2F2F2] p-4 flex flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb ||
-                            "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
                         </div>
 
                         <button
