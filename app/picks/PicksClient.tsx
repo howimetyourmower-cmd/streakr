@@ -1153,7 +1153,7 @@ export default function PicksClient() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black">Picks</h1>
+              <h1 className="text-3xl sm:text-4xl font-black">PICKS</h1>
               {roundLabel ? (
                 <span
                   className="mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
