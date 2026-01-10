@@ -348,7 +348,7 @@ export default function ProfileClient() {
   }
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
+    <div className="min-h-screen text-white" style={{ backgroundColor: Torpie.bg }}>
       {/* top sponsor strip */}
       <div
         className="w-full border-b"
