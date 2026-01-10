@@ -373,7 +373,7 @@ export default function ProfileClient() {
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black">Profile</h1>
+              <h1 className="text-3xl sm:text-4xl font-black">PROFILE/h1>
               <span
                 className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black"
                 style={{
