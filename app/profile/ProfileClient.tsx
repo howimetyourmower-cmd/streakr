@@ -19,13 +19,13 @@ type ProfileData = {
   phone?: string;
   gender?: string;
   favouriteAflTeam?: string;
-  avatarUrl?: string; // new name
+  avatarUrl?: string; // preferred
   photoURL?: string; // legacy
 
-  // Stats (may be computed later; UI should be resilient)
+  // stats (UI now, computed later)
   currentStreak?: number;
-  longestStreak?: number; // legacy / might mean "season best" in some setups
-  lifetimeBestStreak?: number; // preferred all-time best
+  longestStreak?: number;
+  lifetimeBestStreak?: number;
   lifetimeWins?: number;
   lifetimeLosses?: number;
   roundsPlayed?: number;
@@ -56,12 +56,14 @@ const AFL_TEAMS = [
 
 const JOOSE = {
   bg: "#000000",
-  red: "#FF2E4D",
+  red: "#d11b2f",
+  red2: "#FF2E4D",
   white: "#FFFFFF",
 };
 
-function toNum(v: unknown, fallback = 0) {
-  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+function toNum(v: unknown, fallback = 0): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export default function ProfileClient() {
@@ -119,8 +121,7 @@ export default function ProfileClient() {
             }
           });
 
-          const streakBadges =
-            (firestoreData.streakBadges as Record<string, boolean>) || {};
+          const streakBadges = (firestoreData.streakBadges as Record<string, boolean>) || {};
           const mergedBadges = { ...streakBadges, ...levelBadges };
 
           data = {
@@ -175,9 +176,7 @@ export default function ProfileClient() {
     load();
   }, [user]);
 
-  const handleFieldChange = (
-    e: ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => {
+  const handleFieldChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormValues((prev) => ({ ...prev, [name]: value }));
   };
@@ -301,20 +300,19 @@ export default function ProfileClient() {
   const longestStreak = toNum(profile.longestStreak, 0);
   const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
 
-  // ✅ IMPORTANT: “Best streak” should never be lower than current streak in UI.
-  // It represents all-time peak, including right now if you're currently above your recorded best.
+  // ✅ IMPORTANT:
+  // - Current streak = live streak right now.
+  // - Best streak = all-time peak (and should never display lower than current).
   const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
 
   const lifetimeWins = toNum(profile.lifetimeWins, 0);
   const lifetimeLosses = toNum(profile.lifetimeLosses, 0);
   const roundsPlayed = toNum(profile.roundsPlayed, 0);
   const totalPicks = lifetimeWins + lifetimeLosses;
-  const correctPercent =
-    totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
+  const correctPercent = totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
 
   // Avatar source
-  const avatarUrl =
-    profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
+  const avatarUrl = profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
 
   const displayName = useMemo(() => {
     const name =
@@ -322,12 +320,7 @@ export default function ProfileClient() {
       profile.username ||
       [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
     return name || "Joose Player";
-  }, [
-    authUser?.displayName,
-    profile.username,
-    profile.firstName,
-    profile.lastName,
-  ]);
+  }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
 
   if (loading) {
     return (
@@ -340,28 +333,23 @@ export default function ProfileClient() {
   if (!user || !authUser) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <p className="text-sm text-white/70">
-          You need to be logged in to view your profile.
-        </p>
+        <p className="text-sm text-white/70">You need to be logged in to view your profile.</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
+    <div className="min-h-screen text-white" style={{ backgroundColor: JOOSE.bg }}>
       {/* top sponsor strip */}
       <div
         className="w-full border-b"
         style={{
           borderColor: "rgba(255,255,255,0.08)",
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.00) 100%)",
+          background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.00) 100%)",
         }}
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">
-            OFFICIAL PARTNER
-          </div>
+          <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
           <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">
             Proudly supporting JOOSE all season long
           </div>
@@ -373,12 +361,12 @@ export default function ProfileClient() {
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black">PROFILE/h1>
+              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em]">PROFILE</h1>
               <span
-                className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black"
+                className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
                 style={{
-                  borderColor: "rgba(255,46,77,0.35)",
-                  background: "rgba(255,46,77,0.12)",
+                  borderColor: "rgba(209,27,47,0.35)",
+                  background: "rgba(209,27,47,0.12)",
                   color: "rgba(255,255,255,0.92)",
                 }}
               >
@@ -386,9 +374,8 @@ export default function ProfileClient() {
               </span>
             </div>
             <p className="mt-1 text-sm text-white/65">
-              Welcome back,{" "}
-              <span className="font-semibold text-white">{displayName}</span>.
-              Track streaks, badges and details here.
+              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Track streaks, badges and
+              details here.
             </p>
           </div>
 
@@ -424,12 +411,8 @@ export default function ProfileClient() {
               onClick={toggleEditing}
               className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
               style={{
-                borderColor: isEditing
-                  ? "rgba(255,255,255,0.18)"
-                  : "rgba(255,46,77,0.35)",
-                background: isEditing
-                  ? "rgba(255,255,255,0.06)"
-                  : "rgba(255,46,77,0.14)",
+                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(209,27,47,0.35)",
+                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(209,27,47,0.14)",
                 color: "rgba(255,255,255,0.95)",
               }}
             >
@@ -495,9 +478,8 @@ export default function ProfileClient() {
                 <div
                   className="h-14 w-14 rounded-2xl p-[3px]"
                   style={{
-                    background:
-                      "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.55) 100%)",
-                    boxShadow: "0 12px 28px rgba(255,46,77,0.18)",
+                    background: "linear-gradient(180deg, rgba(209,27,47,0.95) 0%, rgba(209,27,47,0.55) 100%)",
+                    boxShadow: "0 12px 28px rgba(209,27,47,0.18)",
                   }}
                 >
                   <div
@@ -509,11 +491,7 @@ export default function ProfileClient() {
                   >
                     {avatarUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={avatarUrl}
-                        alt="Avatar"
-                        className="h-full w-full object-cover"
-                      />
+                      <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center text-xl font-black">
                         {(displayName?.[0] || "J").toUpperCase()}
@@ -536,16 +514,10 @@ export default function ProfileClient() {
               </div>
 
               <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
-                  Logged in as
-                </div>
-                <div className="mt-1 text-[14px] font-black text-white truncate">
-                  {authUser.email ?? "No email"}
-                </div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Logged in as</div>
+                <div className="mt-1 text-[14px] font-black text-white truncate">{authUser.email ?? "No email"}</div>
                 <div className="mt-1 text-[12px] text-white/55 font-semibold truncate">
-                  {profile.favouriteAflTeam
-                    ? `Favourite: ${profile.favouriteAflTeam}`
-                    : "Set your favourite team below"}
+                  {profile.favouriteAflTeam ? `Favourite: ${profile.favouriteAflTeam}` : "Set your favourite team below"}
                 </div>
               </div>
             </div>
@@ -583,19 +555,15 @@ export default function ProfileClient() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
-                Match stats
-              </div>
-              <div className="mt-1 text-[14px] font-black text-white">
-                Your season snapshot
-              </div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Match stats</div>
+              <div className="mt-1 text-[14px] font-black text-white">Your season snapshot</div>
             </div>
 
             <span
               className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
               style={{
-                borderColor: "rgba(255,46,77,0.32)",
-                background: "rgba(255,46,77,0.10)",
+                borderColor: "rgba(209,27,47,0.32)",
+                background: "rgba(209,27,47,0.10)",
                 color: "rgba(255,255,255,0.92)",
               }}
               title="Joose theme"
@@ -604,7 +572,7 @@ export default function ProfileClient() {
                 className="h-2 w-2 rounded-full"
                 style={{
                   background: JOOSE.red,
-                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
+                  boxShadow: "0 0 14px rgba(209,27,47,0.55)",
                 }}
               />
               LIVE
@@ -613,24 +581,9 @@ export default function ProfileClient() {
 
           {/* top cards */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <StatCard
-              label="Current streak"
-              value={String(currentStreak)}
-              hint="What you're on right now."
-              accent="red"
-            />
-            <StatCard
-              label="Best streak"
-              value={String(bestStreakDisplay)}
-              hint="Your all-time peak (includes your current streak if higher)."
-              accent="white"
-            />
-            <StatCard
-              label="Rounds played"
-              value={String(roundsPlayed)}
-              hint="How many rounds you've played."
-              accent="white"
-            />
+            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="red" />
+            <StatCard label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak streak." accent="white" />
+            <StatCard label="Rounds played" value={String(roundsPlayed)} hint="How many rounds you've played." accent="white" />
           </div>
 
           {/* lifetime record */}
@@ -643,12 +596,8 @@ export default function ProfileClient() {
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
-                  Lifetime record
-                </div>
-                <div className="mt-1 text-[14px] font-black text-white">
-                  All-time picks
-                </div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Lifetime record</div>
+                <div className="mt-1 text-[14px] font-black text-white">All-time picks</div>
                 <div className="mt-1 text-[12px] text-white/60 font-semibold">
                   (UI-only for now — we’ll wire real computed stats in step 2)
                 </div>
@@ -661,9 +610,7 @@ export default function ProfileClient() {
                   background: "rgba(255,255,255,0.06)",
                 }}
               >
-                <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">
-                  Correct
-                </div>
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Correct</div>
                 <div className="text-[18px] font-black" style={{ color: JOOSE.red }}>
                   {correctPercent}%
                 </div>
@@ -682,50 +629,19 @@ export default function ProfileClient() {
           <div className="mt-5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
-                  Streak badges
-                </div>
-                <div className="mt-1 text-[14px] font-black text-white">
-                  Unlock as you climb
-                </div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Streak badges</div>
+                <div className="mt-1 text-[14px] font-black text-white">Unlock as you climb</div>
               </div>
 
-              <div className="text-[11px] text-white/55 font-semibold">
-                Tip: badges match the big streak animation
-              </div>
+              <div className="text-[11px] text-white/55 font-semibold">Tip: badges match the streak animation</div>
             </div>
 
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-              <BadgeCard
-                level={3}
-                title="3 in a row"
-                subtitle="Keep building 😎"
-                unlocked={!!localBadges["3"]}
-              />
-              <BadgeCard
-                level={5}
-                title="On Fire"
-                subtitle="Bang! You're on 🔥"
-                unlocked={!!localBadges["5"]}
-              />
-              <BadgeCard
-                level={10}
-                title="Elite"
-                subtitle="10 straight 🏆"
-                unlocked={!!localBadges["10"]}
-              />
-              <BadgeCard
-                level={15}
-                title="Dominance"
-                subtitle="Ridiculous run 💪"
-                unlocked={!!localBadges["15"]}
-              />
-              <BadgeCard
-                level={20}
-                title="Legendary"
-                subtitle="GOAT status 🐐"
-                unlocked={!!localBadges["20"]}
-              />
+              <BadgeCard level={3} title="3 in a row" subtitle="Keep building 😎" unlocked={!!localBadges["3"]} />
+              <BadgeCard level={5} title="On Fire" subtitle="Bang! You're on 🔥" unlocked={!!localBadges["5"]} />
+              <BadgeCard level={10} title="Elite" subtitle="10 straight 🏆" unlocked={!!localBadges["10"]} />
+              <BadgeCard level={15} title="Dominance" subtitle="Ridiculous run 💪" unlocked={!!localBadges["15"]} />
+              <BadgeCard level={20} title="Legendary" subtitle="GOAT status 🐐" unlocked={!!localBadges["20"]} />
             </div>
           </div>
         </section>
@@ -741,15 +657,9 @@ export default function ProfileClient() {
         >
           <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">
-                Personal details
-              </div>
-              <div className="mt-1 text-[18px] font-black text-white">
-                Your info
-              </div>
-              <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                Username & DOB are locked here.
-              </div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Personal details</div>
+              <div className="mt-1 text-[18px] font-black text-white">Your info</div>
+              <div className="mt-1 text-[12px] text-white/60 font-semibold">Username & DOB are locked here.</div>
             </div>
 
             {isEditing ? (
@@ -772,8 +682,8 @@ export default function ProfileClient() {
                   disabled={saving}
                   className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
                   style={{
-                    borderColor: "rgba(255,46,77,0.35)",
-                    background: "rgba(255,46,77,0.18)",
+                    borderColor: "rgba(209,27,47,0.35)",
+                    background: "rgba(209,27,47,0.18)",
                     color: "rgba(255,255,255,0.95)",
                     opacity: saving ? 0.7 : 1,
                   }}
@@ -786,18 +696,11 @@ export default function ProfileClient() {
 
           {/* locked rows */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <ReadOnlyRow
-              label="Username"
-              value={profile.username || authUser.displayName || "—"}
-            />
+            <ReadOnlyRow label="Username" value={profile.username || authUser.displayName || "—"} />
             <ReadOnlyRow label="Date of birth" value={profile.dateOfBirth || "—"} />
           </div>
 
-          <form
-            id="profile-form"
-            onSubmit={handleSubmit}
-            className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm"
-          >
+          <form id="profile-form" onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <Field
               label="First name"
               name="firstName"
@@ -851,9 +754,7 @@ export default function ProfileClient() {
             />
 
             <div className="sm:col-span-2">
-              <label className="block text-[11px] text-white/60 mb-1">
-                Favourite AFL team
-              </label>
+              <label className="block text-[11px] text-white/60 mb-1">Favourite AFL team</label>
               <select
                 name="favouriteAflTeam"
                 value={String(formValues.favouriteAflTeam ?? "")}
@@ -861,12 +762,8 @@ export default function ProfileClient() {
                 disabled={!isEditing}
                 className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
                 style={{
-                  borderColor: isEditing
-                    ? "rgba(255,255,255,0.16)"
-                    : "rgba(255,255,255,0.10)",
-                  background: isEditing
-                    ? "rgba(255,255,255,0.06)"
-                    : "rgba(0,0,0,0.28)",
+                  borderColor: isEditing ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)",
+                  background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)",
                   color: "rgba(255,255,255,0.92)",
                 }}
               >
@@ -884,25 +781,17 @@ export default function ProfileClient() {
           <div
             className="mt-6 rounded-3xl border p-4 text-center"
             style={{
-              borderColor: "rgba(255,46,77,0.28)",
+              borderColor: "rgba(209,27,47,0.28)",
               background:
-                "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
+                "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
             }}
           >
-            <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">
-              Sponsor banner placeholder
-            </div>
-            <div className="mt-1 text-[13px] font-black text-white">
-              Put your major partner here
-            </div>
-            <div className="mt-1 text-[12px] text-white/55 font-semibold">
-              (Clickable image / CTA in phase 2)
-            </div>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">Sponsor banner placeholder</div>
+            <div className="mt-1 text-[13px] font-black text-white">Put your major partner here</div>
+            <div className="mt-1 text-[12px] text-white/55 font-semibold">(Clickable image / CTA in phase 2)</div>
           </div>
 
-          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">
-            JOOSE © 2026
-          </div>
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">JOOSE © 2026</div>
         </section>
       </div>
     </div>
@@ -932,9 +821,7 @@ function StatCard({
         background: "rgba(0,0,0,0.28)",
       }}
     >
-      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">
-        {label}
-      </div>
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
         {value}
       </div>
@@ -954,11 +841,7 @@ function MiniStat({
   good?: boolean;
   bad?: boolean;
 }) {
-  const color = good
-    ? "rgba(45,255,122,0.92)"
-    : bad
-    ? "rgba(255,46,77,0.92)"
-    : "rgba(255,255,255,0.92)";
+  const color = good ? "rgba(45,255,122,0.92)" : bad ? "rgba(255,46,77,0.92)" : "rgba(255,255,255,0.92)";
 
   return (
     <div
@@ -968,9 +851,7 @@ function MiniStat({
         background: "rgba(255,255,255,0.04)",
       }}
     >
-      <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">
-        {label}
-      </div>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-1 text-[18px] font-black" style={{ color }}>
         {value}
       </div>
@@ -987,9 +868,7 @@ function ReadOnlyRow({ label, value }: { label: string; value: string }) {
         background: "rgba(0,0,0,0.28)",
       }}
     >
-      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">
-        {label}
-      </div>
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-2 text-[14px] font-black text-white">{value}</div>
       <div className="mt-1 text-[11px] text-white/45 font-semibold">Locked</div>
     </div>
@@ -1007,25 +886,13 @@ type FieldProps = {
   onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
 };
 
-function Field({
-  label,
-  name,
-  value,
-  onChange,
-  disabled,
-  type = "text",
-  placeholder,
-  tone,
-}: FieldProps) {
-  const borderColor =
-    tone === "edit" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)";
+function Field({ label, name, value, onChange, disabled, type = "text", placeholder, tone }: FieldProps) {
+  const borderColor = tone === "edit" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)";
   const bg = tone === "edit" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)";
 
   return (
     <div>
-      <label className="block text-[11px] text-white/60 mb-1 font-semibold tracking-wide">
-        {label}
-      </label>
+      <label className="block text-[11px] text-white/60 mb-1 font-semibold tracking-wide">{label}</label>
       <input
         name={name}
         type={type}
@@ -1058,19 +925,18 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
     <div
       className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
       style={{
-        borderColor: unlocked ? "rgba(255,46,77,0.40)" : "rgba(255,255,255,0.10)",
+        borderColor: unlocked ? "rgba(209,27,47,0.40)" : "rgba(255,255,255,0.10)",
         background: unlocked
-          ? "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
+          ? "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
           : "rgba(0,0,0,0.28)",
-        boxShadow: unlocked ? "0 18px 60px rgba(255,46,77,0.10)" : "none",
+        boxShadow: unlocked ? "0 18px 60px rgba(209,27,47,0.10)" : "none",
       }}
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
         <div
           className="absolute inset-0"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)",
           }}
         />
       </div>
@@ -1080,9 +946,7 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
         <img
           src={imageSrc}
           alt={`Streak badge level ${level}`}
-          className={`h-full w-full object-contain ${
-            unlocked ? "" : "grayscale opacity-70"
-          }`}
+          className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`}
         />
         {!unlocked && (
           <div
@@ -1098,20 +962,14 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
       </div>
 
       <p className="relative text-[12px] font-black text-white">{title}</p>
-      <p className="relative text-[11px] text-white/65 font-semibold mt-0.5">
-        {subtitle}
-      </p>
+      <p className="relative text-[11px] text-white/65 font-semibold mt-0.5">{subtitle}</p>
 
       <div
         className="relative mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black tracking-[0.18em]"
         style={{
-          borderColor: unlocked
-            ? "rgba(45,255,122,0.22)"
-            : "rgba(255,255,255,0.12)",
+          borderColor: unlocked ? "rgba(45,255,122,0.22)" : "rgba(255,255,255,0.12)",
           background: unlocked ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
-          color: unlocked
-            ? "rgba(45,255,122,0.92)"
-            : "rgba(255,255,255,0.75)",
+          color: unlocked ? "rgba(45,255,122,0.92)" : "rgba(255,255,255,0.75)",
         }}
       >
         {unlocked ? "UNLOCKED" : "LOCKED"}
