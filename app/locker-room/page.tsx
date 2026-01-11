@@ -1,8 +1,8 @@
-// /app/locker-room/page.tsx
+// /app/locker-rooms/page.tsx
+import LockerRoomClient from "../locker-room/LockerRoomClient";
+
 export const dynamic = "force-dynamic";
 
-import LockerRoomClient from "./LockerRoomClient";
-
-export default function Page() {
+export default function LockerRoomsPage() {
   return <LockerRoomClient />;
 }
