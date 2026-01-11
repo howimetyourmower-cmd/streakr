@@ -16,7 +16,7 @@ export default function NavBar() {
       { href: "/", label: "Home" },
       { href: "/picks", label: "Picks" },
       { href: "/leaderboards", label: "Leaderboards" },
-      { href: "/locker-rooms", label: "Locker Rooms" },
+      { href: "/locker-room", label: "Locker Rooms" },
       { href: "/profile", label: "Profile" },
     ],
     []
