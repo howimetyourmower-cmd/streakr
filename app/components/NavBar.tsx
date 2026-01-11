@@ -16,7 +16,7 @@ export default function NavBar() {
       { href: "/", label: "Home" },
       { href: "/picks", label: "Picks" },
       { href: "/leaderboards", label: "Leaderboards" },
-      { href: "/locker-room", label: "Locker Room" },
+      { href: "/locker-rooms", label: "Locker Rooms" },
       { href: "/profile", label: "Profile" },
     ],
     []
@@ -38,7 +38,7 @@ export default function NavBar() {
               alt="Joose"
               fill
               priority
-              className="object-contain object centre"
+              className="object-contain object-center"
             />
           </div>
         </Link>
