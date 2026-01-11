@@ -8,7 +8,7 @@ import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
-const LOGO_SRC = "/Joose-logo.png"; // confirmed
+const LOGO_SRC = "/joose-logo.png"; // confirmed
 
 export default function NavBar() {
   const items: NavItem[] = useMemo(
