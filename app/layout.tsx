@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 import NavBar from "./components/NavBar";
 
 export const metadata: Metadata = {
-  title: "JOOSE",
-  description: "JOOSE – Streak prediction game",
+  title: "TORPIE",
+  description: "TORPIE – Streak prediction game",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -27,7 +27,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
 
             {/* Middle text */}
             <p className="flex-1 text-right text-[11px] font-semibold text-white/95 sm:text-[12px]">
-              Proudly supporting JOOSE all season long
+              Proudly supporting TORPIE all season long
             </p>
 
             {/* Optional CTA button */}
