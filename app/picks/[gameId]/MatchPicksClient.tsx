@@ -366,7 +366,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const picksStorageKey = useMemo(() => {
     const uid = user?.uid || "anon";
-    return `joose:picks:${uid}:${gameId}`;
+    return `torpie:picks:${uid}:${gameId}`;
   }, [user?.uid, gameId]);
 
   // localStorage (anon/offline fallback)
@@ -557,7 +557,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     >
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting JOOSE all season long</div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting Torpie all season long</div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
