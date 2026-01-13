@@ -814,7 +814,7 @@ export default function PicksClient() {
                 background: "rgba(255,46,77,0.10)",
                 color: "rgba(255,255,255,0.92)",
               }}
-              title="JOOSE is live and updating"
+              title="Torpie is live and updating"
             >
               <span
                 className="h-2 w-2 rounded-full"
