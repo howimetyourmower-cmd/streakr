@@ -52,7 +52,7 @@ const MATCH_HQ = {
   muted2: "#666666",
 };
 
-const HOW_TO_PLAY_PICKS_KEY = "JOOSE_seen_how_to_play_picks_v1";
+const HOW_TO_PLAY_PICKS_KEY = "Torpie_seen_how_to_play_picks_v1";
 
 function formatAedt(dateIso: string): string {
   try {
@@ -1357,7 +1357,7 @@ export default function PicksClient() {
         </div>
 
         <div className="mt-8 pb-6 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
-          JOOSE © 2026
+          Torpie © 2026
         </div>
       </div>
     </div>
