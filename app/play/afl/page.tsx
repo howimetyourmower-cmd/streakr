@@ -412,8 +412,8 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                If you call an unreal mark — that’s a <span className="font-black text-white">SCREAMR</span>.
-                Same here: pick live yes/no outcomes during AFL matches. Pick any amount. One wrong in a game
+                That’s a <span className="font-black text-white">SCREAMR</span>.
+                Pick live yes/no AFL matches outcomes. build your streak. One wrong in a game
                 and your streak is cooked.
               </p>
 
