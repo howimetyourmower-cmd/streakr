@@ -8,7 +8,21 @@ import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
-const LOGO_SRC = "public/screamr-logo.png"; // confirmed
+/**
+ * ✅ IMPORTANT (Next/Image):
+ * - Do NOT use "public/..." in the src.
+ * - Anything inside /public is referenced from the root: "/screamr-logo.png"
+ */
+const LOGO_SRC = "/screamr-logo.png"; // confirmed
+
+const COLORS = {
+  bg: "#000000",
+  border: "rgba(255,255,255,0.10)",
+  text: "rgba(255,255,255,0.88)",
+  muted: "rgba(255,255,255,0.65)",
+  hoverBg: "rgba(255,255,255,0.06)",
+  red: "#FF2E4D",
+};
 
 export default function NavBar() {
   const items: NavItem[] = useMemo(
@@ -23,7 +37,24 @@ export default function NavBar() {
   );
 
   return (
-    <header className="sticky top-0 z-[80] w-full border-b border-black/10 bg-white">
+    <header
+      className="sticky top-0 z-[80] w-full border-b"
+      style={{
+        borderColor: COLORS.border,
+        background: "rgba(0,0,0,0.72)",
+        backdropFilter: "blur(10px)",
+      }}
+    >
+      {/* subtle top glow */}
+      <div
+        className="pointer-events-none absolute inset-x-0 top-0 h-[1px]"
+        style={{
+          background:
+            "linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,46,77,0.55) 50%, rgba(0,0,0,0) 100%)",
+          opacity: 0.55,
+        }}
+      />
+
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
         {/* LEFT: LOGO */}
         <Link
@@ -32,25 +63,34 @@ export default function NavBar() {
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[80px] w-[200px]">
+          <div className="relative h-[52px] w-[170px] sm:h-[58px] sm:w-[190px]">
             <Image
               src={LOGO_SRC}
-              alt="Screamr"
+              alt="SCREAMR"
               fill
               priority
-              className="object-contain object-center"
+              className="object-contain object-left"
             />
           </div>
         </Link>
 
         {/* DESKTOP NAV */}
-        <nav className="hidden md:flex items-center gap-2">
+        <nav className="hidden md:flex items-center gap-1">
           {items.map((it) => (
             <Link
               key={it.href}
               href={it.href}
-              className="rounded-xl px-3 py-2 text-[14px] font-black text-black/80 hover:text-black hover:bg-black/5"
-              style={{ textDecoration: "none" }}
+              className="rounded-xl px-3 py-2 text-[13px] font-black transition"
+              style={{
+                textDecoration: "none",
+                color: COLORS.text,
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLAnchorElement).style.background = COLORS.hoverBg;
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+              }}
             >
               {it.label}
             </Link>
@@ -58,9 +98,11 @@ export default function NavBar() {
 
           <Link
             href="/picks"
-            className="ml-2 rounded-xl px-4 py-2 text-[12px] font-black text-white"
+            className="ml-2 inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black text-white border transition active:scale-[0.99]"
             style={{
-              background: "#FF2E4D",
+              borderColor: "rgba(255,46,77,0.35)",
+              background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
+              boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
               textDecoration: "none",
             }}
           >
@@ -72,13 +114,18 @@ export default function NavBar() {
         <div className="flex items-center gap-2 md:hidden">
           <Link
             href="/picks"
-            className="rounded-xl px-3 py-2 text-[12px] font-black text-white"
-            style={{ background: "#FF2E4D", textDecoration: "none" }}
+            className="inline-flex items-center justify-center rounded-2xl px-3 py-2 text-[12px] font-black text-white border active:scale-[0.99] transition"
+            style={{
+              borderColor: "rgba(255,46,77,0.35)",
+              background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
+              boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+              textDecoration: "none",
+            }}
           >
             GO PICK
           </Link>
 
-          <MobileNav items={items} accent="#FF2E4D" />
+          <MobileNav items={items} accent={COLORS.red} />
         </div>
       </div>
     </header>
