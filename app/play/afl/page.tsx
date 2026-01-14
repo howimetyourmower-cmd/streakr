@@ -330,7 +330,7 @@ export default function AflHubPage() {
         <div className="relative w-full h-[560px] sm:h-[640px]">
           {/* ✅ Use your SCREAMR desktop background (save as /public/screamr/hero-bg.jpg) */}
           <Image
-            src="/screamr/hero-bg.jpg"
+            src="/screamr/hero-bg.png"
             alt="SCREAMR AFL hero"
             fill
             priority
@@ -487,7 +487,7 @@ export default function AflHubPage() {
 
                 <div className="mt-4 flex items-center gap-4">
                   <div className="relative h-14 w-14 rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(0,0,0,0.35)" }}>
-                    <Image src="/screamr/logo.png" alt="SCREAMR" fill className="object-contain p-2" />
+                    <Image src="/screamr/screamr-logo.png" alt="SCREAMR" fill className="object-contain p-2" />
                   </div>
                   <div className="min-w-0">
                     <div className="text-[16px] font-black text-white">Hit a SCREAMR</div>
@@ -617,7 +617,7 @@ export default function AflHubPage() {
                     >
                       <div className="relative h-36">
                         <Image
-                          src="/screamr/hero-bg.jpg"
+                          src="/screamr/hero-bg.png"
                           alt="Match hero"
                           fill
                           className="object-cover object-center"
