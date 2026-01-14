@@ -61,7 +61,7 @@ export default function NavBar() {
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[52px] w-[170px] sm:h-[58px] sm:w-[190px]">
+          <div className="relative h-[72px] w-[170px] sm:h-[78px] sm:w-[190px]">
             <Image
               src={LOGO_SRC}
               alt="SCREAMR"
