@@ -1,579 +1,1131 @@
-// /app/picks/PicksClient.tsx
+// /app/picks/page.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
 
-import React, { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { useAuth } from "@/hooks/useAuth";
 
-/**
- * TORPIE HOMEPAGE (client) — replaces the old Picks UI.
- *
- * ✅ Designed to match your mockup style:
- * - Big stadium hero with headline + CTAs
- * - 3 feature cards (Torpie / Footy Markit / Survivor) — but only Torpie is active
- * - “Join the Tribe” stripe section
- * - Trust icons row
- * - Final CTA + footer links
- *
- * ✅ Drop-in safe: no API calls, no auth dependency, no env vars.
- * ✅ Works on mobile + desktop.
- *
- * Images expected in /public:
- * - /images/torpie-hero.jpg
- * - /images/torpie-card-picks.jpg
- * - /images/torpie-crowd.jpg
- *
- * Routes used (change if you want):
- * - Play button -> /picks  (or /play)
- * - Learn more -> /how-to-play
- * - Leagues -> /leagues
- * - Sign up -> /signup
- * - Log in -> /login
- */
-
-const BRAND = {
-  red: "#FF2E4D",
-  bg: "#05060A",
-  ink: "#0A0A0A",
-  white: "#FFFFFF",
-  gold: "#FFCC33",
+type ApiQuestion = {
+  id: string;
+  gameId?: string;
+  quarter: number;
+  question: string;
+  status: "open" | "final" | "pending" | "void";
+  userPick?: "yes" | "no";
+  correctPick?: boolean | null; // true=correct, false=wrong, null=void
+  outcome?: "yes" | "no" | "void";
 };
 
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
+type ApiGame = {
+  id: string; // gameId (eg "R1-G3")
+  match: string;
+  venue: string;
+  startTime: string;
+  questions: ApiQuestion[];
+};
+
+type PicksApiResponse = {
+  games: ApiGame[];
+  roundNumber?: number;
+  currentStreak?: number;
+  leaderScore?: number;
+  leaderName?: string | null;
+};
+
+const BRAND = {
+  name: "SCREAMR",
+  bg: "#000000",
+  red: "#FF2E4D",
+  green: "#2DFF7A",
+  white: "#FFFFFF",
+};
+
+// Put these in /public/screamr/ (recommended):
+// ✅ /public/screamr/hero-bg.png  (your stadium red background image)
+// ✅ /public/screamr/logo.png     (your SCREAMR logo with text OR icon)
+// ✅ /public/screamr/icon.png     (optional: icon-only version)
+const ASSETS = {
+  heroBg: "/screamr/hero-bg.png",
+  logo: "/screamr/logo.png",
+  icon: "/screamr/icon.png",
+};
+
+const MATCH_HQ = {
+  card: "#F2F2F2",
+  border: "#E5E5E5",
+  pill: "#EAEAEA",
+  pillBorder: "#DADADA",
+  text: "#0A0A0A",
+  muted: "#555555",
+  muted2: "#666666",
+};
+
+const HOW_TO_PLAY_PICKS_KEY = "screamr_seen_how_to_play_picks_v1";
+
+function formatAedt(dateIso: string): string {
+  try {
+    const d = new Date(dateIso);
+    return d.toLocaleString("en-AU", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZoneName: "short",
+    });
+  } catch {
+    return dateIso;
+  }
 }
 
-function TopNav() {
-  return (
-    <header className="sticky top-0 z-[60]">
+function msToCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  if (d > 0) return `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = (match || "").split(/\s+vs\s+/i);
+  if (m.length !== 2) return null;
+  return { home: m[0].trim(), away: m[1].trim() };
+}
+
+// ---- Team Logo helpers (as you had) ----
+type TeamSlug =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "goldcoast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "northmelbourne"
+  | "portadelaide"
+  | "richmond"
+  | "stkilda"
+  | "sydney"
+  | "westcoast"
+  | "westernbulldogs";
+
+function teamNameToSlug(nameRaw: string): TeamSlug | null {
+  const n = (nameRaw || "").toLowerCase().trim();
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
+  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
+    return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+
+  if (n.includes("adelaide")) return "adelaide";
+  if (n.includes("brisbane")) return "brisbane";
+  if (n.includes("carlton")) return "carlton";
+  if (n.includes("collingwood")) return "collingwood";
+  if (n.includes("essendon")) return "essendon";
+  if (n.includes("fremantle")) return "fremantle";
+  if (n.includes("geelong")) return "geelong";
+  if (n.includes("hawthorn")) return "hawthorn";
+  if (n.includes("melbourne")) return "melbourne";
+  if (n.includes("richmond")) return "richmond";
+  if (n.includes("sydney") || n.includes("swans")) return "sydney";
+
+  return null;
+}
+
+function logoCandidates(teamSlug: TeamSlug): string[] {
+  return [
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
+    `/afllogos/${teamSlug}-logo.jpg`,
+    `/afllogos/${teamSlug}-logo.png`,
+  ];
+}
+
+const TeamLogo = React.memo(function TeamLogoInner({
+  teamName,
+  size = 55,
+}: {
+  teamName: string;
+  size?: number;
+}) {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const fallbackInitials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  if (!slug || dead) {
+    return (
       <div
-        className="border-b"
+        className="flex items-center justify-center rounded-2xl border font-black"
         style={{
-          borderColor: "rgba(255,255,255,0.08)",
-          background:
-            "linear-gradient(180deg, rgba(5,6,10,0.92) 0%, rgba(5,6,10,0.74) 100%)",
-          backdropFilter: "blur(10px)",
+          width: size,
+          height: size,
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.90)",
+        }}
+        title={teamName}
+      >
+        {fallbackInitials || "AFL"}
+      </div>
+    );
+  }
+
+  const candidates = logoCandidates(slug);
+  const src = candidates[Math.min(idx, candidates.length - 1)];
+
+  return (
+    <div
+      className="relative rounded-2xl border overflow-hidden"
+      style={{
+        width: size,
+        height: size,
+        borderColor: "rgba(255,255,255,0.14)",
+        background: "rgba(0,0,0,0.35)",
+      }}
+      title={teamName}
+    >
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+
+function CheckIcon({ size = 18, color = BRAND.green }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M20 6L9 17l-5-5"
+        stroke={color}
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function XIcon({ size = 18, color = BRAND.red }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 6l12 12M18 6L6 18"
+        stroke={color}
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+type GameStatusRow = {
+  gameId: string;
+  match: string;
+  venue: string;
+  startTime: string;
+  picks: number;
+  correct: number;
+  wrong: number;
+  voided: number;
+  unsettled: number;
+  streakAfter: number | null;
+};
+
+function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.78)" }} onClick={onClose} />
+      <div
+        className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
+        style={{
+          borderColor: "rgba(255,255,255,0.14)",
+          background: "rgba(10,10,10,0.96)",
+          boxShadow: "0 30px 90px rgba(0,0,0,0.75)",
         }}
       >
-        <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <Link href="/" className="flex items-center gap-3" style={{ textDecoration: "none" }}>
-              <div className="relative h-9 w-9 overflow-hidden rounded-xl border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.10)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
-                {/* Replace with your real Torpie logo if/when you have it */}
-                <div className="absolute inset-0 flex items-center justify-center font-black text-white">
-                  T
-                </div>
-              </div>
-              <div className="leading-tight">
-                <div className="text-white font-black tracking-tight text-[14px] sm:text-[15px]">
-                  TORPIE
-                </div>
-                <div className="text-white/55 text-[11px] font-semibold">
-                  Pick the multiplier. Survive the streak.
-                </div>
-              </div>
-            </Link>
-
-            <nav className="hidden md:flex items-center gap-2">
-              <NavPill href="/picks">Play</NavPill>
-              <NavPill href="/how-to-play">How to play</NavPill>
-              <NavPill href="/leagues">Leagues</NavPill>
-            </nav>
-
-            <div className="flex items-center gap-2">
-              <Link
-                href="/picks"
-                className="inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,46,77,0.30)",
-                  background: `linear-gradient(180deg, ${BRAND.red} 0%, rgba(255,46,77,0.72) 100%)`,
-                  color: "rgba(255,255,255,0.98)",
-                  boxShadow: "0 14px 34px rgba(255,46,77,0.16)",
-                  textDecoration: "none",
-                }}
-              >
-                PLAY NOW
-              </Link>
-
-              <Link
-                href="/login"
-                className="hidden sm:inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                  textDecoration: "none",
-                }}
-              >
-                LOG IN
-              </Link>
-
-              <Link
-                href="/signup"
-                className="hidden sm:inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.10)",
-                  color: "rgba(255,255,255,0.95)",
-                  textDecoration: "none",
-                }}
-              >
-                SIGN UP
-              </Link>
-
-              <button
-                type="button"
-                className="md:hidden inline-flex h-10 w-10 items-center justify-center rounded-2xl border"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-                aria-label="Menu"
-                onClick={() => {
-                  const el = document.getElementById("torpie-mobile-menu");
-                  if (el) el.classList.toggle("hidden");
-                }}
-              >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                </svg>
-              </button>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xl font-black">How to play</div>
+            <div className="text-white/70 text-sm mt-1">
+              Pick any amount. Locks at bounce. One wrong pick breaks the match streak.
             </div>
           </div>
 
-          <div id="torpie-mobile-menu" className="hidden md:hidden pt-3 pb-2">
-            <div className="flex flex-col gap-2">
-              <MobileLink href="/picks">Play</MobileLink>
-              <MobileLink href="/how-to-play">How to play</MobileLink>
-              <MobileLink href="/leagues">Leagues</MobileLink>
-              <div className="h-px my-1" style={{ background: "rgba(255,255,255,0.08)" }} />
-              <MobileLink href="/signup">Sign up</MobileLink>
-              <MobileLink href="/login">Log in</MobileLink>
-            </div>
-          </div>
-        </div>
-      </div>
-    </header>
-  );
-}
-
-function NavPill({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="rounded-full px-3 py-1.5 text-[12px] font-black border"
-      style={{
-        borderColor: "rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.06)",
-        color: "rgba(255,255,255,0.92)",
-        textDecoration: "none",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function MobileLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="rounded-2xl px-4 py-3 text-[13px] font-black border"
-      style={{
-        borderColor: "rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.06)",
-        color: "rgba(255,255,255,0.92)",
-        textDecoration: "none",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function StadiumHero() {
-  return (
-    <section className="relative overflow-hidden">
-      <div className="absolute inset-0">
-        <Image
-          src="/images/torpie-hero.jpg"
-          alt="Torpie stadium hero"
-          fill
-          priority
-          className="object-cover"
-        />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(5,6,10,0.40) 0%, rgba(5,6,10,0.82) 55%, rgba(5,6,10,0.98) 100%)",
-          }}
-        />
-        <div
-          className="absolute -top-28 left-1/2 h-[420px] w-[900px] -translate-x-1/2 rounded-full blur-3xl"
-          style={{
-            background: "radial-gradient(circle, rgba(255,46,77,0.22) 0%, rgba(255,46,77,0.00) 60%)",
-          }}
-        />
-      </div>
-
-      <div className="relative mx-auto max-w-6xl px-4 sm:px-6 pt-10 sm:pt-14 pb-10 sm:pb-14">
-        <div className="max-w-3xl">
-          <div
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black"
+          <button
+            className="rounded-full px-3 py-2 text-[12px] font-black border"
             style={{
               borderColor: "rgba(255,255,255,0.14)",
               background: "rgba(255,255,255,0.06)",
               color: "rgba(255,255,255,0.92)",
             }}
+            onClick={onClose}
           >
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{
-                background: BRAND.red,
-                boxShadow: "0 0 14px rgba(255,46,77,0.55)",
-              }}
-            />
-            LIVE • AFL 2026
+            Close
+          </button>
+        </div>
+
+        <div className="mt-4 space-y-3 text-sm text-white/85">
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">1) Pick any amount</div>
+            <div className="text-white/70 mt-1">Pick 0, 1, 5 or all questions.</div>
           </div>
 
-          <h1 className="mt-5 text-white font-black leading-[0.95] tracking-tight text-[40px] sm:text-[58px]">
-            WHERE FANS{" "}
-            <span style={{ color: BRAND.gold }}>PLAY TO WIN</span>
-          </h1>
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">2) Auto-lock</div>
+            <div className="text-white/70 mt-1">No lock-in button. Picks lock at the game start time.</div>
+          </div>
 
-          <p className="mt-4 text-white/75 text-[14px] sm:text-[16px] font-semibold max-w-xl">
-            Think fast. Pick smart. Own the moment. Torpie turns every round into a
-            high-stakes streak chase.
-          </p>
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">3) Clean Sweep</div>
+            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
+          </div>
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            <CTAButton href="/picks" variant="primary">
-              PLAY TORPIE
-            </CTAButton>
-            <CTAButton href="/how-to-play" variant="secondary">
-              LEARN MORE
-            </CTAButton>
-
-            <div className="hidden sm:flex items-center gap-2 text-white/60 text-[12px] font-semibold">
-              <Dot /> Free to play
-              <Dot /> Skill based
-              <Dot /> Leagues with mates
-            </div>
+          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+            <div className="font-black">Footy meaning</div>
+            <div className="text-white/70 mt-1">If someone takes an awesome mark… that’s a SCREAMER.</div>
           </div>
         </div>
 
-        <div className="mt-10 sm:mt-12">
-          <GameCardsRow />
+        <div className="mt-5 flex justify-end">
+          <button
+            className="rounded-2xl px-5 py-3 text-[12px] font-black border"
+            style={{
+              borderColor: "rgba(255,46,77,0.35)",
+              background: "rgba(255,46,77,0.14)",
+              color: "rgba(255,255,255,0.95)",
+            }}
+            onClick={onClose}
+          >
+            Let’s go
+          </button>
         </div>
       </div>
-    </section>
-  );
-}
-
-function Dot() {
-  return (
-    <span
-      className="inline-block h-1.5 w-1.5 rounded-full"
-      style={{ background: "rgba(255,255,255,0.35)" }}
-    />
-  );
-}
-
-function CTAButton({
-  href,
-  children,
-  variant,
-}: {
-  href: string;
-  children: React.ReactNode;
-  variant: "primary" | "secondary";
-}) {
-  const isPrimary = variant === "primary";
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-[12px] font-black border"
-      style={{
-        borderColor: isPrimary ? "rgba(255,46,77,0.32)" : "rgba(255,255,255,0.16)",
-        background: isPrimary
-          ? `linear-gradient(180deg, ${BRAND.gold} 0%, rgba(255,204,51,0.80) 100%)`
-          : "rgba(255,255,255,0.06)",
-        color: isPrimary ? "rgba(10,10,10,0.95)" : "rgba(255,255,255,0.92)",
-        boxShadow: isPrimary ? "0 16px 40px rgba(255,204,51,0.14)" : "none",
-        textDecoration: "none",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function GameCardsRow() {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <GameCardTorpie />
-      <ComingSoonCard title="FOOTY MARKIT" subtitle="Trade on the game." cta="COMING SOON" />
-      <ComingSoonCard title="SURVIVOR" subtitle="Outlast the comp." cta="COMING SOON" />
     </div>
   );
 }
 
-function CardFrame({
-  children,
-  accent = "rgba(255,255,255,0.12)",
+function StatPill({
+  label,
+  value,
+  hint,
+  accent = BRAND.red,
 }: {
-  children: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  hint: string;
   accent?: string;
 }) {
   return (
     <div
-      className="relative overflow-hidden rounded-3xl border"
+      className="rounded-2xl border p-3 sm:p-4"
       style={{
-        borderColor: accent,
-        background: "rgba(255,255,255,0.04)",
-        boxShadow: "0 26px 90px rgba(0,0,0,0.65)",
+        borderColor: "rgba(255,255,255,0.10)",
+        background: "rgba(10,10,10,0.52)",
+        backdropFilter: "blur(10px)",
+        boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
       }}
     >
-      {children}
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/60 font-black">{label}</div>
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <div className="text-[28px] sm:text-[32px] font-black leading-none" style={{ color: accent }}>
+          {value}
+        </div>
+        <div className="text-[11px] text-white/60 font-semibold text-right leading-snug">{hint}</div>
+      </div>
     </div>
   );
 }
 
-function GameCardTorpie() {
+/** silhouette background for each card, clipped */
+function CardSilhouetteBg({ opacity = 1 }: { opacity?: number }) {
   return (
-    <CardFrame accent="rgba(255,204,51,0.22)">
-      <div className="absolute inset-0">
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute inset-0" style={{ opacity }}>
         <Image
-          src="/images/torpie-card-picks.jpg"
-          alt="Torpie game card"
+          src="/afl1.png"
+          alt=""
           fill
-          className="object-cover"
-        />
-        <div className="absolute inset-0 bg-black/55" />
-        <div
-          className="absolute inset-0"
+          sizes="(max-width: 1024px) 100vw, 1024px"
           style={{
-            background:
-              "linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.72) 70%, rgba(0,0,0,0.90) 100%)",
+            objectFit: "cover",
+            filter: "grayscale(1) brightness(0.35) contrast(1.35)",
+            transform: "scale(1.04)",
           }}
+          priority={false}
         />
       </div>
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.70) 60%, rgba(0,0,0,0.92) 100%)",
+        }}
+      />
+    </div>
+  );
+}
 
-      <div className="relative p-5">
-        <div className="flex items-center justify-between gap-3">
+export default function PicksPage() {
+  const { user } = useAuth();
+
+  const lastGoodRef = useRef<PicksApiResponse | null>(null);
+
+  const [roundNumber, setRoundNumber] = useState<number | null>(null);
+  const [games, setGames] = useState<ApiGame[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [err, setErr] = useState("");
+
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
+  const [leaderScore, setLeaderScore] = useState<number | null>(null);
+  const [leaderName, setLeaderName] = useState<string | null>(null);
+
+  const [howOpen, setHowOpen] = useState(false);
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const seen = localStorage.getItem(HOW_TO_PLAY_PICKS_KEY);
+      if (!seen) setHowOpen(true);
+    } catch {}
+  }, []);
+
+  const closeHow = useCallback(() => {
+    try {
+      localStorage.setItem(HOW_TO_PLAY_PICKS_KEY, "1");
+    } catch {}
+    setHowOpen(false);
+  }, []);
+
+  const applyData = useCallback((data: PicksApiResponse) => {
+    setRoundNumber(typeof data.roundNumber === "number" ? data.roundNumber : null);
+    setGames(Array.isArray(data.games) ? data.games : []);
+    setCurrentStreak(typeof data.currentStreak === "number" ? data.currentStreak : 0);
+    setLeaderScore(typeof data.leaderScore === "number" ? data.leaderScore : null);
+    setLeaderName(typeof data.leaderName === "string" ? data.leaderName : null);
+
+    lastGoodRef.current = data;
+  }, []);
+
+  const loadPicks = useCallback(
+    async (mode: "initial" | "refresh" = "refresh") => {
+      try {
+        if (mode === "initial") setLoading(true);
+        else setRefreshing(true);
+
+        setErr("");
+
+        let authHeader: Record<string, string> = {};
+        if (user) {
+          try {
+            const token = await user.getIdToken();
+            authHeader = { Authorization: `Bearer ${token}` };
+          } catch {}
+        }
+
+        const res = await fetch("/api/picks", { headers: authHeader, cache: "no-store" });
+        if (!res.ok) throw new Error(await res.text());
+        const data = (await res.json()) as PicksApiResponse;
+
+        if (Array.isArray(data.games) && data.games.length === 0 && lastGoodRef.current?.games?.length) {
+          return;
+        }
+        applyData(data);
+      } catch (e) {
+        console.error(e);
+        if (lastGoodRef.current?.games?.length) setErr("Live update failed — showing last known data.");
+        else setErr("Could not load picks right now.");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [applyData, user]
+  );
+
+  useEffect(() => {
+    loadPicks("initial");
+  }, [loadPicks]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      void loadPicks("refresh");
+    }, 15000);
+    return () => window.clearInterval(id);
+  }, [loadPicks]);
+
+  const stableGames = games.length ? games : lastGoodRef.current?.games || [];
+  const stableRoundNumber =
+    roundNumber !== null
+      ? roundNumber
+      : typeof lastGoodRef.current?.roundNumber === "number"
+      ? lastGoodRef.current!.roundNumber!
+      : null;
+
+  const stableLeaderScore =
+    leaderScore !== null
+      ? leaderScore
+      : typeof lastGoodRef.current?.leaderScore === "number"
+      ? lastGoodRef.current!.leaderScore!
+      : null;
+
+  const stableLeaderName =
+    leaderName !== null
+      ? leaderName
+      : typeof lastGoodRef.current?.leaderName === "string"
+      ? (lastGoodRef.current!.leaderName as string)
+      : null;
+
+  const stableCurrentStreak =
+    typeof currentStreak === "number" && currentStreak !== 0
+      ? currentStreak
+      : typeof lastGoodRef.current?.currentStreak === "number"
+      ? lastGoodRef.current!.currentStreak!
+      : currentStreak;
+
+  const roundLabel =
+    stableRoundNumber === null ? "" : stableRoundNumber === 0 ? "Opening Round" : `Round ${stableRoundNumber}`;
+
+  const sortedGames = useMemo(() => {
+    return [...stableGames].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  }, [stableGames]);
+
+  const nextUp = useMemo(() => {
+    const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
+    if (upcoming.length) return upcoming[0];
+    return sortedGames[0] || null;
+  }, [sortedGames, nowMs]);
+
+  const lastNextUpRef = useRef<ApiGame | null>(null);
+  const [nextUpStable, setNextUpStable] = useState<ApiGame | null>(null);
+
+  useEffect(() => {
+    if (nextUp) {
+      lastNextUpRef.current = nextUp;
+      setNextUpStable(nextUp);
+    } else if (!nextUpStable && lastNextUpRef.current) {
+      setNextUpStable(lastNextUpRef.current);
+    }
+  }, [nextUp, nextUpStable]);
+
+  const nextUpLockMs = useMemo(() => {
+    const g = nextUpStable;
+    if (!g) return null;
+    return new Date(g.startTime).getTime() - nowMs;
+  }, [nextUpStable, nowMs]);
+
+  const isNextUpLive = nextUpLockMs !== null ? nextUpLockMs <= 0 : false;
+
+  const gamesPicked = useMemo(() => {
+    return stableGames.filter((g) => (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no"))
+      .length;
+  }, [stableGames]);
+
+  const eligible = gamesPicked > 0;
+
+  const distanceToLeader = useMemo(() => {
+    if (stableLeaderScore === null) return null;
+    return Math.max(0, stableLeaderScore - stableCurrentStreak);
+  }, [stableLeaderScore, stableCurrentStreak]);
+
+  const leaderProgress = useMemo(() => {
+    if (stableLeaderScore === null || stableLeaderScore <= 0) return 0;
+    return clamp((stableCurrentStreak / stableLeaderScore) * 100, 0, 100);
+  }, [stableLeaderScore, stableCurrentStreak]);
+
+  const gameStatusRows = useMemo((): GameStatusRow[] => {
+    let runningStreak = 0;
+
+    return sortedGames.map((g) => {
+      const pickedQs = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no");
+      const picks = pickedQs.length;
+
+      let correct = 0;
+      let wrong = 0;
+      let voided = 0;
+      let unsettled = 0;
+
+      for (const q of pickedQs) {
+        if (q.correctPick === true) correct += 1;
+        else if (q.correctPick === false) wrong += 1;
+        else if (q.correctPick === null) voided += 1;
+        else unsettled += 1;
+      }
+
+      if (wrong > 0) runningStreak = 0;
+      else runningStreak += correct;
+
+      return {
+        gameId: g.id,
+        match: g.match,
+        venue: g.venue,
+        startTime: g.startTime,
+        picks,
+        correct,
+        wrong,
+        voided,
+        unsettled,
+        streakAfter: runningStreak,
+      };
+    });
+  }, [sortedGames]);
+
+  const StickyChaseBar = () => {
+    const g = nextUpStable;
+    if (!g) return null;
+
+    const href = `/picks/${encodeURIComponent(g.id)}`;
+    const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
+    const lockText = nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
+    const chaseText =
+      stableLeaderScore === null ? "Leader loading…" : distanceToLeader === 0 ? "Equal lead" : `Need ${distanceToLeader}`;
+
+    return (
+      <div className="fixed bottom-0 left-0 right-0 z-[60] md:hidden">
+        <div
+          className="px-3 pb-3 pt-2"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.78) 35%, rgba(0,0,0,0.96) 100%)",
+          }}
+        >
           <div
-            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black"
+            className="rounded-2xl border p-3 shadow-[0_18px_60px_rgba(0,0,0,0.80)]"
             style={{
-              borderColor: "rgba(255,204,51,0.35)",
-              background: "rgba(255,204,51,0.12)",
-              color: "rgba(255,255,255,0.92)",
+              borderColor: "rgba(255,255,255,0.12)",
+              background: "rgba(10,10,10,0.92)",
+              backdropFilter: "blur(10px)",
             }}
           >
-            <span className="h-2 w-2 rounded-full" style={{ background: BRAND.gold }} />
-            FEATURED
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+                    style={{
+                      borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
+                      background: isNextUpLive ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        background: isNextUpLive ? BRAND.red : "rgba(255,255,255,0.55)",
+                        boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                      }}
+                    />
+                    {lockText || "Next up"}
+                  </span>
+
+                  <span className="text-[11px] text-white/60 font-semibold truncate">{g.match}</span>
+                </div>
+
+                <div className="mt-2 flex items-center gap-3">
+                  <div
+                    className="rounded-xl border px-3 py-1.5"
+                    style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}
+                  >
+                    <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
+                    <div className="text-[16px] font-black" style={{ color: BRAND.red }}>
+                      {stableCurrentStreak}
+                    </div>
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
+                    <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
+                    <div className="text-[11px] text-white/55 font-semibold truncate">
+                      {stableLeaderScore === null
+                        ? ""
+                        : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Link
+                href={href}
+                className="shrink-0 inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 12px 30px rgba(255,46,77,0.18)",
+                  textDecoration: "none",
+                }}
+              >
+                {label}
+              </Link>
+            </div>
           </div>
-
-          <span
-            className="rounded-full px-3 py-1 text-[11px] font-black border"
-            style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
-            }}
-          >
-            LIVE
-          </span>
-        </div>
-
-        <div className="mt-4">
-          <div className="text-white font-black text-[26px] tracking-tight">TORPIE</div>
-          <div className="mt-1 text-white/75 text-[13px] font-semibold">
-            Pick the multiplier. Dominate the ladder.
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <StatChip label="Locks at bounce" />
-          <StatChip label="Streak based" />
-          <StatChip label="Leagues" />
-        </div>
-
-        <div className="mt-6">
-          <Link
-            href="/picks"
-            className="inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 text-[12px] font-black border"
-            style={{
-              borderColor: "rgba(255,204,51,0.40)",
-              background: `linear-gradient(180deg, ${BRAND.gold} 0%, rgba(255,204,51,0.82) 100%)`,
-              color: "rgba(10,10,10,0.95)",
-              textDecoration: "none",
-              boxShadow: "0 14px 34px rgba(255,204,51,0.18)",
-            }}
-          >
-            PLAY TORPIE
-          </Link>
         </div>
       </div>
-    </CardFrame>
-  );
-}
+    );
+  };
 
-function ComingSoonCard({
-  title,
-  subtitle,
-  cta,
-}: {
-  title: string;
-  subtitle: string;
-  cta: string;
-}) {
-  return (
-    <CardFrame>
-      <div className="absolute inset-0">
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "radial-gradient(900px 240px at 50% 0%, rgba(255,255,255,0.08) 0%, rgba(0,0,0,0.00) 65%)",
-          }}
-        />
-        <div className="absolute inset-0 bg-black/55" />
-      </div>
+  const Hero = () => {
+    const g = nextUpStable;
+    const href = g ? `/picks/${encodeURIComponent(g.id)}` : "/picks";
 
-      <div className="relative p-5 flex flex-col h-full">
-        <div className="flex items-center justify-between gap-3">
-          <span
-            className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+    const lockLine =
+      nextUpLockMs === null
+        ? ""
+        : isNextUpLive
+        ? "LIVE — locked"
+        : `Locks in ${msToCountdown(nextUpLockMs)} (auto)`;
+
+    const leaderLine =
+      stableLeaderScore === null
+        ? "Leader loading…"
+        : stableLeaderName
+        ? `${stableLeaderName} leads on ${stableLeaderScore}`
+        : `Leader streak: ${stableLeaderScore}`;
+
+    const chaseLine =
+      stableLeaderScore === null
+        ? "—"
+        : distanceToLeader === 0
+        ? "You’re equal lead."
+        : `You need ${distanceToLeader} to catch the lead.`;
+
+    const m = g ? splitMatch(g.match) : null;
+    const homeName = m?.home ?? "";
+    const awayName = m?.away ?? "";
+
+    return (
+      <div
+        className="relative overflow-hidden rounded-[28px] border"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.02)",
+          boxShadow: "0 30px 120px rgba(0,0,0,0.80)",
+        }}
+      >
+        {/* Background image */}
+        <div className="absolute inset-0">
+          <Image
+            src={ASSETS.heroBg}
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 1024px) 100vw, 1100px"
+            style={{ objectFit: "cover", filter: "saturate(1.05) contrast(1.08)" }}
+          />
+          {/* readability overlay */}
+          <div
+            className="absolute inset-0"
             style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
+              background:
+                "radial-gradient(900px 280px at 50% 10%, rgba(255,46,77,0.30) 0%, rgba(0,0,0,0.00) 65%), linear-gradient(180deg, rgba(0,0,0,0.40) 0%, rgba(0,0,0,0.78) 60%, rgba(0,0,0,0.92) 100%)",
             }}
-          >
-            COMING SOON
-          </span>
-
-          <span className="text-white/45 text-[11px] font-black tracking-[0.14em]">
-            2026
-          </span>
-        </div>
-
-        <div className="mt-5">
-          <div className="text-white font-black text-[22px] tracking-tight">{title}</div>
-          <div className="mt-1 text-white/70 text-[13px] font-semibold">{subtitle}</div>
-        </div>
-
-        <div className="mt-4 space-y-2 text-white/65 text-[12px] font-semibold">
-          <div className="flex items-center gap-2"><MiniCheck /> Built for mates</div>
-          <div className="flex items-center gap-2"><MiniCheck /> Live ladders</div>
-          <div className="flex items-center gap-2"><MiniCheck /> Weekly prizes</div>
-        </div>
-
-        <div className="mt-auto pt-6">
-          <button
-            type="button"
-            className="inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 text-[12px] font-black border"
+          />
+          {/* vignette */}
+          <div
+            className="absolute inset-0"
             style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.70)",
+              boxShadow: "inset 0 0 160px rgba(0,0,0,0.75)",
             }}
-            disabled
-          >
-            {cta}
-          </button>
+          />
         </div>
-      </div>
-    </CardFrame>
-  );
-}
 
-function MiniCheck() {
-  return (
-    <span
-      className="inline-flex h-5 w-5 items-center justify-center rounded-full border"
-      style={{ borderColor: "rgba(255,255,255,0.14)", background: "rgba(255,255,255,0.06)" }}
-      aria-hidden="true"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M20 6L9 17l-5-5"
-          stroke="rgba(255,255,255,0.85)"
-          strokeWidth="2.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </span>
-  );
-}
+        <div className="relative z-10 p-4 sm:p-6">
+          {/* Top bar inside hero */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="relative h-[34px] w-[140px] sm:h-[38px] sm:w-[160px]">
+                <Image
+                  src={ASSETS.logo}
+                  alt={BRAND.name}
+                  fill
+                  sizes="160px"
+                  style={{ objectFit: "contain" }}
+                  onError={() => {}}
+                />
+              </div>
 
-function StatChip({ label }: { label: string }) {
-  return (
-    <span
-      className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-      style={{
-        borderColor: "rgba(255,255,255,0.14)",
-        background: "rgba(255,255,255,0.06)",
-        color: "rgba(255,255,255,0.92)",
-      }}
-    >
-      {label}
-    </span>
-  );
-}
+              {roundLabel ? (
+                <span
+                  className="hidden sm:inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                  style={{
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.10)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  {roundLabel}
+                </span>
+              ) : null}
 
-function TribeSection() {
-  return (
-    <section className="relative overflow-hidden">
-      <div className="absolute inset-0">
-        <Image src="/images/torpie-crowd.jpg" alt="Torpie crowd" fill className="object-cover" />
-        <div className="absolute inset-0 bg-black/70" />
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(5,6,10,0.85) 0%, rgba(5,6,10,0.55) 45%, rgba(5,6,10,0.95) 100%)",
-          }}
-        />
-      </div>
+              {refreshing ? (
+                <span className="hidden sm:inline mt-1 text-[11px] font-black tracking-widest text-white/45">
+                  REFRESHING…
+                </span>
+              ) : null}
+            </div>
 
-      <div className="relative mx-auto max-w-6xl px-4 sm:px-6 py-12 sm:py-14">
-        <div className="text-center">
-          <div className="text-white font-black text-[26px] sm:text-[34px] tracking-tight">
-            JOIN THE TRIBE. RULE THE LEAGUE.
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setHowOpen(true)}
+                className="rounded-full px-3 py-2 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                How to play
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void loadPicks("refresh")}
+                className="rounded-full px-3 py-2 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+                title="Refresh"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
-          <div className="mt-3 text-white/75 text-[13px] sm:text-[15px] font-semibold max-w-2xl mx-auto">
-            Create or join leagues with your mates, climb the ranks, and flex your streak every week.
-          </div>
 
-          <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
-            <Link
-              href="/leagues"
-              className="inline-flex items-center justify-center rounded-2xl px-8 py-3 text-[12px] font-black border"
+          {/* Big headline */}
+          <div className="mt-5 sm:mt-7">
+            <div
+              className="text-[30px] sm:text-[44px] font-black leading-[1.02]"
               style={{
-                borderColor: "rgba(255,204,51,0.40)",
-                background: `linear-gradient(180deg, ${BRAND.gold} 0%, rgba(255,204,51,0.82) 100%)`,
-                color: "rgba(10,10,10,0.95)",
-                textDecoration: "none",
-                boxShadow: "0 14px 34px rgba(255,204,51,0.16)",
+                textShadow: "0 2px 18px rgba(0,0,0,0.75)",
+                letterSpacing: "-0.02em",
               }}
             >
-              VIEW LEAGUES
-            </Link>
+              THAT’S A <span style={{ color: BRAND.red }}>SCREAMER.</span>
+            </div>
+            <div className="mt-2 text-[13px] sm:text-[15px] text-white/70 font-semibold max-w-2xl">
+              Pick any amount. Locks at bounce. One wrong pick kills your match streak. Survive the round and chase the
+              top streak.
+            </div>
 
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black"
+                style={{
+                  borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
+                  background: isNextUpLive ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{
+                    background: isNextUpLive ? BRAND.red : "rgba(255,255,255,0.55)",
+                    boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                  }}
+                />
+                {g ? "NEXT UP" : "LOADING"}
+              </span>
+
+              {g ? (
+                <span className="text-[11px] text-white/70 font-semibold">
+                  {formatAedt(g.startTime)} • {lockLine}
+                </span>
+              ) : (
+                <span className="text-[11px] text-white/70 font-semibold">Loading schedule…</span>
+              )}
+            </div>
+          </div>
+
+          {/* Stats + Next up card */}
+          <div className="mt-5 grid grid-cols-1 lg:grid-cols-12 gap-3">
+            <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <StatPill
+                label="Current streak"
+                value={stableCurrentStreak}
+                hint="Keep it alive. One wrong pick resets to 0."
+                accent={BRAND.red}
+              />
+              <StatPill
+                label="Leader"
+                value={stableLeaderScore === null ? "—" : stableLeaderScore}
+                hint={leaderLine}
+                accent={BRAND.red}
+              />
+              <div className="sm:col-span-2">
+                <div
+                  className="rounded-2xl border p-3 sm:p-4"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.10)",
+                    background: "rgba(10,10,10,0.52)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: "0 14px 40px rgba(0,0,0,0.55)",
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-white/60 font-black">Chase</div>
+                    <div className="text-[11px] text-white/60 font-semibold">{chaseLine}</div>
+                  </div>
+
+                  <div
+                    className="mt-3 h-[10px] w-full rounded-full border overflow-hidden"
+                    style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.06)" }}
+                    aria-label="progress to leader"
+                  >
+                    <div
+                      className="h-full"
+                      style={{
+                        width: `${leaderProgress}%`,
+                        background: `linear-gradient(90deg, ${BRAND.red} 0%, rgba(255,46,77,0.30) 100%)`,
+                      }}
+                    />
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-white/70 font-semibold">
+                      {eligible ? "Eligible to win" : "Pick at least 1 game to be eligible"}
+                    </div>
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black"
+                      style={{
+                        borderColor: eligible ? "rgba(45,255,122,0.35)" : "rgba(255,255,255,0.14)",
+                        background: eligible ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+                        color: "rgba(255,255,255,0.92)",
+                      }}
+                    >
+                      {eligible ? <CheckIcon size={16} color={BRAND.green} /> : null}
+                      {gamesPicked} games picked
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-7">
+              <Link
+                href={href}
+                className="block rounded-3xl overflow-hidden border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.22)",
+                  background: "rgba(255,255,255,0.03)",
+                  textDecoration: "none",
+                  boxShadow: "0 26px 90px rgba(0,0,0,0.55)",
+                }}
+              >
+                <div className="relative p-4 sm:p-5 overflow-hidden" style={{ minHeight: 160 }}>
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{
+                      background:
+                        "radial-gradient(900px 220px at 50% 0%, rgba(255,46,77,0.24) 0%, rgba(0,0,0,0.00) 70%)",
+                    }}
+                  />
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ boxShadow: "inset 0 0 80px rgba(0,0,0,0.55)" }}
+                  />
+
+                  <div className="relative z-10">
+                    <div className="flex items-center justify-between gap-3">
+                      <div
+                        className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black border"
+                        style={{
+                          borderColor: "rgba(255,46,77,0.45)",
+                          background: "rgba(255,46,77,0.12)",
+                          color: "rgba(255,255,255,0.92)",
+                        }}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{
+                            background: isNextUpLive ? BRAND.red : "rgba(255,255,255,0.55)",
+                            boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "none",
+                          }}
+                        />
+                        {isNextUpLive ? "LIVE" : "NEXT MATCH"}
+                      </div>
+
+                      <div className="text-[11px] text-white/75 font-semibold">
+                        {g ? lockLine : "Loading…"}
+                      </div>
+                    </div>
+
+                    {g ? (
+                      <>
+                        <div className="mt-4 flex items-center justify-center gap-3 sm:gap-4">
+                          <TeamLogo teamName={homeName || g.match} size={56} />
+                          <div className="text-white/70 font-black text-[12px] sm:text-[13px]">vs</div>
+                          <TeamLogo teamName={awayName || "AFL"} size={56} />
+                        </div>
+
+                        <div className="mt-3 text-center">
+                          <div
+                            className="text-[20px] sm:text-[26px] font-black leading-tight"
+                            style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 14px rgba(0,0,0,0.75)" }}
+                          >
+                            {g.match}
+                          </div>
+                          <div className="mt-1 text-[12px] text-white/70 font-semibold">
+                            {g.venue} • {formatAedt(g.startTime)}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-center gap-2">
+                          <span
+                            className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-[12px] font-black border"
+                            style={{
+                              borderColor: "rgba(255,46,77,0.32)",
+                              background:
+                                "linear-gradient(180deg, rgba(255,46,77,0.98) 0%, rgba(255,46,77,0.70) 100%)",
+                              color: "rgba(255,255,255,0.98)",
+                              boxShadow: "0 14px 34px rgba(255,46,77,0.18)",
+                            }}
+                          >
+                            {isNextUpLive ? "GO PICK (LIVE)" : "GO PICK"}
+                          </span>
+
+                          <span
+                            className="hidden sm:inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
+                            style={{
+                              borderColor: "rgba(255,255,255,0.14)",
+                              background: "rgba(255,255,255,0.06)",
+                              color: "rgba(255,255,255,0.92)",
+                            }}
+                          >
+                            Auto-locks at bounce
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="mt-6 text-center text-white/70 font-semibold">Loading next match…</div>
+                    )}
+                  </div>
+                </div>
+              </Link>
+            </div>
+          </div>
+
+          {err ? (
+            <div className="mt-4 text-sm font-semibold" style={{ color: BRAND.red }}>
+              {err}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const DashboardStrip = () => {
+    const leaderText =
+      stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
+
+    const leaderHint =
+      stableLeaderScore === null
+        ? "Waiting for leaderScore from /api/picks."
+        : distanceToLeader === 0
+        ? "Equal lead — keep it alive."
+        : `Gap: ${distanceToLeader}`;
+
+    const cardBase: React.CSSProperties = {
+      borderColor: MATCH_HQ.border,
+      background: MATCH_HQ.card,
+      color: MATCH_HQ.text,
+    };
+
+    const pill: React.CSSProperties = {
+      borderColor: MATCH_HQ.pillBorder,
+      background: MATCH_HQ.pill,
+      color: MATCH_HQ.text,
+    };
+
+    const numStyle: React.CSSProperties = {
+      color: BRAND.red,
+    };
+
+    return (
+      <div
+        className="mt-6 rounded-3xl border px-3 py-3"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Match HQ</div>
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
+              style={{
+                borderColor: "rgba(255,46,77,0.28)",
+                background: "rgba(255,46,77,0.10)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              title={`${BRAND.name} is live and updating`}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: BRAND.red,
+                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
+                }}
+              />
+              LIVE
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <Link
-              href="/picks"
-              className="inline-flex items-center justify-center rounded-2xl px-8 py-3 text-[12px] font-black border"
+              href="/leaderboards"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
               style={{
                 borderColor: "rgba(255,255,255,0.14)",
                 background: "rgba(255,255,255,0.06)",
@@ -581,178 +1133,457 @@ function TribeSection() {
                 textDecoration: "none",
               }}
             >
-              PLAY NOW
+              Leaderboards
             </Link>
-          </div>
-        </div>
 
-        <TrustRow />
-      </div>
-    </section>
-  );
-}
-
-function TrustRow() {
-  const items = useMemo(
-    () => [
-      { title: "WIN WEEKLY PRIZES", sub: "Top streaks win." },
-      { title: "COMPETE WITH FRIENDS", sub: "Leagues + bragging rights." },
-      { title: "100% SKILL BASED", sub: "No luck wheels." },
-      { title: "SAFE & SECURE", sub: "Protected accounts." },
-    ],
-    []
-  );
-
-  return (
-    <div className="mt-10 grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {items.map((it) => (
-        <div
-          key={it.title}
-          className="rounded-3xl border p-4"
-          style={{
-            borderColor: "rgba(255,255,255,0.12)",
-            background: "rgba(0,0,0,0.28)",
-            boxShadow: "0 20px 70px rgba(0,0,0,0.55)",
-          }}
-        >
-          <div className="flex items-start gap-3">
-            <div
-              className="h-10 w-10 rounded-2xl border flex items-center justify-center"
+            <button
+              type="button"
+              className="rounded-full px-3 py-1.5 text-[11px] font-black border"
               style={{
-                borderColor: "rgba(255,204,51,0.25)",
-                background: "rgba(255,204,51,0.10)",
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
               }}
-              aria-hidden="true"
+              onClick={() => setHowOpen(true)}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M20 6L9 17l-5-5"
-                  stroke="rgba(255,255,255,0.92)"
-                  strokeWidth="2.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              How to play
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-1 lg:grid-cols-4 gap-2">
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Current streak
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableCurrentStreak}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">Keep it alive</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  One wrong pick resets to 0.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Leader
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableLeaderScore === null ? "—" : stableLeaderScore}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black truncate">{leaderText}</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  Top streak right now.
+                </div>
+              </div>
             </div>
 
-            <div className="min-w-0">
-              <div className="text-white font-black text-[12px] tracking-wide">{it.title}</div>
-              <div className="mt-1 text-white/65 text-[11px] font-semibold">{it.sub}</div>
+            <div
+              className="mt-2 h-[8px] w-full rounded-full border overflow-hidden"
+              style={{ borderColor: "rgba(0,0,0,0.10)", background: "rgba(0,0,0,0.06)" }}
+              aria-label="progress to leader"
+            >
+              <div
+                className="h-full"
+                style={{
+                  width: `${leaderProgress}%`,
+                  background: `linear-gradient(90deg, ${BRAND.red} 0%, rgba(255,46,77,0.45) 100%)`,
+                }}
+              />
+            </div>
+
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
+              {leaderHint}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Distance
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5" style={pill}>
+                <span className="text-[16px] font-black" style={numStyle}>
+                  {stableLeaderScore === null || distanceToLeader === null ? "—" : distanceToLeader}
+                </span>
+              </div>
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">
+                  {stableLeaderScore === null ? "Waiting on data" : "Close the gap"}
+                </div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  Current streak only.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border px-3 py-2" style={cardBase}>
+            <div className="text-[10px] uppercase tracking-widest font-black" style={{ color: MATCH_HQ.muted2 }}>
+              Eligible
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
+                {eligible ? (
+                  <CheckIcon size={16} color={BRAND.red} />
+                ) : (
+                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
+                    —
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[12px] font-black">{eligible ? "Eligible to win" : "Not yet"}</div>
+                <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
+                  {gamesPicked} games picked
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-2 text-[11px] font-semibold" style={{ color: MATCH_HQ.muted }}>
+              Tip: locks at bounce.
             </div>
           </div>
         </div>
-      ))}
-    </div>
-  );
-}
 
-function FinalCTA() {
-  return (
-    <section className="relative">
-      <div
-        className="mx-auto max-w-6xl px-4 sm:px-6 py-12 sm:py-16"
-      >
+        {/* Game status table */}
         <div
-          className="relative overflow-hidden rounded-[28px] border"
+          className="mt-3 rounded-2xl border p-3 sm:p-3.5"
           style={{
-            borderColor: "rgba(255,255,255,0.12)",
-            background:
-              "radial-gradient(900px 240px at 50% 0%, rgba(255,46,77,0.20) 0%, rgba(0,0,0,0.00) 65%), rgba(255,255,255,0.03)",
-            boxShadow: "0 30px 110px rgba(0,0,0,0.70)",
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(0,0,0,0.28)",
           }}
         >
-          <div className="absolute inset-0 pointer-events-none">
-            <div
-              className="absolute -top-24 left-1/2 h-[280px] w-[680px] -translate-x-1/2 rounded-full blur-3xl"
-              style={{
-                background: "radial-gradient(circle, rgba(255,204,51,0.18) 0%, rgba(255,204,51,0.00) 60%)",
-              }}
-            />
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
+            <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
           </div>
 
-          <div className="relative p-6 sm:p-10 text-center">
-            <div className="text-white font-black text-[26px] sm:text-[34px] tracking-tight">
-              READY FOR GAME DAY?
-            </div>
-            <div className="mt-3 text-white/75 text-[13px] sm:text-[15px] font-semibold max-w-2xl mx-auto">
-              Sign up in 20 seconds. Jump into Torpie. Start building your streak.
+          <div
+            className="hidden md:block mt-3 overflow-hidden rounded-2xl border"
+            style={{ borderColor: "rgba(255,255,255,0.10)" }}
+          >
+            <table className="w-full text-left">
+              <thead>
+                <tr style={{ background: "rgba(255,255,255,0.05)" }}>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Game</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Picks</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Correct</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Unsettled
+                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Streak after
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {gameStatusRows.map((r, i) => {
+                  const anyWrong = r.wrong > 0;
+                  const pillState =
+                    anyWrong
+                      ? { label: "DEAD ☠️", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
+                      : r.unsettled > 0
+                      ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
+                      : { label: "ALIVE ✅", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
+
+                  return (
+                    <tr
+                      key={r.gameId}
+                      style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}
+                    >
+                      <td className="px-3 py-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-black text-white truncate">{r.match}</div>
+                            <div className="text-[11px] text-white/60 font-semibold truncate">
+                              {formatAedt(r.startTime)} • {r.venue}
+                            </div>
+                          </div>
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
+                            style={{
+                              borderColor: pillState.border,
+                              background: pillState.bg,
+                              color: "rgba(255,255,255,0.92)",
+                            }}
+                          >
+                            {pillState.label}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-3 py-2 text-[13px] font-black text-white">{r.picks}</td>
+
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{
+                          color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)",
+                        }}
+                      >
+                        {r.correct}
+                      </td>
+
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{
+                          color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)",
+                        }}
+                      >
+                        {r.wrong}
+                      </td>
+
+                      <td className="px-3 py-2 text-[13px] font-black text-white/80">{r.voided}</td>
+                      <td className="px-3 py-2 text-[13px] font-black text-white/80">{r.unsettled}</td>
+
+                      <td className="px-3 py-2">
+                        <div
+                          className="inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5"
+                          style={{
+                            borderColor: anyWrong ? "rgba(255,46,77,0.35)" : "rgba(255,255,255,0.14)",
+                            background: anyWrong ? "rgba(255,46,77,0.10)" : "rgba(255,255,255,0.06)",
+                          }}
+                        >
+                          {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
+                          <span className="text-[14px] font-black text-white">{r.streakAfter ?? "—"}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="md:hidden mt-3 space-y-2">
+            {gameStatusRows.map((r) => (
+              <div
+                key={r.gameId}
+                className="rounded-2xl border p-3"
+                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}
+              >
+                <div className="text-[13px] font-black text-white">{r.match}</div>
+                <div className="text-[11px] text-white/60 font-semibold">
+                  {formatAedt(r.startTime)} • {r.venue}
+                </div>
+                <div className="mt-2 text-[12px] text-white/80 font-semibold">
+                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter ?? "—"}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 text-[11px] text-white/55 font-semibold">
+            Clean Sweep: any wrong pick in a game resets streak to 0. Voids don’t add.
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const MatchCard = ({ g }: { g: ApiGame }) => {
+    const lockMs = new Date(g.startTime).getTime() - nowMs;
+    const m = splitMatch(g.match);
+    const homeName = m?.home ?? g.match;
+    const awayName = m?.away ?? "";
+
+    const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+    const isLocked = lockMs <= 0;
+
+    const badgeStyle = isLocked
+      ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
+      : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
+
+    return (
+      <Link
+        href={`/picks/${encodeURIComponent(g.id)}`}
+        className="block rounded-2xl overflow-hidden border"
+        style={{
+          borderColor: "rgba(255,255,255,0.10)",
+          background: "rgba(255,255,255,0.03)",
+          boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
+          textDecoration: "none",
+        }}
+      >
+        <div className="relative p-4 overflow-hidden" style={{ minHeight: 196 }}>
+          <CardSilhouetteBg opacity={1} />
+
+          {/* subtle red glow */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(520px 140px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 65%)",
+            }}
+          />
+
+          <div className="relative z-10">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] text-white/85 font-semibold">{formatAedt(g.startTime)}</div>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}
+              >
+                {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
+              </span>
             </div>
 
-            <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
-              <Link
-                href="/signup"
-                className="inline-flex items-center justify-center rounded-2xl px-10 py-4 text-[12px] font-black border"
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <TeamLogo teamName={homeName} size={48} />
+              <div className="text-white/80 font-black text-[12px]">vs</div>
+              <TeamLogo teamName={awayName || "AFL"} size={48} />
+            </div>
+
+            <div className="mt-3 text-center">
+              <div
+                className="text-[17px] sm:text-[18px] font-black leading-tight"
                 style={{
-                  borderColor: "rgba(255,204,51,0.40)",
-                  background: `linear-gradient(180deg, ${BRAND.gold} 0%, rgba(255,204,51,0.82) 100%)`,
-                  color: "rgba(10,10,10,0.95)",
-                  textDecoration: "none",
-                  boxShadow: "0 16px 44px rgba(255,204,51,0.16)",
+                  color: "rgba(255,255,255,0.98)",
+                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
                 }}
               >
-                SIGN UP NOW
-              </Link>
+                {g.match}
+              </div>
+              <div
+                className="mt-1 text-[12px] font-semibold truncate"
+                style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
+              >
+                {g.venue}
+              </div>
+            </div>
 
-              <Link
-                href="/picks"
-                className="inline-flex items-center justify-center rounded-2xl px-10 py-4 text-[12px] font-black border"
+            <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
+                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.95)",
+                }}
+              >
+                {picksCount}/12 picked
+              </span>
+
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                 style={{
                   borderColor: "rgba(255,255,255,0.14)",
                   background: "rgba(255,255,255,0.06)",
                   color: "rgba(255,255,255,0.92)",
-                  textDecoration: "none",
                 }}
               >
-                PLAY AS GUEST
-              </Link>
+                {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
+              </span>
             </div>
 
-            <div className="mt-8 flex items-center justify-center gap-4 text-white/45 text-[11px] font-semibold flex-wrap">
-              <FooterLink href="/about">About</FooterLink>
-              <FooterLink href="/help">Help</FooterLink>
-              <FooterLink href="/terms">Terms</FooterLink>
-              <FooterLink href="/privacy">Privacy</FooterLink>
-            </div>
-
-            <div className="mt-4 text-white/40 text-[11px] font-semibold">
-              TORPIE © 2026
+            <div className="mt-4 flex items-center justify-center">
+              <span
+                className="inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.32)",
+                  background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.72) 100%)",
+                  color: "rgba(255,255,255,0.98)",
+                  boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+                }}
+              >
+                PLAY NOW
+              </span>
             </div>
           </div>
         </div>
+      </Link>
+    );
+  };
+
+  const headerOpacity = refreshing ? 0.88 : 1;
+
+  return (
+    <div className="min-h-screen text-white" style={{ backgroundColor: BRAND.bg }}>
+      <HowToPlayModal open={howOpen} onClose={closeHow} />
+      <StickyChaseBar />
+
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 md:pb-14" style={{ opacity: headerOpacity }}>
+        {/* 🔥 NEW: Premium hero */}
+        <Hero />
+
+        {/* Secondary strip */}
+        <DashboardStrip />
+
+        <div className="mt-7">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
+              <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
+            </div>
+
+            {roundLabel ? (
+              <span
+                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.35)",
+                  background: "rgba(255,46,77,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {roundLabel}
+              </span>
+            ) : null}
+          </div>
+
+          {loading && sortedGames.length === 0 ? (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-2xl border overflow-hidden"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.03)",
+                  }}
+                >
+                  <div className="h-[196px] bg-white/5 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : sortedGames.length === 0 ? (
+            <div
+              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
+              style={{
+                borderColor: "rgba(255,46,77,0.35)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              No games found.
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sortedGames.map((g) => (
+                <MatchCard key={g.id} g={g} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-10 pb-6 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
+          {BRAND.name} © 2026
+        </div>
       </div>
-    </section>
-  );
-}
-
-function FooterLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link href={href} className="hover:text-white/70" style={{ textDecoration: "none" }}>
-      {children}
-    </Link>
-  );
-}
-
-export default function PicksClient() {
-  // Tiny polish: hero “breathes” into place once mounted (no framer-motion needed)
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  return (
-    <div
-      className={cn("min-h-screen text-white", mounted && "opacity-100")}
-      style={{
-        backgroundColor: BRAND.bg,
-        opacity: mounted ? 1 : 0,
-        transition: "opacity 220ms ease",
-      }}
-    >
-      <TopNav />
-
-      <main>
-        <StadiumHero />
-        <TribeSection />
-        <FinalCTA />
-      </main>
     </div>
   );
 }
