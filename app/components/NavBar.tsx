@@ -9,17 +9,15 @@ import MobileNav from "./MobileNav";
 type NavItem = { href: string; label: string };
 
 /**
- * ✅ IMPORTANT (Next/Image):
- * - Do NOT use "public/..." in the src.
- * - Anything inside /public is referenced from the root: "/screamr-logo.png"
+ * ✅ Next/Image path rule:
+ * Anything inside /public is referenced from the root.
+ * So /public/screamr/screamr-logo.png => "/screamr/screamr-logo.png"
  */
-const LOGO_SRC = "/screamr-logo.png"; // confirmed
+const LOGO_SRC = "/screamr/screamr-logo.png";
 
 const COLORS = {
-  bg: "#000000",
   border: "rgba(255,255,255,0.10)",
   text: "rgba(255,255,255,0.88)",
-  muted: "rgba(255,255,255,0.65)",
   hoverBg: "rgba(255,255,255,0.06)",
   red: "#FF2E4D",
 };
@@ -101,7 +99,8 @@ export default function NavBar() {
             className="ml-2 inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black text-white border transition active:scale-[0.99]"
             style={{
               borderColor: "rgba(255,46,77,0.35)",
-              background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
+              background:
+                "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
               boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
               textDecoration: "none",
             }}
@@ -117,7 +116,8 @@ export default function NavBar() {
             className="inline-flex items-center justify-center rounded-2xl px-3 py-2 text-[12px] font-black text-white border active:scale-[0.99] transition"
             style={{
               borderColor: "rgba(255,46,77,0.35)",
-              background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
+              background:
+                "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
               boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
               textDecoration: "none",
             }}
