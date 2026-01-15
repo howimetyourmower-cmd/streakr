@@ -52,10 +52,11 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-const BRAND_RED = "#FF2E4D";
+/** ✅ BRAND (match your SCREAMR / orange theme) */
+const BRAND_ACCENT = "#FF7A00";
 const BRAND_BG = "#000000";
 
-// ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
+/** ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc) */
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
@@ -110,7 +111,7 @@ function parseTeams(match: string) {
   return { home: match.trim(), away: "" };
 }
 
-/* ✅ MATCH PicksClient team slug + logo candidates logic */
+/* ✅ Team slug + logo candidates logic */
 
 type TeamSlug =
   | "adelaide"
@@ -168,13 +169,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = ({
-  teamName,
-  size = 72,
-}: {
-  teamName: string;
-  size?: number;
-}) => {
+const TeamLogo = ({ teamName, size = 72 }: { teamName: string; size?: number }) => {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
@@ -247,8 +242,8 @@ function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
-        <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_RED }}>
+      <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_ACCENT }}>
+        <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_ACCENT }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
@@ -268,10 +263,10 @@ function PlayerAvatar({ name }: { name: string }) {
 
 function TeamLogoSquircle({ teamName }: { teamName: string }) {
   return (
-    <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
+    <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_ACCENT }}>
       <div
         className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
-        style={{ background: BRAND_RED }}
+        style={{ background: BRAND_ACCENT }}
       >
         <TeamLogo teamName={teamName} size={72} />
       </div>
@@ -296,6 +291,7 @@ function GamePickHeader({ match }: { match: string }) {
 }
 
 function PercentBar({ yes, no }: { yes: number; no: number }) {
+  // If backend gives 0/0, keep bar empty but stable.
   const yesPct = Math.max(0, Math.min(100, Math.round(yes)));
   const noPct = Math.max(0, Math.min(100, Math.round(no)));
 
@@ -306,7 +302,7 @@ function PercentBar({ yes, no }: { yes: number; no: number }) {
         <span>No {noPct}%</span>
       </div>
       <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
-        <div className="h-full" style={{ width: `${yesPct}%`, background: BRAND_RED }} />
+        <div className="h-full" style={{ width: `${yesPct}%`, background: BRAND_ACCENT }} />
       </div>
     </div>
   );
@@ -326,8 +322,7 @@ function ResultPill({
   const isDone = status === "final" || status === "void";
   if (!isDone) return null;
 
-  const base =
-    "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.14em]";
+  const base = "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.14em]";
 
   if (status === "void" || outcome === "void") {
     return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>VOID</span>;
@@ -462,13 +457,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     setSaving((prev) => ({ ...prev, [questionId]: true }));
     try {
-      const ref = doc(db, "picks", `${user.uid}_${questionId}`);
+      const refDoc = doc(db, "picks", `${user.uid}_${questionId}`);
 
       if (next === "none") {
-        await deleteDoc(ref);
+        await deleteDoc(refDoc);
       } else {
         await setDoc(
-          ref,
+          refDoc,
           {
             userId: user.uid,
             questionId,
@@ -557,7 +552,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     >
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting Torpie all season long</div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting SCREAMR all season long</div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -616,11 +611,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             const yesBtnClass =
               selected === "yes"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
+                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,122,0,0.20)]`
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
             const noBtnClass =
               selected === "no"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
+                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,122,0,0.20)]`
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
@@ -681,7 +676,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
                           isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${yesBtnClass}`}
-                        style={selected === "yes" ? { background: BRAND_RED } : undefined}
+                        style={selected === "yes" ? { background: BRAND_ACCENT } : undefined}
                         onClick={() => void setPick(q.id, "yes", status)}
                       >
                         YES
@@ -693,7 +688,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
                           isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                         } ${noBtnClass}`}
-                        style={selected === "no" ? { background: BRAND_RED } : undefined}
+                        style={selected === "no" ? { background: BRAND_ACCENT } : undefined}
                         onClick={() => void setPick(q.id, "no", status)}
                       >
                         NO
@@ -724,13 +719,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                       <div className="mt-5 flex-1 rounded-2xl bg-[#F2F2F2] p-4 flex flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win a $100 gift card"}
                         </div>
 
                         <button
                           type="button"
                           className="mt-4 inline-flex items-center justify-center rounded-full border border-black/15 px-6 py-2 text-sm font-extrabold text-black/85"
-                          style={{ background: "rgba(255,46,77,0.20)" }}
+                          style={{ background: "rgba(255,122,0,0.20)" }}
                           onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
                         >
                           Tap to reveal
