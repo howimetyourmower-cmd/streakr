@@ -79,7 +79,7 @@ export default function MobileNav({
           }}
         >
           <div className="flex items-center justify-between">
-            <div className="text-white font-black text-[14px]">TORPIE</div>
+            <div className="text-white font-black text-[14px]">SCREAMR</div>
 
             <button
               type="button"
