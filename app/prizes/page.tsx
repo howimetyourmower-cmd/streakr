@@ -1,8 +1,8 @@
 // /app/prizes/page.tsx
-import prizesClient from "./prizesClient";
+import PrizesClient from "./PrizesClient";
 
 export const dynamic = "force-dynamic";
 
 export default function PrizesPage() {
-  return <prizesClient />;
+  return <PrizesClient />;
 }
