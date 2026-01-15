@@ -23,6 +23,7 @@ export default function NavBar() {
       { href: "/", label: "Home" },
       { href: "/picks", label: "Picks" },
       { href: "/leaderboards", label: "Leaderboards" },
+      { href: "/prizes", label: "Prizes" },
       { href: "/locker-room", label: "Locker Room" },
       { href: "/profile", label: "Profile" },
     ],
