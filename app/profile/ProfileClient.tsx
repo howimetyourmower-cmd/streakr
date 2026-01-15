@@ -54,13 +54,12 @@ const AFL_TEAMS = [
   "Western Bulldogs",
 ];
 
-const SCREAMR = {
+// ✅ swap orange vibe -> Torpie/Streakr red theme
+const TORPIE = {
   bg: "#000000",
-  accent: "#FF7A00", // ✅ SCREAMR orange
+  red: "#FF2E4D",
+  red2: "#d11b2f",
   white: "#FFFFFF",
-
-  // keep a danger red for error states (don’t tie errors to brand)
-  danger: "#FF2E4D",
 };
 
 function toNum(v: unknown, fallback = 0): number {
@@ -302,7 +301,9 @@ export default function ProfileClient() {
   const longestStreak = toNum(profile.longestStreak, 0);
   const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
 
-  // Current streak should never appear higher than best; best should never display lower than current.
+  // ✅ IMPORTANT:
+  // - Current streak = live streak right now.
+  // - Best streak = all-time peak (and should never display lower than current).
   const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
 
   const lifetimeWins = toNum(profile.lifetimeWins, 0);
@@ -319,7 +320,7 @@ export default function ProfileClient() {
       authUser?.displayName ||
       profile.username ||
       [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
-    return name || "Screamr Player";
+    return name || "Torpie Player";
   }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
 
   if (loading) {
@@ -339,7 +340,7 @@ export default function ProfileClient() {
   }
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: SCREAMR.bg }}>
+    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
       {/* top sponsor strip */}
       <div
         className="w-full border-b"
@@ -350,9 +351,7 @@ export default function ProfileClient() {
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
-          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">
-            Proudly supporting SCREAMR all season long
-          </div>
+          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">Proudly supporting Torpie all season long</div>
         </div>
       </div>
 
@@ -365,17 +364,16 @@ export default function ProfileClient() {
               <span
                 className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
                 style={{
-                  borderColor: "rgba(255,122,0,0.40)",
-                  background: "rgba(255,122,0,0.14)",
+                  borderColor: "rgba(255,46,77,0.35)",
+                  background: "rgba(255,46,77,0.12)",
                   color: "rgba(255,255,255,0.92)",
                 }}
               >
-                SCREAMR
+                TORPIE
               </span>
             </div>
             <p className="mt-1 text-sm text-white/65">
-              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Track streaks, badges and
-              details here.
+              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Track streaks, badges and details here.
             </p>
           </div>
 
@@ -411,8 +409,8 @@ export default function ProfileClient() {
               onClick={toggleEditing}
               className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
               style={{
-                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(255,122,0,0.40)",
-                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(255,122,0,0.16)",
+                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(255,46,77,0.35)",
+                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(255,46,77,0.14)",
                 color: "rgba(255,255,255,0.95)",
               }}
             >
@@ -478,8 +476,8 @@ export default function ProfileClient() {
                 <div
                   className="h-14 w-14 rounded-2xl p-[3px]"
                   style={{
-                    background: "linear-gradient(180deg, rgba(255,122,0,0.95) 0%, rgba(255,122,0,0.55) 100%)",
-                    boxShadow: "0 12px 28px rgba(255,122,0,0.18)",
+                    background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.55) 100%)",
+                    boxShadow: "0 12px 28px rgba(255,46,77,0.18)",
                   }}
                 >
                   <div
@@ -494,7 +492,7 @@ export default function ProfileClient() {
                       <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center text-xl font-black">
-                        {(displayName?.[0] || "S").toUpperCase()}
+                        {(displayName?.[0] || "T").toUpperCase()}
                       </div>
                     )}
                   </div>
@@ -532,13 +530,7 @@ export default function ProfileClient() {
                 }}
               >
                 {uploadingAvatar ? "Uploading…" : "Change picture"}
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleAvatarChange}
-                  disabled={uploadingAvatar}
-                />
+                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
               </label>
             </div>
           </div>
@@ -562,31 +554,29 @@ export default function ProfileClient() {
             <span
               className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
               style={{
-                borderColor: "rgba(255,122,0,0.32)",
-                background: "rgba(255,122,0,0.10)",
+                borderColor: "rgba(255,46,77,0.32)",
+                background: "rgba(255,46,77,0.10)",
                 color: "rgba(255,255,255,0.92)",
               }}
-              title="Screamr theme"
+              title="Torpie theme"
             >
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
-                  background: SCREAMR.accent,
-                  boxShadow: "0 0 14px rgba(255,122,0,0.55)",
+                  background: TORPIE.red,
+                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
                 }}
               />
               LIVE
             </span>
           </div>
 
-          {/* top cards */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="accent" />
+            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="red" />
             <StatCard label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak streak." accent="white" />
             <StatCard label="Rounds played" value={String(roundsPlayed)} hint="How many rounds you've played." accent="white" />
           </div>
 
-          {/* lifetime record */}
           <div
             className="mt-4 rounded-3xl border p-4 sm:p-5"
             style={{
@@ -598,9 +588,7 @@ export default function ProfileClient() {
               <div>
                 <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Lifetime record</div>
                 <div className="mt-1 text-[14px] font-black text-white">All-time picks</div>
-                <div className="mt-1 text-[12px] text-white/60 font-semibold">
-                  (UI-only for now — we’ll wire real computed stats in step 2)
-                </div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">(UI-only for now — we’ll wire real computed stats in step 2)</div>
               </div>
 
               <div
@@ -611,7 +599,7 @@ export default function ProfileClient() {
                 }}
               >
                 <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Correct</div>
-                <div className="text-[18px] font-black" style={{ color: SCREAMR.accent }}>
+                <div className="text-[18px] font-black" style={{ color: TORPIE.red }}>
                   {correctPercent}%
                 </div>
               </div>
@@ -625,7 +613,6 @@ export default function ProfileClient() {
             </div>
           </div>
 
-          {/* badges */}
           <div className="mt-5">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -682,8 +669,8 @@ export default function ProfileClient() {
                   disabled={saving}
                   className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
                   style={{
-                    borderColor: "rgba(255,122,0,0.40)",
-                    background: "rgba(255,122,0,0.18)",
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.18)",
                     color: "rgba(255,255,255,0.95)",
                     opacity: saving ? 0.7 : 1,
                   }}
@@ -694,64 +681,18 @@ export default function ProfileClient() {
             ) : null}
           </div>
 
-          {/* locked rows */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
             <ReadOnlyRow label="Username" value={profile.username || authUser.displayName || "—"} />
             <ReadOnlyRow label="Date of birth" value={profile.dateOfBirth || "—"} />
           </div>
 
           <form id="profile-form" onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-            <Field
-              label="First name"
-              name="firstName"
-              value={String(formValues.firstName ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              tone={isEditing ? "edit" : "view"}
-            />
-            <Field
-              label="Surname"
-              name="lastName"
-              value={String(formValues.lastName ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              tone={isEditing ? "edit" : "view"}
-            />
-            <Field
-              label="Suburb"
-              name="suburb"
-              value={String(formValues.suburb ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              tone={isEditing ? "edit" : "view"}
-            />
-            <Field
-              label="State"
-              name="state"
-              value={String(formValues.state ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              placeholder="VIC, NSW, QLD…"
-              tone={isEditing ? "edit" : "view"}
-            />
-            <Field
-              label="Phone"
-              name="phone"
-              type="tel"
-              value={String(formValues.phone ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              tone={isEditing ? "edit" : "view"}
-            />
-            <Field
-              label="Gender"
-              name="gender"
-              value={String(formValues.gender ?? "")}
-              onChange={handleFieldChange}
-              disabled={!isEditing}
-              placeholder="Optional"
-              tone={isEditing ? "edit" : "view"}
-            />
+            <Field label="First name" name="firstName" value={String(formValues.firstName ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Surname" name="lastName" value={String(formValues.lastName ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Suburb" name="suburb" value={String(formValues.suburb ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="State" name="state" value={String(formValues.state ?? "")} onChange={handleFieldChange} disabled={!isEditing} placeholder="VIC, NSW, QLD…" tone={isEditing ? "edit" : "view"} />
+            <Field label="Phone" name="phone" type="tel" value={String(formValues.phone ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Gender" name="gender" value={String(formValues.gender ?? "")} onChange={handleFieldChange} disabled={!isEditing} placeholder="Optional" tone={isEditing ? "edit" : "view"} />
 
             <div className="sm:col-span-2">
               <label className="block text-[11px] text-white/60 mb-1">Favourite AFL team</label>
@@ -777,13 +718,11 @@ export default function ProfileClient() {
             </div>
           </form>
 
-          {/* Sponsor placeholder */}
           <div
             className="mt-6 rounded-3xl border p-4 text-center"
             style={{
-              borderColor: "rgba(255,122,0,0.28)",
-              background:
-                "radial-gradient(900px 140px at 50% 0%, rgba(255,122,0,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
+              borderColor: "rgba(255,46,77,0.28)",
+              background: "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
             }}
           >
             <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">Sponsor banner placeholder</div>
@@ -791,7 +730,7 @@ export default function ProfileClient() {
             <div className="mt-1 text-[12px] text-white/55 font-semibold">(Clickable image / CTA in phase 2)</div>
           </div>
 
-          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">SCREAMR © 2026</div>
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">TORPIE © 2026</div>
         </section>
       </div>
     </div>
@@ -800,27 +739,11 @@ export default function ProfileClient() {
 
 /* ───────── Helper components ───────── */
 
-function StatCard({
-  label,
-  value,
-  hint,
-  accent,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-  accent: "accent" | "white";
-}) {
-  const vColor = accent === "accent" ? SCREAMR.accent : "rgba(255,255,255,0.92)";
+function StatCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent: "red" | "white" }) {
+  const vColor = accent === "red" ? TORPIE.red : "rgba(255,255,255,0.92)";
 
   return (
-    <div
-      className="rounded-3xl border p-4"
-      style={{
-        borderColor: "rgba(255,255,255,0.10)",
-        background: "rgba(0,0,0,0.28)",
-      }}
-    >
+    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
       <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
         {value}
@@ -830,31 +753,11 @@ function StatCard({
   );
 }
 
-function MiniStat({
-  label,
-  value,
-  good,
-  bad,
-}: {
-  label: string;
-  value: string;
-  good?: boolean;
-  bad?: boolean;
-}) {
-  const color = good
-    ? "rgba(45,255,122,0.92)"
-    : bad
-    ? "rgba(255,46,77,0.92)"
-    : "rgba(255,255,255,0.92)";
+function MiniStat({ label, value, good, bad }: { label: string; value: string; good?: boolean; bad?: boolean }) {
+  const color = good ? "rgba(45,255,122,0.92)" : bad ? "rgba(255,46,77,0.92)" : "rgba(255,255,255,0.92)";
 
   return (
-    <div
-      className="rounded-2xl border p-3"
-      style={{
-        borderColor: "rgba(255,255,255,0.10)",
-        background: "rgba(255,255,255,0.04)",
-      }}
-    >
+    <div className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
       <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-1 text-[18px] font-black" style={{ color }}>
         {value}
@@ -865,13 +768,7 @@ function MiniStat({
 
 function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      className="rounded-3xl border p-4"
-      style={{
-        borderColor: "rgba(255,255,255,0.10)",
-        background: "rgba(0,0,0,0.28)",
-      }}
-    >
+    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
       <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-2 text-[14px] font-black text-white">{value}</div>
       <div className="mt-1 text-[11px] text-white/45 font-semibold">Locked</div>
@@ -905,11 +802,7 @@ function Field({ label, name, value, onChange, disabled, type = "text", placehol
         disabled={disabled}
         placeholder={placeholder}
         className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
-        style={{
-          borderColor,
-          background: bg,
-          color: "rgba(255,255,255,0.92)",
-        }}
+        style={{ borderColor, background: bg, color: "rgba(255,255,255,0.92)" }}
       />
     </div>
   );
@@ -929,36 +822,24 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
     <div
       className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
       style={{
-        borderColor: unlocked ? "rgba(255,122,0,0.40)" : "rgba(255,255,255,0.10)",
+        borderColor: unlocked ? "rgba(255,46,77,0.40)" : "rgba(255,255,255,0.10)",
         background: unlocked
-          ? "radial-gradient(900px 140px at 50% 0%, rgba(255,122,0,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
+          ? "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
           : "rgba(0,0,0,0.28)",
-        boxShadow: unlocked ? "0 18px 60px rgba(255,122,0,0.10)" : "none",
+        boxShadow: unlocked ? "0 18px 60px rgba(255,46,77,0.10)" : "none",
       }}
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
-        <div
-          className="absolute inset-0"
-          style={{
-            background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)",
-          }}
-        />
+        <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)" }} />
       </div>
 
       <div className="relative mb-2 h-24 w-20">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageSrc}
-          alt={`Streak badge level ${level}`}
-          className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`}
-        />
+        <img src={imageSrc} alt={`Streak badge level ${level}`} className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`} />
         {!unlocked && (
           <div
             className="absolute inset-0 flex items-center justify-center text-[10px] font-black tracking-[0.18em]"
-            style={{
-              color: "rgba(255,255,255,0.75)",
-              textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-            }}
+            style={{ color: "rgba(255,255,255,0.75)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
           >
             LOCKED
           </div>
