@@ -8,11 +8,6 @@ import MobileNav from "./MobileNav";
 
 type NavItem = { href: string; label: string };
 
-/**
- * ✅ Next/Image path rule:
- * Anything inside /public is referenced from the root.
- * So /public/screamr/screamr-logo.png => "/screamr/screamr-logo.png"
- */
 const LOGO_SRC = "/screamr/screamr-logo.png";
 
 const COLORS = {
@@ -39,29 +34,26 @@ export default function NavBar() {
       className="sticky top-0 z-[80] w-full border-b"
       style={{
         borderColor: COLORS.border,
-        background: "rgba(0,0,0,0.72)",
-        backdropFilter: "blur(10px)",
+        background: "rgba(0,0,0,0.78)",
+        backdropFilter: "blur(12px)",
       }}
     >
-      {/* subtle top glow */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-0 h-[1px]"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,46,77,0.55) 50%, rgba(0,0,0,0) 100%)",
-          opacity: 0.55,
-        }}
-      />
-
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
-        {/* LEFT: LOGO */}
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
+        {/* LOGO */}
         <Link
           href="/"
           aria-label="SCREAMR Home"
           className="flex items-center"
           style={{ textDecoration: "none" }}
         >
-          <div className="relative h-[72px] w-[170px] sm:h-[78px] sm:w-[190px]">
+          <div
+            className="
+              relative
+              h-[56px] w-[180px]
+              md:h-[90px] md:w-[300px]
+              lg:h-[100px] lg:w-[340px]
+            "
+          >
             <Image
               src={LOGO_SRC}
               alt="SCREAMR"
@@ -73,21 +65,21 @@ export default function NavBar() {
         </Link>
 
         {/* DESKTOP NAV */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-2">
           {items.map((it) => (
             <Link
               key={it.href}
               href={it.href}
-              className="rounded-xl px-3 py-2 text-[13px] font-black transition"
+              className="rounded-xl px-3 py-2 text-[14px] font-black transition"
               style={{
-                textDecoration: "none",
                 color: COLORS.text,
+                textDecoration: "none",
               }}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.background = COLORS.hoverBg;
+                e.currentTarget.style.background = COLORS.hoverBg;
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLAnchorElement).style.background = "transparent";
+                e.currentTarget.style.background = "transparent";
               }}
             >
               {it.label}
@@ -96,11 +88,11 @@ export default function NavBar() {
 
           <Link
             href="/picks"
-            className="ml-2 inline-flex items-center justify-center rounded-2xl px-4 py-2 text-[12px] font-black text-white border transition active:scale-[0.99]"
+            className="ml-2 inline-flex items-center justify-center rounded-2xl px-5 py-2 text-[12px] font-black text-white border"
             style={{
               borderColor: "rgba(255,46,77,0.35)",
               background:
-                "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
+                "linear-gradient(180deg, rgba(255,46,77,0.95), rgba(177,15,42,0.95))",
               boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
               textDecoration: "none",
             }}
@@ -109,16 +101,14 @@ export default function NavBar() {
           </Link>
         </nav>
 
-        {/* MOBILE: GO PICK + BURGER */}
+        {/* MOBILE */}
         <div className="flex items-center gap-2 md:hidden">
           <Link
             href="/picks"
-            className="inline-flex items-center justify-center rounded-2xl px-3 py-2 text-[12px] font-black text-white border active:scale-[0.99] transition"
+            className="rounded-2xl px-3 py-2 text-[12px] font-black text-white"
             style={{
-              borderColor: "rgba(255,46,77,0.35)",
               background:
-                "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(177,15,42,0.95) 100%)",
-              boxShadow: "0 10px 26px rgba(255,46,77,0.18)",
+                "linear-gradient(180deg, rgba(255,46,77,0.95), rgba(177,15,42,0.95))",
               textDecoration: "none",
             }}
           >
