@@ -1,4 +1,4 @@
-// /app/picks/PicksClient.tsx
+/// /app/picks/PicksClient.tsx
 "use client";
 
 export const dynamic = "force-dynamic";
@@ -35,21 +35,41 @@ type PicksApiResponse = {
   leaderName?: string | null;
 };
 
+/**
+ * ✅ SCREAMR PALETTE (only colours changed)
+ * - Black glass base
+ * - Neon red accent
+ * - High-contrast text
+ */
 const COLORS = {
   bg: "#000000",
   red: "#FF2E4D",
   green: "#2DFF7A",
   white: "#FFFFFF",
+
+  // extra screamr tones (used via MATCH_HQ below)
+  panel: "#07070A",
+  panel2: "#0B0B10",
+  border: "rgba(255,255,255,0.10)",
+  soft: "rgba(255,255,255,0.06)",
+  soft2: "rgba(255,255,255,0.03)",
+  text: "rgba(255,255,255,0.92)",
+  muted: "rgba(255,255,255,0.70)",
+  muted2: "rgba(255,255,255,0.55)",
 };
 
+/**
+ * ✅ Match HQ palette — converted from light to SCREAMR dark
+ * (no layout changes; just colours)
+ */
 const MATCH_HQ = {
-  card: "#F2F2F2",
-  border: "#E5E5E5",
-  pill: "#EAEAEA",
-  pillBorder: "#DADADA",
-  text: "#0A0A0A",
-  muted: "#555555",
-  muted2: "#666666",
+  card: "rgba(10,10,10,0.92)",
+  border: "rgba(255,255,255,0.12)",
+  pill: "rgba(255,255,255,0.06)",
+  pillBorder: "rgba(255,255,255,0.14)",
+  text: "rgba(255,255,255,0.92)",
+  muted: "rgba(255,255,255,0.70)",
+  muted2: "rgba(255,255,255,0.55)",
 };
 
 const HOW_TO_PLAY_PICKS_KEY = "Torpie_seen_how_to_play_picks_v1";
@@ -175,9 +195,9 @@ const TeamLogo = React.memo(function TeamLogoInner({
         style={{
           width: size,
           height: size,
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(0,0,0,0.35)",
-          color: "rgba(255,255,255,0.90)",
+          borderColor: COLORS.border,
+          background: "rgba(0,0,0,0.45)",
+          color: COLORS.text,
         }}
         title={teamName}
       >
@@ -195,8 +215,8 @@ const TeamLogo = React.memo(function TeamLogoInner({
       style={{
         width: size,
         height: size,
-        borderColor: "rgba(255,255,255,0.14)",
-        background: "rgba(0,0,0,0.35)",
+        borderColor: COLORS.border,
+        background: "rgba(0,0,0,0.45)",
       }}
       title={teamName}
     >
@@ -286,16 +306,12 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
       role="dialog"
       aria-modal="true"
     >
-      <div
-        className="absolute inset-0"
-        style={{ background: "rgba(0,0,0,0.75)" }}
-        onClick={onClose}
-      />
+      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
         style={{
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(10,10,10,0.96)",
+          borderColor: COLORS.border,
+          background: "rgba(0,0,0,0.92)",
           boxShadow: "0 30px 90px rgba(0,0,0,0.75)",
         }}
       >
@@ -310,9 +326,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
           <button
             className="rounded-full px-3 py-2 text-[12px] font-black border"
             style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
+              borderColor: COLORS.border,
+              background: COLORS.soft,
+              color: COLORS.text,
             }}
             onClick={onClose}
           >
@@ -321,17 +337,17 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
 
         <div className="mt-4 space-y-3 text-sm text-white/85">
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <div className="rounded-2xl border p-4" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
             <div className="font-black">1) Pick any amount</div>
             <div className="text-white/70 mt-1">Pick 0, 1, 5 or all 12 questions.</div>
           </div>
 
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <div className="rounded-2xl border p-4" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
             <div className="font-black">2) Auto-lock</div>
             <div className="text-white/70 mt-1">No lock-in button. Picks lock at the game start time.</div>
           </div>
 
-          <div className="rounded-2xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <div className="rounded-2xl border p-4" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
             <div className="font-black">3) Clean Sweep</div>
             <div className="text-white/70 mt-1">
               One wrong pick resets your streak for that match. Voids don’t count.
@@ -345,7 +361,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
             style={{
               borderColor: "rgba(255,46,77,0.35)",
               background: "rgba(255,46,77,0.14)",
-              color: "rgba(255,255,255,0.95)",
+              color: COLORS.text,
             }}
             onClick={onClose}
           >
@@ -637,8 +653,8 @@ export default function PicksClient() {
           <div
             className="rounded-2xl border p-3 shadow-[0_18px_60px_rgba(0,0,0,0.80)]"
             style={{
-              borderColor: "rgba(255,255,255,0.12)",
-              background: "rgba(10,10,10,0.92)",
+              borderColor: COLORS.border,
+              background: "rgba(0,0,0,0.88)",
               backdropFilter: "blur(10px)",
             }}
           >
@@ -648,9 +664,9 @@ export default function PicksClient() {
                   <span
                     className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[10px] font-black"
                     style={{
-                      borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.14)",
-                      background: isNextUpLive ? "rgba(255,46,77,0.14)" : "rgba(255,255,255,0.06)",
-                      color: "rgba(255,255,255,0.92)",
+                      borderColor: isNextUpLive ? "rgba(255,46,77,0.55)" : COLORS.border,
+                      background: isNextUpLive ? "rgba(255,46,77,0.14)" : COLORS.soft,
+                      color: COLORS.text,
                     }}
                   >
                     <span
@@ -738,8 +754,8 @@ export default function PicksClient() {
       <div
         className="mt-4 rounded-3xl border px-3 py-3"
         style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
+          borderColor: COLORS.border,
+          background: COLORS.soft2,
         }}
       >
         <div className="flex items-center justify-between gap-3">
@@ -750,7 +766,7 @@ export default function PicksClient() {
               style={{
                 borderColor: "rgba(255,46,77,0.28)",
                 background: "rgba(255,46,77,0.10)",
-                color: "rgba(255,255,255,0.92)",
+                color: COLORS.text,
               }}
               title="Torpie is live and updating"
             >
@@ -770,9 +786,9 @@ export default function PicksClient() {
               href="/leaderboards"
               className="rounded-full px-3 py-1.5 text-[11px] font-black border"
               style={{
-                borderColor: "rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.06)",
-                color: "rgba(255,255,255,0.92)",
+                borderColor: COLORS.border,
+                background: COLORS.soft,
+                color: COLORS.text,
                 textDecoration: "none",
               }}
             >
@@ -783,9 +799,9 @@ export default function PicksClient() {
               type="button"
               className="rounded-full px-3 py-1.5 text-[11px] font-black border"
               style={{
-                borderColor: "rgba(255,255,255,0.14)",
-                background: "rgba(255,255,255,0.06)",
-                color: "rgba(255,255,255,0.92)",
+                borderColor: COLORS.border,
+                background: COLORS.soft,
+                color: COLORS.text,
               }}
               onClick={() => setHowOpen(true)}
             >
@@ -835,8 +851,8 @@ export default function PicksClient() {
             <div
               className="mt-2 h-[8px] w-full rounded-full border overflow-hidden"
               style={{
-                borderColor: "rgba(0,0,0,0.10)",
-                background: "rgba(0,0,0,0.06)",
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(255,255,255,0.06)",
               }}
               aria-label="progress to leader"
             >
@@ -905,11 +921,10 @@ export default function PicksClient() {
           </div>
         </div>
 
-        {/* ✅ THIS IS THE GAME STATUS SECTION — it will no longer disappear on refresh */}
         <div
           className="mt-3 rounded-2xl border p-3 sm:p-3.5"
           style={{
-            borderColor: "rgba(255,255,255,0.10)",
+            borderColor: COLORS.border,
             background: "rgba(0,0,0,0.28)",
           }}
         >
@@ -918,10 +933,7 @@ export default function PicksClient() {
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
           </div>
 
-          <div
-            className="hidden md:block mt-3 overflow-hidden rounded-2xl border"
-            style={{ borderColor: "rgba(255,255,255,0.10)" }}
-          >
+          <div className="hidden md:block mt-3 overflow-hidden rounded-2xl border" style={{ borderColor: COLORS.border }}>
             <table className="w-full text-left">
               <thead>
                 <tr style={{ background: "rgba(255,255,255,0.05)" }}>
@@ -946,7 +958,7 @@ export default function PicksClient() {
                   const pillState = anyWrong
                     ? { label: "DEAD ☠️", border: "rgba(255,46,77,0.45)", bg: "rgba(255,46,77,0.14)" }
                     : anyUnsettled && r.picks > 0
-                    ? { label: "IN PROGRESS", border: "rgba(255,255,255,0.18)", bg: "rgba(255,255,255,0.06)" }
+                    ? { label: "IN PROGRESS", border: COLORS.border, bg: COLORS.soft }
                     : { label: "ALIVE ✅", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
@@ -967,7 +979,7 @@ export default function PicksClient() {
                             style={{
                               borderColor: pillState.border,
                               background: pillState.bg,
-                              color: "rgba(255,255,255,0.92)",
+                              color: COLORS.text,
                             }}
                           >
                             {pillState.label}
@@ -998,8 +1010,8 @@ export default function PicksClient() {
                         <div
                           className="inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5"
                           style={{
-                            borderColor: anyWrong ? "rgba(255,46,77,0.35)" : "rgba(255,255,255,0.14)",
-                            background: anyWrong ? "rgba(255,46,77,0.10)" : "rgba(255,255,255,0.06)",
+                            borderColor: anyWrong ? "rgba(255,46,77,0.35)" : COLORS.border,
+                            background: anyWrong ? "rgba(255,46,77,0.10)" : COLORS.soft,
                           }}
                         >
                           {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
@@ -1020,15 +1032,14 @@ export default function PicksClient() {
               <div
                 key={r.gameId}
                 className="rounded-2xl border p-3"
-                style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.18)" }}
+                style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}
               >
                 <div className="text-[13px] font-black text-white">{r.match}</div>
                 <div className="text-[11px] text-white/60 font-semibold">
                   {formatAedt(r.startTime)} • {r.venue}
                 </div>
                 <div className="mt-2 text-[12px] text-white/80 font-semibold">
-                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak{" "}
-                  {r.streakAfter === null ? "—" : r.streakAfter}
+                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter === null ? "—" : r.streakAfter}
                 </div>
               </div>
             ))}
@@ -1055,7 +1066,7 @@ export default function PicksClient() {
 
     const badgeStyle = isLocked
       ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
-      : { borderColor: "rgba(255,255,255,0.16)", background: "rgba(0,0,0,0.40)" };
+      : { borderColor: COLORS.border, background: "rgba(0,0,0,0.40)" };
 
     const href = `/picks/${g.id}`;
 
@@ -1064,8 +1075,8 @@ export default function PicksClient() {
         href={href}
         className="block rounded-2xl overflow-hidden border"
         style={{
-          borderColor: "rgba(255,255,255,0.10)",
-          background: "rgba(255,255,255,0.03)",
+          borderColor: COLORS.border,
+          background: COLORS.soft2,
           boxShadow: "0 18px 55px rgba(0,0,0,0.75)",
           textDecoration: "none",
         }}
@@ -1116,9 +1127,9 @@ export default function PicksClient() {
               <span
                 className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                 style={{
-                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : "rgba(255,255,255,0.14)",
-                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.95)",
+                  borderColor: picksCount > 0 ? "rgba(45,255,122,0.45)" : COLORS.border,
+                  background: picksCount > 0 ? "rgba(45,255,122,0.10)" : COLORS.soft,
+                  color: COLORS.text,
                 }}
               >
                 {picksCount}/12 picked
@@ -1127,9 +1138,9 @@ export default function PicksClient() {
               <span
                 className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
                 style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
+                  borderColor: COLORS.border,
+                  background: COLORS.soft,
+                  color: COLORS.text,
                 }}
               >
                 {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
@@ -1171,7 +1182,6 @@ export default function PicksClient() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-3">
-              {/* ✅ Title locked to ALL CAPS like Leaderboard */}
               <h1 className="text-3xl sm:text-4xl font-black uppercase tracking-[0.14em]">Picks</h1>
 
               {roundLabel ? (
@@ -1180,7 +1190,7 @@ export default function PicksClient() {
                   style={{
                     borderColor: "rgba(255,46,77,0.35)",
                     background: "rgba(255,46,77,0.10)",
-                    color: "rgba(255,255,255,0.92)",
+                    color: COLORS.text,
                   }}
                 >
                   {roundLabel}
@@ -1200,9 +1210,9 @@ export default function PicksClient() {
             onClick={() => loadPicks("refresh")}
             className="rounded-full px-3 py-2 text-[11px] font-black border"
             style={{
-              borderColor: "rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.06)",
-              color: "rgba(255,255,255,0.92)",
+              borderColor: COLORS.border,
+              background: COLORS.soft,
+              color: COLORS.text,
             }}
             title="Refresh"
           >
@@ -1216,7 +1226,6 @@ export default function PicksClient() {
           </div>
         ) : null}
 
-        {/* NEXT UP (stable) */}
         {nextUpStable ? (
           <div className="mt-4 transition-opacity duration-200" style={{ opacity: initialLoading ? 0.75 : 1 }}>
             <Link
@@ -1224,7 +1233,7 @@ export default function PicksClient() {
               className="block rounded-3xl overflow-hidden border"
               style={{
                 borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,255,255,0.03)",
+                background: COLORS.soft2,
                 boxShadow: "0 26px 90px rgba(0,0,0,0.70)",
                 textDecoration: "none",
               }}
@@ -1246,7 +1255,7 @@ export default function PicksClient() {
                       style={{
                         borderColor: "rgba(255,46,77,0.55)",
                         background: "rgba(255,46,77,0.14)",
-                        color: "rgba(255,255,255,0.92)",
+                        color: COLORS.text,
                         boxShadow: "0 0 24px rgba(255,46,77,0.16)",
                       }}
                     >
@@ -1321,7 +1330,6 @@ export default function PicksClient() {
         <div className="mt-6">
           <div className="text-[12px] uppercase tracking-widest text-white/55 font-black">Scheduled matches</div>
 
-          {/* ✅ Only show skeleton on FIRST ever load when we have no stable games */}
           {initialLoading && sortedGames.length === 0 ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -1329,8 +1337,8 @@ export default function PicksClient() {
                   key={i}
                   className="rounded-2xl border overflow-hidden"
                   style={{
-                    borderColor: "rgba(255,255,255,0.10)",
-                    background: "rgba(255,255,255,0.03)",
+                    borderColor: COLORS.border,
+                    background: COLORS.soft2,
                   }}
                 >
                   <div className="h-[190px] bg-white/5 animate-pulse" />
@@ -1342,7 +1350,7 @@ export default function PicksClient() {
               className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
               style={{
                 borderColor: "rgba(255,46,77,0.35)",
-                background: "rgba(255,255,255,0.03)",
+                background: COLORS.soft2,
               }}
             >
               No games found.
