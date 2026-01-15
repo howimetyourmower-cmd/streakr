@@ -1,763 +1,863 @@
+// /app/profile/ProfileClient.tsx
 "use client";
 
-// /app/picks/[gameId]/MatchPicksClient.tsx
-export const dynamic = "force-dynamic";
-
-import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, ChangeEvent, FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { auth, db, storage } from "@/lib/firebaseClient";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { onAuthStateChanged, User } from "firebase/auth";
 import { useAuth } from "@/hooks/useAuth";
-import { db } from "@/lib/firebaseClient";
-import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
 
-type QuestionStatus = "open" | "final" | "pending" | "void";
-type PickOutcome = "yes" | "no";
-type LocalPick = PickOutcome | "none";
-type QuestionOutcome = "yes" | "no" | "void";
+type ProfileData = {
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  suburb?: string;
+  state?: string;
+  phone?: string;
+  gender?: string;
+  favouriteAflTeam?: string;
+  avatarUrl?: string; // preferred
+  photoURL?: string; // legacy
 
-type ApiQuestion = {
-  id: string;
-  quarter: number;
-  question: string;
-  status: any;
+  // stats (UI now, computed later)
+  currentStreak?: number;
+  longestStreak?: number;
+  lifetimeBestStreak?: number;
+  lifetimeWins?: number;
+  lifetimeLosses?: number;
+  roundsPlayed?: number;
 
-  match?: string;
-  venue?: string;
-  startTime?: string;
-
-  userPick?: "yes" | "no";
-  yesPercent?: number;
-  noPercent?: number;
-  commentCount?: number;
-
-  isSponsorQuestion?: boolean;
-  sponsorName?: string;
-  sponsorBlurb?: string;
-
-  // ✅ comes from /api/picks
-  correctOutcome?: QuestionOutcome;
-  outcome?: QuestionOutcome;
-  correctPick?: boolean | null;
+  streakBadges?: Record<string, boolean>;
 };
 
-type ApiGame = {
-  id: string;
-  match: string;
-  venue: string;
-  startTime: string;
-  questions: ApiQuestion[];
+const AFL_TEAMS = [
+  "Adelaide Crows",
+  "Brisbane Lions",
+  "Carlton",
+  "Collingwood",
+  "Essendon",
+  "Fremantle",
+  "Geelong Cats",
+  "Gold Coast Suns",
+  "GWS Giants",
+  "Hawthorn Hawks",
+  "Melbourne Demons",
+  "North Melbourne Kangaroos",
+  "Port Adelaide Power",
+  "Richmond Tigers",
+  "St Kilda Saints",
+  "Sydney Swans",
+  "West Coast Eagles",
+  "Western Bulldogs",
+];
+
+// ✅ swap orange vibe -> Torpie/Streakr red theme
+const TORPIE = {
+  bg: "#000000",
+  red: "#FF2E4D",
+  red2: "#d11b2f",
+  white: "#FFFFFF",
 };
 
-type PicksApiResponse = {
-  games: ApiGame[];
-  roundNumber?: number;
-};
-
-/** ✅ BRAND (match your SCREAMR / orange theme) */
-const BRAND_ACCENT = "#FF7A00";
-const BRAND_BG = "#000000";
-
-/** ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc) */
-function roundNumberFromGameId(gameId: string): number {
-  const s = String(gameId || "").toUpperCase().trim();
-  if (s.startsWith("OR-")) return 0;
-  if (s.startsWith("R")) {
-    const dash = s.indexOf("-");
-    const prefix = dash === -1 ? s : s.slice(0, dash); // "R12"
-    const n = Number(prefix.replace("R", ""));
-    if (Number.isFinite(n) && n >= 0) return n;
-  }
-  return 0;
+function toNum(v: unknown, fallback = 0): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function extractPlayerName(question: string) {
-  const q = question.trim();
-  if (!q.toLowerCase().startsWith("will ")) return null;
-
-  const start = 5;
-  const parenIdx = q.indexOf(" (", start);
-  const stopIdx = parenIdx !== -1 ? parenIdx : q.length;
-  const name = q.slice(start, stopIdx).trim();
-
-  if (!name) return null;
-  if (!name.includes(" ")) return null;
-
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
-
-  return name;
-}
-
-function playerSlug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
-}
-
-function safeStatus(s: any): QuestionStatus {
-  const v = String(s || "").toLowerCase().trim();
-  if (v === "open") return "open";
-  if (v === "final") return "final";
-  if (v === "pending") return "pending";
-  if (v === "void") return "void";
-  return "open";
-}
-
-function formatQuarterLabel(q: number) {
-  return `QUARTER ${q}`;
-}
-
-function parseTeams(match: string) {
-  const parts = match.split(" vs ");
-  if (parts.length === 2) return { home: parts[0].trim(), away: parts[1].trim() };
-  const parts2 = match.split(/\s+vs\s+/i);
-  if (parts2.length === 2) return { home: parts2[0].trim(), away: parts2[1].trim() };
-  return { home: match.trim(), away: "" };
-}
-
-/* ✅ Team slug + logo candidates logic */
-
-type TeamSlug =
-  | "adelaide"
-  | "brisbane"
-  | "carlton"
-  | "collingwood"
-  | "essendon"
-  | "fremantle"
-  | "geelong"
-  | "goldcoast"
-  | "gws"
-  | "hawthorn"
-  | "melbourne"
-  | "northmelbourne"
-  | "portadelaide"
-  | "richmond"
-  | "stkilda"
-  | "sydney"
-  | "westcoast"
-  | "westernbulldogs";
-
-function teamNameToSlug(nameRaw: string): TeamSlug | null {
-  const n = (nameRaw || "").toLowerCase().trim();
-
-  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
-  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
-  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
-  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
-
-  if (n.includes("adelaide")) return "adelaide";
-  if (n.includes("brisbane")) return "brisbane";
-  if (n.includes("carlton")) return "carlton";
-  if (n.includes("collingwood")) return "collingwood";
-  if (n.includes("essendon")) return "essendon";
-  if (n.includes("fremantle")) return "fremantle";
-  if (n.includes("geelong")) return "geelong";
-  if (n.includes("hawthorn")) return "hawthorn";
-  if (n.includes("melbourne")) return "melbourne";
-  if (n.includes("richmond")) return "richmond";
-  if (n.includes("sydney") || n.includes("swans")) return "sydney";
-
-  return null;
-}
-
-function logoCandidates(teamSlug: TeamSlug): string[] {
-  return [
-    `/aflteams/${teamSlug}-logo.jpg`,
-    `/aflteams/${teamSlug}-logo.jpeg`,
-    `/aflteams/${teamSlug}-logo.png`,
-    `/afllogos/${teamSlug}-logo.jpg`,
-    `/afllogos/${teamSlug}-logo.png`,
-  ];
-}
-
-const TeamLogo = ({ teamName, size = 72 }: { teamName: string; size?: number }) => {
-  const slug = teamNameToSlug(teamName);
-  const [idx, setIdx] = useState(0);
-  const [dead, setDead] = useState(false);
-
-  const fallbackInitials = (teamName || "AFL")
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((x) => x[0]?.toUpperCase())
-    .join("");
-
-  if (!slug || dead) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-2xl border font-black"
-        style={{
-          width: size,
-          height: size,
-          borderColor: "rgba(255,255,255,0.14)",
-          background: "rgba(0,0,0,0.35)",
-          color: "rgba(255,255,255,0.90)",
-        }}
-        title={teamName}
-      >
-        {fallbackInitials || "AFL"}
-      </div>
-    );
-  }
-
-  const candidates = logoCandidates(slug);
-  const src = candidates[Math.min(idx, candidates.length - 1)];
-
-  return (
-    <div
-      className="relative rounded-2xl border overflow-hidden"
-      style={{
-        width: size,
-        height: size,
-        borderColor: "rgba(255,255,255,0.14)",
-        background: "rgba(0,0,0,0.35)",
-      }}
-      title={teamName}
-    >
-      <div className="absolute inset-0 p-2">
-        <Image
-          src={src}
-          alt={`${teamName} logo`}
-          fill
-          sizes={`${size}px`}
-          style={{ objectFit: "contain" }}
-          onError={() => {
-            setIdx((p) => {
-              if (p + 1 < candidates.length) return p + 1;
-              setDead(true);
-              return p;
-            });
-          }}
-        />
-      </div>
-    </div>
-  );
-};
-
-/* UI bits */
-
-function PlayerAvatar({ name }: { name: string }) {
-  const exact = `/players/${encodeURIComponent(name)}.jpg`;
-  const slug = `/players/${playerSlug(name)}.jpg`;
-  const [src, setSrc] = useState(exact);
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_ACCENT }}>
-        <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_ACCENT }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={src}
-            alt={name}
-            className="h-full w-full object-cover"
-            onError={() => {
-              if (src === exact) setSrc(slug);
-            }}
-          />
-        </div>
-      </div>
-
-      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">PLAYER PICK</div>
-    </div>
-  );
-}
-
-function TeamLogoSquircle({ teamName }: { teamName: string }) {
-  return (
-    <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_ACCENT }}>
-      <div
-        className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
-        style={{ background: BRAND_ACCENT }}
-      >
-        <TeamLogo teamName={teamName} size={72} />
-      </div>
-    </div>
-  );
-}
-
-function GamePickHeader({ match }: { match: string }) {
-  const { home, away } = parseTeams(match);
-
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="flex items-center justify-center gap-3">
-        <TeamLogoSquircle teamName={home} />
-        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
-        <TeamLogoSquircle teamName={away || "AFL"} />
-      </div>
-
-      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">GAME PICK</div>
-    </div>
-  );
-}
-
-function PercentBar({ yes, no }: { yes: number; no: number }) {
-  // If backend gives 0/0, keep bar empty but stable.
-  const yesPct = Math.max(0, Math.min(100, Math.round(yes)));
-  const noPct = Math.max(0, Math.min(100, Math.round(no)));
-
-  return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between text-[11px] text-black/45">
-        <span>Yes {yesPct}%</span>
-        <span>No {noPct}%</span>
-      </div>
-      <div className="mt-1 h-[3px] w-full overflow-hidden rounded-full bg-black/10">
-        <div className="h-full" style={{ width: `${yesPct}%`, background: BRAND_ACCENT }} />
-      </div>
-    </div>
-  );
-}
-
-function ResultPill({
-  status,
-  selected,
-  correctPick,
-  outcome,
-}: {
-  status: QuestionStatus;
-  selected: LocalPick;
-  correctPick: boolean | null | undefined;
-  outcome: QuestionOutcome | undefined;
-}) {
-  const isDone = status === "final" || status === "void";
-  if (!isDone) return null;
-
-  const base = "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.14em]";
-
-  if (status === "void" || outcome === "void") {
-    return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>VOID</span>;
-  }
-
-  if (selected === "none") {
-    return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>NO PICK</span>;
-  }
-
-  if (correctPick === true) {
-    return <span className={`${base} border-emerald-400/30 bg-emerald-400/10 text-emerald-200`}>✅ CORRECT</span>;
-  }
-
-  if (correctPick === false) {
-    return <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>❌ WRONG</span>;
-  }
-
-  return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
-}
-
-export default function MatchPicksClient({ gameId }: { gameId: string }) {
+export default function ProfileClient() {
+  const router = useRouter();
   const { user } = useAuth();
 
-  // ✅ FIX: separate initial-load vs background refresh (prevents “black flash”)
-  const [loading, setLoading] = useState(true); // first load only
-  const [refreshing, setRefreshing] = useState(false); // background refresh, keep UI
-  const [err, setErr] = useState<string | null>(null);
-  const [game, setGame] = useState<ApiGame | null>(null);
-  const lastGameRef = useRef<ApiGame | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<ProfileData>({});
+  const [loading, setLoading] = useState(true);
 
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
-  const [picks, setPicks] = useState<Record<string, LocalPick>>({});
-  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const picksStorageKey = useMemo(() => {
-    const uid = user?.uid || "anon";
-    return `torpie:picks:${uid}:${gameId}`;
-  }, [user?.uid, gameId]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [formValues, setFormValues] = useState<ProfileData>({});
+  const [localBadges, setLocalBadges] = useState<Record<string, boolean>>({});
 
-  // localStorage (anon/offline fallback)
+  // Auth listener (keeps redirect logic you had)
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(picksStorageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Record<string, LocalPick>;
-      if (parsed && typeof parsed === "object") setPicks(parsed);
-    } catch {}
-  }, [picksStorageKey]);
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setAuthUser(u);
+      if (!u) {
+        router.push("/auth?mode=login&returnTo=/profile");
+      }
+    });
+    return () => unsub();
+  }, [router]);
 
+  // Load profile
   useEffect(() => {
-    try {
-      localStorage.setItem(picksStorageKey, JSON.stringify(picks));
-    } catch {}
-  }, [picks, picksStorageKey]);
-
-  async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
-    if (mode === "initial") setLoading(true);
-    else setRefreshing(true);
-
-    setErr(null);
-
-    try {
-      const headers: Record<string, string> = {};
-      if (user) {
-        const token = await user.getIdToken();
-        headers.Authorization = `Bearer ${token}`;
+    const load = async () => {
+      if (!user) {
+        setLoading(false);
+        return;
       }
 
-      const res = await fetch(`/api/picks?round=${roundNumber}`, {
-        cache: "no-store",
-        headers,
-      });
-      if (!res.ok) throw new Error(`API error (${res.status})`);
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
 
-      const data = (await res.json()) as PicksApiResponse;
-      const found = (data.games || []).find((g) => g.id === gameId);
-      if (!found) throw new Error("Game not found for this gameId");
+        let data: ProfileData;
 
-      setGame(found);
-      lastGameRef.current = found;
+        if (snap.exists()) {
+          const firestoreData = (snap.data() as Record<string, unknown>) || {};
 
-      // ✅ if logged in, merge server userPick into local picks (never wipe)
-      if (user) {
-        const seeded: Record<string, LocalPick> = {};
-        for (const q of found.questions || []) {
-          if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
+          // Map existing boolean fields like badges_level3 etc
+          const levelBadges: Record<string, boolean> = {};
+          [3, 5, 10, 15, 20].forEach((lvl) => {
+            const key = `badges_level${lvl}`;
+            if (firestoreData[key] === true) {
+              levelBadges[String(lvl)] = true;
+            }
+          });
+
+          const streakBadges = (firestoreData.streakBadges as Record<string, boolean>) || {};
+          const mergedBadges = { ...streakBadges, ...levelBadges };
+
+          data = {
+            ...(firestoreData as any),
+            streakBadges: mergedBadges,
+          } as ProfileData;
+
+          setLocalBadges(mergedBadges);
+        } else {
+          data = {
+            username: user.displayName || "",
+            firstName: "",
+            lastName: "",
+            suburb: "",
+            state: "",
+            phone: "",
+            gender: "",
+            favouriteAflTeam: "",
+            avatarUrl: user.photoURL || "",
+            currentStreak: 0,
+            longestStreak: 0,
+            lifetimeBestStreak: 0,
+            lifetimeWins: 0,
+            lifetimeLosses: 0,
+            roundsPlayed: 0,
+            streakBadges: {},
+          };
+          await setDoc(userRef, data, { merge: true });
+          setLocalBadges({});
         }
-        setPicks((prev) => ({ ...prev, ...seeded }));
-      } else {
-        // anon: only seed if nothing exists locally
-        setPicks((prev) => {
-          if (Object.keys(prev || {}).length > 0) return prev;
-          const seeded: Record<string, LocalPick> = {};
-          for (const q of found.questions || []) {
-            if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
-          }
-          return seeded;
+
+        setProfile(data);
+        setFormValues({
+          username: data.username || "",
+          firstName: data.firstName || "",
+          lastName: data.lastName || "",
+          dateOfBirth: data.dateOfBirth || "",
+          suburb: data.suburb || "",
+          state: data.state || "",
+          phone: data.phone || "",
+          gender: data.gender || "",
+          favouriteAflTeam: data.favouriteAflTeam || "",
         });
+      } catch (err) {
+        console.error("Failed to load profile", err);
+        setError("Could not load your profile. Please try again.");
+      } finally {
+        setLoading(false);
       }
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load picks");
-    } finally {
-      if (mode === "initial") setLoading(false);
-      setRefreshing(false);
+    };
+
+    load();
+  }, [user]);
+
+  const handleFieldChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const toggleEditing = () => {
+    if (isEditing) {
+      setFormValues({
+        username: profile.username || "",
+        firstName: profile.firstName || "",
+        lastName: profile.lastName || "",
+        dateOfBirth: profile.dateOfBirth || "",
+        suburb: profile.suburb || "",
+        state: profile.state || "",
+        phone: profile.phone || "",
+        gender: profile.gender || "",
+        favouriteAflTeam: profile.favouriteAflTeam || "",
+      });
     }
-  }
+    setIsEditing((prev) => !prev);
+    setError(null);
+    setSuccessMessage(null);
+  };
 
-  useEffect(() => {
-    void fetchMatch("initial");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameId, user?.uid]);
-
-  const stableGame = game ?? lastGameRef.current;
-
-  const questions = useMemo(() => {
-    const qs = stableGame?.questions || [];
-    return [...qs].sort((a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id));
-  }, [stableGame]);
-
-  const selectedCount = useMemo(() => {
-    return Object.values(picks).filter((v) => v === "yes" || v === "no").length;
-  }, [picks]);
-
-  const lockedCount = useMemo(() => {
-    return questions.filter((q) => safeStatus(q.status) !== "open").length;
-  }, [questions]);
-
-  async function persistPick(questionId: string, next: LocalPick) {
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
     if (!user) return;
 
-    setSaving((prev) => ({ ...prev, [questionId]: true }));
+    setSaving(true);
+    setError(null);
+    setSuccessMessage(null);
+
     try {
-      const refDoc = doc(db, "picks", `${user.uid}_${questionId}`);
+      const userRef = doc(db, "users", user.uid);
 
-      if (next === "none") {
-        await deleteDoc(refDoc);
-      } else {
-        await setDoc(
-          refDoc,
-          {
-            userId: user.uid,
-            questionId,
-            pick: next,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
+      // DO NOT allow username or DOB to change from UI
+      await updateDoc(userRef, {
+        firstName: formValues.firstName || "",
+        lastName: formValues.lastName || "",
+        suburb: formValues.suburb || "",
+        state: formValues.state || "",
+        phone: formValues.phone || "",
+        gender: formValues.gender || "",
+        favouriteAflTeam: formValues.favouriteAflTeam || "",
+      });
 
-      void fetchMatch("refresh");
-    } catch (e) {
-      console.error("[MatchPicksClient] failed to persist pick", e);
+      setProfile((prev) => ({
+        ...prev,
+        firstName: formValues.firstName || "",
+        lastName: formValues.lastName || "",
+        suburb: formValues.suburb || "",
+        state: formValues.state || "",
+        phone: formValues.phone || "",
+        gender: formValues.gender || "",
+        favouriteAflTeam: formValues.favouriteAflTeam || "",
+      }));
+
+      setIsEditing(false);
+      setSuccessMessage("Profile updated.");
+      window.setTimeout(() => setSuccessMessage(null), 2500);
+    } catch (err) {
+      console.error("Failed to save profile", err);
+      setError("Could not save changes. Please try again.");
     } finally {
-      setSaving((prev) => ({ ...prev, [questionId]: false }));
+      setSaving(false);
     }
-  }
+  };
 
-  async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus) {
-    if (status !== "open") return;
+  const handleAvatarChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (!user) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    setPicks((prev) => {
-      const current = prev[questionId] || "none";
-      const next: LocalPick = current === value ? "none" : value;
-      void persistPick(questionId, next);
-      return { ...prev, [questionId]: next };
-    });
-  }
+    // quick client validation (UI-only)
+    if (!file.type.startsWith("image/")) {
+      setError("Please select an image file.");
+      return;
+    }
+    if (file.size > 6 * 1024 * 1024) {
+      setError("Image too large. Please use an image under 6MB.");
+      return;
+    }
 
-  async function clearPick(questionId: string, status: QuestionStatus) {
-    if (status !== "open") return;
+    setUploadingAvatar(true);
+    setError(null);
+    setSuccessMessage(null);
 
-    setPicks((prev) => {
-      void persistPick(questionId, "none");
-      return { ...prev, [questionId]: "none" };
-    });
-  }
+    try {
+      const storageRef = ref(storage, `avatars/${user.uid}/${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
 
-  if (loading && !stableGame) {
+      const userRef = doc(db, "users", user.uid);
+      await updateDoc(userRef, { avatarUrl: url });
+
+      setProfile((prev) => ({
+        ...prev,
+        avatarUrl: url,
+      }));
+
+      setSuccessMessage("Profile picture updated.");
+      window.setTimeout(() => setSuccessMessage(null), 2500);
+    } catch (err) {
+      console.error("Avatar upload failed", err);
+      setError("Could not upload picture. Please try again.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      router.push("/");
+    } catch (err) {
+      console.error("Logout failed", err);
+    }
+  };
+
+  // Derived stats (UI-only — backend comes later)
+  const currentStreak = toNum(profile.currentStreak, 0);
+  const longestStreak = toNum(profile.longestStreak, 0);
+  const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
+
+  // ✅ IMPORTANT:
+  // - Current streak = live streak right now.
+  // - Best streak = all-time peak (and should never display lower than current).
+  const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
+
+  const lifetimeWins = toNum(profile.lifetimeWins, 0);
+  const lifetimeLosses = toNum(profile.lifetimeLosses, 0);
+  const roundsPlayed = toNum(profile.roundsPlayed, 0);
+  const totalPicks = lifetimeWins + lifetimeLosses;
+  const correctPercent = totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
+
+  // Avatar source
+  const avatarUrl = profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
+
+  const displayName = useMemo(() => {
+    const name =
+      authUser?.displayName ||
+      profile.username ||
+      [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
+    return name || "Torpie Player";
+  }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
+
+  if (loading) {
     return (
-      <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
-        <div className="max-w-6xl mx-auto">
-          <div className="h-8 w-72 rounded bg-white/10 animate-pulse" />
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-56 rounded-2xl bg-white/5 animate-pulse" />
-            ))}
-          </div>
-        </div>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <p className="text-sm text-white/70">Loading profile…</p>
       </div>
     );
   }
 
-  if ((err && !stableGame) || !stableGame) {
+  if (!user || !authUser) {
     return (
-      <div className="min-h-[70vh] text-white px-4 py-10" style={{ background: BRAND_BG }}>
-        <div className="max-w-3xl mx-auto rounded-2xl border border-white/10 bg-white/5 p-6">
-          <div className="text-lg font-black tracking-wide">Couldn’t load match</div>
-          <div className="mt-2 text-white/70 text-sm">{err || "Unknown error"}</div>
-          <div className="mt-4 text-white/40 text-xs">
-            GameId: <span className="font-mono">{gameId}</span>
-          </div>
-          <button
-            type="button"
-            className="mt-5 rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-            onClick={() => void fetchMatch("initial")}
-          >
-            TRY AGAIN
-          </button>
-        </div>
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <p className="text-sm text-white/70">You need to be logged in to view your profile.</p>
       </div>
     );
   }
-
-  const { home, away } = parseTeams(stableGame.match);
-  const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
   return (
-    <div
-      className="min-h-screen text-white"
-      style={{
-        background: BRAND_BG,
-        opacity: refreshing ? 0.78 : 1,
-        transition: "opacity 120ms ease",
-      }}
-    >
-      <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
-        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting SCREAMR all season long</div>
+    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
+      {/* top sponsor strip */}
+      <div
+        className="w-full border-b"
+        style={{
+          borderColor: "rgba(255,255,255,0.08)",
+          background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.00) 100%)",
+        }}
+      >
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+          <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
+          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">Proudly supporting Torpie all season long</div>
+        </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-6">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-end justify-between gap-3">
-            <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
-            <div className="flex items-center gap-2">
-              {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
-              ) : null}
-              <button
-                type="button"
-                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-                onClick={() => void fetchMatch("refresh")}
+      <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em]">PROFILE</h1>
+              <span
+                className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
+                style={{
+                  borderColor: "rgba(255,46,77,0.35)",
+                  background: "rgba(255,46,77,0.12)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
               >
-                REFRESH
-              </button>
+                TORPIE
+              </span>
             </div>
+            <p className="mt-1 text-sm text-white/65">
+              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Track streaks, badges and details here.
+            </p>
           </div>
 
-          {err ? (
-            <div className="text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
-              {err}
-            </div>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/picks"
+              className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Go to Picks
+            </a>
 
-          <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 12
-            </div>
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Locks: <span className="font-semibold text-white">{lockedCount}</span>
-            </div>
-            <div className="rounded-full border border-white/15 px-3 py-1">Auto-locks at bounce</div>
-          </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {questions.map((q, idx) => {
-            const status = safeStatus(q.status);
-            const qNum = String(idx + 1).padStart(2, "0");
-
-            const playerName = extractPlayerName(q.question);
-            const isSponsored = !!q.isSponsorQuestion;
-            const isRevealed = !!revealed[q.id];
-            const isPlayerPick = !!playerName;
-
-            const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
-            const no = typeof q.noPercent === "number" ? q.noPercent : 0;
-
-            const sponsorName = (q.sponsorName || "REBEL SPORT").toUpperCase();
-            const selected = picks[q.id] || "none";
-
-            const isLocked = status !== "open";
-            const isSaving = !!saving[q.id];
-
-            const yesBtnClass =
-              selected === "yes"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,122,0,0.20)]`
-                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
-            const noBtnClass =
-              selected === "no"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,122,0,0.20)]`
-                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
-
-            return (
-              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4">
-                <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
-                  <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
-                </div>
-
-                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[15px] font-black tracking-wide">
-                        Q{qNum} - {formatQuarterLabel(q.quarter)}
-                      </div>
-
-                      <div className="mt-1 flex items-center gap-2">
-                        <div className="text-[12px] text-white/60">
-                          Status: <span className="text-white/60">{status}</span>
-                        </div>
-
-                        <ResultPill
-                          status={status}
-                          selected={selected}
-                          correctPick={q.correctPick}
-                          outcome={q.correctOutcome ?? q.outcome}
-                        />
-
-                        {isSaving && (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                        isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
-                      }`}
-                      aria-label="Clear pick"
-                      disabled={isLocked || isSaving}
-                      onClick={() => void clearPick(q.id, status)}
-                    >
-                      <span className="text-white/80 font-black">×</span>
-                    </button>
-                  </div>
-
-                  <div className="mt-4 flex justify-center">
-                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
-                  </div>
-
-                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
-
-                  <div className="mt-4 rounded-2xl bg-[#F2F2F2] p-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <button
-                        type="button"
-                        disabled={isLocked || isSaving}
-                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                        } ${yesBtnClass}`}
-                        style={selected === "yes" ? { background: BRAND_ACCENT } : undefined}
-                        onClick={() => void setPick(q.id, "yes", status)}
-                      >
-                        YES
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isLocked || isSaving}
-                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                        } ${noBtnClass}`}
-                        style={selected === "no" ? { background: BRAND_ACCENT } : undefined}
-                        onClick={() => void setPick(q.id, "no", status)}
-                      >
-                        NO
-                      </button>
-                    </div>
-
-                    <PercentBar yes={yes} no={no} />
-                  </div>
-                </div>
-
-                {isSponsored && !isRevealed && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
-
-                    <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
-                          <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by <span className="font-black text-white">{sponsorName}</span>
-                          </div>
-                        </div>
-
-                        <div className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[10px] font-black tracking-[0.18em] text-white/70">
-                          SPONSORED
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex-1 rounded-2xl bg-[#F2F2F2] p-4 flex flex-col items-center justify-center text-center">
-                        <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win a $100 gift card"}
-                        </div>
-
-                        <button
-                          type="button"
-                          className="mt-4 inline-flex items-center justify-center rounded-full border border-black/15 px-6 py-2 text-sm font-extrabold text-black/85"
-                          style={{ background: "rgba(255,122,0,0.20)" }}
-                          onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
-                        >
-                          Tap to reveal
-                        </button>
-                      </div>
-
-                      <div className="mt-4 text-[11px] text-white/40">* Tap to reveal to make your pick</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 12
-            </div>
+            <a
+              href="/leaderboards"
+              className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+              style={{
+                borderColor: "rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.06)",
+                color: "rgba(255,255,255,0.92)",
+                textDecoration: "none",
+              }}
+            >
+              Leaderboards
+            </a>
 
             <button
               type="button"
-              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-              onClick={() => void fetchMatch("refresh")}
+              onClick={toggleEditing}
+              className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
+              style={{
+                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(255,46,77,0.35)",
+                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(255,46,77,0.14)",
+                color: "rgba(255,255,255,0.95)",
+              }}
             >
-              REFRESH
+              {isEditing ? "Cancel" : "Edit profile"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
+              style={{
+                borderColor: "rgba(255,46,77,0.45)",
+                background: "rgba(255,46,77,0.12)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+            >
+              Log out
             </button>
           </div>
         </div>
 
-        <div className="h-16" />
+        {(error || successMessage) && (
+          <div className="mb-5 space-y-2">
+            {error && (
+              <div
+                className="rounded-2xl border px-4 py-3 text-sm"
+                style={{
+                  borderColor: "rgba(255,46,77,0.40)",
+                  background: "rgba(255,46,77,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {error}
+              </div>
+            )}
+            {successMessage && (
+              <div
+                className="rounded-2xl border px-4 py-3 text-sm"
+                style={{
+                  borderColor: "rgba(45,255,122,0.28)",
+                  background: "rgba(45,255,122,0.10)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {successMessage}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Identity strip */}
+        <div
+          className="rounded-3xl border p-4 sm:p-5 mb-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div
+                  className="h-14 w-14 rounded-2xl p-[3px]"
+                  style={{
+                    background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.55) 100%)",
+                    boxShadow: "0 12px 28px rgba(255,46,77,0.18)",
+                  }}
+                >
+                  <div
+                    className="h-full w-full overflow-hidden rounded-[14px]"
+                    style={{
+                      background: "rgba(0,0,0,0.40)",
+                      border: "1px solid rgba(255,255,255,0.10)",
+                    }}
+                  >
+                    {avatarUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="h-full w-full flex items-center justify-center text-xl font-black">
+                        {(displayName?.[0] || "T").toUpperCase()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {uploadingAvatar && (
+                  <div
+                    className="absolute inset-0 rounded-2xl flex items-center justify-center text-[11px] font-black"
+                    style={{
+                      background: "rgba(0,0,0,0.65)",
+                      border: "1px solid rgba(255,255,255,0.10)",
+                    }}
+                  >
+                    Uploading…
+                  </div>
+                )}
+              </div>
+
+              <div className="min-w-0">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Logged in as</div>
+                <div className="mt-1 text-[14px] font-black text-white truncate">{authUser.email ?? "No email"}</div>
+                <div className="mt-1 text-[12px] text-white/55 font-semibold truncate">
+                  {profile.favouriteAflTeam ? `Favourite: ${profile.favouriteAflTeam}` : "Set your favourite team below"}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <label
+                className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black cursor-pointer"
+                style={{
+                  borderColor: "rgba(255,255,255,0.14)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                {uploadingAvatar ? "Uploading…" : "Change picture"}
+                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats + Badges */}
+        <section
+          className="rounded-3xl border p-4 sm:p-6 mb-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Match stats</div>
+              <div className="mt-1 text-[14px] font-black text-white">Your season snapshot</div>
+            </div>
+
+            <span
+              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
+              style={{
+                borderColor: "rgba(255,46,77,0.32)",
+                background: "rgba(255,46,77,0.10)",
+                color: "rgba(255,255,255,0.92)",
+              }}
+              title="Torpie theme"
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  background: TORPIE.red,
+                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
+                }}
+              />
+              LIVE
+            </span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="red" />
+            <StatCard label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak streak." accent="white" />
+            <StatCard label="Rounds played" value={String(roundsPlayed)} hint="How many rounds you've played." accent="white" />
+          </div>
+
+          <div
+            className="mt-4 rounded-3xl border p-4 sm:p-5"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              background: "rgba(0,0,0,0.28)",
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Lifetime record</div>
+                <div className="mt-1 text-[14px] font-black text-white">All-time picks</div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">(UI-only for now — we’ll wire real computed stats in step 2)</div>
+              </div>
+
+              <div
+                className="rounded-2xl border px-3 py-2 text-center"
+                style={{
+                  borderColor: "rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.06)",
+                }}
+              >
+                <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Correct</div>
+                <div className="text-[18px] font-black" style={{ color: TORPIE.red }}>
+                  {correctPercent}%
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MiniStat label="Best streak" value={String(bestStreakDisplay)} />
+              <MiniStat label="Wins" value={String(lifetimeWins)} good />
+              <MiniStat label="Losses" value={String(lifetimeLosses)} bad />
+              <MiniStat label="Total picks" value={String(totalPicks)} />
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Streak badges</div>
+                <div className="mt-1 text-[14px] font-black text-white">Unlock as you climb</div>
+              </div>
+
+              <div className="text-[11px] text-white/55 font-semibold">Tip: badges match the streak animation</div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              <BadgeCard level={3} title="3 in a row" subtitle="Keep building 😎" unlocked={!!localBadges["3"]} />
+              <BadgeCard level={5} title="On Fire" subtitle="Bang! You're on 🔥" unlocked={!!localBadges["5"]} />
+              <BadgeCard level={10} title="Elite" subtitle="10 straight 🏆" unlocked={!!localBadges["10"]} />
+              <BadgeCard level={15} title="Dominance" subtitle="Ridiculous run 💪" unlocked={!!localBadges["15"]} />
+              <BadgeCard level={20} title="Legendary" subtitle="GOAT status 🐐" unlocked={!!localBadges["20"]} />
+            </div>
+          </div>
+        </section>
+
+        {/* Personal details */}
+        <section
+          className="rounded-3xl border p-4 sm:p-6"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "rgba(255,255,255,0.03)",
+            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
+          }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Personal details</div>
+              <div className="mt-1 text-[18px] font-black text-white">Your info</div>
+              <div className="mt-1 text-[12px] text-white/60 font-semibold">Username & DOB are locked here.</div>
+            </div>
+
+            {isEditing ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={toggleEditing}
+                  className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+                  style={{
+                    borderColor: "rgba(255,255,255,0.14)",
+                    background: "rgba(255,255,255,0.06)",
+                    color: "rgba(255,255,255,0.92)",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  form="profile-form"
+                  disabled={saving}
+                  className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
+                  style={{
+                    borderColor: "rgba(255,46,77,0.35)",
+                    background: "rgba(255,46,77,0.18)",
+                    color: "rgba(255,255,255,0.95)",
+                    opacity: saving ? 0.7 : 1,
+                  }}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <ReadOnlyRow label="Username" value={profile.username || authUser.displayName || "—"} />
+            <ReadOnlyRow label="Date of birth" value={profile.dateOfBirth || "—"} />
+          </div>
+
+          <form id="profile-form" onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <Field label="First name" name="firstName" value={String(formValues.firstName ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Surname" name="lastName" value={String(formValues.lastName ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Suburb" name="suburb" value={String(formValues.suburb ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="State" name="state" value={String(formValues.state ?? "")} onChange={handleFieldChange} disabled={!isEditing} placeholder="VIC, NSW, QLD…" tone={isEditing ? "edit" : "view"} />
+            <Field label="Phone" name="phone" type="tel" value={String(formValues.phone ?? "")} onChange={handleFieldChange} disabled={!isEditing} tone={isEditing ? "edit" : "view"} />
+            <Field label="Gender" name="gender" value={String(formValues.gender ?? "")} onChange={handleFieldChange} disabled={!isEditing} placeholder="Optional" tone={isEditing ? "edit" : "view"} />
+
+            <div className="sm:col-span-2">
+              <label className="block text-[11px] text-white/60 mb-1">Favourite AFL team</label>
+              <select
+                name="favouriteAflTeam"
+                value={String(formValues.favouriteAflTeam ?? "")}
+                onChange={handleFieldChange}
+                disabled={!isEditing}
+                className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
+                style={{
+                  borderColor: isEditing ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)",
+                  background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)",
+                  color: "rgba(255,255,255,0.92)",
+                }}
+              >
+                <option value="">Select team…</option>
+                {AFL_TEAMS.map((team) => (
+                  <option key={team} value={team} style={{ color: "#000" }}>
+                    {team}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </form>
+
+          <div
+            className="mt-6 rounded-3xl border p-4 text-center"
+            style={{
+              borderColor: "rgba(255,46,77,0.28)",
+              background: "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
+            }}
+          >
+            <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">Sponsor banner placeholder</div>
+            <div className="mt-1 text-[13px] font-black text-white">Put your major partner here</div>
+            <div className="mt-1 text-[12px] text-white/55 font-semibold">(Clickable image / CTA in phase 2)</div>
+          </div>
+
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">TORPIE © 2026</div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Helper components ───────── */
+
+function StatCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent: "red" | "white" }) {
+  const vColor = accent === "red" ? TORPIE.red : "rgba(255,255,255,0.92)";
+
+  return (
+    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
+      <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
+        {value}
+      </div>
+      <div className="mt-1 text-[12px] text-white/55 font-semibold">{hint}</div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value, good, bad }: { label: string; value: string; good?: boolean; bad?: boolean }) {
+  const color = good ? "rgba(45,255,122,0.92)" : bad ? "rgba(255,46,77,0.92)" : "rgba(255,255,255,0.92)";
+
+  return (
+    <div className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+      <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
+      <div className="mt-1 text-[18px] font-black" style={{ color }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
+      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
+      <div className="mt-2 text-[14px] font-black text-white">{value}</div>
+      <div className="mt-1 text-[11px] text-white/45 font-semibold">Locked</div>
+    </div>
+  );
+}
+
+type FieldProps = {
+  label: string;
+  name: string;
+  value: string;
+  disabled?: boolean;
+  type?: string;
+  placeholder?: string;
+  tone: "edit" | "view";
+  onChange: (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => void;
+};
+
+function Field({ label, name, value, onChange, disabled, type = "text", placeholder, tone }: FieldProps) {
+  const borderColor = tone === "edit" ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.10)";
+  const bg = tone === "edit" ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.28)";
+
+  return (
+    <div>
+      <label className="block text-[11px] text-white/60 mb-1 font-semibold tracking-wide">{label}</label>
+      <input
+        name={name}
+        type={type}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
+        style={{ borderColor, background: bg, color: "rgba(255,255,255,0.92)" }}
+      />
+    </div>
+  );
+}
+
+type BadgeProps = {
+  level: number;
+  title: string;
+  subtitle: string;
+  unlocked: boolean;
+};
+
+function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
+  const imageSrc = `/badges/streak-${level}.png`;
+
+  return (
+    <div
+      className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
+      style={{
+        borderColor: unlocked ? "rgba(255,46,77,0.40)" : "rgba(255,255,255,0.10)",
+        background: unlocked
+          ? "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
+          : "rgba(0,0,0,0.28)",
+        boxShadow: unlocked ? "0 18px 60px rgba(255,46,77,0.10)" : "none",
+      }}
+    >
+      <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
+        <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)" }} />
+      </div>
+
+      <div className="relative mb-2 h-24 w-20">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={imageSrc} alt={`Streak badge level ${level}`} className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`} />
+        {!unlocked && (
+          <div
+            className="absolute inset-0 flex items-center justify-center text-[10px] font-black tracking-[0.18em]"
+            style={{ color: "rgba(255,255,255,0.75)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
+          >
+            LOCKED
+          </div>
+        )}
+      </div>
+
+      <p className="relative text-[12px] font-black text-white">{title}</p>
+      <p className="relative text-[11px] text-white/65 font-semibold mt-0.5">{subtitle}</p>
+
+      <div
+        className="relative mt-2 inline-flex items-center rounded-full border px-3 py-1 text-[10px] font-black tracking-[0.18em]"
+        style={{
+          borderColor: unlocked ? "rgba(45,255,122,0.22)" : "rgba(255,255,255,0.12)",
+          background: unlocked ? "rgba(45,255,122,0.10)" : "rgba(255,255,255,0.06)",
+          color: unlocked ? "rgba(45,255,122,0.92)" : "rgba(255,255,255,0.75)",
+        }}
+      >
+        {unlocked ? "UNLOCKED" : "LOCKED"}
       </div>
     </div>
   );
