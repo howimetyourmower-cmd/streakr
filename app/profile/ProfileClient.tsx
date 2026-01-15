@@ -54,11 +54,13 @@ const AFL_TEAMS = [
   "Western Bulldogs",
 ];
 
-const JOOSE = {
+const SCREAMR = {
   bg: "#000000",
-  red: "#d11b2f",
-  red2: "#FF2E4D",
+  accent: "#FF7A00", // ✅ SCREAMR orange
   white: "#FFFFFF",
+
+  // keep a danger red for error states (don’t tie errors to brand)
+  danger: "#FF2E4D",
 };
 
 function toNum(v: unknown, fallback = 0): number {
@@ -300,9 +302,7 @@ export default function ProfileClient() {
   const longestStreak = toNum(profile.longestStreak, 0);
   const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
 
-  // ✅ IMPORTANT:
-  // - Current streak = live streak right now.
-  // - Best streak = all-time peak (and should never display lower than current).
+  // Current streak should never appear higher than best; best should never display lower than current.
   const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
 
   const lifetimeWins = toNum(profile.lifetimeWins, 0);
@@ -319,7 +319,7 @@ export default function ProfileClient() {
       authUser?.displayName ||
       profile.username ||
       [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
-    return name || "Joose Player";
+    return name || "Screamr Player";
   }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
 
   if (loading) {
@@ -339,7 +339,7 @@ export default function ProfileClient() {
   }
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: JOOSE.bg }}>
+    <div className="min-h-screen text-white" style={{ backgroundColor: SCREAMR.bg }}>
       {/* top sponsor strip */}
       <div
         className="w-full border-b"
@@ -351,7 +351,7 @@ export default function ProfileClient() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
           <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">
-            Proudly supporting JOOSE all season long
+            Proudly supporting SCREAMR all season long
           </div>
         </div>
       </div>
@@ -365,12 +365,12 @@ export default function ProfileClient() {
               <span
                 className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
                 style={{
-                  borderColor: "rgba(209,27,47,0.35)",
-                  background: "rgba(209,27,47,0.12)",
+                  borderColor: "rgba(255,122,0,0.40)",
+                  background: "rgba(255,122,0,0.14)",
                   color: "rgba(255,255,255,0.92)",
                 }}
               >
-                JOOSE
+                SCREAMR
               </span>
             </div>
             <p className="mt-1 text-sm text-white/65">
@@ -411,8 +411,8 @@ export default function ProfileClient() {
               onClick={toggleEditing}
               className="inline-flex items-center justify-center rounded-full px-4 py-2 text-[11px] font-black border"
               style={{
-                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(209,27,47,0.35)",
-                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(209,27,47,0.14)",
+                borderColor: isEditing ? "rgba(255,255,255,0.18)" : "rgba(255,122,0,0.40)",
+                background: isEditing ? "rgba(255,255,255,0.06)" : "rgba(255,122,0,0.16)",
                 color: "rgba(255,255,255,0.95)",
               }}
             >
@@ -478,8 +478,8 @@ export default function ProfileClient() {
                 <div
                   className="h-14 w-14 rounded-2xl p-[3px]"
                   style={{
-                    background: "linear-gradient(180deg, rgba(209,27,47,0.95) 0%, rgba(209,27,47,0.55) 100%)",
-                    boxShadow: "0 12px 28px rgba(209,27,47,0.18)",
+                    background: "linear-gradient(180deg, rgba(255,122,0,0.95) 0%, rgba(255,122,0,0.55) 100%)",
+                    boxShadow: "0 12px 28px rgba(255,122,0,0.18)",
                   }}
                 >
                   <div
@@ -494,7 +494,7 @@ export default function ProfileClient() {
                       <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
                     ) : (
                       <div className="h-full w-full flex items-center justify-center text-xl font-black">
-                        {(displayName?.[0] || "J").toUpperCase()}
+                        {(displayName?.[0] || "S").toUpperCase()}
                       </div>
                     )}
                   </div>
@@ -562,17 +562,17 @@ export default function ProfileClient() {
             <span
               className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
               style={{
-                borderColor: "rgba(209,27,47,0.32)",
-                background: "rgba(209,27,47,0.10)",
+                borderColor: "rgba(255,122,0,0.32)",
+                background: "rgba(255,122,0,0.10)",
                 color: "rgba(255,255,255,0.92)",
               }}
-              title="Joose theme"
+              title="Screamr theme"
             >
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
-                  background: JOOSE.red,
-                  boxShadow: "0 0 14px rgba(209,27,47,0.55)",
+                  background: SCREAMR.accent,
+                  boxShadow: "0 0 14px rgba(255,122,0,0.55)",
                 }}
               />
               LIVE
@@ -581,7 +581,7 @@ export default function ProfileClient() {
 
           {/* top cards */}
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="red" />
+            <StatCard label="Current streak" value={String(currentStreak)} hint="Your live streak right now." accent="accent" />
             <StatCard label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak streak." accent="white" />
             <StatCard label="Rounds played" value={String(roundsPlayed)} hint="How many rounds you've played." accent="white" />
           </div>
@@ -611,7 +611,7 @@ export default function ProfileClient() {
                 }}
               >
                 <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Correct</div>
-                <div className="text-[18px] font-black" style={{ color: JOOSE.red }}>
+                <div className="text-[18px] font-black" style={{ color: SCREAMR.accent }}>
                   {correctPercent}%
                 </div>
               </div>
@@ -682,8 +682,8 @@ export default function ProfileClient() {
                   disabled={saving}
                   className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black"
                   style={{
-                    borderColor: "rgba(209,27,47,0.35)",
-                    background: "rgba(209,27,47,0.18)",
+                    borderColor: "rgba(255,122,0,0.40)",
+                    background: "rgba(255,122,0,0.18)",
                     color: "rgba(255,255,255,0.95)",
                     opacity: saving ? 0.7 : 1,
                   }}
@@ -781,9 +781,9 @@ export default function ProfileClient() {
           <div
             className="mt-6 rounded-3xl border p-4 text-center"
             style={{
-              borderColor: "rgba(209,27,47,0.28)",
+              borderColor: "rgba(255,122,0,0.28)",
               background:
-                "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
+                "radial-gradient(900px 140px at 50% 0%, rgba(255,122,0,0.22) 0%, rgba(0,0,0,0.00) 70%), rgba(255,255,255,0.03)",
             }}
           >
             <div className="text-[11px] uppercase tracking-[0.22em] text-white/60 font-semibold">Sponsor banner placeholder</div>
@@ -791,7 +791,7 @@ export default function ProfileClient() {
             <div className="mt-1 text-[12px] text-white/55 font-semibold">(Clickable image / CTA in phase 2)</div>
           </div>
 
-          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">JOOSE © 2026</div>
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">SCREAMR © 2026</div>
         </section>
       </div>
     </div>
@@ -809,9 +809,9 @@ function StatCard({
   label: string;
   value: string;
   hint: string;
-  accent: "red" | "white";
+  accent: "accent" | "white";
 }) {
-  const vColor = accent === "red" ? JOOSE.red : "rgba(255,255,255,0.92)";
+  const vColor = accent === "accent" ? SCREAMR.accent : "rgba(255,255,255,0.92)";
 
   return (
     <div
@@ -841,7 +841,11 @@ function MiniStat({
   good?: boolean;
   bad?: boolean;
 }) {
-  const color = good ? "rgba(45,255,122,0.92)" : bad ? "rgba(255,46,77,0.92)" : "rgba(255,255,255,0.92)";
+  const color = good
+    ? "rgba(45,255,122,0.92)"
+    : bad
+    ? "rgba(255,46,77,0.92)"
+    : "rgba(255,255,255,0.92)";
 
   return (
     <div
@@ -925,11 +929,11 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
     <div
       className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
       style={{
-        borderColor: unlocked ? "rgba(209,27,47,0.40)" : "rgba(255,255,255,0.10)",
+        borderColor: unlocked ? "rgba(255,122,0,0.40)" : "rgba(255,255,255,0.10)",
         background: unlocked
-          ? "radial-gradient(900px 140px at 50% 0%, rgba(209,27,47,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
+          ? "radial-gradient(900px 140px at 50% 0%, rgba(255,122,0,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
           : "rgba(0,0,0,0.28)",
-        boxShadow: unlocked ? "0 18px 60px rgba(209,27,47,0.10)" : "none",
+        boxShadow: unlocked ? "0 18px 60px rgba(255,122,0,0.10)" : "none",
       }}
     >
       <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
