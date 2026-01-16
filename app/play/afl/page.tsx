@@ -15,7 +15,7 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: any; // API may send "Open"/"Final" etc
+  status: any;
   match: string;
   venue: string;
   startTime: string;
@@ -56,7 +56,6 @@ const PREVIEW_FOCUS_KEY = "screamr_preview_focus_v1";
 /** Helpers */
 function normaliseStatus(val: any): QuestionStatus {
   const s = String(val ?? "").toLowerCase().trim();
-  if (s === "open") return "open";
   if (s === "final") return "final";
   if (s === "pending") return "pending";
   if (s === "void") return "void";
@@ -105,7 +104,7 @@ function msToCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-/** ✅ SCREAMR palette: Black / Red / White */
+/** SCREAMR palette */
 const COLORS = {
   bg: "#06070B",
   panel: "#0A0B10",
@@ -124,7 +123,6 @@ export default function AflHubPage() {
   const [openQuestions, setOpenQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
   const [showAuthModal, setShowAuthModal] = useState(false);
 
   const picksHref = "/picks?sport=AFL";
@@ -146,23 +144,19 @@ export default function AflHubPage() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
-
         const g = Array.isArray(data.games) ? data.games : [];
         setGames(g);
 
         const flat: QuestionRow[] = g.flatMap((game) =>
-          (game.questions || []).map((q) => {
-            const status = normaliseStatus(q.status);
-            return {
-              id: q.id,
-              match: game.match,
-              venue: game.venue,
-              startTime: game.startTime,
-              quarter: q.quarter,
-              question: q.question,
-              status,
-            };
-          })
+          (game.questions || []).map((q) => ({
+            id: q.id,
+            match: game.match,
+            venue: game.venue,
+            startTime: game.startTime,
+            quarter: q.quarter,
+            question: q.question,
+            status: normaliseStatus(q.status),
+          }))
         );
 
         const openOnly = flat.filter((q) => q.status === "open");
@@ -190,10 +184,7 @@ export default function AflHubPage() {
     const sorted = [...games].sort(
       (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
     );
-
-    const upcoming = sorted.filter(
-      (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
-    );
+    const upcoming = sorted.filter((g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60);
     return (upcoming.length ? upcoming : sorted).slice(0, 3);
   }, [games]);
 
@@ -215,10 +206,7 @@ export default function AflHubPage() {
   const previewQuestions = useMemo(() => openQuestions.slice(0, 6), [openQuestions]);
 
   const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
-    if (!user) {
-      setShowAuthModal(true);
-      return;
-    }
+    if (!user) return setShowAuthModal(true);
 
     try {
       const payload: PreviewFocusPayload = {
@@ -248,7 +236,6 @@ export default function AflHubPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Shared styles
   const darkCardStyle = {
     borderColor: "rgba(255,255,255,0.10)",
     background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
@@ -311,7 +298,7 @@ export default function AflHubPage() {
   };
 
   return (
-    <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
+    <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
         @keyframes screamrPing {
           0% { transform: scale(1); opacity: .55; }
@@ -324,39 +311,44 @@ export default function AflHubPage() {
           100% { transform: translateY(0px); }
         }
 
-        /* ✅ Prize ticker marquee */
-        .screamr-marquee {
+        /* ✅ Full-width ticker (seamless loop) */
+        .screamr-ticker {
+          width: 100%;
           overflow: hidden;
-          white-space: nowrap;
+          border-radius: 999px;
         }
-        .screamr-track {
+        .screamr-ticker__track {
+          display: flex;
+          width: max-content;
+          will-change: transform;
+          animation: screamrScroll 18s linear infinite;
+        }
+        .screamr-ticker__group {
           display: inline-flex;
           align-items: center;
-          width: max-content;
-          animation: screamrScroll 18s linear infinite;
+          white-space: nowrap;
         }
         @keyframes screamrScroll {
           0% { transform: translateX(0); }
           100% { transform: translateX(-50%); }
         }
         @media (prefers-reduced-motion: reduce) {
-          .screamr-track { animation: none; }
+          .screamr-ticker__track { animation: none; }
         }
       `}</style>
 
       {/* ======= HERO ======= */}
       <section className="relative overflow-hidden">
         <div className="relative w-full h-[560px] sm:h-[640px]">
-          {/* ✅ Use your SCREAMR desktop background (save as /public/screamr/hero-bg.jpg) */}
           <Image
             src="/screamr/hero-bg.png"
             alt="SCREAMR AFL hero"
             fill
             priority
             className="object-cover object-center"
+            sizes="100vw"
           />
 
-          {/* cinematic overlays */}
           <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.35)" }} />
           <div
             className="absolute inset-0"
@@ -379,58 +371,64 @@ export default function AflHubPage() {
           />
         </div>
 
-        <div className="absolute inset-0">
-          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
-            <div className="max-w-2xl">
-              {/* ✅ PRIZE TICKER (above LIVE AFL PICKS) */}
+        {/* ✅ Important: overflow-x-hidden + min-w-0 prevents mobile sideways scroll */}
+        <div className="absolute inset-0 overflow-x-hidden">
+          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center min-w-0">
+            <div className="max-w-2xl min-w-0">
+              {/* ✅ PRIZE TICKER (FULL WIDTH) */}
               <div
-                className="mb-3 rounded-full border"
+                className="mb-3 border"
                 style={{
                   borderColor: "rgba(255,255,255,0.10)",
                   background:
                     "linear-gradient(180deg, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.22) 100%)",
                   boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.10)}`,
+                  borderRadius: 999,
                 }}
               >
-                <div className="relative rounded-full px-1">
-                  {/* edge fades */}
-                  <div className="pointer-events-none absolute inset-y-0 left-0 w-10 rounded-l-full bg-gradient-to-r from-black/80 to-transparent" />
-                  <div className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-full bg-gradient-to-l from-black/80 to-transparent" />
+                <div className="relative px-2 py-1">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 w-10 rounded-l-full bg-gradient-to-r from-black/85 to-transparent" />
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-full bg-gradient-to-l from-black/85 to-transparent" />
 
-                  <div className="screamr-marquee py-2">
-                    <div className="screamr-track">
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <span
-                          key={`a-${i}`}
-                          className="mx-3 text-[11px] font-black tracking-[0.24em]"
-                          style={{
-                            color: "rgba(255,255,255,0.88)",
-                            textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
-                          }}
-                        >
-                          * WIN $1000 EACH ROUND *
-                        </span>
-                      ))}
-                      {/* duplicate for seamless loop */}
-                      {Array.from({ length: 12 }).map((_, i) => (
-                        <span
-                          key={`b-${i}`}
-                          className="mx-3 text-[11px] font-black tracking-[0.24em]"
-                          style={{
-                            color: "rgba(255,255,255,0.88)",
-                            textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
-                          }}
-                        >
-                          * WIN $1000 EACH ROUND *
-                        </span>
-                      ))}
+                  <div className="screamr-ticker">
+                    <div className="screamr-ticker__track">
+                      {/* group A */}
+                      <div className="screamr-ticker__group">
+                        {Array.from({ length: 18 }).map((_, i) => (
+                          <span
+                            key={`a-${i}`}
+                            className="mx-3 text-[11px] font-black tracking-[0.24em]"
+                            style={{
+                              color: "rgba(255,255,255,0.88)",
+                              textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
+                            }}
+                          >
+                            * WIN $1000 EACH ROUND *
+                          </span>
+                        ))}
+                      </div>
+                      {/* group B (duplicate for seamless loop) */}
+                      <div className="screamr-ticker__group">
+                        {Array.from({ length: 18 }).map((_, i) => (
+                          <span
+                            key={`b-${i}`}
+                            className="mx-3 text-[11px] font-black tracking-[0.24em]"
+                            style={{
+                              color: "rgba(255,255,255,0.88)",
+                              textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.18)}`,
+                            }}
+                          >
+                            * WIN $1000 EACH ROUND *
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* top chip row */}
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <span
                   className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
                   style={{
@@ -446,7 +444,7 @@ export default function AflHubPage() {
 
                 {nextUp ? (
                   <span
-                    className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
+                    className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black min-w-0"
                     style={{
                       borderColor: "rgba(255,255,255,0.16)",
                       background: "rgba(255,255,255,0.06)",
@@ -454,11 +452,15 @@ export default function AflHubPage() {
                     }}
                     title={nextUp.match}
                   >
-                    <span className="text-white/55">NEXT:</span>{" "}
-                    <span className="truncate max-w-[220px] sm:max-w-[360px]">{nextUp.match}</span>
-                    <span className="text-white/35">•</span>
-                    <span className="text-white/70">
-                      {nextUpLockMs === null ? "" : isNextUpLive ? "LIVE" : `Locks in ${msToCountdown(nextUpLockMs)}`}
+                    <span className="text-white/55 shrink-0">NEXT:</span>
+                    <span className="truncate max-w-[200px] sm:max-w-[360px]">{nextUp.match}</span>
+                    <span className="text-white/35 shrink-0">•</span>
+                    <span className="text-white/70 shrink-0">
+                      {nextUpLockMs === null
+                        ? ""
+                        : isNextUpLive
+                        ? "LIVE"
+                        : `Locks in ${msToCountdown(nextUpLockMs)}`}
                     </span>
                   </span>
                 ) : null}
@@ -481,7 +483,7 @@ export default function AflHubPage() {
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
                 That’s a <span className="font-black text-white">SCREAMR</span>. Pick live yes/no AFL matches outcomes.
-                build your streak. One wrong in a game and your streak is cooked.
+                Build your streak. One wrong in a game and your streak is cooked.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -523,7 +525,7 @@ export default function AflHubPage() {
               </div>
             </div>
 
-            {/* right side logo / badge */}
+            {/* right side panel */}
             <div className="hidden lg:flex flex-1 justify-end">
               <div
                 className="rounded-3xl border p-5"
@@ -560,7 +562,9 @@ export default function AflHubPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-[16px] font-black text-white">Hit a SCREAMR</div>
-                    <div className="text-[12px] text-white/65 font-semibold truncate">Make calls live • Climb the leaderboard</div>
+                    <div className="text-[12px] text-white/65 font-semibold truncate">
+                      Make calls live • Climb the leaderboard
+                    </div>
                   </div>
                 </div>
 
@@ -601,7 +605,6 @@ export default function AflHubPage() {
           </div>
         </div>
 
-        {/* bottom fade */}
         <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-b from-transparent to-[#0A0A0F]" />
       </section>
 
@@ -702,12 +705,14 @@ export default function AflHubPage() {
                           }}
                         />
                         <div className="absolute left-4 right-4 bottom-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs text-white/75 font-semibold">{line}</div>
+                          <div className="flex items-center justify-between gap-2 min-w-0">
+                            <div className="text-xs text-white/75 font-semibold truncate">{line}</div>
                             <span
-                              className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 border text-[10px] font-black"
+                              className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 border text-[10px] font-black shrink-0"
                               style={{
-                                borderColor: live ? rgbaFromHex(COLORS.red, 0.55) : "rgba(255,255,255,0.16)",
+                                borderColor: live
+                                  ? rgbaFromHex(COLORS.red, 0.55)
+                                  : "rgba(255,255,255,0.16)",
                                 background: live ? rgbaFromHex(COLORS.red, 0.14) : "rgba(255,255,255,0.06)",
                                 color: "rgba(255,255,255,0.92)",
                               }}
@@ -716,7 +721,7 @@ export default function AflHubPage() {
                               {live ? "LIVE" : `LOCKS ${msToCountdown(lockMs)}`}
                             </span>
                           </div>
-                          <div className="text-sm font-black text-white/95 mt-1">{g.match}</div>
+                          <div className="text-sm font-black text-white/95 mt-1 truncate">{g.match}</div>
                         </div>
                       </div>
 
@@ -742,7 +747,9 @@ export default function AflHubPage() {
             ) : (
               <div className="rounded-2xl border p-5" style={darkCardStyle}>
                 <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
-                <div className="text-[12px] text-white/55">Once rounds are seeded, featured matches show here automatically.</div>
+                <div className="text-[12px] text-white/55">
+                  Once rounds are seeded, featured matches show here automatically.
+                </div>
               </div>
             )}
           </div>
@@ -807,9 +814,9 @@ export default function AflHubPage() {
                     <div key={q.id} className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
                       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                         <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2 min-w-0">
                             <span
-                              className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
+                              className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black shrink-0"
                               style={{
                                 borderColor: rgbaFromHex(COLORS.red, 0.35),
                                 background: rgbaFromHex(COLORS.red, 0.08),
@@ -820,13 +827,13 @@ export default function AflHubPage() {
                               Q{q.quarter}
                             </span>
 
-                            <span className="text-white/35">•</span>
-                            <span className="font-semibold text-white/70">{formatStartLine(q.startTime)}</span>
-                            <span className="text-white/35">•</span>
-                            <span className="text-white/70">{q.venue}</span>
+                            <span className="text-white/35 shrink-0">•</span>
+                            <span className="font-semibold text-white/70 truncate">{formatStartLine(q.startTime)}</span>
+                            <span className="text-white/35 shrink-0">•</span>
+                            <span className="text-white/70 truncate">{q.venue}</span>
                           </div>
 
-                          <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
+                          <div className="text-xs sm:text-sm font-black text-white/85 mb-2 truncate">{q.match}</div>
                           <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
                         </div>
 
