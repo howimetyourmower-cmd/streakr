@@ -10,6 +10,9 @@
    Palette + UI primitives + motion tokens
    NOTE: keeps legacy --orange-* aliases so existing UI won't break
    ───────────────────────────────────────────── */
+html, body {
+  overflow-x: hidden;
+}
 
 html,
 body {
