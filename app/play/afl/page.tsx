@@ -311,7 +311,7 @@ export default function AflHubPage() {
   };
 
   return (
-    <main className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg }}>
+    <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
         @keyframes screamrPing {
           0% { transform: scale(1); opacity: .55; }
@@ -324,57 +324,21 @@ export default function AflHubPage() {
           100% { transform: translateY(0px); }
         }
 
-        /* ✅ Prize ticker marquee (mobile-proof) */
+        /* ✅ Prize ticker marquee */
         .screamr-marquee {
-          position: relative;
           overflow: hidden;
-          width: 100%;
-          border-radius: 999px;
-
-          -webkit-mask-image: linear-gradient(
-            90deg,
-            transparent 0%,
-            #000 10%,
-            #000 90%,
-            transparent 100%
-          );
-          mask-image: linear-gradient(
-            90deg,
-            transparent 0%,
-            #000 10%,
-            #000 90%,
-            transparent 100%
-          );
-        }
-
-        .screamr-track {
-          display: flex;
-          width: max-content;
-          will-change: transform;
-          animation: screamrScroll 16s linear infinite;
-        }
-
-        .screamr-group {
-          display: inline-flex;
-          align-items: center;
           white-space: nowrap;
         }
-
+        .screamr-track {
+          display: inline-flex;
+          align-items: center;
+          width: max-content;
+          animation: screamrScroll 16s linear infinite;
+        }
         @keyframes screamrScroll {
           0% { transform: translateX(0); }
           100% { transform: translateX(-50%); }
         }
-
-        /* ✅ Options: pause on hover (desktop) */
-        @media (hover: hover) and (pointer: fine) {
-          .screamr-marquee:hover .screamr-track { animation-play-state: paused; }
-        }
-
-        /* ✅ Options: slow down on mobile */
-        @media (max-width: 640px) {
-          .screamr-track { animation-duration: 22s; }
-        }
-
         @media (prefers-reduced-motion: reduce) {
           .screamr-track { animation: none; }
         }
@@ -382,7 +346,7 @@ export default function AflHubPage() {
 
       {/* ======= HERO ======= */}
       <section className="relative overflow-hidden">
-        <div className="relative w-full h-[560px] sm:h-[640px]">
+        <div className="relative w-full h-[580px] sm:h-[640px]">
           <Image
             src="/screamr/hero-bg.png"
             alt="SCREAMR AFL hero"
@@ -417,54 +381,53 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              {/* ✅ PRIZE TICKER (mobile-proof + pause-on-hover + slow on mobile) */}
+              {/* ✅ FULL-WIDTH MARQUEE (VISIBLE ON MOBILE) */}
               <div
-                className="mb-3 rounded-full border"
+                className="
+                  w-screen
+                  ml-[calc(50%-50vw)] mr-[calc(50%-50vw)]
+                  mb-3
+                  rounded-none
+                  border-y
+                "
                 style={{
                   borderColor: "rgba(255,255,255,0.10)",
                   background:
-                    "linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.26) 100%)",
-                  boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.10)}`,
+                    "linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.38) 100%)",
+                  boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.12)}`,
                 }}
               >
-                <div className="relative rounded-full px-1">
-                  {/* edge fades (extra, looks nice even if mask unsupported) */}
-                  <div className="pointer-events-none absolute inset-y-0 left-0 w-10 rounded-l-full bg-gradient-to-r from-black/90 to-transparent" />
-                  <div className="pointer-events-none absolute inset-y-0 right-0 w-10 rounded-r-full bg-gradient-to-l from-black/90 to-transparent" />
+                <div className="relative">
+                  {/* edge fades */}
+                  <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/90 to-transparent" />
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/90 to-transparent" />
 
-                  <div className="screamr-marquee">
+                  <div className="screamr-marquee py-2.5">
                     <div className="screamr-track">
-                      {/* group A */}
-                      <div className="screamr-group py-2.5">
-                        {Array.from({ length: 10 }).map((_, i) => (
-                          <span
-                            key={`a-${i}`}
-                            className="mx-3 text-[12px] sm:text-[11px] font-black tracking-[0.18em]"
-                            style={{
-                              color: "rgba(255,255,255,0.92)",
-                              textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.22)}`,
-                            }}
-                          >
-                            ● WIN $1000 EACH ROUND ●
-                          </span>
-                        ))}
-                      </div>
-
-                      {/* group B duplicate */}
-                      <div className="screamr-group py-2.5" aria-hidden="true">
-                        {Array.from({ length: 10 }).map((_, i) => (
-                          <span
-                            key={`b-${i}`}
-                            className="mx-3 text-[12px] sm:text-[11px] font-black tracking-[0.18em]"
-                            style={{
-                              color: "rgba(255,255,255,0.92)",
-                              textShadow: `0 8px 22px ${rgbaFromHex(COLORS.red, 0.22)}`,
-                            }}
-                          >
-                            ● WIN $1000 EACH ROUND ●
-                          </span>
-                        ))}
-                      </div>
+                      {Array.from({ length: 14 }).map((_, i) => (
+                        <span
+                          key={`a-${i}`}
+                          className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                          style={{
+                            color: "rgba(255,255,255,0.92)",
+                            textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
+                          }}
+                        >
+                          * WIN $1000 EACH ROUND *
+                        </span>
+                      ))}
+                      {Array.from({ length: 14 }).map((_, i) => (
+                        <span
+                          key={`b-${i}`}
+                          className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                          style={{
+                            color: "rgba(255,255,255,0.92)",
+                            textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
+                          }}
+                        >
+                          * WIN $1000 EACH ROUND *
+                        </span>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -561,9 +524,7 @@ export default function AflHubPage() {
                   { k: "Clean Sweep", v: "any wrong = reset" },
                 ].map((it) => (
                   <div key={it.k} className="rounded-2xl border px-4 py-3" style={glassCardStyle}>
-                    <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
-                      {it.k}
-                    </div>
+                    <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">{it.k}</div>
                     <div className="mt-1 text-[13px] font-black text-white/90">{it.v}</div>
                   </div>
                 ))}
@@ -581,9 +542,7 @@ export default function AflHubPage() {
                 }}
               >
                 <div className="flex items-center justify-between">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">
-                    Today’s vibe
-                  </div>
+                  <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Today’s vibe</div>
                   <span
                     className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
                     style={{
@@ -617,10 +576,7 @@ export default function AflHubPage() {
 
                 <div
                   className="mt-4 rounded-2xl border p-4"
-                  style={{
-                    borderColor: "rgba(255,255,255,0.10)",
-                    background: "rgba(0,0,0,0.22)",
-                  }}
+                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.22)" }}
                 >
                   <div className="text-[12px] font-black text-white/90">Pro tip</div>
                   <div className="mt-1 text-[12px] text-white/70 leading-relaxed">
@@ -660,7 +616,7 @@ export default function AflHubPage() {
       </section>
 
       {/* ======= CONTENT ======= */}
-      <section style={{ background: "#0A0A0F" }}>
+      <section className="overflow-x-hidden" style={{ background: "#0A0A0F" }}>
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
           {/* HOW IT WORKS */}
           <div ref={howRef} className="mb-10">
