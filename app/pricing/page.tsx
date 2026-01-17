@@ -13,7 +13,6 @@ type Plan = {
   cadence: string;
   subline: string;
   highlight?: boolean;
-  perks: string[];
 };
 
 const PLANS: Plan[] = [
@@ -22,17 +21,15 @@ const PLANS: Plan[] = [
     name: "Per Round",
     price: "$2.99",
     cadence: "per round",
-    subline: "Pay as you play",
-    perks: ["All 15 questions per match", "Last 5 games stats", "Live YES/NO % + trends", "1 Free Kick (that round)"],
+    subline: "Low friction. Instant edge.",
   },
   {
     id: "month",
     name: "4 Weeks",
     price: "$9.99",
     cadence: "per 4 weeks",
-    subline: "Best short-term value",
+    subline: "Best short-term value.",
     highlight: true,
-    perks: ["All 15 questions per match", "Last 5 games stats", "Live YES/NO % + trends", "1 Free Kick per round"],
   },
   {
     id: "season",
@@ -40,8 +37,19 @@ const PLANS: Plan[] = [
     price: "$49.99",
     cadence: "per season",
     subline: "Commit. Survive. Brag.",
-    perks: ["All Premium features all season", "Full history + best streak ever", "Season streak chart", "Premium badge"],
   },
+];
+
+const PREMIUM_FEATURES: string[] = [
+  "All 15 questions per match",
+  "Last 5 games stats per question",
+  "Live YES/NO percentages",
+  "Trend indicators (simple arrows)",
+  "1 Free Kick per round",
+  "Full pick history",
+  "Best streak ever",
+  "Season streak chart",
+  "Premium badge on profile",
 ];
 
 function Pill({ children }: { children: React.ReactNode }) {
@@ -137,6 +145,9 @@ function PressureCTA() {
             SCREAMR is brutal by design — one wrong pick in a match and your streak is gone. Premium doesn’t change the
             rules. It gives you the edge to survive them.
           </p>
+          <p className="mt-2 text-xs text-white/55">
+            All Premium purchases include the same features — you’re only choosing how long you want it for.
+          </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Link
@@ -172,13 +183,7 @@ export default function PricingPage() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 md:px-8">
           <Link href="/" className="flex items-center gap-3">
             <div className="relative h-7 w-28 md:h-9 md:w-40">
-              <Image
-                src="/screamr/screamr-logo.png"
-                alt="SCREAMR logo"
-                fill
-                priority
-                className="object-contain"
-              />
+              <Image src="/screamr/screamr-logo.png" alt="SCREAMR logo" fill priority className="object-contain" />
             </div>
           </Link>
 
@@ -214,7 +219,7 @@ export default function PricingPage() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(255,46,77,0.35),transparent_55%)]" />
 
           {/* Marquee breakout (full width on mobile) */}
-          <div className="absolute top-0 left-1/2 w-screen -translate-x-1/2">
+          <div className="absolute left-1/2 top-0 w-screen -translate-x-1/2">
             <div className="border-b border-white/10 bg-black/50 backdrop-blur">
               <div className="relative overflow-hidden">
                 <div className="animate-[marquee_18s_linear_infinite] whitespace-nowrap py-2 text-xs tracking-[0.18em] text-white/80">
@@ -249,7 +254,8 @@ export default function PricingPage() {
                 <p className="mt-3 text-sm leading-relaxed text-white/75 md:text-base">
                   SCREAMR is a live YES/NO picks game inspired by the biggest moments in footy. If someone takes an
                   awesome mark, that’s a <span style={{ color: ACCENT }}>SCREAMR</span>. One wrong pick in a match resets
-                  your streak to zero — voids don’t count. Highest current streak each round wins <span className="text-white">$1,000</span>.
+                  your streak to zero — voids don’t count. Highest current streak each round wins{" "}
+                  <span className="text-white">$1,000</span>.
                 </p>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -269,8 +275,8 @@ export default function PricingPage() {
                 </div>
 
                 <div className="mt-5 flex flex-wrap gap-2">
-                  <Pill>Mobile-first</Pill>
-                  <Pill>Premium feel</Pill>
+                  <Pill>All Premium tiers = same features</Pill>
+                  <Pill>Choose duration only</Pill>
                   <Pill>Game of skill</Pill>
                 </div>
               </div>
@@ -288,7 +294,8 @@ export default function PricingPage() {
               Same rules. Different survival tools.
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-white/70">
-              Premium is about control, confidence, and survival — not cheating. We do <span className="text-white">not</span> lock core gameplay behind a paywall.
+              Premium is about control, confidence, and survival — not cheating. You’re not buying different features per
+              tier — you’re choosing <span className="text-white">how long</span> you want Premium for.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -308,9 +315,7 @@ export default function PricingPage() {
               <div>
                 <p className="text-xs font-medium tracking-[0.22em] text-white/60">FREE</p>
                 <h3 className="mt-1 text-2xl font-semibold tracking-tight">Everyone starts here</h3>
-                <p className="mt-2 text-sm text-white/70">
-                  Fun, brutal, competitive — no paywall nonsense.
-                </p>
+                <p className="mt-2 text-sm text-white/70">Fun, brutal, competitive — no paywall nonsense.</p>
               </div>
               <span className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs text-white/75">
                 Default
@@ -342,9 +347,10 @@ export default function PricingPage() {
                   {[
                     "Only 7 of 15 questions per game unlocked",
                     "No historical stats",
+                    "No live YES/NO percentages",
+                    "No trends",
                     "No Free Kick",
-                    "No streak protection",
-                    "Limited pick history (current round only)",
+                    "No pick history (current round only)",
                   ].map((t) => (
                     <li key={t} className="flex items-start gap-3 text-sm text-white/70">
                       <XIcon />
@@ -356,9 +362,7 @@ export default function PricingPage() {
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <p className="text-xs text-white/60">Positioning</p>
-                <p className="mt-1 text-sm font-semibold">
-                  “Free players get the thrill. Premium players get the edge.”
-                </p>
+                <p className="mt-1 text-sm font-semibold">“Free players get the thrill. Premium players get the edge.”</p>
               </div>
             </div>
           </div>
@@ -373,15 +377,13 @@ export default function PricingPage() {
               <div className="relative">
                 <p className="text-xs font-medium tracking-[0.22em] text-white/60">PREMIUM</p>
                 <h3 className="mt-1 text-2xl font-semibold tracking-tight">Control. Confidence. Survival.</h3>
-                <p className="mt-2 text-sm text-white/70">
-                  Everything Free has, plus more information and one signature safety net.
-                </p>
+                <p className="mt-2 text-sm text-white/70">All Premium tiers include the same features.</p>
               </div>
               <span
                 className="relative rounded-full px-3 py-1 text-xs font-semibold"
                 style={{ backgroundColor: `${ACCENT}1A`, border: `1px solid ${ACCENT}55` }}
               >
-                Best experience
+                Same features • any tier
               </span>
             </div>
 
@@ -394,6 +396,9 @@ export default function PricingPage() {
                     "Last 5 games stats per question",
                     "Live YES/NO percentages",
                     "Trend indicators (simple arrows)",
+                    "Full pick history + best streak ever",
+                    "Season streak chart",
+                    "Premium badge on profile",
                   ].map((t) => (
                     <li key={t} className="flex items-start gap-3 text-sm text-white/85">
                       <CheckIcon variant="premium" />
@@ -415,23 +420,6 @@ export default function PricingPage() {
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs font-medium tracking-[0.22em] text-white/60">History & bragging</p>
-                <ul className="mt-3 space-y-2">
-                  {[
-                    "Full pick history",
-                    "Best streak ever",
-                    "Season streak chart",
-                    "Premium badge on profile",
-                  ].map((t) => (
-                    <li key={t} className="flex items-start gap-3 text-sm text-white/80">
-                      <CheckIcon variant="premium" />
-                      <span>{t}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
               <div className="rounded-2xl border border-white/10 bg-black/40 p-4">
                 <p className="text-xs text-white/60">Premium mindset</p>
                 <p className="mt-1 text-sm font-semibold">“I survived that by one pick. Worth it.”</p>
@@ -447,11 +435,9 @@ export default function PricingPage() {
           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-xs font-medium tracking-[0.22em] text-white/60">ONE-SCREEN COMPARISON</p>
-              <h3 className="mt-2 text-xl font-semibold tracking-tight md:text-2xl">
-                Upgrade. Stay alive.
-              </h3>
+              <h3 className="mt-2 text-xl font-semibold tracking-tight md:text-2xl">Free vs Premium</h3>
               <p className="mt-2 text-sm text-white/70">
-                This section is designed to be reused inside an upgrade modal later.
+                All Premium plans include the same features — you’re choosing duration only.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -470,44 +456,136 @@ export default function PricingPage() {
 
             <FeatureRow
               label="Questions per game"
-              free={<span className="flex items-center gap-2"><XIcon /> 7 of 15</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> 15 of 15</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> 7 of 15
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> 15 of 15
+                </span>
+              }
             />
             <FeatureRow
               label="Eligible for weekly prize (WIN $1000 EACH ROUND)"
-              free={<span className="flex items-center gap-2"><CheckIcon variant="free" /> Yes</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Yes</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="free" /> Yes
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
             />
             <FeatureRow
               label="Live YES/NO percentages"
-              free={<span className="flex items-center gap-2"><XIcon /> No</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Yes</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> No
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
             />
             <FeatureRow
               label="Last 5 games stats"
-              free={<span className="flex items-center gap-2"><XIcon /> No</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Yes</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> No
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
             />
             <FeatureRow
               label="Trend indicators"
-              free={<span className="flex items-center gap-2"><XIcon /> No</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Yes</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> No
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
             />
             <FeatureRow
               label="Free Kick (1 per round)"
-              free={<span className="flex items-center gap-2"><XIcon /> No</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Yes</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> No
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
             />
             <FeatureRow
               label="Pick history"
-              free={<span className="flex items-center gap-2"><XIcon /> Current round only</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Full history</span>}
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> Not available
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Full history
+                </span>
+              }
               subtle
             />
             <FeatureRow
-              label="Best streak ever + season chart"
-              free={<span className="flex items-center gap-2"><XIcon /> Not available</span>}
-              premium={<span className="flex items-center gap-2"><CheckIcon variant="premium" /> Included</span>}
+              label="Best streak ever"
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> Not available
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Included
+                </span>
+              }
+              subtle
+            />
+            <FeatureRow
+              label="Season streak chart"
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> Not available
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Included
+                </span>
+              }
+              subtle
+            />
+            <FeatureRow
+              label="Premium badge on profile"
+              free={
+                <span className="flex items-center gap-2">
+                  <XIcon /> No
+                </span>
+              }
+              premium={
+                <span className="flex items-center gap-2">
+                  <CheckIcon variant="premium" /> Yes
+                </span>
+              }
               subtle
             />
           </div>
@@ -524,13 +602,14 @@ export default function PricingPage() {
           <div>
             <p className="text-xs font-medium tracking-[0.22em] text-white/60">PLANS</p>
             <h2 id="plans" className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
-              Choose your edge.
+              Choose your duration.
             </h2>
             <p className="mt-2 max-w-2xl text-sm text-white/70">
-              These are the recommended price points to match the AFL round rhythm and your weekly prize cycle.
+              Every Premium tier includes the same feature set. Pick the time window that matches how you play.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Pill>Same features • any tier</Pill>
             <Pill>$2.99 / round</Pill>
             <Pill>$9.99 / 4 weeks</Pill>
             <Pill>$49.99 / season</Pill>
@@ -561,12 +640,29 @@ export default function PricingPage() {
               <p className="mt-1 text-sm text-white/70">{plan.subline}</p>
 
               <div className="mt-5 space-y-2">
-                {plan.perks.map((perk) => (
+                {PREMIUM_FEATURES.slice(0, 6).map((perk) => (
                   <div key={perk} className="flex items-start gap-3 text-sm text-white/80">
                     <CheckIcon variant="premium" />
                     <span>{perk}</span>
                   </div>
                 ))}
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/35 p-4">
+                <p className="text-xs font-medium tracking-[0.22em] text-white/60">Included in every Premium tier</p>
+                <div className="mt-3 grid grid-cols-1 gap-2">
+                  {[
+                    "All 15 questions",
+                    "Stats + live % + trends",
+                    "1 Free Kick per round",
+                    "Full history + charts + badge",
+                  ].map((t) => (
+                    <div key={t} className="flex items-start gap-3 text-sm text-white/80">
+                      <CheckIcon variant="premium" />
+                      <span>{t}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="mt-6 flex flex-col gap-2">
@@ -586,9 +682,7 @@ export default function PricingPage() {
         {/* What NOT to paywall */}
         <div className="mt-10 rounded-3xl border border-white/10 bg-black/40 p-6 md:p-8">
           <p className="text-xs font-medium tracking-[0.22em] text-white/60">IMPORTANT</p>
-          <h3 className="mt-2 text-xl font-semibold tracking-tight md:text-2xl">
-            What we won’t put behind Premium
-          </h3>
+          <h3 className="mt-2 text-xl font-semibold tracking-tight md:text-2xl">What we won’t put behind Premium</h3>
           <p className="mt-2 text-sm text-white/70">SCREAMR wins by pressure — not exclusion.</p>
 
           <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
