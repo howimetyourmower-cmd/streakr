@@ -8,7 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import UpgradeModal from "@/components/UpgradeModal";
+import UpgradeModal from "../../components/UpgradeModal";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -138,23 +138,13 @@ function LockPill({ children }: { children: React.ReactNode }) {
       className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black"
       style={{
         borderColor: rgbaFromHex(COLORS.red, 0.35),
-        background: rgbaFromHex(COLORS.red, 0.10),
+        background: rgbaFromHex(COLORS.red, 0.1),
         color: "rgba(255,255,255,0.92)",
       }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M7 11V8a5 5 0 0110 0v3"
-          stroke="rgba(255,255,255,0.82)"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-        />
-        <path
-          d="M6 11h12v10H6V11z"
-          stroke="rgba(255,255,255,0.82)"
-          strokeWidth="2.2"
-          strokeLinejoin="round"
-        />
+        <path d="M7 11V8a5 5 0 0110 0v3" stroke="rgba(255,255,255,0.82)" strokeWidth="2.2" strokeLinecap="round" />
+        <path d="M6 11h12v10H6V11z" stroke="rgba(255,255,255,0.82)" strokeWidth="2.2" strokeLinejoin="round" />
       </svg>
       {children}
     </span>
@@ -168,16 +158,6 @@ function CheckIcon({ accent }: { accent?: boolean }) {
     <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center rounded-full" style={{ background: bg }}>
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
         <path d="M20 6L9 17l-5-5" stroke={stroke} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
-  );
-}
-
-function XIcon() {
-  return (
-    <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white/5">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <path d="M18 6L6 18M6 6l12 12" stroke="rgba(255,255,255,0.55)" strokeWidth="2.5" strokeLinecap="round" />
       </svg>
     </span>
   );
@@ -203,7 +183,6 @@ export default function ScreamrPreviewPage() {
 
   const [showAuthModal, setShowAuthModal] = useState(false);
 
-  // Upgrade modal
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<string | undefined>(undefined);
 
@@ -326,7 +305,6 @@ export default function ScreamrPreviewPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Shared styles
   const darkCardStyle = {
     borderColor: "rgba(255,255,255,0.10)",
     background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
@@ -385,49 +363,24 @@ export default function ScreamrPreviewPage() {
   return (
     <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
-        @keyframes screamrPing {
-          0% { transform: scale(1); opacity: .55; }
-          80% { transform: scale(1.7); opacity: 0; }
-          100% { transform: scale(1.7); opacity: 0; }
-        }
-        @keyframes floaty {
-          0% { transform: translateY(0px); }
-          50% { transform: translateY(-6px); }
-          100% { transform: translateY(0px); }
-        }
+        @keyframes screamrPing { 0% { transform: scale(1); opacity: .55; } 80% { transform: scale(1.7); opacity: 0; } 100% { transform: scale(1.7); opacity: 0; } }
+        @keyframes floaty { 0% { transform: translateY(0px); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0px); } }
         .screamr-marquee { overflow: hidden; white-space: nowrap; }
-        .screamr-track {
-          display: inline-flex;
-          align-items: center;
-          width: max-content;
-          animation: screamrScroll 16s linear infinite;
-        }
-        @keyframes screamrScroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .screamr-track { animation: none; }
-        }
+        .screamr-track { display: inline-flex; align-items: center; width: max-content; animation: screamrScroll 16s linear infinite; }
+        @keyframes screamrScroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        @media (prefers-reduced-motion: reduce) { .screamr-track { animation: none; } }
       `}</style>
 
-      {/* ======= HERO ======= */}
+      {/* HERO */}
       <section className="relative overflow-hidden">
         <div className="relative w-full h-[600px] sm:h-[660px]">
           <Image src="/screamr/hero-bg.png" alt="SCREAMR AFL hero" fill priority className="object-cover object-center" />
-
-          {/* cinematic overlays */}
           <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.35)" }} />
           <div
             className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(900px 360px at 20% 12%, rgba(255,46,77,0.26) 0%, rgba(0,0,0,0.00) 65%)",
-            }}
+            style={{ background: "radial-gradient(900px 360px at 20% 12%, rgba(255,46,77,0.26) 0%, rgba(0,0,0,0.00) 65%)" }}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
-
-          {/* subtle grain */}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{
@@ -442,7 +395,7 @@ export default function ScreamrPreviewPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              {/* ✅ FULL-WIDTH MARQUEE */}
+              {/* FULL-WIDTH MARQUEE */}
               <div
                 className="w-screen ml-[calc(50%-50vw)] mr-[calc(50%-50vw)] mb-3 rounded-none border-y"
                 style={{
@@ -480,12 +433,12 @@ export default function ScreamrPreviewPage() {
                 </div>
               </div>
 
-              {/* top chip row */}
+              {/* chips */}
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
                   style={{
-                    borderColor: rgbaFromHex(COLORS.red, 0.40),
+                    borderColor: rgbaFromHex(COLORS.red, 0.4),
                     background: rgbaFromHex(COLORS.red, 0.12),
                     color: "rgba(255,255,255,0.92)",
                     boxShadow: `0 0 20px ${rgbaFromHex(COLORS.red, 0.14)}`,
@@ -498,19 +451,13 @@ export default function ScreamrPreviewPage() {
                 {nextUp ? (
                   <span
                     className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.16)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "rgba(255,255,255,0.90)",
-                    }}
+                    style={{ borderColor: "rgba(255,255,255,0.16)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.90)" }}
                     title={nextUp.match}
                   >
                     <span className="text-white/55">NEXT:</span>{" "}
                     <span className="truncate max-w-[220px] sm:max-w-[360px]">{nextUp.match}</span>
                     <span className="text-white/35">•</span>
-                    <span className="text-white/70">
-                      {nextUpLockMs === null ? "" : isNextUpLive ? "LIVE" : `Locks in ${msToCountdown(nextUpLockMs)}`}
-                    </span>
+                    <span className="text-white/70">{nextUpLockMs === null ? "" : isNextUpLive ? "LIVE" : `Locks in ${msToCountdown(nextUpLockMs)}`}</span>
                   </span>
                 ) : null}
 
@@ -530,17 +477,11 @@ export default function ScreamrPreviewPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                Tap YES/NO on live questions. Pick 0 to 12 per match. Clean Sweep rules: 1 wrong in that match and your streak
-                resets. Voids don’t count.
+                Tap YES/NO on live questions. Pick 0 to 12 per match. Clean Sweep rules: 1 wrong in that match and your streak resets. Voids don’t count.
               </p>
 
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={primaryBtn}
-                >
+                <Link href={picksHref} onClick={requireAuthForPicks} className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-black border transition active:scale-[0.99]" style={primaryBtn}>
                   GO TO PICKS
                 </Link>
 
@@ -557,12 +498,7 @@ export default function ScreamrPreviewPage() {
                   type="button"
                   onClick={() => openUpgrade("Unlock Premium: all 15 questions + Free Kick + stats")}
                   className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={{
-                    borderColor: rgbaFromHex(COLORS.red, 0.35),
-                    background: rgbaFromHex(COLORS.red, 0.10),
-                    color: "rgba(255,255,255,0.92)",
-                    boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.14)}`,
-                  }}
+                  style={{ borderColor: rgbaFromHex(COLORS.red, 0.35), background: rgbaFromHex(COLORS.red, 0.10), color: "rgba(255,255,255,0.92)", boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.14)}` }}
                 >
                   SEE PREMIUM
                 </button>
@@ -582,7 +518,7 @@ export default function ScreamrPreviewPage() {
               </div>
             </div>
 
-            {/* Desktop: Premium tease card */}
+            {/* Desktop premium tease */}
             <div className="hidden lg:flex flex-1 justify-end">
               <div className="rounded-3xl border p-5" style={{ ...glassCardStyle, width: 380, animation: "floaty 4.2s ease-in-out infinite" }}>
                 <div className="flex items-center justify-between">
@@ -641,10 +577,9 @@ export default function ScreamrPreviewPage() {
         <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-b from-transparent to-[#0A0A0F]" />
       </section>
 
-      {/* ======= CONTENT ======= */}
+      {/* CONTENT */}
       <section className="overflow-x-hidden" style={{ background: "#0A0A0F" }}>
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          {/* HOW IT WORKS */}
           <div ref={howRef} className="mb-10">
             <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
 
@@ -662,49 +597,17 @@ export default function ScreamrPreviewPage() {
 
               <div className="rounded-2xl border p-5" style={darkCardStyle}>
                 <div className="text-sm font-black mb-2">2) LOCKS AT BOUNCE</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  No lock-in button. Picks auto-lock at the game start time. Questions drop live during the match.
-                </p>
+                <p className="text-sm text-white/65 leading-relaxed">No lock-in button. Picks auto-lock at the game start time. Questions drop live during the match.</p>
               </div>
 
               <div className="rounded-2xl border p-5" style={darkCardStyle}>
                 <div className="text-sm font-black mb-2">3) CLEAN SWEEP</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Your streak is per game. Any wrong pick in that match = reset to 0. Voids don’t count.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl border p-5" style={glassCardStyle}>
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[12px] font-black text-white/80">Premium gives you the edge</div>
-                  <div className="text-[12px] text-white/65">All tiers include the same features — choose duration only.</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openUpgrade("Unlock Premium: Free Kick + stats + all 15 questions")}
-                  className="shrink-0 inline-flex items-center justify-center rounded-2xl border px-4 py-2.5 text-[12px] font-black"
-                  style={{ borderColor: rgbaFromHex(COLORS.red, 0.45), background: rgbaFromHex(COLORS.red, 0.10), color: "rgba(255,255,255,0.92)" }}
-                >
-                  SEE PREMIUM
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {PREMIUM_TEASE.slice(0, 4).map((t) => (
-                  <div key={t} className="flex items-start gap-3 text-[12px] text-white/80">
-                    <span className="mt-0.5">
-                      <CheckIcon accent />
-                    </span>
-                    <span>{t}</span>
-                  </div>
-                ))}
+                <p className="text-sm text-white/65 leading-relaxed">Your streak is per game. Any wrong pick in that match = reset to 0. Voids don’t count.</p>
               </div>
             </div>
           </div>
 
-          {/* NEXT FEATURED MATCHES */}
+          {/* FEATURED */}
           <div className="mb-10">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div className="text-[12px] font-black text-white/75">NEXT FEATURED MATCHES</div>
@@ -735,11 +638,7 @@ export default function ScreamrPreviewPage() {
                   const live = lockMs <= 0;
 
                   return (
-                    <div
-                      key={g.id}
-                      className="rounded-2xl border overflow-hidden"
-                      style={{ borderColor: "rgba(255,255,255,0.10)", boxShadow: "0 18px 55px rgba(0,0,0,0.70)", background: "rgba(0,0,0,0.18)" }}
-                    >
+                    <div key={g.id} className="rounded-2xl border overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.10)", boxShadow: "0 18px 55px rgba(0,0,0,0.70)", background: "rgba(0,0,0,0.18)" }}>
                       <div className="relative h-36">
                         <Image src="/screamr/hero-bg.png" alt="Match hero" fill className="object-cover object-center" sizes="(max-width: 768px) 100vw, 33vw" />
                         <div className="absolute inset-0 bg-black/62" />
@@ -795,7 +694,7 @@ export default function ScreamrPreviewPage() {
             )}
           </div>
 
-          {/* PICKS AVAILABLE RIGHT NOW */}
+          {/* OPEN PICKS */}
           <div className="mb-2">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
@@ -922,7 +821,6 @@ export default function ScreamrPreviewPage() {
                                 <button type="button" onClick={() => goToPicksWithPreviewFocus(q.id, "yes")} className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition" style={yesBtnStyle}>
                                   YES
                                 </button>
-
                                 <button type="button" onClick={() => goToPicksWithPreviewFocus(q.id, "no")} className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition" style={noBtnStyle}>
                                   NO
                                 </button>
@@ -937,12 +835,7 @@ export default function ScreamrPreviewPage() {
 
             {!loading && openQuestions.length > 0 ? (
               <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-                <Link
-                  href={picksHref}
-                  onClick={requireAuthForPicks}
-                  className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-black border transition active:scale-[0.99]"
-                  style={{ borderColor: "rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.92)" }}
-                >
+                <Link href={picksHref} onClick={requireAuthForPicks} className="inline-flex items-center justify-center rounded-2xl px-6 py-3 text-sm font-black border transition active:scale-[0.99]" style={{ borderColor: "rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.92)" }}>
                   VIEW ALL {openQuestions.length} OPEN PICKS →
                 </Link>
 
@@ -977,7 +870,7 @@ export default function ScreamrPreviewPage() {
         </div>
       </section>
 
-      {/* ========= AUTH MODAL ========= */}
+      {/* AUTH MODAL */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm rounded-3xl border p-6" style={darkCardStyle}>
@@ -988,9 +881,7 @@ export default function ScreamrPreviewPage() {
               </button>
             </div>
 
-            <p className="text-sm text-white/65 mb-4">
-              You need a free SCREAMR account to make picks, build your streak and appear on the leaderboard.
-            </p>
+            <p className="text-sm text-white/65 mb-4">You need a free SCREAMR account to make picks, build your streak and appear on the leaderboard.</p>
 
             <div className="flex flex-col sm:flex-row gap-3">
               <Link
@@ -1015,7 +906,7 @@ export default function ScreamrPreviewPage() {
         </div>
       )}
 
-      {/* ========= UPGRADE MODAL ========= */}
+      {/* UPGRADE MODAL */}
       <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} returnTo={picksHref} reason={upgradeReason} showAuthActions />
     </main>
   );
