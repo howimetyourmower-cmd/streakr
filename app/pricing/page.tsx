@@ -178,16 +178,7 @@ export default function PricingPage() {
         style={{ backgroundColor: `${ACCENT}22` }}
       />
 
-      {/* Header */}
-      <header className="relative z-10 border-b border-white/10 bg-black/70 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 md:px-8">
-          <Link href="/" className="flex items-center gap-3">
-            <div className="relative h-7 w-28 md:h-9 md:w-40">
-              <Image src="/screamr/screamr-logo.png" alt="SCREAMR logo" fill priority className="object-contain" />
-            </div>
-          </Link>
-
-          <nav className="flex items-center gap-2">
+               <nav className="flex items-center gap-2">
             <Link
               href="/picks?sport=AFL"
               className="hidden rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/80 transition hover:bg-white/10 md:inline-flex"
