@@ -1,4 +1,4 @@
-// /components/UpgradeModal.tsx
+// /app/screamr/UpgradeModal.tsx
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
@@ -14,20 +14,19 @@ type UpgradeModalProps = {
   onClose: () => void;
 
   /**
-   * Used to build auth returnTo param.
+   * Used to build auth returnTo param and deep links.
    * Example: "/picks?sport=AFL"
    */
   returnTo?: string;
 
   /**
-   * Optional: show context for what feature triggered the upsell
+   * Optional: show context for what feature triggered the upsell.
    * e.g. "Unlock all 15 questions" or "Free Kick is Premium"
    */
   reason?: string;
 
   /**
-   * Optional: If true, show login/signup buttons (recommended).
-   * If false, the modal will show "Continue" -> /pricing.
+   * If true, show signup/login buttons.
    */
   showAuthActions?: boolean;
 
@@ -56,32 +55,21 @@ const PLAN_CARDS: Array<{
   price: string;
   cadence: string;
   tag?: string;
+  blurb: string;
 }> = [
-  { id: "round", label: "Per Round", price: "$2.99", cadence: "per round" },
-  { id: "month", label: "4 Weeks", price: "$9.99", cadence: "per 4 weeks", tag: "Most popular" },
-  { id: "season", label: "Season", price: "$49.99", cadence: "per season" },
+  { id: "round", label: "Per Round", price: "$2.99", cadence: "per round", blurb: "Try it for a round. Instant edge." },
+  { id: "month", label: "4 Weeks", price: "$9.99", cadence: "per 4 weeks", tag: "Most popular", blurb: "Best value to stay alive." },
+  { id: "season", label: "Season", price: "$49.99", cadence: "per season", blurb: "Commit. Survive. Brag." },
 ];
 
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(" ");
 }
 
-function CheckIcon() {
+function Pill({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      aria-hidden
-      className="inline-flex h-5 w-5 items-center justify-center rounded-full"
-      style={{ backgroundColor: `${ACCENT}1A` }}
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M20 6L9 17l-5-5"
-          stroke={ACCENT}
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+    <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[12px] text-white/80">
+      {children}
     </span>
   );
 }
@@ -90,10 +78,12 @@ function Dot() {
   return <span className="inline-block h-1.5 w-1.5 rounded-full" style={{ backgroundColor: ACCENT }} />;
 }
 
-function Pill({ children }: { children: React.ReactNode }) {
+function CheckIcon() {
   return (
-    <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[12px] text-white/80">
-      {children}
+    <span aria-hidden className="inline-flex h-5 w-5 items-center justify-center rounded-full" style={{ backgroundColor: `${ACCENT}1A` }}>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+        <path d="M20 6L9 17l-5-5" stroke={ACCENT} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
     </span>
   );
 }
@@ -117,13 +107,11 @@ export default function UpgradeModal({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-
     document.addEventListener("keydown", onKeyDown);
-    // Lock background scroll
+
     const prevOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
 
-    // Focus the panel for accessibility
     window.setTimeout(() => panelRef.current?.focus(), 0);
 
     return () => {
@@ -135,11 +123,7 @@ export default function UpgradeModal({
   if (!open) return null;
 
   const handleSelect = (plan: ScreamrPlanId) => {
-    if (onSelectPlan) {
-      onSelectPlan(plan);
-      return;
-    }
-    // Default behaviour for now: take them to pricing page (payments not wired yet)
+    if (onSelectPlan) return onSelectPlan(plan);
     router.push("/pricing#plans");
   };
 
@@ -150,11 +134,10 @@ export default function UpgradeModal({
       aria-label="Upgrade to SCREAMR Premium"
       className="fixed inset-0 z-[100] flex items-end justify-center bg-black/70 backdrop-blur-sm md:items-center"
       onMouseDown={(e) => {
-        // Close only if clicking backdrop (not the panel)
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Subtle top glow */}
+      {/* cinematic glow */}
       <div
         aria-hidden
         className="pointer-events-none absolute left-1/2 top-[-160px] h-[420px] w-[420px] -translate-x-1/2 rounded-full blur-3xl"
@@ -170,7 +153,7 @@ export default function UpgradeModal({
           "max-h-[92vh] md:max-h-[86vh]"
         )}
       >
-        {/* Cinematic header */}
+        {/* header */}
         <div className="relative border-b border-white/10 bg-black/60 px-5 py-5 md:px-8">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(255,46,77,0.25),transparent_60%)]" />
           <div className="relative flex items-start justify-between gap-4">
@@ -179,12 +162,11 @@ export default function UpgradeModal({
                 <Dot />
                 <p className="text-xs font-medium tracking-[0.22em] text-white/60">SCREAMR PREMIUM</p>
               </div>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
-                Upgrade. Stay alive.
-              </h2>
+
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">Upgrade. Stay alive.</h2>
+
               <p className="mt-2 max-w-xl text-sm text-white/70">
-                One wrong pick in a match resets your streak. Premium doesn’t change the rules — it gives you the edge
-                to survive them.
+                One wrong pick in a match resets your streak. Premium doesn’t change the rules — it gives you the edge to survive them.
               </p>
 
               {reason ? (
@@ -208,26 +190,19 @@ export default function UpgradeModal({
               aria-label="Close"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M18 6L6 18M6 6l12 12"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                />
+                <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
               </svg>
             </button>
           </div>
         </div>
 
-        {/* Body */}
+        {/* body */}
         <div className="overflow-y-auto px-5 py-6 md:px-8">
-          {/* Quick compare strip */}
+          {/* compare */}
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
               <p className="text-xs font-medium tracking-[0.22em] text-white/60">FREE</p>
-              <p className="mt-2 text-sm text-white/80">
-                7 of 15 questions • no stats • no history • no Free Kick
-              </p>
+              <p className="mt-2 text-sm text-white/80">7 of 15 questions • no stats • no history • no Free Kick</p>
               <p className="mt-2 text-xs text-white/55">
                 Still eligible for <span className="text-white">WIN $1000 EACH ROUND</span>.
               </p>
@@ -243,15 +218,14 @@ export default function UpgradeModal({
               <p className="relative mt-2 text-sm text-white/85">
                 15 of 15 questions • stats + live % • history + charts • 1 Free Kick per round
               </p>
-              <p className="relative mt-2 text-xs text-white/60">
-                Same feature set on every tier — duration only.
-              </p>
+              <p className="relative mt-2 text-xs text-white/60">Same feature set on every tier — duration only.</p>
             </div>
           </div>
 
-          {/* Features */}
+          {/* features */}
           <div className="mt-6 rounded-3xl border border-white/10 bg-black/40 p-5">
             <p className="text-xs font-medium tracking-[0.22em] text-white/60">WHAT YOU GET</p>
+
             <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
               {PREMIUM_FEATURES.map((f) => (
                 <div key={f} className="flex items-start gap-3 text-sm text-white/80">
@@ -270,13 +244,13 @@ export default function UpgradeModal({
               </div>
               <p className="mt-2 text-base font-semibold">🛡 Free Kick</p>
               <p className="mt-2 text-sm text-white/70">
-                If you lose a streak, Free Kick activates and your streak rolls back to the previous total. Can’t be
-                stacked or spammed. Feels powerful — not pay-to-win.
+                If you lose a streak, Free Kick activates and your streak rolls back to the previous total. Can’t be stacked or spammed.
+                Feels powerful — not pay-to-win.
               </p>
             </div>
           </div>
 
-          {/* Plans */}
+          {/* plans */}
           <div className="mt-6">
             <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
               <div>
@@ -317,33 +291,35 @@ export default function UpgradeModal({
                   ) : null}
 
                   <p className="text-xs font-medium tracking-[0.22em] text-white/60">{p.label}</p>
+
                   <div className="mt-2 flex items-end gap-2">
                     <p className="text-3xl font-semibold tracking-tight">{p.price}</p>
                     <p className="pb-1 text-xs text-white/60">{p.cadence}</p>
                   </div>
-                  <p className="mt-2 text-sm text-white/70">{p.id === "month" ? "Best value to stay alive." : "Same Premium features."}</p>
+
+                  <p className="mt-2 text-sm text-white/70">{p.blurb}</p>
 
                   <div className="mt-4 inline-flex items-center gap-2 text-xs font-semibold text-white">
                     <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: ACCENT }} />
                     Continue
                   </div>
+
+                  <p className="mt-3 text-[11px] text-white/50">
+                    UI only for now — checkout wiring comes next.
+                  </p>
                 </button>
               ))}
             </div>
-
-            <p className="mt-3 text-xs text-white/55">
-              Payments not wired yet — selecting a plan can route to <span className="text-white">/pricing</span> or your future checkout.
-            </p>
           </div>
 
-          {/* Auth actions */}
+          {/* auth */}
           <div className="mt-6 rounded-3xl border border-white/10 bg-white/5 p-5">
             <p className="text-xs font-medium tracking-[0.22em] text-white/60">NEXT</p>
+
             {showAuthActions ? (
               <>
-                <p className="mt-2 text-sm text-white/70">
-                  Create an account to track your streaks and unlock Premium when you’re ready.
-                </p>
+                <p className="mt-2 text-sm text-white/70">Create an account to track streaks and unlock Premium when you’re ready.</p>
+
                 <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <Link
                     href={`/auth?mode=signup&returnTo=${encodedReturnTo}`}
@@ -352,12 +328,14 @@ export default function UpgradeModal({
                   >
                     Sign up
                   </Link>
+
                   <Link
                     href={`/auth?mode=login&returnTo=${encodedReturnTo}`}
                     className="inline-flex items-center justify-center rounded-2xl border border-white/15 bg-white px-5 py-3 text-sm font-semibold text-black transition hover:opacity-90"
                   >
                     Log in
                   </Link>
+
                   <Link
                     href="/pricing"
                     className="inline-flex items-center justify-center rounded-2xl border border-white/10 bg-black/40 px-5 py-3 text-sm font-semibold text-white/85 transition hover:bg-white/10"
@@ -391,12 +369,10 @@ export default function UpgradeModal({
           </div>
         </div>
 
-        {/* Bottom bar (mobile) */}
+        {/* footer bar */}
         <div className="border-t border-white/10 bg-black/80 px-5 py-4 md:px-8">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-white/60">
-              Tip: Premium tiers are identical — choose duration only.
-            </p>
+            <p className="text-xs text-white/60">Premium tiers are identical — choose duration only.</p>
             <div className="flex gap-2">
               <button
                 type="button"
@@ -415,14 +391,6 @@ export default function UpgradeModal({
             </div>
           </div>
         </div>
-
-        {/* Local keyframes (no Tailwind config needed) */}
-        <style>{`
-          @keyframes modalIn {
-            0% { transform: translateY(8px); opacity: 0; }
-            100% { transform: translateY(0px); opacity: 1; }
-          }
-        `}</style>
       </div>
     </div>
   );
