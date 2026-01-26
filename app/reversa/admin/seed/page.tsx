@@ -1,7 +1,7 @@
 // /app/reversa/admin/seed/page.tsx
 
 import { db } from "@/lib/admin";
-import { doc, setDoc, serverTimestamp } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import {
   reversaRounds,
   reversaGames,
@@ -10,20 +10,26 @@ import {
 export const dynamic = "force-dynamic";
 
 async function seedReversa() {
-  // Seed Opening Round
+  // ✅ Seed Opening Round
   for (const round of reversaRounds) {
-    await setDoc(doc(db, "reversaRounds", round.id), {
-      ...round,
-      seededAt: serverTimestamp(),
-    });
+    await db.collection("reversaRounds").doc(round.id).set(
+      {
+        ...round,
+        seededAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
   }
 
-  // Seed Opening Round games
+  // ✅ Seed Opening Round games
   for (const game of reversaGames) {
-    await setDoc(doc(db, "reversaGames", game.id), {
-      ...game,
-      seededAt: serverTimestamp(),
-    });
+    await db.collection("reversaGames").doc(game.id).set(
+      {
+        ...game,
+        seededAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
   }
 
   return {
