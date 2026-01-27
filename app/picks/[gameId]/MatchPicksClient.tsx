@@ -69,19 +69,66 @@ function roundNumberFromGameId(gameId: string): number {
   return 0;
 }
 
+/**
+ * ✅ FIX: Only treat as a PLAYER PICK if it *looks like a real player name*
+ * This prevents things like:
+ * - "Will the total match score..." being incorrectly treated as a player.
+ */
 function extractPlayerName(question: string) {
-  const q = question.trim();
-  if (!q.toLowerCase().startsWith("will ")) return null;
+  const q = String(question || "").trim();
+  const lower = q.toLowerCase();
 
+  if (!lower.startsWith("will ")) return null;
+
+  // We only trust the "(TEAM)" pattern for player picks like: "Will Isaac Heeney (SYD) ..."
   const start = 5;
   const parenIdx = q.indexOf(" (", start);
-  const stopIdx = parenIdx !== -1 ? parenIdx : q.length;
-  const name = q.slice(start, stopIdx).trim();
+  if (parenIdx === -1) return null;
 
+  const name = q.slice(start, parenIdx).trim();
   if (!name) return null;
-  if (!name.includes(" ")) return null;
 
-  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?)\b/i.test(name)) return null;
+  // Must be at least 2 words (First Last)
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return null;
+
+  // Block common non-player phrases early
+  const badFirstWords = new Set([
+    "the",
+    "a",
+    "an",
+    "total",
+    "match",
+    "game",
+    "team",
+    "quarter",
+    "first",
+    "next",
+    "any",
+    "either",
+    "both",
+    "combined",
+  ]);
+  if (badFirstWords.has(words[0].toLowerCase())) return null;
+
+  // Reject stat-ish words
+  if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?|points?)\b/i.test(name)) return null;
+
+  // Must look like capitalised name tokens
+  // allow: O'Neill, McDonald, De Goey, hyphenated, etc.
+  const tokenLooksName = (w: string) =>
+    /^[A-Z][A-Za-z'’\-]+$/.test(w) || /^[A-Z][A-Za-z'’\-]+$/.test(w.replace(/[^A-Za-z'’\-]/g, ""));
+
+  // allow connectors like "de", "van" ONLY if surrounding tokens look like names
+  const connectors = new Set(["de", "del", "da", "di", "van", "von", "la", "le", "st"]);
+  let nameTokens = 0;
+  for (const w of words) {
+    const wl = w.toLowerCase();
+    if (connectors.has(wl)) continue;
+    if (!tokenLooksName(w)) return null;
+    nameTokens += 1;
+  }
+  if (nameTokens < 2) return null;
 
   return name;
 }
@@ -99,7 +146,11 @@ function safeStatus(s: any): QuestionStatus {
   return "open";
 }
 
+/**
+ * ✅ FIX: Quarter 0 should display as FULL GAME (not QUARTER 0)
+ */
 function formatQuarterLabel(q: number) {
+  if (q === 0) return "FULL GAME";
   return `QUARTER ${q}`;
 }
 
@@ -117,7 +168,6 @@ function parseTeams(match: string) {
   // fallback
   return { home: m, away: "" };
 }
-
 
 /* ✅ MATCH PicksClient team slug + logo candidates logic */
 
@@ -147,7 +197,8 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
+    return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
   if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
@@ -272,7 +323,10 @@ function PlayerAvatar({ name }: { name: string }) {
 function TeamLogoSquircle({ teamName }: { teamName: string }) {
   return (
     <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
-      <div className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center" style={{ background: BRAND_RED }}>
+      <div
+        className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
+        style={{ background: BRAND_RED }}
+      >
         <TeamLogo teamName={teamName} size={72} />
       </div>
     </div>
@@ -598,7 +652,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="flex items-end justify-between gap-3">
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
-              {refreshing ? <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div> : null}
+              {refreshing ? (
+                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
+              ) : null}
               <button
                 type="button"
                 className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
@@ -660,7 +716,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
-                <div className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}>
+                <div
+                  className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[15px] font-black tracking-wide">
@@ -672,9 +730,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                           Status: <span className="text-white/60">{status}</span>
                         </div>
 
-                        <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+                        <ResultPill
+                          status={status}
+                          selected={selected}
+                          correctPick={q.correctPick}
+                          outcome={q.correctOutcome ?? q.outcome}
+                        />
 
-                        {isSaving && <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>}
+                        {isSaving && (
+                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
+                        )}
                       </div>
                     </div>
 
@@ -691,7 +756,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </button>
                   </div>
 
-                  <div className="mt-4 flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}</div>
+                  <div className="mt-4 flex justify-center">
+                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
+                  </div>
 
                   <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
 
@@ -722,7 +789,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       </button>
                     </div>
 
-                    {/* ✅ updated 2-way bar */}
                     <PercentBar yes={yes} no={no} />
                   </div>
                 </div>
