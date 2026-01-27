@@ -153,10 +153,24 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   return null;
 }
 
+/**
+ * ✅ FIX: splitMatch must handle BOTH "vs" and "v"
+ * Round 2 is using "v" so away team was blank -> fallback "AFL" -> "A"
+ */
 function splitMatch(match: string): { home: string; away: string } | null {
-  const m = (match || "").split(/\s+vs\s+/i);
-  if (m.length !== 2) return null;
-  return { home: m[0].trim(), away: m[1].trim() };
+  const m = String(match || "").trim();
+  if (!m) return null;
+
+  // Handles: "Team A vs Team B" OR "Team A v Team B" (any spacing/case)
+  const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
+  const hit = m.match(re);
+  if (!hit) return null;
+
+  const home = hit[1].trim();
+  const away = hit[2].trim();
+  if (!home || !away) return null;
+
+  return { home, away };
 }
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
