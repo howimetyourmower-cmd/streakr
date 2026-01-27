@@ -1,7 +1,8 @@
 // /app/api/picks/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { db, auth } from "@/lib/admin";
-import rounds2026 from "@/data/rounds-2026.json";
+import fs from "fs/promises";
+import path from "path";
 
 export const dynamic = "force-dynamic";
 
@@ -80,8 +81,6 @@ type GameLockDoc = {
   updatedAt?: FirebaseFirestore.Timestamp;
 };
 
-const rows: JsonRow[] = rounds2026 as JsonRow[];
-
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
@@ -152,6 +151,33 @@ async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
   } catch (error) {
     console.error("[/api/picks] Failed to verify ID token", error);
     return null;
+  }
+}
+
+// ─────────────────────────────────────────────
+// ✅ Load round JSON from its own file
+// ─────────────────────────────────────────────
+
+async function loadRoundRows(roundNumber: number): Promise<JsonRow[]> {
+  const roundCode = getRoundCode(roundNumber);
+  const fileName = `${roundCode}.json`;
+
+  // Put your files here:
+  // /src/data/rounds/2026/OR.json
+  // /src/data/rounds/2026/R1.json
+  // /src/data/rounds/2026/R2.json
+  const abs = path.join(process.cwd(), "src", "data", "rounds", "2026", fileName);
+
+  try {
+    const raw = await fs.readFile(abs, "utf8");
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return [];
+    return parsed as JsonRow[];
+  } catch (e) {
+    // If file doesn't exist or JSON invalid, treat as empty round.
+    console.warn(`[api/picks] No round file found for ${roundCode} at ${abs}`);
+    return [];
   }
 }
 
@@ -253,7 +279,11 @@ async function getCommentCountsForRound(roundNumber: number): Promise<Record<str
   const commentCounts: Record<string, number> = {};
 
   try {
-    const snap = await db.collection("comments").where("roundNumber", "==", roundNumber).get();
+    const snap = await db
+      .collection("comments")
+      .where("roundNumber", "==", roundNumber)
+      .get();
+
     snap.forEach((docSnap) => {
       const data = docSnap.data() as { questionId?: string };
       const qid = data.questionId;
@@ -284,7 +314,10 @@ async function getQuestionStatusForQuestionIds(params: {
   questionIds: Set<string>;
 }): Promise<Record<string, { status: QuestionStatus; outcome?: QuestionOutcome }>> {
   const { roundNumber, questionIds } = params;
-  const out: Record<string, { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }> = {};
+  const out: Record<
+    string,
+    { status: QuestionStatus; outcome?: QuestionOutcome; updatedAtMs: number }
+  > = {};
 
   const ids = Array.from(questionIds);
   if (!ids.length) return {};
@@ -401,7 +434,7 @@ async function readUsername(uid: string): Promise<string | null> {
 }
 
 // ─────────────────────────────────────────────
-// ✅ Streak (FIXED: no dependency on q.correctPick)
+// ✅ Streak (no dependency on q.correctPick)
 // ─────────────────────────────────────────────
 
 function computeRunningStreakAcrossGames(
@@ -419,11 +452,10 @@ function computeRunningStreakAcrossGames(
 
     if (pickedQs.length === 0) continue;
 
-    // If any picked question is not settled, skip this game for streak (don’t change running)
+    // If any picked question is not settled, skip this game for streak
     const anyUnsettled = pickedQs.some((q) => q.status !== "final" && q.status !== "void");
     if (anyUnsettled) continue;
 
-    // Evaluate wrong/correct using outcome + that user's pick
     const anyWrong = pickedQs.some((q) => {
       const pick = picksForUser[q.id];
       if (!pick) return false;
@@ -461,30 +493,6 @@ function computeRunningStreakAcrossGames(
   return running;
 }
 
-function autoDetectRoundNumber(nowMs: number): number {
-  let nextRow: JsonRow | null = null;
-  let nextMs = Infinity;
-
-  for (const r of rows) {
-    const t = safeTimeMs(r.StartTime);
-    if (!Number.isFinite(t)) continue;
-
-    if (t >= nowMs && t < nextMs) {
-      nextMs = t;
-      nextRow = r;
-    }
-  }
-
-  if (nextRow) return parseRoundNumber(nextRow.Round) ?? 0;
-
-  let max = 0;
-  for (const r of rows) {
-    const rn = parseRoundNumber(r.Round);
-    if (rn !== null) max = Math.max(max, rn);
-  }
-  return max;
-}
-
 // ─────────────────────────────────────────────
 // Main GET handler
 // ─────────────────────────────────────────────
@@ -494,17 +502,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const url = new URL(req.url);
     const roundParam = url.searchParams.get("round");
 
-    let roundNumber: number;
-    if (roundParam === null) roundNumber = autoDetectRoundNumber(Date.now());
-    else {
-      const parsed = Number(roundParam);
-      roundNumber = !Number.isNaN(parsed) && parsed >= 0 ? parsed : 0;
-    }
+    // With per-round files, we rely on explicit ?round= (your UI already does this).
+    const roundNumber = roundParam !== null && !Number.isNaN(Number(roundParam)) ? Math.max(0, Number(roundParam)) : 0;
 
     const currentUserId = await getUserIdFromRequest(req);
     const roundCode = getRoundCode(roundNumber);
 
-    const roundRows = rows.filter((r) => parseRoundNumber(r.Round) === roundNumber);
+    const roundRows = await loadRoundRows(roundNumber);
 
     if (!roundRows.length) {
       const empty: PicksApiResponse = {
@@ -611,9 +615,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         commentCount: commentCounts[questionId] ?? 0,
 
         isSponsorQuestion,
-        sponsorName: isSponsorQuestion
-          ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER"
-          : undefined,
+        sponsorName: isSponsorQuestion ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER" : undefined,
         sponsorBlurb: isSponsorQuestion ? sponsorConfig?.sponsorBlurb : undefined,
 
         correctOutcome: finalOutcome,
@@ -631,7 +633,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         ),
       }));
 
-    // ✅ current streak now uses outcome-based scoring too (works regardless of correctPick)
     const currentStreak = currentUserId ? computeRunningStreakAcrossGames(games, userPicks) : 0;
 
     let leaderScore = 0;
