@@ -104,12 +104,20 @@ function formatQuarterLabel(q: number) {
 }
 
 function parseTeams(match: string) {
-  const parts = match.split(" vs ");
-  if (parts.length === 2) return { home: parts[0].trim(), away: parts[1].trim() };
-  const parts2 = match.split(/\s+vs\s+/i);
-  if (parts2.length === 2) return { home: parts2[0].trim(), away: parts2[1].trim() };
-  return { home: match.trim(), away: "" };
+  const m = String(match || "").trim();
+
+  // Handles: "Team A vs Team B", "Team A v Team B", any casing, variable spacing
+  const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
+  const hit = m.match(re);
+
+  if (hit) {
+    return { home: hit[1].trim(), away: hit[2].trim() };
+  }
+
+  // fallback
+  return { home: m, away: "" };
 }
+
 
 /* ✅ MATCH PicksClient team slug + logo candidates logic */
 
