@@ -1,5 +1,6 @@
 "use client";
 
+// /app/picks/PicksClient.tsx
 export const dynamic = "force-dynamic";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -153,6 +154,13 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   return null;
 }
 
+/**
+ * ✅ FIX: support both "vs" and "v"
+ * Examples:
+ * - "Sydney Swans vs Hawthorn"
+ * - "SYD v HAW"
+ * - "Sydney Swans v Hawthorn"
+ */
 function splitMatch(match: string): { home: string; away: string } | null {
   const m = String(match || "").trim();
   if (!m) return null;
@@ -167,7 +175,6 @@ function splitMatch(match: string): { home: string; away: string } | null {
 
   return { home, away };
 }
-
 
 function logoCandidates(teamSlug: TeamSlug): string[] {
   return [
