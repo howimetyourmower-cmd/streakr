@@ -439,6 +439,30 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
+/**
+ * ✅ Keeps card layout consistent even when question text is long.
+ * - Clamps to 3 lines (so YES/NO area never gets pushed down)
+ * - Fixed min/max height matches 3 lines at this font/leading
+ */
+function QuestionText({ text }: { text: string }) {
+  return (
+    <div
+      className="mt-4 text-[18px] font-extrabold text-white break-words"
+      style={{
+        lineHeight: 1.25,
+        minHeight: 68, // ~3 lines @ 18px * 1.25
+        maxHeight: 68,
+        display: "-webkit-box",
+        WebkitLineClamp: 3 as any,
+        WebkitBoxOrient: "vertical" as any,
+        overflow: "hidden",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
@@ -711,13 +735,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
 
             return (
-              <div key={q.id} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4">
+              <div
+                key={q.id}
+                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4 flex flex-col"
+              >
                 <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
 
                 <div
-                  className={`relative ${isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""}`}
+                  className={`relative flex flex-col flex-1 ${
+                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -760,36 +789,39 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
                   </div>
 
-                  <div className="mt-4 text-[18px] leading-snug font-extrabold text-white">{q.question}</div>
+                  <QuestionText text={q.question} />
 
-                  <div className="mt-4 rounded-2xl bg-[#F2F2F2] p-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <button
-                        type="button"
-                        disabled={isLocked || isSaving}
-                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                        } ${yesBtnClass}`}
-                        style={selected === "yes" ? { background: BRAND_RED } : undefined}
-                        onClick={() => void setPick(q.id, "yes", status)}
-                      >
-                        YES
-                      </button>
+                  {/* ✅ Push pick panel to the bottom so all cards align nicely */}
+                  <div className="mt-auto pt-4">
+                    <div className="rounded-2xl bg-[#F2F2F2] p-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <button
+                          type="button"
+                          disabled={isLocked || isSaving}
+                          className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                          } ${yesBtnClass}`}
+                          style={selected === "yes" ? { background: BRAND_RED } : undefined}
+                          onClick={() => void setPick(q.id, "yes", status)}
+                        >
+                          YES
+                        </button>
 
-                      <button
-                        type="button"
-                        disabled={isLocked || isSaving}
-                        className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
-                          isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                        } ${noBtnClass}`}
-                        style={selected === "no" ? { background: BRAND_RED } : undefined}
-                        onClick={() => void setPick(q.id, "no", status)}
-                      >
-                        NO
-                      </button>
+                        <button
+                          type="button"
+                          disabled={isLocked || isSaving}
+                          className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                          } ${noBtnClass}`}
+                          style={selected === "no" ? { background: BRAND_RED } : undefined}
+                          onClick={() => void setPick(q.id, "no", status)}
+                        >
+                          NO
+                        </button>
+                      </div>
+
+                      <PercentBar yes={yes} no={no} />
                     </div>
-
-                    <PercentBar yes={yes} no={no} />
                   </div>
                 </div>
 
