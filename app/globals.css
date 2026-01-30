@@ -189,7 +189,7 @@ button {
   display: flex;
   width: max-content;
   will-change: transform;
-  animation: screamrScroll 18s linear infinite;
+  animation: screamrScroll 45s linear infinite;
 }
 
 .screamr-ticker__group {
