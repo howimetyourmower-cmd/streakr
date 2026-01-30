@@ -179,6 +179,9 @@ button {
 /* ================================
    MARQUEE / TICKER (GLOBAL)
 ================================ */
+.screamr-ticker__track {
+  animation-duration: 150s !important;
+}
 
 .screamr-ticker {
   width: 100%;
