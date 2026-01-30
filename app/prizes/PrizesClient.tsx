@@ -12,6 +12,19 @@ type PrizeRule = {
   desc: string;
 };
 
+function rgbaFromHex(hex: string, alpha: number): string {
+  const h = (hex || "").replace("#", "").trim();
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (full.length !== 6) return `rgba(255,255,255,${alpha})`;
+
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+
+  const a = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
 export default function PrizesClient() {
   const rules: PrizeRule[] = useMemo(
     () => [
@@ -45,6 +58,31 @@ export default function PrizesClient() {
 
   return (
     <div className="min-h-screen text-white" style={{ background: BRAND_BG }}>
+      <style>{`
+        /* ✅ Full-width marquee used on prizes page */
+        .screamr-marquee {
+          overflow: hidden;
+          white-space: nowrap;
+        }
+        .screamr-track {
+          display: inline-flex;
+          align-items: center;
+          width: max-content;
+          will-change: transform;
+          animation: screamrScroll 80s linear infinite;
+        }
+        @keyframes screamrScroll {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .screamr-track { animation: none; }
+        }
+        @media (max-width: 640px) {
+          .screamr-track { animation-duration: 110s; }
+        }
+      `}</style>
+
       {/* top sponsor strip */}
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
@@ -52,6 +90,57 @@ export default function PrizesClient() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-8">
+        {/* ✅ FULL-WIDTH MARQUEE (VISIBLE ON MOBILE) */}
+        <div
+          className="
+            w-screen
+            ml-[calc(50%-50vw)] mr-[calc(50%-50vw)]
+            mb-4
+            rounded-none
+            border-y
+          "
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background: "linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.38) 100%)",
+            boxShadow: `0 0 26px ${rgbaFromHex(BRAND_RED, 0.12)}`,
+          }}
+        >
+          <div className="relative">
+            {/* edge fades */}
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/90 to-transparent" />
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/90 to-transparent" />
+
+            <div className="screamr-marquee py-2.5">
+              <div className="screamr-track">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <span
+                    key={`a-${i}`}
+                    className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                    style={{
+                      color: "rgba(255,255,255,0.92)",
+                      textShadow: `0 10px 26px ${rgbaFromHex(BRAND_RED, 0.22)}`,
+                    }}
+                  >
+                    * SCREAMR BETA 2026 TEST SEASON — NO PRIZES — testing gameplay + streak tracking — send us your ideas — 2027 will be huge *
+                  </span>
+                ))}
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <span
+                    key={`b-${i}`}
+                    className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                    style={{
+                      color: "rgba(255,255,255,0.92)",
+                      textShadow: `0 10px 26px ${rgbaFromHex(BRAND_RED, 0.22)}`,
+                    }}
+                  >
+                    * SCREAMR BETA 2026 TEST SEASON — NO PRIZES — testing gameplay + streak tracking — send us your ideas — 2027 will be huge *
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Hero */}
         <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#0b0b0b] p-6 md:p-8">
           <div
@@ -75,8 +164,8 @@ export default function PrizesClient() {
                   WIN <span style={{ color: BRAND_RED }}>$1,000</span> EACH ROUND
                 </h1>
                 <p className="mt-3 max-w-2xl text-white/70 text-sm md:text-base font-semibold leading-relaxed">
-                  Torpie rewards the sharpest streak builders. Finish the round with the <b>highest current streak</b> and
-                  you take home the round prize.
+                  Torpie rewards the sharpest streak builders. Finish the round with the <b>highest current streak</b>{" "}
+                  and you take home the round prize.
                 </p>
               </div>
 
@@ -159,7 +248,8 @@ export default function PrizesClient() {
             <div className="mt-2 text-lg font-black">If two players finish equal…</div>
             <ul className="mt-3 space-y-2 text-sm text-white/70 font-semibold">
               <li>
-                <span className="font-black text-white">1)</span> Highest streak achieved earliest in the round (first to reach it).
+                <span className="font-black text-white">1)</span> Highest streak achieved earliest in the round (first to
+                reach it).
               </li>
               <li>
                 <span className="font-black text-white">2)</span> If still tied: most correct picks for the round.
@@ -203,16 +293,13 @@ export default function PrizesClient() {
           </div>
         </div>
 
-        
         {/* CTA */}
         <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-center">
           <div className="text-[11px] font-black tracking-[0.22em] text-white/60">READY?</div>
           <div className="mt-2 text-2xl md:text-3xl font-black">
             Build a streak. <span style={{ color: BRAND_RED }}>Win the round.</span>
           </div>
-          <div className="mt-2 text-sm text-white/65 font-semibold">
-            Head to Picks and start stacking correct calls.
-          </div>
+          <div className="mt-2 text-sm text-white/65 font-semibold">Head to Picks and start stacking correct calls.</div>
 
           <div className="mt-4 flex items-center justify-center gap-2">
             <Link
