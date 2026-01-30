@@ -567,9 +567,9 @@ export default function AflHubPage() {
                     <Image src="/screamr/screamr-logo.png" alt="SCREAMR" fill className="object-contain p-2" />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-[16px] font-black text-white">Hit a SCREAMR</div>
+                    <div className="text-[16px] font-black text-white">Take a SCREAMR</div>
                     <div className="text-[12px] text-white/65 font-semibold truncate">
-                      Make calls live • Climb the leaderboard
+                      Make your picks • Climb the leaderboard
                     </div>
                   </div>
                 </div>
