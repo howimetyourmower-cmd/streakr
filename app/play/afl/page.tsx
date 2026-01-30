@@ -413,7 +413,7 @@ export default function AflHubPage() {
                             textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
                           }}
                         >
-                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - Thank for helpig us build - send us your ideas - 2027 will be huge *
+                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
                         </span>
                       ))}
                       {Array.from({ length: 14 }).map((_, i) => (
@@ -425,7 +425,7 @@ export default function AflHubPage() {
                             textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
                           }}
                         >
-                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - Thank for helpig us build - send us your ideas - 2027 will be huge *
+                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
                         </span>
                       ))}
                     </div>
