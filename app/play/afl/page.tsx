@@ -333,7 +333,7 @@ export default function AflHubPage() {
           display: inline-flex;
           align-items: center;
           width: max-content;
-          animation: screamrScroll 16s linear infinite;
+          animation: screamrScroll 80s linear infinite;
         }
         @keyframes screamrScroll {
           0% { transform: translateX(0); }
