@@ -203,6 +203,62 @@ export default function PrizesClient() {
           </div>
         </div>
 
+ <div className="absolute inset-0">
+          <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
+            <div className="max-w-2xl">
+              {/* ✅ FULL-WIDTH MARQUEE (VISIBLE ON MOBILE) */}
+              <div
+                className="
+                  w-screen
+                  ml-[calc(50%-50vw)] mr-[calc(50%-50vw)]
+                  mb-3
+                  rounded-none
+                  border-y
+                "
+                style={{
+                  borderColor: "rgba(255,255,255,0.10)",
+                  background:
+                    "linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.38) 100%)",
+                  boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.12)}`,
+                }}
+              >
+                <div className="relative">
+                  {/* edge fades */}
+                  <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/90 to-transparent" />
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/90 to-transparent" />
+
+                  <div className="screamr-marquee py-2.5">
+                    <div className="screamr-track">
+                      {Array.from({ length: 14 }).map((_, i) => (
+                        <span
+                          key={`a-${i}`}
+                          className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                          style={{
+                            color: "rgba(255,255,255,0.92)",
+                            textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
+                          }}
+                        >
+                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
+                        </span>
+                      ))}
+                      {Array.from({ length: 14 }).map((_, i) => (
+                        <span
+                          key={`b-${i}`}
+                          className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
+                          style={{
+                            color: "rgba(255,255,255,0.92)",
+                            textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
+                          }}
+                        >
+                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+        
         {/* CTA */}
         <div className="mt-8 rounded-3xl border border-white/10 bg-white/[0.03] p-6 text-center">
           <div className="text-[11px] font-black tracking-[0.22em] text-white/60">READY?</div>
