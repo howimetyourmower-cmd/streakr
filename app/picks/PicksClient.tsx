@@ -177,10 +177,11 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
 }
 
 /**
- * ✅ Picks page logo tile — now matches the MatchPicksClient style:
- * - thick neon border
- * - inner glow
- * - subtle animated shine
+ * ✅ Picks page logo tile — MATCHES MatchPicksClient:
+ * - red squircle frame
+ * - inner dark tile with subtle top glow
+ * - consistent padding + sizing
+ * - safe fallback initials
  */
 const TeamLogo = React.memo(function TeamLogoInner({
   teamName,
@@ -203,19 +204,14 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const candidates = slug ? logoCandidates(slug) : [];
   const src = slug ? candidates[Math.min(idx, candidates.length - 1)] : "";
 
-  // outer tile size; keep consistent look on hero + cards
-  const tile: React.CSSProperties = {
-    width: size,
-    height: size,
-    borderRadius: 18,
-  };
+  const tile: React.CSSProperties = { width: size, height: size, borderRadius: 18 };
 
   if (!slug || dead) {
     return (
       <div className="relative" style={tile} title={teamName}>
-        <div className="absolute inset-0 screamr-logoBorder" style={{ borderRadius: 18 }} />
-        <div className="absolute inset-[3px] screamr-logoInner" style={{ borderRadius: 16 }}>
-          <div className="absolute inset-0 screamr-logoShine" style={{ borderRadius: 16 }} />
+        <div className="absolute inset-0 screamr-teamFrame" style={{ borderRadius: 18 }} />
+        <div className="absolute inset-[3px] screamr-teamTile" style={{ borderRadius: 16 }}>
+          <div className="absolute inset-0 screamr-teamShine" style={{ borderRadius: 16 }} />
           <div className="absolute inset-0 flex items-center justify-center font-black tracking-wide text-white/90">
             {fallbackInitials || "AFL"}
           </div>
@@ -226,9 +222,9 @@ const TeamLogo = React.memo(function TeamLogoInner({
 
   return (
     <div className="relative" style={tile} title={teamName}>
-      <div className="absolute inset-0 screamr-logoBorder" style={{ borderRadius: 18 }} />
-      <div className="absolute inset-[3px] screamr-logoInner" style={{ borderRadius: 16 }}>
-        <div className="absolute inset-0 screamr-logoShine" style={{ borderRadius: 16 }} />
+      <div className="absolute inset-0 screamr-teamFrame" style={{ borderRadius: 18 }} />
+      <div className="absolute inset-[3px] screamr-teamTile" style={{ borderRadius: 16 }}>
+        <div className="absolute inset-0 screamr-teamShine" style={{ borderRadius: 16 }} />
         <div className="absolute inset-0 p-2.5">
           <Image
             src={src}
@@ -312,7 +308,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xl font-black">How to play</div>
-            <div className="text-white/70 text-sm mt-1">Pick any amount. Locks at bounce. One wrong pick kills that match.</div>
+            <div className="text-white/70 text-sm mt-1">
+              Pick any amount. Locks at bounce. One wrong pick kills that match.
+            </div>
           </div>
 
           <button
@@ -341,7 +339,9 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
 
           <div className="rounded-2xl border p-4" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
             <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
+            <div className="text-white/70 mt-1">
+              One wrong pick resets your streak for that match. Voids don’t count.
+            </div>
           </div>
         </div>
 
@@ -610,6 +610,51 @@ export default function PicksClient() {
     });
   }, [sortedGames]);
 
+  const TinyBolt = ({ live }: { live?: boolean }) => {
+    return (
+      <span className="relative inline-flex h-2 w-2">
+        <span
+          className="absolute inline-flex h-full w-full rounded-full"
+          style={{
+            background: live ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.35)",
+            animation: live ? "screamrPing 1.55s cubic-bezier(0,0,0.2,1) infinite" : "none",
+          }}
+        />
+        <span
+          className="relative inline-flex h-2 w-2 rounded-full"
+          style={{
+            background: live ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.55)",
+            boxShadow: live ? "0 0 12px rgba(255,46,77,0.35)" : "none",
+          }}
+        />
+      </span>
+    );
+  };
+
+  const BroadcastTimer = ({ live, lockMs }: { live: boolean; lockMs: number | null }) => {
+    const text = lockMs === null ? "" : live ? "LIVE / LOCKED" : `LOCKS IN ${msToCountdown(lockMs)}`;
+
+    return (
+      <span
+        className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black"
+        style={{
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: live
+            ? "linear-gradient(180deg, rgba(255,46,77,0.28) 0%, rgba(0,0,0,0.22) 100%)"
+            : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.05) 100%)",
+          boxShadow: live ? "0 0 26px rgba(255,46,77,0.16)" : "0 10px 26px rgba(0,0,0,0.35)",
+          color: "rgba(255,255,255,0.94)",
+          fontFamily:
+            'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+          letterSpacing: "0.06em",
+        }}
+      >
+        <TinyBolt live={live} />
+        {text}
+      </span>
+    );
+  };
+
   const StickyChaseBar = () => {
     const g = nextUpStable;
     if (!g) return null;
@@ -656,7 +701,13 @@ export default function PicksClient() {
                 </div>
 
                 <div className="mt-2 flex items-center gap-3">
-                  <div className="rounded-xl border px-3 py-1.5" style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}>
+                  <div
+                    className="rounded-xl border px-3 py-1.5"
+                    style={{
+                      borderColor: "rgba(255,46,77,0.22)",
+                      background: "rgba(255,46,77,0.10)",
+                    }}
+                  >
                     <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
                     <div className="text-[16px] font-black" style={{ color: COLORS.red }}>
                       {stableCurrentStreak}
@@ -667,7 +718,9 @@ export default function PicksClient() {
                     <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
                     <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
                     <div className="text-[11px] text-white/55 font-semibold truncate">
-                      {stableLeaderScore === null ? "" : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
+                      {stableLeaderScore === null
+                        ? ""
+                        : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
                     </div>
                   </div>
                 </div>
@@ -694,7 +747,8 @@ export default function PicksClient() {
   };
 
   const DashboardStrip = () => {
-    const leaderText = stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
+    const leaderText =
+      stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
 
     const leaderHint =
       stableLeaderScore === null
@@ -722,8 +776,14 @@ export default function PicksClient() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Match HQ</div>
-            <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-black" title="SCREAMR is live and updating">
-              <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
+            <span
+              className="screamr-pill inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-black"
+              title="SCREAMR is live and updating"
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ background: COLORS.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }}
+              />
               LIVE
             </span>
           </div>
@@ -732,7 +792,12 @@ export default function PicksClient() {
             <Link
               href="/leaderboards"
               className="rounded-full px-3 py-1.5 text-[11px] font-black border"
-              style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text, textDecoration: "none" }}
+              style={{
+                borderColor: COLORS.border,
+                background: COLORS.soft,
+                color: COLORS.text,
+                textDecoration: "none",
+              }}
             >
               Leaderboards
             </Link>
@@ -819,7 +884,9 @@ export default function PicksClient() {
                 </span>
               </div>
               <div className="min-w-0">
-                <div className="text-[12px] font-black">{stableLeaderScore === null ? "Waiting on data" : "Close the gap"}</div>
+                <div className="text-[12px] font-black">
+                  {stableLeaderScore === null ? "Waiting on data" : "Close the gap"}
+                </div>
                 <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   Current streak only.
                 </div>
@@ -834,7 +901,13 @@ export default function PicksClient() {
 
             <div className="mt-2 flex items-center gap-2">
               <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
-                {eligible ? <CheckIcon size={16} color={COLORS.red} /> : <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>—</span>}
+                {eligible ? (
+                  <CheckIcon size={16} color={COLORS.red} />
+                ) : (
+                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
+                    —
+                  </span>
+                )}
               </div>
 
               <div className="min-w-0">
@@ -851,7 +924,10 @@ export default function PicksClient() {
           </div>
         </div>
 
-        <div className="mt-3 rounded-2xl border p-3 sm:p-3.5" style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.28)" }}>
+        <div
+          className="mt-3 rounded-2xl border p-3 sm:p-3.5"
+          style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.28)" }}
+        >
           <div className="flex items-center justify-between gap-3">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
@@ -866,8 +942,12 @@ export default function PicksClient() {
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Correct</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Unsettled</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Streak after</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Unsettled
+                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
+                    Streak after
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -882,7 +962,10 @@ export default function PicksClient() {
                     : { label: "ALIVE ✅", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
-                    <tr key={r.gameId} style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}>
+                    <tr
+                      key={r.gameId}
+                      style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}
+                    >
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
@@ -891,7 +974,14 @@ export default function PicksClient() {
                               {formatAedt(r.startTime)} • {r.venue}
                             </div>
                           </div>
-                          <span className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border" style={{ borderColor: pillState.border, background: pillState.bg, color: COLORS.text }}>
+                          <span
+                            className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
+                            style={{
+                              borderColor: pillState.border,
+                              background: pillState.bg,
+                              color: COLORS.text,
+                            }}
+                          >
                             {pillState.label}
                           </span>
                         </div>
@@ -899,11 +989,17 @@ export default function PicksClient() {
 
                       <td className="px-3 py-2 text-[13px] font-black text-white">{r.picks}</td>
 
-                      <td className="px-3 py-2 text-[13px] font-black" style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}>
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{ color: r.correct > 0 ? "rgba(45,255,122,0.95)" : "rgba(255,255,255,0.78)" }}
+                      >
                         {r.correct}
                       </td>
 
-                      <td className="px-3 py-2 text-[13px] font-black" style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)" }}>
+                      <td
+                        className="px-3 py-2 text-[13px] font-black"
+                        style={{ color: r.wrong > 0 ? "rgba(255,46,77,0.95)" : "rgba(255,255,255,0.78)" }}
+                      >
                         {r.wrong}
                       </td>
 
@@ -911,9 +1007,17 @@ export default function PicksClient() {
                       <td className="px-3 py-2 text-[13px] font-black text-white/80">{r.unsettled}</td>
 
                       <td className="px-3 py-2">
-                        <div className="inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5" style={{ borderColor: anyWrong ? "rgba(255,46,77,0.35)" : COLORS.border, background: anyWrong ? "rgba(255,46,77,0.10)" : COLORS.soft }}>
+                        <div
+                          className="inline-flex items-center gap-2 rounded-xl border px-2.5 py-1.5"
+                          style={{
+                            borderColor: anyWrong ? "rgba(255,46,77,0.35)" : COLORS.border,
+                            background: anyWrong ? "rgba(255,46,77,0.10)" : COLORS.soft,
+                          }}
+                        >
                           {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
-                          <span className="text-[14px] font-black text-white">{r.streakAfter === null ? "—" : r.streakAfter}</span>
+                          <span className="text-[14px] font-black text-white">
+                            {r.streakAfter === null ? "—" : r.streakAfter}
+                          </span>
                         </div>
                       </td>
                     </tr>
@@ -925,19 +1029,26 @@ export default function PicksClient() {
 
           <div className="md:hidden mt-3 space-y-2">
             {gameStatusRows.map((r) => (
-              <div key={r.gameId} className="rounded-2xl border p-3" style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}>
+              <div
+                key={r.gameId}
+                className="rounded-2xl border p-3"
+                style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}
+              >
                 <div className="text-[13px] font-black text-white">{r.match}</div>
                 <div className="text-[11px] text-white/60 font-semibold">
                   {formatAedt(r.startTime)} • {r.venue}
                 </div>
                 <div className="mt-2 text-[12px] text-white/80 font-semibold">
-                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter === null ? "—" : r.streakAfter}
+                  Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak{" "}
+                  {r.streakAfter === null ? "—" : r.streakAfter}
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="mt-2 text-[11px] text-white/55 font-semibold">Clean Sweep: any wrong pick in a game resets streak to 0. Voids don’t add.</div>
+          <div className="mt-2 text-[11px] text-white/55 font-semibold">
+            Clean Sweep: any wrong pick in a game resets streak to 0. Voids don’t add.
+          </div>
         </div>
       </div>
     );
@@ -955,37 +1066,41 @@ export default function PicksClient() {
     const href = `/picks/${g.id}`;
 
     return (
-      <Link
-        href={href}
-        className="block rounded-2xl overflow-hidden"
-        style={{
-          textDecoration: "none",
-        }}
-      >
-        <div className="relative p-[1px] rounded-2xl screamr-cardBorder">
+      <Link href={href} className="block rounded-2xl overflow-hidden screamr-stageCard" style={{ textDecoration: "none" }}>
+        <div className="relative p-[1px] rounded-2xl screamr-ledFrame">
           <div
             className="relative rounded-2xl overflow-hidden border"
             style={{
               borderColor: "rgba(255,255,255,0.10)",
-              background: COLORS.soft2,
+              background: "rgba(255,255,255,0.03)",
               boxShadow: "0 18px 55px rgba(0,0,0,0.78)",
             }}
           >
-            <div className="relative p-4 overflow-hidden" style={{ minHeight: 198 }}>
+            <div className="relative p-4 overflow-hidden" style={{ minHeight: 208 }}>
               <div className="screamr-sparks" />
               <div className="absolute inset-0 screamr-spotlights" />
+
+              {/* extra "stage" glow */}
+              <div className="absolute inset-0 screamr-stageGlow" />
+
               <CardSilhouetteBg opacity={1} />
 
               <div className="relative z-10">
                 <div className="flex items-center justify-between gap-3">
                   <span className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
-                    <span className="h-2 w-2 rounded-full" style={{ background: isLocked ? COLORS.red : COLORS.cyan, boxShadow: isLocked ? "0 0 14px rgba(255,46,77,0.55)" : "0 0 14px rgba(0,229,255,0.50)" }} />
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{
+                        background: isLocked ? COLORS.red : COLORS.cyan,
+                        boxShadow: isLocked
+                          ? "0 0 14px rgba(255,46,77,0.55)"
+                          : "0 0 14px rgba(0,229,255,0.50)",
+                      }}
+                    />
                     {isLocked ? "LIVE" : "GAME"}
                   </span>
 
-                  <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
-                    {isLocked ? "LOCKED" : `LOCKS IN ${msToCountdown(lockMs)}`}
-                  </span>
+                  <BroadcastTimer live={isLocked} lockMs={lockMs} />
                 </div>
 
                 <div className="mt-3 flex items-center justify-center gap-3">
@@ -995,10 +1110,22 @@ export default function PicksClient() {
                 </div>
 
                 <div className="mt-3 text-center">
-                  <div className="text-[18px] sm:text-[19px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
+                  <div
+                    className="text-[18px] sm:text-[19px] font-black leading-tight"
+                    style={{
+                      color: "rgba(255,255,255,0.98)",
+                      textShadow: "0 2px 12px rgba(0,0,0,0.70)",
+                    }}
+                  >
                     {g.match}
                   </div>
-                  <div className="mt-1 text-[12px] font-semibold truncate" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
+                  <div
+                    className="mt-1 text-[12px] font-semibold truncate"
+                    style={{
+                      color: "rgba(255,255,255,0.78)",
+                      textShadow: "0 2px 10px rgba(0,0,0,0.60)",
+                    }}
+                  >
                     {g.venue}
                   </div>
                 </div>
@@ -1015,7 +1142,14 @@ export default function PicksClient() {
                     {picksCount}/12 picked
                   </span>
 
-                  <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}>
+                  <span
+                    className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                    style={{
+                      borderColor: COLORS.border,
+                      background: COLORS.soft,
+                      color: COLORS.text,
+                    }}
+                  >
                     {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
                   </span>
                 </div>
@@ -1028,7 +1162,13 @@ export default function PicksClient() {
               </div>
             </div>
 
-            <div className="h-[1px]" style={{ background: "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.40), rgba(0,229,255,0.18), rgba(255,46,77,0.00))" }} />
+            <div
+              className="h-[1px]"
+              style={{
+                background:
+                  "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.40), rgba(0,229,255,0.18), rgba(255,46,77,0.00))",
+              }}
+            />
           </div>
         </div>
       </Link>
@@ -1036,9 +1176,22 @@ export default function PicksClient() {
   };
 
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg, opacity: refreshing ? 0.9 : 1, transition: "opacity 120ms ease" }}>
+    <div
+      className="min-h-screen text-white"
+      style={{
+        backgroundColor: COLORS.bg,
+        opacity: refreshing ? 0.9 : 1,
+        transition: "opacity 120ms ease",
+      }}
+    >
       {/* 🎪 GAME SHOW STYLE (cards + labels + logo tiles) */}
       <style>{`
+        @keyframes screamrPing {
+          0% { transform: scale(1); opacity: .55; }
+          80% { transform: scale(1.7); opacity: 0; }
+          100% { transform: scale(1.7); opacity: 0; }
+        }
+
         .screamr-sparks {
           position: absolute;
           inset: 0;
@@ -1061,22 +1214,51 @@ export default function PicksClient() {
           pointer-events: none;
           position: absolute;
           inset: 0;
-          opacity: 0.55;
+          opacity: 0.62;
           background:
-            radial-gradient(700px 260px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
-            radial-gradient(700px 260px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
-            radial-gradient(900px 340px at 50% 110%, rgba(255,46,77,0.08) 0%, rgba(0,0,0,0) 70%);
-          filter: blur(0px);
+            radial-gradient(760px 280px at 18% 0%, rgba(0,229,255,0.16) 0%, rgba(0,0,0,0) 72%),
+            radial-gradient(760px 280px at 82% 0%, rgba(255,46,77,0.20) 0%, rgba(0,0,0,0) 72%),
+            radial-gradient(980px 360px at 50% 115%, rgba(255,46,77,0.10) 0%, rgba(0,0,0,0) 70%);
         }
 
-        .screamr-cardBorder {
+        /* LED frame (more game-show than the old border) */
+        .screamr-ledFrame {
           background: linear-gradient(135deg,
-            rgba(255,46,77,0.50) 0%,
-            rgba(255,46,77,0.08) 25%,
-            rgba(0,229,255,0.10) 55%,
-            rgba(255,46,77,0.38) 100%);
-          box-shadow: 0 24px 80px rgba(0,0,0,0.75);
+            rgba(255,46,77,0.62) 0%,
+            rgba(255,46,77,0.10) 22%,
+            rgba(0,229,255,0.12) 52%,
+            rgba(255,46,77,0.48) 100%);
+          box-shadow: 0 26px 90px rgba(0,0,0,0.75);
+          position: relative;
+          overflow: hidden;
         }
+        .screamr-ledFrame::after {
+          content: "";
+          position: absolute;
+          inset: -40%;
+          background:
+            radial-gradient(circle, rgba(255,255,255,0.16) 0 1px, transparent 2px);
+          background-size: 14px 14px;
+          opacity: 0.16;
+          transform: rotate(12deg);
+          pointer-events: none;
+        }
+
+        /* stage glow layer for the card body */
+        .screamr-stageGlow {
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(540px 220px at 50% 20%, rgba(255,46,77,0.14) 0%, rgba(0,0,0,0.0) 70%),
+            radial-gradient(700px 260px at 50% 100%, rgba(0,229,255,0.08) 0%, rgba(0,0,0,0.0) 68%);
+          opacity: 0.9;
+        }
+
+        /* Hover / press = "stage lights up" */
+        .screamr-stageCard { transform: translateZ(0); }
+        .screamr-stageCard:hover { filter: brightness(1.03); }
+        .screamr-stageCard:active { transform: translateY(1px); }
 
         .screamr-pill {
           position: relative;
@@ -1107,13 +1289,14 @@ export default function PicksClient() {
           100% { transform: translateX(210%) rotate(22deg); opacity: 0; }
         }
 
+        /* 🔥 game-show label (less boring) */
         .screamr-gameLabel {
           position: relative;
           border: 1px solid rgba(255,46,77,0.35);
           background:
-            linear-gradient(90deg, rgba(255,46,77,0.22) 0%, rgba(0,229,255,0.10) 50%, rgba(255,46,77,0.18) 100%);
+            linear-gradient(90deg, rgba(255,46,77,0.26) 0%, rgba(0,229,255,0.12) 50%, rgba(255,46,77,0.22) 100%);
           color: rgba(255,255,255,0.95);
-          box-shadow: 0 12px 34px rgba(255,46,77,0.12);
+          box-shadow: 0 12px 34px rgba(255,46,77,0.14);
           overflow: hidden;
         }
         .screamr-gameLabel::after {
@@ -1121,12 +1304,12 @@ export default function PicksClient() {
           position: absolute;
           inset: 0;
           background:
-            radial-gradient(420px 120px at 0% 50%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 60%);
+            radial-gradient(520px 140px at 0% 50%, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.00) 60%);
           animation: labelSweep 2.8s ease-in-out infinite;
         }
         @keyframes labelSweep {
           0% { transform: translateX(-55%); opacity: 0.0; }
-          25% { opacity: 0.7; }
+          25% { opacity: 0.75; }
           55% { transform: translateX(35%); opacity: 0.0; }
           100% { transform: translateX(35%); opacity: 0.0; }
         }
@@ -1140,35 +1323,32 @@ export default function PicksClient() {
         .screamr-cta:hover { filter: brightness(1.04); }
         .screamr-cta:active { transform: translateY(1px); }
 
-        .screamr-logoBorder {
-          background: linear-gradient(135deg,
-            rgba(255,46,77,0.75) 0%,
-            rgba(255,46,77,0.18) 30%,
-            rgba(0,229,255,0.18) 60%,
-            rgba(255,46,77,0.55) 100%);
+        /* ✅ Team logo (MatchPicksClient-style red frame) */
+        .screamr-teamFrame {
+          background: linear-gradient(180deg, rgba(255,46,77,0.90) 0%, rgba(177,15,42,0.92) 100%);
           box-shadow:
-            0 14px 34px rgba(255,46,77,0.12),
-            0 0 0 1px rgba(0,0,0,0.40) inset;
+            0 16px 44px rgba(255,46,77,0.18),
+            0 0 0 1px rgba(0,0,0,0.45) inset;
         }
-        .screamr-logoInner {
+        .screamr-teamTile {
           background:
-            radial-gradient(300px 120px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%),
-            linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.78) 100%);
+            radial-gradient(320px 140px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.0) 72%),
+            linear-gradient(180deg, rgba(0,0,0,0.66) 0%, rgba(0,0,0,0.82) 100%);
           border: 1px solid rgba(255,255,255,0.10);
           box-shadow:
-            0 0 0 1px rgba(255,46,77,0.10) inset,
-            0 18px 48px rgba(0,0,0,0.65);
+            0 0 0 1px rgba(255,46,77,0.12) inset,
+            0 22px 55px rgba(0,0,0,0.70);
           overflow: hidden;
         }
-        .screamr-logoShine {
+        .screamr-teamShine {
           pointer-events: none;
           position: absolute;
-          top: -40%;
-          left: -45%;
+          top: -44%;
+          left: -55%;
           width: 70%;
-          height: 220%;
+          height: 240%;
           transform: rotate(18deg);
-          background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
+          background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.14), rgba(255,255,255,0.00));
           animation: logoShine 4.2s ease-in-out infinite;
           opacity: 0.0;
         }
@@ -1178,77 +1358,115 @@ export default function PicksClient() {
           45% { transform: translateX(230%) rotate(18deg); opacity: 0.0; }
           100% { transform: translateX(230%) rotate(18deg); opacity: 0.0; }
         }
+
+        @media (prefers-reduced-motion: reduce) {
+          .screamr-sparks, .screamr-pill::after, .screamr-gameLabel::after, .screamr-teamShine { animation: none !important; }
+        }
       `}</style>
 
       <HowToPlayModal open={howOpen} onClose={closeHow} />
       <StickyChaseBar />
 
       <div className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-5 pb-24 md:pb-14">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black uppercase tracking-[0.14em]">Picks</h1>
+        {/* === BROADCAST HEADER (game-show) === */}
+        <div
+          className="rounded-3xl border p-4 sm:p-5"
+          style={{
+            borderColor: "rgba(255,255,255,0.10)",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.46) 65%, rgba(0,0,0,0.62) 100%)",
+            boxShadow: "0 26px 90px rgba(0,0,0,0.68)",
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex items-center gap-2">
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[10px] font-black tracking-[0.22em]"
+                    style={{
+                      borderColor: "rgba(255,46,77,0.34)",
+                      background: "rgba(255,46,77,0.12)",
+                      color: "rgba(255,255,255,0.94)",
+                      boxShadow: "0 0 22px rgba(255,46,77,0.14)",
+                    }}
+                  >
+                    <TinyBolt live />
+                    ON AIR
+                  </span>
 
-              {roundLabel ? (
-                <span className="screamr-pill mt-1 inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
-                  {roundLabel}
-                </span>
-              ) : null}
+                  {roundLabel ? (
+                    <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                      {roundLabel}
+                    </span>
+                  ) : null}
 
-              {refreshing ? <span className="mt-1 text-[11px] font-black tracking-[0.14em] text-white/35">REFRESHING…</span> : null}
+                  {refreshing ? (
+                    <span className="text-[11px] font-black tracking-[0.14em] text-white/35">REFRESHING…</span>
+                  ) : null}
+                </div>
+
+                <h1 className="text-3xl sm:text-4xl font-black uppercase tracking-[0.14em]">Picks</h1>
+              </div>
+
+              <div className="mt-1 text-[13px] text-white/65 font-semibold">
+                Pick any amount. Survive the streak.
+              </div>
             </div>
 
-            <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
+            <button
+              type="button"
+              onClick={() => loadPicks("refresh")}
+              className="rounded-full px-3 py-2 text-[11px] font-black border"
+              style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}
+              title="Refresh"
+            >
+              Refresh
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => loadPicks("refresh")}
-            className="rounded-full px-3 py-2 text-[11px] font-black border"
-            style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}
-            title="Refresh"
-          >
-            Refresh
-          </button>
+          {err ? (
+            <div className="mt-3 text-sm" style={{ color: COLORS.red }}>
+              {err} Try refreshing.
+            </div>
+          ) : null}
         </div>
 
-        {err ? (
-          <div className="mt-3 text-sm" style={{ color: COLORS.red }}>
-            {err} Try refreshing.
-          </div>
-        ) : null}
-
+        {/* === TONIGHT’S MAIN EVENT === */}
         {nextUpStable ? (
           <div className="mt-4 transition-opacity duration-200" style={{ opacity: initialLoading ? 0.75 : 1 }}>
-            <Link
-              href={`/picks/${nextUpStable.id}`}
-              className="block rounded-3xl overflow-hidden"
-              style={{ textDecoration: "none" }}
-            >
-              <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
+            <Link href={`/picks/${nextUpStable.id}`} className="block rounded-3xl overflow-hidden" style={{ textDecoration: "none" }}>
+              <div className="relative p-[1px] rounded-3xl screamr-ledFrame">
                 <div
                   className="relative rounded-3xl overflow-hidden border"
                   style={{
                     borderColor: "rgba(255,255,255,0.10)",
-                    background: COLORS.soft2,
+                    background: "rgba(255,255,255,0.03)",
                     boxShadow: "0 26px 90px rgba(0,0,0,0.72)",
                   }}
                 >
-                  <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
+                  <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 185 }}>
                     <div className="screamr-sparks" />
                     <div className="absolute inset-0 screamr-spotlights" />
+                    <div className="absolute inset-0 screamr-stageGlow" />
                     <CardSilhouetteBg opacity={1} />
 
                     <div className="relative z-10">
                       <div className="flex items-center justify-between gap-3">
                         <span className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em]">
-                          <span className="h-2 w-2 rounded-full" style={{ background: isNextUpLive ? COLORS.red : COLORS.cyan, boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "0 0 14px rgba(0,229,255,0.50)" }} />
-                          NEXT UP
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{
+                              background: isNextUpLive ? COLORS.red : COLORS.cyan,
+                              boxShadow: isNextUpLive
+                                ? "0 0 14px rgba(255,46,77,0.55)"
+                                : "0 0 14px rgba(0,229,255,0.50)",
+                            }}
+                          />
+                          TONIGHT’S MAIN EVENT
                         </span>
 
-                        <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
-                          {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / LOCKED" : `LOCKS IN ${msToCountdown(nextUpLockMs)}`}
-                        </span>
+                        <BroadcastTimer live={isNextUpLive} lockMs={nextUpLockMs ?? null} />
                       </div>
 
                       {(() => {
@@ -1265,10 +1483,22 @@ export default function PicksClient() {
                       })()}
 
                       <div className="mt-3 text-center">
-                        <div className="text-[22px] sm:text-[28px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
+                        <div
+                          className="text-[22px] sm:text-[28px] font-black leading-tight"
+                          style={{
+                            color: "rgba(255,255,255,0.98)",
+                            textShadow: "0 2px 12px rgba(0,0,0,0.70)",
+                          }}
+                        >
                           {nextUpStable.match}
                         </div>
-                        <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
+                        <div
+                          className="mt-2 text-[12px] font-semibold"
+                          style={{
+                            color: "rgba(255,255,255,0.78)",
+                            textShadow: "0 2px 10px rgba(0,0,0,0.60)",
+                          }}
+                        >
                           {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
                         </div>
                       </div>
@@ -1281,7 +1511,13 @@ export default function PicksClient() {
                     </div>
                   </div>
 
-                  <div className="h-[1px]" style={{ background: "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.45), rgba(0,229,255,0.18), rgba(255,46,77,0.00))" }} />
+                  <div
+                    className="h-[1px]"
+                    style={{
+                      background:
+                        "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.45), rgba(0,229,255,0.18), rgba(255,46,77,0.00))",
+                    }}
+                  />
                 </div>
               </div>
             </Link>
@@ -1299,13 +1535,20 @@ export default function PicksClient() {
           {initialLoading && sortedGames.length === 0 ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="rounded-2xl border overflow-hidden" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
+                <div
+                  key={i}
+                  className="rounded-2xl border overflow-hidden"
+                  style={{ borderColor: COLORS.border, background: COLORS.soft2 }}
+                >
                   <div className="h-[190px] bg-white/5 animate-pulse" />
                 </div>
               ))}
             </div>
           ) : sortedGames.length === 0 ? (
-            <div className="mt-4 rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,46,77,0.35)", background: COLORS.soft2 }}>
+            <div
+              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
+              style={{ borderColor: "rgba(255,46,77,0.35)", background: COLORS.soft2 }}
+            >
               No games found.
             </div>
           ) : (
