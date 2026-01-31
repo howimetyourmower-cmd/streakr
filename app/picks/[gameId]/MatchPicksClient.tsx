@@ -52,9 +52,10 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-// ✅ Use Torpie/Streakr red (not orange)
+// ✅ Use SCREAMR red (not orange)
 const BRAND_RED = "#FF2E4D";
 const BRAND_BG = "#000000";
+const BRAND_CYAN = "#00E5FF";
 
 // ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
 function roundNumberFromGameId(gameId: string): number {
@@ -197,8 +198,7 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
-    return "westernbulldogs";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
   if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
@@ -210,6 +210,7 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("essendon")) return "essendon";
   if (n.includes("fremantle")) return "fremantle";
   if (n.includes("geelong")) return "geelong";
+  if (n.includes("gold coast")) return "goldcoast";
   if (n.includes("hawthorn")) return "hawthorn";
   if (n.includes("melbourne")) return "melbourne";
   if (n.includes("richmond")) return "richmond";
@@ -301,8 +302,9 @@ function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
-        <div className="h-full w-full overflow-hidden rounded-[15px]" style={{ background: BRAND_RED }}>
+      <div className="relative h-[92px] w-[92px] rounded-[22px] p-[3px]" style={{ background: BRAND_RED }}>
+        <div className="absolute inset-0 rounded-[22px] opacity-55 blur-[10px]" style={{ background: BRAND_RED }} />
+        <div className="relative h-full w-full overflow-hidden rounded-[19px]" style={{ background: "rgba(0,0,0,0.35)" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
@@ -315,18 +317,16 @@ function PlayerAvatar({ name }: { name: string }) {
         </div>
       </div>
 
-      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">PLAYER PICK</div>
+      <div className="text-[11px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
     </div>
   );
 }
 
 function TeamLogoSquircle({ teamName }: { teamName: string }) {
   return (
-    <div className="h-20 w-20 rounded-[18px] p-[3px] shadow-sm" style={{ background: BRAND_RED }}>
-      <div
-        className="h-full w-full overflow-hidden rounded-[15px] flex items-center justify-center"
-        style={{ background: BRAND_RED }}
-      >
+    <div className="relative h-[92px] w-[92px] rounded-[22px] p-[3px]" style={{ background: BRAND_RED }}>
+      <div className="absolute inset-0 rounded-[22px] opacity-45 blur-[10px]" style={{ background: BRAND_RED }} />
+      <div className="relative h-full w-full overflow-hidden rounded-[19px] flex items-center justify-center bg-black/35">
         <TeamLogo teamName={teamName} size={72} />
       </div>
     </div>
@@ -340,29 +340,27 @@ function GamePickHeader({ match }: { match: string }) {
     <div className="flex flex-col items-center gap-2">
       <div className="flex items-center justify-center gap-3">
         <TeamLogoSquircle teamName={home} />
-        <div className="text-[12px] font-black tracking-[0.25em] text-white/60">VS</div>
+        <div className="text-[12px] font-black tracking-[0.25em] text-white/65">VS</div>
         <TeamLogoSquircle teamName={away || "AFL"} />
       </div>
 
-      <div className="text-[11px] font-semibold tracking-[0.18em] text-white/45">GAME PICK</div>
+      <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
     </div>
   );
 }
 
+function clampPct(n: number) {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
 /**
- * ✅ FIXED: 2-way bar (green/red) that always matches the % values.
- * - If yes=100 and no=0 => green fills full bar, red is 0 width.
- * - If yes=80 and no=20 => green fills 80%, red fills 20%.
- * - If data is missing/invalid, we normalize.
+ * ✅ Game-show "Community Pulse" bar (cyan/red)
  */
-function PercentBar({ yes, no }: { yes: number; no: number }) {
-  let y = Number.isFinite(yes) ? yes : 0;
-  let n = Number.isFinite(no) ? no : 0;
+function CommunityPulse({ yes, no }: { yes: number; no: number }) {
+  let y = clampPct(yes);
+  let n = clampPct(no);
 
-  y = Math.max(0, Math.min(100, y));
-  n = Math.max(0, Math.min(100, n));
-
-  // Normalize if they don't add to 100 (API might send only yes)
   const total = y + n;
   if (total <= 0) {
     y = 0;
@@ -376,29 +374,32 @@ function PercentBar({ yes, no }: { yes: number; no: number }) {
   const noPct = Math.round(n);
 
   return (
-    <div className="mt-3">
-      <div className="flex items-center justify-between text-[11px] font-semibold">
-        <span className="text-emerald-700">Yes {yesPct}%</span>
-        <span className="text-rose-700">No {noPct}%</span>
-      </div>
+    <div className="mt-4">
+      <div className="text-[11px] font-black tracking-[0.22em] text-white/60 text-center">COMMUNITY PULSE</div>
 
-      <div className="mt-1 h-[6px] w-full overflow-hidden rounded-full bg-black/10">
+      <div className="mt-2 h-[10px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10">
         <div className="h-full flex">
           <div
             className="h-full"
             style={{
               width: `${yesPct}%`,
-              background: "rgba(16,185,129,0.95)", // emerald
+              background: `linear-gradient(90deg, rgba(0,229,255,0.95), rgba(0,229,255,0.55))`,
+              boxShadow: `0 0 18px rgba(0,229,255,0.25)`,
             }}
           />
           <div
             className="h-full"
             style={{
               width: `${Math.max(0, 100 - yesPct)}%`,
-              background: "rgba(244,63,94,0.95)", // rose
+              background: `linear-gradient(90deg, rgba(255,46,77,0.55), rgba(255,46,77,0.95))`,
+              boxShadow: `0 0 18px rgba(255,46,77,0.20)`,
             }}
           />
         </div>
+      </div>
+
+      <div className="mt-2 text-[11px] font-semibold text-white/70 text-center">
+        Yes {yesPct}% <span className="text-white/35">•</span> No {noPct}%
       </div>
     </div>
   );
@@ -418,7 +419,8 @@ function ResultPill({
   const isDone = status === "final" || status === "void";
   if (!isDone) return null;
 
-  const base = "inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black tracking-[0.14em]";
+  const base =
+    "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black tracking-[0.18em]";
 
   if (status === "void" || outcome === "void") {
     return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>VOID</span>;
@@ -442,16 +444,15 @@ function ResultPill({
 /**
  * ✅ Keeps card layout consistent even when question text is long.
  * - Clamps to 3 lines (so YES/NO area never gets pushed down)
- * - Fixed min/max height matches 3 lines at this font/leading
  */
 function QuestionText({ text }: { text: string }) {
   return (
     <div
-      className="mt-4 text-[18px] font-extrabold text-white break-words"
+      className="mt-4 text-[18px] font-extrabold text-white break-words text-center"
       style={{
         lineHeight: 1.25,
-        minHeight: 68, // ~3 lines @ 18px * 1.25
-        maxHeight: 68,
+        minHeight: 72, // ~3 lines
+        maxHeight: 72,
         display: "-webkit-box",
         WebkitLineClamp: 3 as any,
         WebkitBoxOrient: "vertical" as any,
@@ -461,6 +462,17 @@ function QuestionText({ text }: { text: string }) {
       {text}
     </div>
   );
+}
+
+function msToClock(ms: number) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const hh = Math.floor(s / 3600);
+
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  if (hh > 0) return `${hh}:${pad2(mm)}:${pad2(ss)}`;
+  return `${pad2(mm)}:${pad2(ss)}`;
 }
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
@@ -476,6 +488,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
 
@@ -568,6 +586,19 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const lockedCount = useMemo(() => questions.filter((q) => safeStatus(q.status) !== "open").length, [questions]);
 
+  const matchStartMs = useMemo(() => {
+    const iso = stableGame?.startTime;
+    const t = iso ? new Date(iso).getTime() : NaN;
+    return Number.isFinite(t) ? t : null;
+  }, [stableGame?.startTime]);
+
+  const matchLockMs = useMemo(() => {
+    if (!matchStartMs) return null;
+    return matchStartMs - nowMs;
+  }, [matchStartMs, nowMs]);
+
+  const matchIsLive = matchLockMs !== null ? matchLockMs <= 0 : false;
+
   async function persistPick(questionId: string, next: LocalPick) {
     if (!user) return;
 
@@ -657,6 +688,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home, away } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
+  const MatchTimerPill = ({ status }: { status: QuestionStatus }) => {
+    if (status === "final") return <div className="screamr-timer screamr-timer--final">FINAL</div>;
+    if (status === "void") return <div className="screamr-timer screamr-timer--final">VOID</div>;
+    if (matchLockMs === null) return <div className="screamr-timer">—</div>;
+    if (matchIsLive) return <div className="screamr-timer screamr-timer--live">LIVE</div>;
+    return <div className="screamr-timer">{msToClock(matchLockMs)}</div>;
+  };
+
   return (
     <div
       className="min-h-screen text-white"
@@ -666,6 +705,101 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         transition: "opacity 120ms ease",
       }}
     >
+      <style>{`
+        .screamr-card {
+          position: relative;
+          border-radius: 22px;
+          overflow: hidden;
+          background: rgba(10,10,12,0.88);
+          border: 1px solid rgba(255,255,255,0.10);
+          box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+        }
+        .screamr-card::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: 22px;
+          padding: 2px;
+          background: linear-gradient(180deg, rgba(255,46,77,0.85), rgba(255,46,77,0.15));
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events: none;
+          opacity: 0.65;
+        }
+        .screamr-card::after {
+          content: "";
+          position: absolute;
+          inset: -40px;
+          background: radial-gradient(500px 220px at 50% 0%, rgba(255,46,77,0.22), rgba(0,0,0,0) 65%);
+          pointer-events: none;
+        }
+        .screamr-sparks {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.22;
+          mix-blend-mode: screen;
+          background-image:
+            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.20) 0 1px, transparent 2px);
+          background-size: 220px 220px;
+          animation: sparksMove 6.5s linear infinite;
+        }
+        @keyframes sparksMove {
+          0% { transform: translate3d(0,0,0); }
+          100% { transform: translate3d(-220px, -220px, 0); }
+        }
+        .screamr-timer {
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.14em;
+          padding: 8px 10px;
+          border-radius: 12px;
+          border: 1px solid rgba(255,46,77,0.35);
+          background: rgba(0,0,0,0.55);
+          color: rgba(255,255,255,0.92);
+          box-shadow: 0 0 18px rgba(255,46,77,0.18);
+          min-width: 84px;
+          text-align: center;
+        }
+        .screamr-timer--live{
+          border-color: rgba(0,229,255,0.45);
+          box-shadow: 0 0 18px rgba(0,229,255,0.18);
+        }
+        .screamr-timer--final{
+          border-color: rgba(255,255,255,0.18);
+          box-shadow: none;
+          color: rgba(255,255,255,0.70);
+        }
+
+        .btn-yes {
+          border: 1px solid rgba(0,229,255,0.45);
+          background: rgba(0,229,255,0.10);
+          box-shadow: 0 0 22px rgba(0,229,255,0.16);
+          color: rgba(255,255,255,0.95);
+        }
+        .btn-yes--selected {
+          background: linear-gradient(180deg, rgba(0,229,255,0.95), rgba(0,229,255,0.40));
+          border-color: rgba(0,229,255,0.75);
+          box-shadow: 0 0 28px rgba(0,229,255,0.22);
+          color: rgba(0,0,0,0.92);
+        }
+        .btn-no {
+          border: 1px solid rgba(255,46,77,0.45);
+          background: rgba(255,46,77,0.10);
+          box-shadow: 0 0 22px rgba(255,46,77,0.14);
+          color: rgba(255,255,255,0.95);
+        }
+        .btn-no--selected {
+          background: linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,46,77,0.35));
+          border-color: rgba(255,46,77,0.75);
+          box-shadow: 0 0 28px rgba(255,46,77,0.20);
+          color: rgba(255,255,255,0.98);
+        }
+      `}</style>
+
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
         <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting Torpie all season long</div>
@@ -676,9 +810,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="flex items-end justify-between gap-3">
             <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
             <div className="flex items-center gap-2">
-              {refreshing ? (
-                <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div>
-              ) : null}
+              {refreshing ? <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div> : null}
               <button
                 type="button"
                 className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
@@ -702,7 +834,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="rounded-full border border-white/15 px-3 py-1">
               Locks: <span className="font-semibold text-white">{lockedCount}</span>
             </div>
-            <div className="rounded-full border border-white/15 px-3 py-1">Auto-locks at bounce</div>
+            <div className="rounded-full border border-white/15 px-3 py-1">
+              {matchLockMs === null ? "Auto-locks at bounce" : matchIsLive ? "LIVE — picks locked" : `Locks in ${msToClock(matchLockMs)}`}
+            </div>
           </div>
         </div>
 
@@ -725,83 +859,85 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isLocked = status !== "open";
             const isSaving = !!saving[q.id];
 
-            const yesBtnClass =
-              selected === "yes"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
-                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
-            const noBtnClass =
-              selected === "no"
-                ? `text-white border-black/10 shadow-[0_0_0_3px_rgba(255,46,77,0.20)]`
-                : "bg-white text-black/80 border-black/15 hover:bg-black/[0.03]";
+            const yesBtn =
+              selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
+            const noBtn =
+              selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
             return (
-              <div
-                key={q.id}
-                className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#111111] p-4 flex flex-col"
-              >
-                <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
+              <div key={q.id} className="screamr-card p-4 flex flex-col">
+                {/* background image */}
+                <div className="pointer-events-none absolute inset-0 opacity-[0.14]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
+
+                {/* sparks overlay */}
+                <div className="screamr-sparks" />
 
                 <div
                   className={`relative flex flex-col flex-1 ${
                     isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
                   }`}
                 >
+                  {/* header row like the mock */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-[15px] font-black tracking-wide">
+                      <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
                         Q{qNum} - {formatQuarterLabel(q.quarter)}
                       </div>
 
-                      <div className="mt-1 flex items-center gap-2">
-                        <div className="text-[12px] text-white/60">
-                          Status: <span className="text-white/60">{status}</span>
-                        </div>
+                      <div className="mt-1 text-[12px] text-white/60">
+                        Status: <span className="text-white/70">{status}</span>
+                      </div>
 
+                      <div className="mt-2 flex items-center gap-2">
                         <ResultPill
                           status={status}
                           selected={selected}
                           correctPick={q.correctPick}
                           outcome={q.correctOutcome ?? q.outcome}
                         />
-
-                        {isSaving && (
+                        {isSaving ? (
                           <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                        isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
-                      }`}
-                      aria-label="Clear pick"
-                      disabled={isLocked || isSaving}
-                      onClick={() => void clearPick(q.id, status)}
-                    >
-                      <span className="text-white/80 font-black">×</span>
-                    </button>
+                    <div className="flex items-start gap-2">
+                      <MatchTimerPill status={status} />
+
+                      <button
+                        type="button"
+                        className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                          isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                        }`}
+                        aria-label="Clear pick"
+                        disabled={isLocked || isSaving}
+                        onClick={() => void clearPick(q.id, status)}
+                        title="Clear pick"
+                      >
+                        <span className="text-white/85 font-black">×</span>
+                      </button>
+                    </div>
                   </div>
 
+                  {/* hero */}
                   <div className="mt-4 flex justify-center">
                     {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
                   </div>
 
                   <QuestionText text={q.question} />
 
-                  {/* ✅ Push pick panel to the bottom so all cards align nicely */}
+                  {/* pick panel */}
                   <div className="mt-auto pt-4">
-                    <div className="rounded-2xl bg-[#F2F2F2] p-4">
-                      <div className="grid grid-cols-2 gap-4">
+                    <div className="rounded-2xl border border-white/10 bg-black/55 p-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <button
                           type="button"
                           disabled={isLocked || isSaving}
-                          className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                          className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                             isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                          } ${yesBtnClass}`}
-                          style={selected === "yes" ? { background: BRAND_RED } : undefined}
+                          } ${yesBtn}`}
                           onClick={() => void setPick(q.id, "yes", status)}
                         >
                           YES
@@ -810,24 +946,23 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         <button
                           type="button"
                           disabled={isLocked || isSaving}
-                          className={`h-12 rounded-2xl border font-extrabold tracking-wide transition ${
+                          className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                             isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                          } ${noBtnClass}`}
-                          style={selected === "no" ? { background: BRAND_RED } : undefined}
+                          } ${noBtn}`}
                           onClick={() => void setPick(q.id, "no", status)}
                         >
                           NO
                         </button>
                       </div>
 
-                      <PercentBar yes={yes} no={no} />
+                      <CommunityPulse yes={yes} no={no} />
                     </div>
                   </div>
                 </div>
 
                 {isSponsored && !isRevealed && (
                   <div className="absolute inset-0 z-20 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" />
+                    <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" />
 
                     <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
                       <div className="flex items-start justify-between gap-3">
@@ -843,22 +978,26 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         </div>
                       </div>
 
-                      <div className="mt-5 flex-1 rounded-2xl bg-[#F2F2F2] p-4 flex flex-col items-center justify-center text-center">
-                        <div className="text-[14px] font-bold text-black/80">
-                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                      <div className="mt-5 flex-1 rounded-2xl border border-white/10 bg-black/55 p-4 flex flex-col items-center justify-center text-center">
+                        <div className="text-[14px] font-bold text-white/90">
+                          {q.sponsorBlurb ||
+                            "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
                         </div>
 
                         <button
                           type="button"
-                          className="mt-4 inline-flex items-center justify-center rounded-full border border-black/15 px-6 py-2 text-sm font-extrabold text-black/85"
-                          style={{ background: "rgba(255,46,77,0.20)" }}
+                          className="mt-4 inline-flex items-center justify-center rounded-full border border-white/20 px-6 py-2 text-sm font-extrabold text-white/90 active:scale-[0.99]"
+                          style={{
+                            background: "rgba(255,46,77,0.20)",
+                            boxShadow: "0 0 18px rgba(255,46,77,0.14)",
+                          }}
                           onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
                         >
                           Tap to reveal
                         </button>
                       </div>
 
-                      <div className="mt-4 text-[11px] text-white/40">* Tap to reveal to make your pick</div>
+                      <div className="mt-4 text-[11px] text-white/45">* Tap to reveal to make your pick</div>
                     </div>
                   </div>
                 )}
