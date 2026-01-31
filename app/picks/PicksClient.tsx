@@ -36,18 +36,19 @@ type PicksApiResponse = {
 };
 
 /**
- * ✅ SCREAMR PALETTE (only colours changed)
+ * ✅ SCREAMR PALETTE
  * - Black glass base
  * - Neon red accent
+ * - Neon cyan for “YES”
  * - High-contrast text
  */
 const COLORS = {
   bg: "#000000",
   red: "#FF2E4D",
+  cyan: "#00E5FF",
   green: "#2DFF7A",
   white: "#FFFFFF",
 
-  // extra screamr tones (used via MATCH_HQ below)
   panel: "#07070A",
   panel2: "#0B0B10",
   border: "rgba(255,255,255,0.10)",
@@ -59,11 +60,10 @@ const COLORS = {
 };
 
 /**
- * ✅ Match HQ palette — converted from light to SCREAMR dark
- * (no layout changes; just colours)
+ * ✅ Match HQ palette — SCREAMR dark
  */
 const MATCH_HQ = {
-  card: "rgba(10,10,10,0.92)",
+  card: "rgba(10,10,12,0.90)",
   border: "rgba(255,255,255,0.12)",
   pill: "rgba(255,255,255,0.06)",
   pillBorder: "rgba(255,255,255,0.14)",
@@ -72,7 +72,7 @@ const MATCH_HQ = {
   muted2: "rgba(255,255,255,0.55)",
 };
 
-const HOW_TO_PLAY_PICKS_KEY = "Torpie_seen_how_to_play_picks_v1";
+const HOW_TO_PLAY_PICKS_KEY = "Screamr_seen_how_to_play_picks_v2";
 
 function formatAedt(dateIso: string): string {
   try {
@@ -132,12 +132,10 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
   if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
   if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
   if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray"))
-    return "westernbulldogs";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
   if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
   if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda")
-    return "stkilda";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
 
   if (n.includes("adelaide")) return "adelaide";
   if (n.includes("brisbane")) return "brisbane";
@@ -156,10 +154,6 @@ function teamNameToSlug(nameRaw: string): TeamSlug | null {
 
 /**
  * ✅ FIX: support both "vs" and "v"
- * Examples:
- * - "Sydney Swans vs Hawthorn"
- * - "SYD v HAW"
- * - "Sydney Swans v Hawthorn"
  */
 function splitMatch(match: string): { home: string; away: string } | null {
   const m = String(match || "").trim();
@@ -186,13 +180,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = React.memo(function TeamLogoInner({
-  teamName,
-  size = 75,
-}: {
-  teamName: string;
-  size?: number;
-}) {
+const TeamLogo = React.memo(function TeamLogoInner({ teamName, size = 75 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
@@ -259,13 +247,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
 function CheckIcon({ size = 22, color = COLORS.green }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M20 6L9 17l-5-5"
-        stroke={color}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M20 6L9 17l-5-5" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -273,18 +255,12 @@ function CheckIcon({ size = 22, color = COLORS.green }: { size?: number; color?:
 function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M6 6l12 12M18 6L6 18"
-        stroke={color}
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M6 6l12 12M18 6L6 18" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function CardSilhouetteBg({ opacity = 1.5 }: { opacity?: number }) {
+function CardSilhouetteBg({ opacity = 1.15 }: { opacity?: number }) {
   return (
     <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
       <div className="absolute inset-0" style={{ opacity }}>
@@ -317,11 +293,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[80] flex items-center justify-center px-4"
-      role="dialog"
-      aria-modal="true"
-    >
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4" role="dialog" aria-modal="true">
       <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.75)" }} onClick={onClose} />
       <div
         className="relative w-full max-w-lg rounded-3xl border p-5 sm:p-6"
@@ -334,9 +306,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xl font-black">How to play</div>
-            <div className="text-white/70 text-sm mt-1">
-              Pick any amount. Locks at bounce. One wrong pick kills that match.
-            </div>
+            <div className="text-white/70 text-sm mt-1">Pick any amount. Locks at bounce. One wrong pick kills that match.</div>
           </div>
 
           <button
@@ -365,9 +335,7 @@ function HowToPlayModal({ open, onClose }: { open: boolean; onClose: () => void 
 
           <div className="rounded-2xl border p-4" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
             <div className="font-black">3) Clean Sweep</div>
-            <div className="text-white/70 mt-1">
-              One wrong pick resets your streak for that match. Voids don’t count.
-            </div>
+            <div className="text-white/70 mt-1">One wrong pick resets your streak for that match. Voids don’t count.</div>
           </div>
         </div>
 
@@ -405,7 +373,7 @@ type GameStatusRow = {
 export default function PicksClient() {
   const { user } = useAuth();
 
-  // ✅ KEY FIX: separate first load vs refresh — never blank the page on refresh.
+  // ✅ separate first load vs refresh — never blank the page on refresh.
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState("");
@@ -474,7 +442,6 @@ export default function PicksClient() {
       if (mode === "initial") setInitialLoading(true);
       else setRefreshing(true);
 
-      // IMPORTANT: do NOT clear games/stats here — that’s what caused “Game status” to disappear.
       setErr("");
 
       try {
@@ -493,7 +460,6 @@ export default function PicksClient() {
         applyData(data);
       } catch (e) {
         console.error(e);
-        // Keep UI; show error toast-like banner
         setErr("Could not load picks right now.");
       } finally {
         if (mode === "initial") setInitialLoading(false);
@@ -513,7 +479,7 @@ export default function PicksClient() {
     return () => window.clearInterval(id);
   }, [loadPicks]);
 
-  // ✅ always use stable data for rendering (prevents disappearing sections)
+  // ✅ always use stable data for rendering
   const stable = lastGoodRef.current;
   const stableGames = stable?.games ?? games;
   const stableRoundNumber = stable?.roundNumber ?? roundNumber;
@@ -525,9 +491,7 @@ export default function PicksClient() {
     stableRoundNumber === null ? "" : stableRoundNumber === 0 ? "Opening Round" : `Round ${stableRoundNumber}`;
 
   const sortedGames = useMemo(() => {
-    return [...(stableGames || [])].sort(
-      (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    );
+    return [...(stableGames || [])].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
   }, [stableGames]);
 
   const nextUp = useMemo(() => {
@@ -557,9 +521,8 @@ export default function PicksClient() {
   const isNextUpLive = nextUpLockMs !== null ? nextUpLockMs <= 0 : false;
 
   const gamesPicked = useMemo(() => {
-    return (stableGames || []).filter((g) =>
-      (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no")
-    ).length;
+    return (stableGames || []).filter((g) => (g.questions || []).some((q) => q.userPick === "yes" || q.userPick === "no"))
+      .length;
   }, [stableGames]);
 
   const eligible = gamesPicked >= 3;
@@ -647,15 +610,10 @@ export default function PicksClient() {
 
     const href = `/picks/${g.id}`;
     const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
-    const lockText =
-      nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
+    const lockText = nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
 
     const chaseText =
-      stableLeaderScore === null
-        ? "Leader loading…"
-        : distanceToLeader === 0
-        ? "Equal lead"
-        : `Need ${distanceToLeader}`;
+      stableLeaderScore === null ? "Leader loading…" : distanceToLeader === 0 ? "Equal lead" : `Need ${distanceToLeader}`;
 
     return (
       <div className="fixed bottom-0 left-0 right-0 z-[60] md:hidden">
@@ -699,10 +657,7 @@ export default function PicksClient() {
                 </div>
 
                 <div className="mt-2 flex items-center gap-3">
-                  <div
-                    className="rounded-xl border px-3 py-1.5"
-                    style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}
-                  >
+                  <div className="rounded-xl border px-3 py-1.5" style={{ borderColor: "rgba(255,46,77,0.22)", background: "rgba(255,46,77,0.10)" }}>
                     <div className="text-[10px] uppercase tracking-widest text-white/70 font-black">Streak</div>
                     <div className="text-[16px] font-black" style={{ color: COLORS.red }}>
                       {stableCurrentStreak}
@@ -713,9 +668,7 @@ export default function PicksClient() {
                     <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
                     <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
                     <div className="text-[11px] text-white/55 font-semibold truncate">
-                      {stableLeaderScore === null
-                        ? ""
-                        : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
+                      {stableLeaderScore === null ? "" : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
                     </div>
                   </div>
                 </div>
@@ -742,8 +695,7 @@ export default function PicksClient() {
   };
 
   const DashboardStrip = () => {
-    const leaderText =
-      stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
+    const leaderText = stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
 
     const leaderHint =
       stableLeaderScore === null
@@ -767,13 +719,7 @@ export default function PicksClient() {
     const numStyle: React.CSSProperties = { color: COLORS.red };
 
     return (
-      <div
-        className="mt-4 rounded-3xl border px-3 py-3"
-        style={{
-          borderColor: COLORS.border,
-          background: COLORS.soft2,
-        }}
-      >
+      <div className="mt-4 rounded-3xl border px-3 py-3" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Match HQ</div>
@@ -784,15 +730,9 @@ export default function PicksClient() {
                 background: "rgba(255,46,77,0.10)",
                 color: COLORS.text,
               }}
-              title="Torpie is live and updating"
+              title="SCREAMR is live and updating"
             >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{
-                  background: COLORS.red,
-                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
-                }}
-              />
+              <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
               LIVE
             </span>
           </div>
@@ -801,12 +741,7 @@ export default function PicksClient() {
             <Link
               href="/leaderboards"
               className="rounded-full px-3 py-1.5 text-[11px] font-black border"
-              style={{
-                borderColor: COLORS.border,
-                background: COLORS.soft,
-                color: COLORS.text,
-                textDecoration: "none",
-              }}
+              style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text, textDecoration: "none" }}
             >
               Leaderboards
             </Link>
@@ -814,11 +749,7 @@ export default function PicksClient() {
             <button
               type="button"
               className="rounded-full px-3 py-1.5 text-[11px] font-black border"
-              style={{
-                borderColor: COLORS.border,
-                background: COLORS.soft,
-                color: COLORS.text,
-              }}
+              style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}
               onClick={() => setHowOpen(true)}
             >
               How to play
@@ -897,9 +828,7 @@ export default function PicksClient() {
                 </span>
               </div>
               <div className="min-w-0">
-                <div className="text-[12px] font-black">
-                  {stableLeaderScore === null ? "Waiting on data" : "Close the gap"}
-                </div>
+                <div className="text-[12px] font-black">{stableLeaderScore === null ? "Waiting on data" : "Close the gap"}</div>
                 <div className="text-[11px] font-semibold leading-snug" style={{ color: MATCH_HQ.muted }}>
                   Current streak only.
                 </div>
@@ -914,13 +843,7 @@ export default function PicksClient() {
 
             <div className="mt-2 flex items-center gap-2">
               <div className="rounded-xl border px-2.5 py-1.5 flex items-center justify-center" style={pill}>
-                {eligible ? (
-                  <CheckIcon size={16} color={COLORS.red} />
-                ) : (
-                  <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>
-                    —
-                  </span>
-                )}
+                {eligible ? <CheckIcon size={16} color={COLORS.red} /> : <span className="font-black" style={{ color: MATCH_HQ.muted2 }}>—</span>}
               </div>
 
               <div className="min-w-0">
@@ -937,13 +860,7 @@ export default function PicksClient() {
           </div>
         </div>
 
-        <div
-          className="mt-3 rounded-2xl border p-3 sm:p-3.5"
-          style={{
-            borderColor: COLORS.border,
-            background: "rgba(0,0,0,0.28)",
-          }}
-        >
+        <div className="mt-3 rounded-2xl border p-3 sm:p-3.5" style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.28)" }}>
           <div className="flex items-center justify-between gap-3">
             <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Game status</div>
             <div className="text-[11px] text-white/55 font-semibold">Picks • Correct • Wrong • Streak after</div>
@@ -958,12 +875,8 @@ export default function PicksClient() {
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Correct</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Wrong</th>
                   <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Void</th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
-                    Unsettled
-                  </th>
-                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">
-                    Streak after
-                  </th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Unsettled</th>
+                  <th className="px-3 py-2 text-[11px] uppercase tracking-widest text-white/60 font-black">Streak after</th>
                 </tr>
               </thead>
               <tbody>
@@ -978,10 +891,7 @@ export default function PicksClient() {
                     : { label: "ALIVE ✅", border: "rgba(45,255,122,0.35)", bg: "rgba(45,255,122,0.10)" };
 
                   return (
-                    <tr
-                      key={r.gameId}
-                      style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}
-                    >
+                    <tr key={r.gameId} style={{ background: i % 2 === 0 ? "rgba(0,0,0,0.16)" : "rgba(0,0,0,0.10)" }}>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
@@ -992,11 +902,7 @@ export default function PicksClient() {
                           </div>
                           <span
                             className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border"
-                            style={{
-                              borderColor: pillState.border,
-                              background: pillState.bg,
-                              color: COLORS.text,
-                            }}
+                            style={{ borderColor: pillState.border, background: pillState.bg, color: COLORS.text }}
                           >
                             {pillState.label}
                           </span>
@@ -1031,9 +937,7 @@ export default function PicksClient() {
                           }}
                         >
                           {anyWrong ? <XIcon size={16} /> : <CheckIcon size={16} color="rgba(45,255,122,0.95)" />}
-                          <span className="text-[14px] font-black text-white">
-                            {r.streakAfter === null ? "—" : r.streakAfter}
-                          </span>
+                          <span className="text-[14px] font-black text-white">{r.streakAfter === null ? "—" : r.streakAfter}</span>
                         </div>
                       </td>
                     </tr>
@@ -1045,11 +949,7 @@ export default function PicksClient() {
 
           <div className="md:hidden mt-3 space-y-2">
             {gameStatusRows.map((r) => (
-              <div
-                key={r.gameId}
-                className="rounded-2xl border p-3"
-                style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}
-              >
+              <div key={r.gameId} className="rounded-2xl border p-3" style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}>
                 <div className="text-[13px] font-black text-white">{r.match}</div>
                 <div className="text-[11px] text-white/60 font-semibold">
                   {formatAedt(r.startTime)} • {r.venue}
@@ -1075,16 +975,14 @@ export default function PicksClient() {
     const homeName = m?.home ?? g.match;
     const awayName = m?.away ?? "";
 
-    const picksCount =
-      (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
+    const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
 
     const isLocked = lockMs <= 0;
+    const href = `/picks/${g.id}`;
 
     const badgeStyle = isLocked
       ? { borderColor: "rgba(255,46,77,0.55)", background: "rgba(255,46,77,0.18)" }
       : { borderColor: COLORS.border, background: "rgba(0,0,0,0.40)" };
-
-    const href = `/picks/${g.id}`;
 
     return (
       <Link
@@ -1098,16 +996,23 @@ export default function PicksClient() {
         }}
       >
         <div className="relative p-4 overflow-hidden" style={{ minHeight: 190 }}>
+          <div className="absolute inset-0 pointer-events-none">
+            <div
+              className="absolute inset-0 opacity-40"
+              style={{
+                background:
+                  "radial-gradient(900px 220px at 50% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 65%)",
+              }}
+            />
+          </div>
+
           <CardSilhouetteBg opacity={1} />
 
           <div className="relative z-10">
             <div className="flex items-center justify-between gap-3">
               <div className="text-[11px] text-white/85 font-semibold">{formatAedt(g.startTime)}</div>
 
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}
-              >
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ ...badgeStyle, color: "rgba(255,255,255,0.96)" }}>
                 {isLocked ? "LIVE / Locked" : `Locks in ${msToCountdown(lockMs)}`}
               </span>
             </div>
@@ -1119,22 +1024,10 @@ export default function PicksClient() {
             </div>
 
             <div className="mt-3 text-center">
-              <div
-                className="text-[17px] sm:text-[18px] font-black leading-tight"
-                style={{
-                  color: "rgba(255,255,255,0.98)",
-                  textShadow: "0 2px 12px rgba(0,0,0,0.70)",
-                }}
-              >
+              <div className="text-[17px] sm:text-[18px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                 {g.match}
               </div>
-              <div
-                className="mt-1 text-[12px] font-semibold truncate"
-                style={{
-                  color: "rgba(255,255,255,0.78)",
-                  textShadow: "0 2px 10px rgba(0,0,0,0.60)",
-                }}
-              >
+              <div className="mt-1 text-[12px] font-semibold truncate" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                 {g.venue}
               </div>
             </div>
@@ -1151,14 +1044,7 @@ export default function PicksClient() {
                 {picksCount}/12 picked
               </span>
 
-              <span
-                className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
-                style={{
-                  borderColor: COLORS.border,
-                  background: COLORS.soft,
-                  color: COLORS.text,
-                }}
-              >
+              <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}>
                 {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
               </span>
             </div>
@@ -1183,14 +1069,28 @@ export default function PicksClient() {
   };
 
   return (
-    <div
-      className="min-h-screen text-white"
-      style={{
-        backgroundColor: COLORS.bg,
-        opacity: refreshing ? 0.9 : 1,
-        transition: "opacity 120ms ease",
-      }}
-    >
+    <div className="min-h-screen text-white" style={{ backgroundColor: COLORS.bg, opacity: refreshing ? 0.9 : 1, transition: "opacity 120ms ease" }}>
+      {/* Game-show polish: subtle sparks + gradient borders */}
+      <style>{`
+        .screamr-sparks {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.18;
+          mix-blend-mode: screen;
+          background-image:
+            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.20) 0 1px, transparent 2px);
+          background-size: 220px 220px;
+          animation: sparksMove 6.5s linear infinite;
+        }
+        @keyframes sparksMove {
+          0% { transform: translate3d(0,0,0); }
+          100% { transform: translate3d(-220px, -220px, 0); }
+        }
+      `}</style>
+
       <HowToPlayModal open={howOpen} onClose={closeHow} />
       <StickyChaseBar />
 
@@ -1213,9 +1113,7 @@ export default function PicksClient() {
                 </span>
               ) : null}
 
-              {refreshing ? (
-                <span className="mt-1 text-[11px] font-black tracking-[0.14em] text-white/35">REFRESHING…</span>
-              ) : null}
+              {refreshing ? <span className="mt-1 text-[11px] font-black tracking-[0.14em] text-white/35">REFRESHING…</span> : null}
             </div>
 
             <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
@@ -1225,11 +1123,7 @@ export default function PicksClient() {
             type="button"
             onClick={() => loadPicks("refresh")}
             className="rounded-full px-3 py-2 text-[11px] font-black border"
-            style={{
-              borderColor: COLORS.border,
-              background: COLORS.soft,
-              color: COLORS.text,
-            }}
+            style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}
             title="Refresh"
           >
             Refresh
@@ -1255,6 +1149,7 @@ export default function PicksClient() {
               }}
             >
               <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
+                <div className="screamr-sparks" />
                 <div
                   className="absolute inset-0 pointer-events-none"
                   style={{
@@ -1286,11 +1181,7 @@ export default function PicksClient() {
                     </div>
 
                     <div className="text-[11px] text-white/80 font-semibold">
-                      {nextUpLockMs === null
-                        ? ""
-                        : nextUpLockMs <= 0
-                        ? "LIVE / Locked"
-                        : `Locks in ${msToCountdown(nextUpLockMs)}`}
+                      {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`}
                     </div>
                   </div>
 
@@ -1308,16 +1199,10 @@ export default function PicksClient() {
                   })()}
 
                   <div className="mt-3 text-center">
-                    <div
-                      className="text-[22px] sm:text-[28px] font-black leading-tight"
-                      style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
-                    >
+                    <div className="text-[22px] sm:text-[28px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                       {nextUpStable.match}
                     </div>
-                    <div
-                      className="mt-2 text-[12px] font-semibold"
-                      style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
-                    >
+                    <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                       {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
                     </div>
                   </div>
@@ -1349,26 +1234,13 @@ export default function PicksClient() {
           {initialLoading && sortedGames.length === 0 ? (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="rounded-2xl border overflow-hidden"
-                  style={{
-                    borderColor: COLORS.border,
-                    background: COLORS.soft2,
-                  }}
-                >
+                <div key={i} className="rounded-2xl border overflow-hidden" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
                   <div className="h-[190px] bg-white/5 animate-pulse" />
                 </div>
               ))}
             </div>
           ) : sortedGames.length === 0 ? (
-            <div
-              className="mt-4 rounded-2xl border p-4 text-sm text-white/70"
-              style={{
-                borderColor: "rgba(255,46,77,0.35)",
-                background: COLORS.soft2,
-              }}
-            >
+            <div className="mt-4 rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: "rgba(255,46,77,0.35)", background: COLORS.soft2 }}>
               No games found.
             </div>
           ) : (
@@ -1381,7 +1253,7 @@ export default function PicksClient() {
         </div>
 
         <div className="mt-8 pb-6 text-center text-[11px]" style={{ color: "rgba(255,255,255,0.55)" }}>
-          Torpie © 2026
+          SCREAMR © 2026
         </div>
       </div>
     </div>
