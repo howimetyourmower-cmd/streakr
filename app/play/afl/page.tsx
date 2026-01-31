@@ -771,7 +771,7 @@ export default function AflHubPage() {
               <h1 className="mt-4 text-[44px] sm:text-[66px] font-extrabold leading-[0.98] tracking-tight">
                 <span className="block">SCREAMR.</span>
                 <span className="block">CALL IT.</span>
-                <span className="block">KEEP IT.</span>
+                <span className="block">LOCK IT.</span>
                 <span
                   className="block"
                   style={{
