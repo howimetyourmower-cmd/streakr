@@ -1,6 +1,6 @@
-// /app/play/afl/page.tsx
 "use client";
 
+// /app/play/afl/page.tsx
 export const dynamic = "force-dynamic";
 
 import { useEffect, useMemo, useRef, useState, MouseEvent } from "react";
@@ -15,7 +15,7 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: any; // API may send "Open"/"Final" etc
+  status: any;
   match: string;
   venue: string;
   startTime: string;
@@ -105,15 +105,156 @@ function msToCountdown(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-/** ✅ SCREAMR palette: Black / Red / White */
+/** ✅ SCREAMR palette */
 const COLORS = {
   bg: "#06070B",
   panel: "#0A0B10",
   panel2: "#07080D",
   red: "#FF2E4D",
   redDeep: "#B10F2A",
+  cyan: "#00E5FF",
   white: "#FFFFFF",
+  border: "rgba(255,255,255,0.10)",
+  soft: "rgba(255,255,255,0.06)",
+  soft2: "rgba(255,255,255,0.03)",
 };
+
+type TeamSlug =
+  | "adelaide"
+  | "brisbane"
+  | "carlton"
+  | "collingwood"
+  | "essendon"
+  | "fremantle"
+  | "geelong"
+  | "goldcoast"
+  | "gws"
+  | "hawthorn"
+  | "melbourne"
+  | "northmelbourne"
+  | "portadelaide"
+  | "richmond"
+  | "stkilda"
+  | "sydney"
+  | "westcoast"
+  | "westernbulldogs";
+
+function teamNameToSlug(nameRaw: string): TeamSlug | null {
+  const n = (nameRaw || "").toLowerCase().trim();
+
+  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
+  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
+  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
+  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
+  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
+  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
+  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
+
+  if (n.includes("adelaide")) return "adelaide";
+  if (n.includes("brisbane")) return "brisbane";
+  if (n.includes("carlton")) return "carlton";
+  if (n.includes("collingwood")) return "collingwood";
+  if (n.includes("essendon")) return "essendon";
+  if (n.includes("fremantle")) return "fremantle";
+  if (n.includes("geelong")) return "geelong";
+  if (n.includes("hawthorn")) return "hawthorn";
+  if (n.includes("melbourne")) return "melbourne";
+  if (n.includes("richmond")) return "richmond";
+  if (n.includes("sydney") || n.includes("swans")) return "sydney";
+
+  return null;
+}
+
+function splitMatch(match: string): { home: string; away: string } | null {
+  const m = String(match || "").trim();
+  if (!m) return null;
+  const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
+  const hit = m.match(re);
+  if (!hit) return null;
+  const home = hit[1].trim();
+  const away = hit[2].trim();
+  if (!home || !away) return null;
+  return { home, away };
+}
+
+function logoCandidates(teamSlug: TeamSlug): string[] {
+  return [
+    `/aflteams/${teamSlug}-logo.jpg`,
+    `/aflteams/${teamSlug}-logo.jpeg`,
+    `/aflteams/${teamSlug}-logo.png`,
+    `/afllogos/${teamSlug}-logo.jpg`,
+    `/afllogos/${teamSlug}-logo.png`,
+  ];
+}
+
+const TeamLogo = ({
+  teamName,
+  size = 78,
+}: {
+  teamName: string;
+  size?: number;
+}) => {
+  const slug = teamNameToSlug(teamName);
+  const [idx, setIdx] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const fallbackInitials = (teamName || "AFL")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((x) => x[0]?.toUpperCase())
+    .join("");
+
+  const candidates = slug ? logoCandidates(slug) : [];
+  const src = slug ? candidates[Math.min(idx, candidates.length - 1)] : "";
+
+  const tile: React.CSSProperties = {
+    width: size,
+    height: size,
+    borderRadius: 18,
+  };
+
+  if (!slug || dead) {
+    return (
+      <div className="relative" style={tile} title={teamName}>
+        <div className="absolute inset-0 screamr-logoBorder" style={{ borderRadius: 18 }} />
+        <div className="absolute inset-[3px] screamr-logoInner" style={{ borderRadius: 16 }}>
+          <div className="absolute inset-0 screamr-logoShine" style={{ borderRadius: 16 }} />
+          <div className="absolute inset-0 flex items-center justify-center font-black tracking-wide text-white/90">
+            {fallbackInitials || "AFL"}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative" style={tile} title={teamName}>
+      <div className="absolute inset-0 screamr-logoBorder" style={{ borderRadius: 18 }} />
+      <div className="absolute inset-[3px] screamr-logoInner" style={{ borderRadius: 16 }}>
+        <div className="absolute inset-0 screamr-logoShine" style={{ borderRadius: 16 }} />
+        <div className="absolute inset-0 p-2.5">
+          <Image
+            src={src}
+            alt={`${teamName} logo`}
+            fill
+            sizes={`${size}px`}
+            style={{ objectFit: "contain" }}
+            onError={() => {
+              setIdx((p) => {
+                if (p + 1 < candidates.length) return p + 1;
+                setDead(true);
+                return p;
+              });
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type StatChip = { label: string; value: string; sub?: string; tone?: "red" | "cyan" | "white" };
 
 export default function AflHubPage() {
   const { user } = useAuth();
@@ -228,9 +369,7 @@ export default function AflHubPage() {
         createdAt: Date.now(),
       };
       window.localStorage.setItem(PREVIEW_FOCUS_KEY, JSON.stringify(payload));
-    } catch {
-      // ignore
-    }
+    } catch {}
 
     router.push(picksHref);
   };
@@ -248,15 +387,14 @@ export default function AflHubPage() {
     el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // Shared styles
   const darkCardStyle = {
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: COLORS.border,
     background: `linear-gradient(180deg, ${COLORS.panel} 0%, ${COLORS.panel2} 100%)`,
     boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
   } as const;
 
   const glassCardStyle = {
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: COLORS.border,
     background: "rgba(10,10,14,0.62)",
     boxShadow: "0 22px 80px rgba(0,0,0,0.65)",
     backdropFilter: "blur(10px)",
@@ -273,14 +411,14 @@ export default function AflHubPage() {
   } as const;
 
   const yesBtnStyle = {
-    borderColor: "rgba(255,255,255,0.35)",
+    borderColor: "rgba(255,255,255,0.25)",
     background: "linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.78))",
     color: "rgba(0,0,0,0.92)",
     boxShadow: "0 0 18px rgba(255,255,255,0.10)",
   } as const;
 
   const noBtnStyle = {
-    borderColor: rgbaFromHex(COLORS.red, 0.75),
+    borderColor: rgbaFromHex(COLORS.red, 0.65),
     background: `linear-gradient(180deg, ${rgbaFromHex(COLORS.red, 0.98)}, ${rgbaFromHex(
       COLORS.redDeep,
       0.92
@@ -310,6 +448,45 @@ export default function AflHubPage() {
     );
   };
 
+  const CardSilhouetteBg = ({ opacity = 1 }: { opacity?: number }) => {
+    return (
+      <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+        <div className="absolute inset-0" style={{ opacity }}>
+          <Image
+            src="/afl1.png"
+            alt=""
+            fill
+            sizes="(max-width: 1024px) 100vw, 1024px"
+            style={{
+              objectFit: "cover",
+              filter: "grayscale(1) brightness(0.35) contrast(1.35)",
+              transform: "scale(1.04)",
+            }}
+            priority={false}
+          />
+        </div>
+
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.58) 55%, rgba(0,0,0,0.90) 100%)",
+          }}
+        />
+      </div>
+    );
+  };
+
+  const stats: StatChip[] = useMemo(() => {
+    const liveCount = games.filter((g) => new Date(g.startTime).getTime() <= nowMs).length;
+    const upcomingCount = games.length - liveCount;
+    return [
+      { label: "Open picks", value: String(openQuestions.length), sub: "right now", tone: "cyan" },
+      { label: "Matches", value: String(games.length), sub: `${upcomingCount} upcoming`, tone: "white" },
+      { label: "Live", value: String(liveCount), sub: "locked", tone: "red" },
+    ];
+  }, [games, openQuestions.length, nowMs]);
+
   return (
     <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
@@ -318,17 +495,146 @@ export default function AflHubPage() {
           80% { transform: scale(1.7); opacity: 0; }
           100% { transform: scale(1.7); opacity: 0; }
         }
-        @keyframes floaty {
-          0% { transform: translateY(0px); }
-          50% { transform: translateY(-6px); }
-          100% { transform: translateY(0px); }
+        @keyframes floaty { 0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)} }
+
+        /* Game-show sparks */
+        .screamr-sparks {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.16;
+          mix-blend-mode: screen;
+          background-image:
+            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.20) 0 1px, transparent 2px);
+          background-size: 220px 220px;
+          animation: sparksMove 6.5s linear infinite;
+        }
+        @keyframes sparksMove { 0%{transform:translate3d(0,0,0)} 100%{transform:translate3d(-220px,-220px,0)} }
+
+        .screamr-spotlights {
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          opacity: 0.60;
+          background:
+            radial-gradient(700px 260px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
+            radial-gradient(700px 260px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
+            radial-gradient(900px 340px at 50% 110%, rgba(255,46,77,0.08) 0%, rgba(0,0,0,0) 70%);
+        }
+
+        .screamr-cardBorder {
+          background: linear-gradient(135deg,
+            rgba(255,46,77,0.55) 0%,
+            rgba(255,46,77,0.08) 25%,
+            rgba(0,229,255,0.10) 55%,
+            rgba(255,46,77,0.40) 100%);
+        }
+
+        .screamr-pill {
+          position: relative;
+          border: 1px solid rgba(255,255,255,0.14);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+          color: rgba(255,255,255,0.92);
+          box-shadow:
+            0 10px 26px rgba(0,0,0,0.35),
+            0 0 0 1px rgba(0,0,0,0.12) inset;
+          overflow: hidden;
+        }
+        .screamr-pill::after {
+          content: "";
+          position: absolute;
+          top: -50%;
+          left: -35%;
+          width: 60%;
+          height: 200%;
+          transform: rotate(22deg);
+          background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
+          animation: pillShine 3.6s ease-in-out infinite;
+        }
+        @keyframes pillShine {
+          0% { transform: translateX(-40%) rotate(22deg); opacity: 0; }
+          18% { opacity: 0.65; }
+          40% { transform: translateX(210%) rotate(22deg); opacity: 0; }
+          100% { transform: translateX(210%) rotate(22deg); opacity: 0; }
+        }
+
+        .screamr-gameLabel {
+          position: relative;
+          border: 1px solid rgba(255,46,77,0.35);
+          background:
+            linear-gradient(90deg, rgba(255,46,77,0.22) 0%, rgba(0,229,255,0.10) 50%, rgba(255,46,77,0.18) 100%);
+          color: rgba(255,255,255,0.95);
+          box-shadow: 0 12px 34px rgba(255,46,77,0.12);
+          overflow: hidden;
+        }
+        .screamr-gameLabel::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(420px 120px at 0% 50%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.00) 60%);
+          animation: labelSweep 2.8s ease-in-out infinite;
+        }
+        @keyframes labelSweep {
+          0% { transform: translateX(-55%); opacity: 0.0; }
+          25% { opacity: 0.7; }
+          55% { transform: translateX(35%); opacity: 0.0; }
+          100% { transform: translateX(35%); opacity: 0.0; }
+        }
+
+        .screamr-cta {
+          border: 1px solid rgba(255,46,77,0.32);
+          background: linear-gradient(180deg, rgba(255,46,77,0.98) 0%, rgba(255,46,77,0.70) 100%);
+          color: rgba(255,255,255,0.98);
+          box-shadow: 0 14px 34px rgba(255,46,77,0.18);
+        }
+        .screamr-cta:hover { filter: brightness(1.04); }
+        .screamr-cta:active { transform: translateY(1px); }
+
+        .screamr-logoBorder {
+          background: linear-gradient(135deg,
+            rgba(255,46,77,0.75) 0%,
+            rgba(255,46,77,0.18) 30%,
+            rgba(0,229,255,0.18) 60%,
+            rgba(255,46,77,0.55) 100%);
+          box-shadow:
+            0 14px 34px rgba(255,46,77,0.12),
+            0 0 0 1px rgba(0,0,0,0.40) inset;
+        }
+        .screamr-logoInner {
+          background:
+            radial-gradient(300px 120px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%),
+            linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.78) 100%);
+          border: 1px solid rgba(255,255,255,0.10);
+          box-shadow:
+            0 0 0 1px rgba(255,46,77,0.10) inset,
+            0 18px 48px rgba(0,0,0,0.65);
+          overflow: hidden;
+        }
+        .screamr-logoShine {
+          pointer-events: none;
+          position: absolute;
+          top: -40%;
+          left: -45%;
+          width: 70%;
+          height: 220%;
+          transform: rotate(18deg);
+          background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
+          animation: logoShine 4.2s ease-in-out infinite;
+          opacity: 0.0;
+        }
+        @keyframes logoShine {
+          0% { transform: translateX(-40%) rotate(18deg); opacity: 0.0; }
+          20% { opacity: 0.55; }
+          45% { transform: translateX(230%) rotate(18deg); opacity: 0.0; }
+          100% { transform: translateX(230%) rotate(18deg); opacity: 0.0; }
         }
 
         /* ✅ Prize ticker marquee */
-        .screamr-marquee {
-          overflow: hidden;
-          white-space: nowrap;
-        }
+        .screamr-marquee { overflow: hidden; white-space: nowrap; }
         .screamr-track {
           display: inline-flex;
           align-items: center;
@@ -341,12 +647,13 @@ export default function AflHubPage() {
         }
         @media (prefers-reduced-motion: reduce) {
           .screamr-track { animation: none; }
+          .screamr-sparks, .screamr-pill::after, .screamr-gameLabel::after, .screamr-logoShine { animation: none !important; }
         }
       `}</style>
 
       {/* ======= HERO ======= */}
       <section className="relative overflow-hidden">
-        <div className="relative w-full h-[580px] sm:h-[640px]">
+        <div className="relative w-full h-[620px] sm:h-[680px]">
           <Image
             src="/screamr/hero-bg.png"
             alt="SCREAMR AFL hero"
@@ -356,15 +663,9 @@ export default function AflHubPage() {
           />
 
           {/* cinematic overlays */}
-          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.35)" }} />
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "radial-gradient(900px 360px at 20% 12%, rgba(255,46,77,0.26) 0%, rgba(0,0,0,0.00) 65%)",
-            }}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/45 to-transparent" />
+          <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.42)" }} />
+          <div className="absolute inset-0 screamr-spotlights" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
           {/* subtle grain */}
           <div
@@ -381,7 +682,7 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              {/* ✅ FULL-WIDTH MARQUEE (VISIBLE ON MOBILE) */}
+              {/* marquee */}
               <div
                 className="
                   w-screen
@@ -391,20 +692,19 @@ export default function AflHubPage() {
                   border-y
                 "
                 style={{
-                  borderColor: "rgba(255,255,255,0.10)",
+                  borderColor: COLORS.border,
                   background:
-                    "linear-gradient(180deg, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.38) 100%)",
+                    "linear-gradient(180deg, rgba(0,0,0,0.74) 0%, rgba(0,0,0,0.42) 100%)",
                   boxShadow: `0 0 26px ${rgbaFromHex(COLORS.red, 0.12)}`,
                 }}
               >
                 <div className="relative">
-                  {/* edge fades */}
                   <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/90 to-transparent" />
                   <div className="pointer-events-none absolute inset-y-0 right-0 w-16 bg-gradient-to-l from-black/90 to-transparent" />
 
                   <div className="screamr-marquee py-2.5">
                     <div className="screamr-track">
-                      {Array.from({ length: 14 }).map((_, i) => (
+                      {Array.from({ length: 12 }).map((_, i) => (
                         <span
                           key={`a-${i}`}
                           className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
@@ -413,10 +713,10 @@ export default function AflHubPage() {
                             textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
                           }}
                         >
-                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
+                          * SCREAMR BETA 2026 — TESTING GAMEPLAY — SEND FEEDBACK — 2027 WILL BE HUGE *
                         </span>
                       ))}
-                      {Array.from({ length: 14 }).map((_, i) => (
+                      {Array.from({ length: 12 }).map((_, i) => (
                         <span
                           key={`b-${i}`}
                           className="mx-4 text-[12px] sm:text-[11px] font-black tracking-[0.22em]"
@@ -425,7 +725,7 @@ export default function AflHubPage() {
                             textShadow: `0 10px 26px ${rgbaFromHex(COLORS.red, 0.22)}`,
                           }}
                         >
-                          * SCREAMR BETA 2026 SEASON - we are testing gameplay and streak tracking - send us your ideas - 2027 will be huge *
+                          * SCREAMR BETA 2026 — TESTING GAMEPLAY — SEND FEEDBACK — 2027 WILL BE HUGE *
                         </span>
                       ))}
                     </div>
@@ -433,7 +733,7 @@ export default function AflHubPage() {
                 </div>
               </div>
 
-              {/* top chip row */}
+              {/* chips */}
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
@@ -462,11 +762,7 @@ export default function AflHubPage() {
                     <span className="truncate max-w-[220px] sm:max-w-[360px]">{nextUp.match}</span>
                     <span className="text-white/35">•</span>
                     <span className="text-white/70">
-                      {nextUpLockMs === null
-                        ? ""
-                        : isNextUpLive
-                        ? "LIVE"
-                        : `Locks in ${msToCountdown(nextUpLockMs)}`}
+                      {nextUpLockMs === null ? "" : isNextUpLive ? "LIVE" : `Locks in ${msToCountdown(nextUpLockMs)}`}
                     </span>
                   </span>
                 ) : null}
@@ -488,10 +784,10 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                That’s a <span className="font-black text-white">SCREAMR</span>. Pick live yes/no AFL matches outcomes.
-                build your streak. One wrong in a game and your streak is cooked.
+                Pick live yes/no AFL outcomes and keep your streak alive. Pick any amount. One wrong pick in a match and your streak is cooked.
               </p>
 
+              {/* hero CTAs */}
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Link
                   href={picksHref}
@@ -516,102 +812,141 @@ export default function AflHubPage() {
                 </button>
               </div>
 
-              {/* hero micro cards */}
+              {/* stats strip */}
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {[
-                  { k: "Pick any amount", v: "0 to 12 questions" },
-                  { k: "Auto-lock", v: "locks at bounce" },
-                  { k: "Clean Sweep", v: "any wrong = reset" },
-                ].map((it) => (
-                  <div key={it.k} className="rounded-2xl border px-4 py-3" style={glassCardStyle}>
-                    <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">{it.k}</div>
-                    <div className="mt-1 text-[13px] font-black text-white/90">{it.v}</div>
-                  </div>
-                ))}
+                {stats.map((s) => {
+                  const tone =
+                    s.tone === "red"
+                      ? COLORS.red
+                      : s.tone === "cyan"
+                      ? COLORS.cyan
+                      : "rgba(255,255,255,0.92)";
+
+                  return (
+                    <div key={s.label} className="rounded-2xl border px-4 py-3" style={glassCardStyle}>
+                      <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">{s.label}</div>
+                      <div className="mt-1 flex items-end justify-between gap-2">
+                        <div className="text-[20px] font-black" style={{ color: tone }}>
+                          {loading ? "—" : s.value}
+                        </div>
+                        <div className="text-[11px] text-white/60 font-semibold">{s.sub || ""}</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* right side logo / badge */}
+            {/* ===== Right Side: GAME SHOW "NEXT UP" BOARD ===== */}
             <div className="hidden lg:flex flex-1 justify-end">
               <div
-                className="rounded-3xl border p-5"
+                className="rounded-3xl overflow-hidden"
                 style={{
-                  ...glassCardStyle,
-                  width: 360,
+                  width: 420,
                   animation: "floaty 4.2s ease-in-out infinite",
                 }}
               >
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] uppercase tracking-widest text-white/55 font-black">Today’s vibe</div>
-                  <span
-                    className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
-                    style={{
-                      borderColor: rgbaFromHex(COLORS.red, 0.40),
-                      background: rgbaFromHex(COLORS.red, 0.12),
-                      color: "rgba(255,255,255,0.92)",
-                    }}
-                  >
-                    <TinyBolt live />
-                    SCREAMR MODE
-                  </span>
-                </div>
-
-                <div className="mt-4 flex items-center gap-4">
+                <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
                   <div
-                    className="relative h-14 w-14 rounded-2xl border overflow-hidden"
+                    className="relative rounded-3xl border overflow-hidden"
                     style={{
-                      borderColor: "rgba(255,255,255,0.12)",
-                      background: "rgba(0,0,0,0.35)",
+                      borderColor: COLORS.border,
+                      background: "rgba(0,0,0,0.72)",
+                      boxShadow: "0 28px 90px rgba(0,0,0,0.72)",
+                      backdropFilter: "blur(10px)",
                     }}
                   >
-                    <Image src="/screamr/screamr-logo.png" alt="SCREAMR" fill className="object-contain p-2" />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-[16px] font-black text-white">Take a SCREAMR</div>
-                    <div className="text-[12px] text-white/65 font-semibold truncate">
-                      Make your picks • Climb the leaderboard
+                    <div className="relative p-5 overflow-hidden" style={{ minHeight: 270 }}>
+                      <div className="screamr-sparks" />
+                      <CardSilhouetteBg opacity={0.85} />
+
+                      <div className="relative z-10">
+                        <div className="flex items-center justify-between">
+                          <span className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em]">
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{
+                                background: isNextUpLive ? COLORS.red : COLORS.cyan,
+                                boxShadow: isNextUpLive
+                                  ? "0 0 14px rgba(255,46,77,0.55)"
+                                  : "0 0 14px rgba(0,229,255,0.50)",
+                              }}
+                            />
+                            NEXT UP
+                          </span>
+
+                          <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                            {nextUpLockMs === null ? "—" : isNextUpLive ? "LIVE / LOCKED" : `LOCKS IN ${msToCountdown(nextUpLockMs)}`}
+                          </span>
+                        </div>
+
+                        {nextUp ? (
+                          <>
+                            {(() => {
+                              const m = splitMatch(nextUp.match);
+                              const home = m?.home ?? nextUp.match;
+                              const away = m?.away ?? "AFL";
+                              return (
+                                <div className="mt-4 flex items-center justify-center gap-4">
+                                  <TeamLogo teamName={home} size={92} />
+                                  <div className="text-white/85 font-black text-[13px]">vs</div>
+                                  <TeamLogo teamName={away} size={92} />
+                                </div>
+                              );
+                            })()}
+
+                            <div className="mt-3 text-center">
+                              <div
+                                className="text-[22px] font-black leading-tight"
+                                style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
+                              >
+                                {nextUp.match}
+                              </div>
+                              <div className="mt-2 text-[12px] font-semibold text-white/70">
+                                {formatStartLine(nextUp.startTime)} • {nextUp.venue}
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex gap-2">
+                              <Link
+                                href={picksHref}
+                                onClick={requireAuthForPicks}
+                                className="flex-1 inline-flex items-center justify-center rounded-2xl px-5 py-3 text-[12px] font-black border screamr-cta"
+                                style={{ textDecoration: "none" }}
+                              >
+                                GO PICK
+                              </Link>
+                              <Link
+                                href="/leaderboards"
+                                className="inline-flex items-center justify-center rounded-2xl px-5 py-3 text-[12px] font-black border"
+                                style={{
+                                  borderColor: "rgba(255,255,255,0.18)",
+                                  background: "rgba(255,255,255,0.06)",
+                                  color: "rgba(255,255,255,0.92)",
+                                  textDecoration: "none",
+                                }}
+                              >
+                                LEADERS
+                              </Link>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="mt-6 rounded-2xl border p-4 text-sm text-white/70" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
+                            Seed rounds to display the Next Up board.
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <div
-                  className="mt-4 rounded-2xl border p-4"
-                  style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.22)" }}
-                >
-                  <div className="text-[12px] font-black text-white/90">Pro tip</div>
-                  <div className="mt-1 text-[12px] text-white/70 leading-relaxed">
-                    Go small early, then scale up when you’re confident. Your streak only cares about being perfect.
+                    <div className="h-[1px]" style={{ background: "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.45), rgba(0,229,255,0.18), rgba(255,46,77,0.00))" }} />
                   </div>
-                </div>
-
-                <div className="mt-4 flex gap-2">
-                  <Link
-                    href={picksHref}
-                    onClick={requireAuthForPicks}
-                    className="flex-1 inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
-                    style={primaryBtn}
-                  >
-                    GO PICK
-                  </Link>
-                  <Link
-                    href="/leaderboards"
-                    className="inline-flex items-center justify-center rounded-2xl px-4 py-3 text-[12px] font-black border"
-                    style={{
-                      borderColor: "rgba(255,255,255,0.18)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "rgba(255,255,255,0.92)",
-                      textDecoration: "none",
-                    }}
-                  >
-                    LEADERS
-                  </Link>
                 </div>
               </div>
             </div>
+            {/* ===== end Right Side ===== */}
           </div>
         </div>
 
-        {/* bottom fade */}
         <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-b from-transparent to-[#0A0A0F]" />
       </section>
 
@@ -623,34 +958,37 @@ export default function AflHubPage() {
             <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
 
             <div className="grid sm:grid-cols-3 gap-4">
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">1) PICK YES / NO</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Tap <span className="font-black text-white/85">YES</span> or{" "}
-                  <span className="font-black" style={{ color: COLORS.red }}>
-                    NO
-                  </span>{" "}
-                  on any question. Pick 0, 1, 5 or all 12 — your call.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">2) LOCKS AT BOUNCE</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  No lock-in button. Picks auto-lock at the game start time. Questions drop live during the match.
-                </p>
-              </div>
-
-              <div className="rounded-2xl border p-5" style={darkCardStyle}>
-                <div className="text-sm font-black mb-2">3) CLEAN SWEEP</div>
-                <p className="text-sm text-white/65 leading-relaxed">
-                  Your streak is per game. Any wrong pick in that match = reset to 0. Voids don’t count.
-                </p>
-              </div>
+              {[
+                {
+                  title: "1) PICK YES / NO",
+                  body: (
+                    <>
+                      Tap <span className="font-black text-white/85">YES</span> or{" "}
+                      <span className="font-black" style={{ color: COLORS.red }}>
+                        NO
+                      </span>{" "}
+                      on any question. Pick 0, 1, 5 or all 12 — your call.
+                    </>
+                  ),
+                },
+                {
+                  title: "2) LOCKS AT BOUNCE",
+                  body: <>No lock-in button. Picks auto-lock at the game start time. Questions drop live during the match.</>,
+                },
+                {
+                  title: "3) CLEAN SWEEP",
+                  body: <>Any wrong pick in a match resets your streak to 0. Voids don’t count.</>,
+                },
+              ].map((it) => (
+                <div key={it.title} className="rounded-2xl border p-5" style={darkCardStyle}>
+                  <div className="text-sm font-black mb-2">{it.title}</div>
+                  <p className="text-sm text-white/65 leading-relaxed">{it.body}</p>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* NEXT FEATURED MATCHES */}
+          {/* NEXT FEATURED MATCHES — game-show cards */}
           <div className="mb-10">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div className="text-[12px] font-black text-white/75">NEXT FEATURED MATCHES</div>
@@ -668,7 +1006,7 @@ export default function AflHubPage() {
               <div className="grid md:grid-cols-3 gap-4">
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="rounded-2xl border overflow-hidden" style={darkCardStyle}>
-                    <div className="h-32 bg-white/5 animate-pulse" />
+                    <div className="h-44 bg-white/5 animate-pulse" />
                     <div className="p-5">
                       <div className="h-4 w-3/4 bg-white/10 rounded animate-pulse mb-2" />
                       <div className="h-3 w-1/2 bg-white/5 rounded animate-pulse mb-4" />
@@ -680,83 +1018,88 @@ export default function AflHubPage() {
             ) : featuredMatches.length ? (
               <div className="grid md:grid-cols-3 gap-4">
                 {featuredMatches.map((g) => {
-                  const line = formatStartLine(g.startTime);
-                  const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
                   const lockMs = new Date(g.startTime).getTime() - nowMs;
                   const live = lockMs <= 0;
+                  const m = splitMatch(g.match);
+                  const home = m?.home ?? g.match;
+                  const away = m?.away ?? "AFL";
+                  const qCount = Array.isArray(g.questions) ? g.questions.length : 0;
 
                   return (
-                    <div
-                      key={g.id}
-                      className="rounded-2xl border overflow-hidden"
-                      style={{
-                        borderColor: "rgba(255,255,255,0.10)",
-                        boxShadow: "0 18px 55px rgba(0,0,0,0.70)",
-                        background: "rgba(0,0,0,0.18)",
-                      }}
-                    >
-                      <div className="relative h-36">
-                        <Image
-                          src="/screamr/hero-bg.png"
-                          alt="Match hero"
-                          fill
-                          className="object-cover object-center"
-                          sizes="(max-width: 768px) 100vw, 33vw"
-                        />
-                        <div className="absolute inset-0 bg-black/62" />
-                        <div
-                          className="absolute inset-0"
-                          style={{
-                            background:
-                              "radial-gradient(700px 220px at 20% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0.00) 60%)",
-                          }}
-                        />
-                        <div className="absolute left-4 right-4 bottom-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs text-white/75 font-semibold">{line}</div>
-                            <span
-                              className="inline-flex items-center gap-2 rounded-full px-2.5 py-1 border text-[10px] font-black"
-                              style={{
-                                borderColor: live
-                                  ? rgbaFromHex(COLORS.red, 0.55)
-                                  : "rgba(255,255,255,0.16)",
-                                background: live ? rgbaFromHex(COLORS.red, 0.14) : "rgba(255,255,255,0.06)",
-                                color: "rgba(255,255,255,0.92)",
-                              }}
-                            >
-                              <TinyBolt live={live} />
-                              {live ? "LIVE" : `LOCKS ${msToCountdown(lockMs)}`}
-                            </span>
+                    <Link key={g.id} href={picksHref} onClick={requireAuthForPicks} style={{ textDecoration: "none" }}>
+                      <div className="relative p-[1px] rounded-2xl screamr-cardBorder">
+                        <div className="relative rounded-2xl border overflow-hidden" style={{ borderColor: COLORS.border, background: COLORS.soft2 }}>
+                          <div className="relative p-4 overflow-hidden" style={{ minHeight: 210 }}>
+                            <div className="screamr-sparks" />
+                            <div className="absolute inset-0 screamr-spotlights" />
+                            <CardSilhouetteBg opacity={0.95} />
+
+                            <div className="relative z-10">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
+                                  <span
+                                    className="h-2 w-2 rounded-full"
+                                    style={{
+                                      background: live ? COLORS.red : COLORS.cyan,
+                                      boxShadow: live
+                                        ? "0 0 14px rgba(255,46,77,0.55)"
+                                        : "0 0 14px rgba(0,229,255,0.50)",
+                                    }}
+                                  />
+                                  {live ? "LIVE" : "GAME"}
+                                </span>
+
+                                <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                                  {live ? "LOCKED" : `LOCKS ${msToCountdown(lockMs)}`}
+                                </span>
+                              </div>
+
+                              <div className="mt-3 flex items-center justify-center gap-3">
+                                <TeamLogo teamName={home} size={78} />
+                                <div className="text-white/85 font-black text-[12px]">vs</div>
+                                <TeamLogo teamName={away} size={78} />
+                              </div>
+
+                              <div className="mt-3 text-center">
+                                <div className="text-[18px] font-black leading-tight text-white">{g.match}</div>
+                                <div className="mt-1 text-[12px] font-semibold text-white/70">{g.venue}</div>
+                                <div className="mt-1 text-[11px] font-semibold text-white/55">{formatStartLine(g.startTime)}</div>
+                              </div>
+
+                              <div className="mt-3 flex items-center justify-center gap-2 flex-wrap">
+                                <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                                  {qCount} questions
+                                </span>
+                                <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                                  Pick any amount
+                                </span>
+                              </div>
+
+                              <div className="mt-4 flex items-center justify-center">
+                                <span className="screamr-cta inline-flex items-center justify-center rounded-xl px-5 py-2 text-[12px] font-black">
+                                  PLAY NOW
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-sm font-black text-white/95 mt-1">{g.match}</div>
+
+                          <div
+                            className="h-[1px]"
+                            style={{
+                              background:
+                                "linear-gradient(90deg, rgba(255,46,77,0.00), rgba(255,46,77,0.40), rgba(0,229,255,0.18), rgba(255,46,77,0.00))",
+                            }}
+                          />
                         </div>
                       </div>
-
-                      <div className="p-5">
-                        <div className="text-sm font-extrabold text-white/90">{g.venue}</div>
-                        <div className="text-[12px] text-white/55 mt-1">{qCount} questions • pick any amount</div>
-
-                        <div className="mt-4">
-                          <Link
-                            href={picksHref}
-                            onClick={requireAuthForPicks}
-                            className="inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-[12px] font-black border"
-                            style={primaryBtn}
-                          >
-                            PLAY THIS MATCH
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
+                    </Link>
                   );
                 })}
               </div>
             ) : (
               <div className="rounded-2xl border p-5" style={darkCardStyle}>
                 <div className="text-sm text-white/70 mb-3">No matches loaded yet.</div>
-                <div className="text-[12px] text-white/55">
-                  Once rounds are seeded, featured matches show here automatically.
-                </div>
+                <div className="text-[12px] text-white/55">Once rounds are seeded, featured matches show here automatically.</div>
               </div>
             )}
           </div>
@@ -766,9 +1109,7 @@ export default function AflHubPage() {
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
                 <div className="text-[12px] font-black text-white/75">PICKS AVAILABLE RIGHT NOW</div>
-                <div className="text-sm text-white/70">
-                  Tap Yes/No to jump into Picks. (We’ll focus that question for you.)
-                </div>
+                <div className="text-sm text-white/70">Tap Yes/No to jump into Picks. (We’ll focus that question for you.)</div>
               </div>
 
               <Link
@@ -797,9 +1138,7 @@ export default function AflHubPage() {
 
             {!loading && previewQuestions.length === 0 && !error ? (
               <div className="rounded-2xl border px-6 py-6 text-center" style={darkCardStyle}>
-                <p className="text-sm text-white/65 mb-4">
-                  No open questions right now. Check back closer to bounce.
-                </p>
+                <p className="text-sm text-white/65 mb-4">No open questions right now. Check back closer to bounce.</p>
                 <Link
                   href={picksHref}
                   onClick={requireAuthForPicks}
@@ -820,50 +1159,47 @@ export default function AflHubPage() {
                     </div>
                   ))
                 : previewQuestions.map((q) => (
-                    <div key={q.id} className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
-                      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
-                            <span
-                              className="inline-flex items-center gap-2 rounded-full px-3 py-1 border font-black"
-                              style={{
-                                borderColor: rgbaFromHex(COLORS.red, 0.35),
-                                background: rgbaFromHex(COLORS.red, 0.08),
-                                color: "rgba(255,255,255,0.92)",
-                              }}
-                            >
-                              <TinyBolt live />
-                              Q{q.quarter}
-                            </span>
+                    <div key={q.id} className="relative p-[1px] rounded-2xl screamr-cardBorder">
+                      <div className="rounded-2xl border px-5 py-4" style={darkCardStyle}>
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
+                              <span
+                                className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                              >
+                                <TinyBolt live />
+                                Q{q.quarter}
+                              </span>
 
-                            <span className="text-white/35">•</span>
-                            <span className="font-semibold text-white/70">{formatStartLine(q.startTime)}</span>
-                            <span className="text-white/35">•</span>
-                            <span className="text-white/70">{q.venue}</span>
+                              <span className="text-white/35">•</span>
+                              <span className="font-semibold text-white/70">{formatStartLine(q.startTime)}</span>
+                              <span className="text-white/35">•</span>
+                              <span className="text-white/70">{q.venue}</span>
+                            </div>
+
+                            <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
+                            <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
                           </div>
 
-                          <div className="text-xs sm:text-sm font-black text-white/85 mb-2">{q.match}</div>
-                          <div className="text-sm sm:text-base font-semibold text-white/90">{q.question}</div>
-                        </div>
+                          <div className="flex items-center gap-3 lg:ml-6 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
+                              className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
+                              style={yesBtnStyle}
+                            >
+                              YES
+                            </button>
 
-                        <div className="flex items-center gap-3 lg:ml-6 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => goToPicksWithPreviewFocus(q.id, "yes")}
-                            className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                            style={yesBtnStyle}
-                          >
-                            YES
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
-                            className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
-                            style={noBtnStyle}
-                          >
-                            NO
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => goToPicksWithPreviewFocus(q.id, "no")}
+                              className="rounded-2xl border px-5 py-3 text-[13px] font-black active:scale-[0.99] transition"
+                              style={noBtnStyle}
+                            >
+                              NO
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -889,7 +1225,7 @@ export default function AflHubPage() {
           </div>
 
           {/* FOOTER */}
-          <footer className="mt-12 border-t pt-6" style={{ borderColor: "rgba(255,255,255,0.10)" }}>
+          <footer className="mt-12 border-t pt-6" style={{ borderColor: COLORS.border }}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/45">
               <p>SCREAMR is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.</p>
               <div className="flex items-center gap-4">
