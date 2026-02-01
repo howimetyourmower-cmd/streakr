@@ -33,7 +33,6 @@ type ApiQuestion = {
   sponsorName?: string;
   sponsorBlurb?: string;
 
-  // ✅ comes from /api/picks
   correctOutcome?: QuestionOutcome;
   outcome?: QuestionOutcome;
   correctPick?: boolean | null;
@@ -52,36 +51,28 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
-// ✅ Use SCREAMR red (not orange)
 const BRAND_RED = "#FF2E4D";
 const BRAND_BG = "#000000";
 const BRAND_CYAN = "#00E5FF";
 
-// ✅ derive roundNumber from gameId ("OR-G2", "R1-G3", etc)
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
   if (s.startsWith("R")) {
     const dash = s.indexOf("-");
-    const prefix = dash === -1 ? s : s.slice(0, dash); // "R12"
+    const prefix = dash === -1 ? s : s.slice(0, dash);
     const n = Number(prefix.replace("R", ""));
     if (Number.isFinite(n) && n >= 0) return n;
   }
   return 0;
 }
 
-/**
- * ✅ FIX: Only treat as a PLAYER PICK if it *looks like a real player name*
- * This prevents things like:
- * - "Will the total match score..." being incorrectly treated as a player.
- */
 function extractPlayerName(question: string) {
   const q = String(question || "").trim();
   const lower = q.toLowerCase();
 
   if (!lower.startsWith("will ")) return null;
 
-  // We only trust the "(TEAM)" pattern for player picks like: "Will Isaac Heeney (SYD) ..."
   const start = 5;
   const parenIdx = q.indexOf(" (", start);
   if (parenIdx === -1) return null;
@@ -89,11 +80,9 @@ function extractPlayerName(question: string) {
   const name = q.slice(start, parenIdx).trim();
   if (!name) return null;
 
-  // Must be at least 2 words (First Last)
   const words = name.split(/\s+/).filter(Boolean);
   if (words.length < 2) return null;
 
-  // Block common non-player phrases early
   const badFirstWords = new Set([
     "the",
     "a",
@@ -112,15 +101,11 @@ function extractPlayerName(question: string) {
   ]);
   if (badFirstWords.has(words[0].toLowerCase())) return null;
 
-  // Reject stat-ish words
   if (/\b(goals?|behinds?|disposals?|marks?|tackles?|kicks?|handballs?|points?)\b/i.test(name)) return null;
 
-  // Must look like capitalised name tokens
-  // allow: O'Neill, McDonald, De Goey, hyphenated, etc.
   const tokenLooksName = (w: string) =>
     /^[A-Z][A-Za-z'’\-]+$/.test(w) || /^[A-Z][A-Za-z'’\-]+$/.test(w.replace(/[^A-Za-z'’\-]/g, ""));
 
-  // allow connectors like "de", "van" ONLY if surrounding tokens look like names
   const connectors = new Set(["de", "del", "da", "di", "van", "von", "la", "le", "st"]);
   let nameTokens = 0;
   for (const w of words) {
@@ -147,9 +132,6 @@ function safeStatus(s: any): QuestionStatus {
   return "open";
 }
 
-/**
- * ✅ FIX: Quarter 0 should display as FULL GAME (not QUARTER 0)
- */
 function formatQuarterLabel(q: number) {
   if (q === 0) return "FULL GAME";
   return `QUARTER ${q}`;
@@ -157,20 +139,13 @@ function formatQuarterLabel(q: number) {
 
 function parseTeams(match: string) {
   const m = String(match || "").trim();
-
-  // Handles: "Team A vs Team B", "Team A v Team B", any casing, variable spacing
   const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
   const hit = m.match(re);
-
-  if (hit) {
-    return { home: hit[1].trim(), away: hit[2].trim() };
-  }
-
-  // fallback
+  if (hit) return { home: hit[1].trim(), away: hit[2].trim() };
   return { home: m, away: "" };
 }
 
-/* ✅ MATCH PicksClient team slug + logo candidates logic */
+/* Teams */
 
 type TeamSlug =
   | "adelaide"
@@ -354,9 +329,6 @@ function clampPct(n: number) {
   return Math.max(0, Math.min(100, n));
 }
 
-/**
- * ✅ Game-show "Community Pulse" bar (cyan/red)
- */
 function CommunityPulse({ yes, no }: { yes: number; no: number }) {
   let y = clampPct(yes);
   let n = clampPct(no);
@@ -440,17 +412,13 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-/**
- * ✅ Keeps card layout consistent even when question text is long.
- * - Clamps to 3 lines (so YES/NO area never gets pushed down)
- */
 function QuestionText({ text }: { text: string }) {
   return (
     <div
       className="mt-4 text-[18px] font-extrabold text-white break-words text-center"
       style={{
         lineHeight: 1.25,
-        minHeight: 72, // ~3 lines
+        minHeight: 72,
         maxHeight: 72,
         display: "-webkit-box",
         WebkitLineClamp: 3 as any,
@@ -464,51 +432,31 @@ function QuestionText({ text }: { text: string }) {
 }
 
 /**
- * ✅ Countdown formatter that shows DAYS + HOURS when needed.
- * Examples:
- * - 2d 03h 12m
- * - 03h 12m 09s
- * - 12m 09s
+ * ✅ Countdown like your mock:
+ * "REVEAL IN: 5d 20:00:00"
  */
-function msToCountdown(ms: number) {
+function msToRevealCountdown(ms: number) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(totalSec / 86400);
+  const rem = totalSec % 86400;
 
-  const days = Math.floor(totalSec / 86400);
-  const remAfterDays = totalSec % 86400;
-
-  const hours = Math.floor(remAfterDays / 3600);
-  const remAfterHours = remAfterDays % 3600;
-
-  const mins = Math.floor(remAfterHours / 60);
-  const secs = remAfterHours % 60;
+  const hh = Math.floor(rem / 3600);
+  const mm = Math.floor((rem % 3600) / 60);
+  const ss = rem % 60;
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
-
-  if (days > 0) {
-    // days + hours + mins
-    return `${days}d ${pad2(hours)}h ${pad2(mins)}m`;
-  }
-
-  if (hours > 0) {
-    // hours + mins + secs
-    return `${pad2(hours)}h ${pad2(mins)}m ${pad2(secs)}s`;
-  }
-
-  // mins + secs (keep it compact)
-  return `${pad2(mins)}m ${pad2(secs)}s`;
+  return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
 }
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
-  // ✅ FIX: separate initial-load vs background refresh (prevents “black flash”)
-  const [loading, setLoading] = useState(true); // first load only
-  const [refreshing, setRefreshing] = useState(false); // background refresh, keep UI
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [game, setGame] = useState<ApiGame | null>(null);
   const lastGameRef = useRef<ApiGame | null>(null);
 
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
@@ -525,7 +473,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return `torpie:picks:${uid}:${gameId}`;
   }, [user?.uid, gameId]);
 
-  // localStorage (anon/offline fallback)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(picksStorageKey);
@@ -554,10 +501,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         headers.Authorization = `Bearer ${token}`;
       }
 
-      const res = await fetch(`/api/picks?round=${roundNumber}`, {
-        cache: "no-store",
-        headers,
-      });
+      const res = await fetch(`/api/picks?round=${roundNumber}`, { cache: "no-store", headers });
       if (!res.ok) throw new Error(`API error (${res.status})`);
 
       const data = (await res.json()) as PicksApiResponse;
@@ -567,7 +511,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setGame(found);
       lastGameRef.current = found;
 
-      // ✅ if logged in, merge server userPick into local picks (never wipe)
       if (user) {
         const seeded: Record<string, LocalPick> = {};
         for (const q of found.questions || []) {
@@ -575,7 +518,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
         setPicks((prev) => ({ ...prev, ...seeded }));
       } else {
-        // anon: only seed if nothing exists locally
         setPicks((prev) => {
           if (Object.keys(prev || {}).length > 0) return prev;
           const seeded: Record<string, LocalPick> = {};
@@ -620,7 +562,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return matchStartMs - nowMs;
   }, [matchStartMs, nowMs]);
 
-  const matchIsLive = matchLockMs !== null ? matchLockMs <= 0 : false;
+  const matchIsLocked = matchLockMs !== null ? matchLockMs <= 0 : false;
 
   async function persistPick(questionId: string, next: LocalPick) {
     if (!user) return;
@@ -711,12 +653,225 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home, away } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
+  // ✅ “Mystery Gamble” sponsor style card, like your screenshots.
+  function SponsorMysteryCard({
+    q,
+    status,
+    qNum,
+  }: {
+    q: ApiQuestion;
+    status: QuestionStatus;
+    qNum: string;
+  }) {
+    const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
+    const selected = picks[q.id] || "none";
+    const isSaving = !!saving[q.id];
+
+    // Always show the vault (question hidden) until lock.
+    const isRevealTime = matchIsLocked;
+
+    // At lock, question text becomes visible (but picks are locked).
+    const showQuestionText = isRevealTime;
+
+    // Buttons: can pick anytime until lock (status=open). After lock, disabled.
+    const locked = status !== "open" || isRevealTime;
+    const yesSelected = selected === "yes";
+    const noSelected = selected === "no";
+
+    return (
+      <div className="screamr-card p-4 flex flex-col">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.16]">
+          <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
+        </div>
+        <div className="screamr-sparks" />
+
+        <div className="relative flex flex-col flex-1">
+          {/* header */}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
+                SPONSOR - {formatQuarterLabel(q.quarter)}
+              </div>
+              <div className="mt-1 text-[12px] text-white/60">
+                Status: <span className="text-white/70">{status}</span>
+              </div>
+
+              <div className="mt-2 flex items-center gap-2">
+                <ResultPill
+                  status={status}
+                  selected={selected}
+                  correctPick={q.correctPick}
+                  outcome={q.correctOutcome ?? q.outcome}
+                />
+                {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2">
+              <div className="screamr-timer screamr-timer--final" style={{ minWidth: 110 }}>
+                {isRevealTime ? "LOCKED" : "VAULT"}
+              </div>
+
+              <button
+                type="button"
+                className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                  locked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                }`}
+                aria-label="Clear pick"
+                disabled={locked || isSaving}
+                onClick={() => void clearPick(q.id, status)}
+                title="Clear pick"
+              >
+                <span className="text-white/85 font-black">×</span>
+              </button>
+            </div>
+          </div>
+
+          {/* big neon title like screenshot */}
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 px-4 py-3 text-center relative overflow-hidden">
+            <div className="absolute inset-0 opacity-[0.55]" style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }} />
+            <div className="relative">
+              <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
+              <div
+                className="mt-1 inline-block rounded-xl px-4 py-2 border"
+                style={{
+                  borderColor: "rgba(255,46,77,0.65)",
+                  boxShadow: "0 0 26px rgba(255,46,77,0.20)",
+                  background: "rgba(0,0,0,0.35)",
+                }}
+              >
+                <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+                  MYSTERY GAMBLE
+                </div>
+              </div>
+              <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">
+                THE VAULT IS LOCKED!
+              </div>
+            </div>
+          </div>
+
+          {/* vault panel */}
+          <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+            {/* “glass cracks” vibe */}
+            <div
+              className="absolute inset-0 opacity-[0.16]"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 15% 30%, rgba(255,255,255,0.35) 0 1px, transparent 2px), radial-gradient(circle at 75% 55%, rgba(255,255,255,0.25) 0 1px, transparent 2px)",
+                backgroundSize: "240px 240px",
+              }}
+            />
+
+            <div
+              className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden"
+              style={{ minHeight: 140 }}
+            >
+              {!showQuestionText ? (
+                <>
+                  <div className="absolute inset-0 backdrop-blur-[2px]" />
+                  <div className="relative flex items-center justify-center" style={{ minHeight: 120 }}>
+                    <div
+                      className="text-[90px] font-black"
+                      style={{
+                        color: "rgba(255,215,110,0.95)",
+                        textShadow: "0 0 22px rgba(255,215,110,0.25)",
+                      }}
+                    >
+                      ?
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="relative flex flex-col items-center justify-center text-center" style={{ minHeight: 120 }}>
+                  <div className="text-[15px] font-extrabold text-white/95">{q.question}</div>
+
+                  {/* when settled: show outcome text line (optional if your API provides) */}
+                  {status === "final" && (q.correctOutcome === "yes" || q.correctOutcome === "no") ? (
+                    <div className="mt-3 inline-flex items-center rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[12px] font-black text-white/80">
+                      Answer: {q.correctOutcome.toUpperCase()}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* reveal countdown */}
+            {!isRevealTime && matchLockMs !== null ? (
+              <div className="mt-4 text-center">
+                <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
+                  REVEAL IN: {msToRevealCountdown(matchLockMs)}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 text-center">
+                <div className="text-[12px] font-black tracking-[0.22em] text-white/70">REVEALED</div>
+              </div>
+            )}
+
+            {/* blind buttons (pre-lock), still show after lock but disabled */}
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={locked || isSaving}
+                className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
+                onClick={() => void setPick(q.id, "yes", status)}
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span className="text-[18px] leading-none">🥤</span>
+                  <span>{isRevealTime ? "YES" : "BLIND YES"}</span>
+                </span>
+              </button>
+
+              <button
+                type="button"
+                disabled={locked || isSaving}
+                className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
+                onClick={() => void setPick(q.id, "no", status)}
+              >
+                <span className="inline-flex items-center justify-center gap-2">
+                  <span className="text-[18px] leading-none">🥤</span>
+                  <span>{isRevealTime ? "NO" : "BLIND NO"}</span>
+                </span>
+              </button>
+            </div>
+
+            {/* prize line */}
+            <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
+              Correct pick goes into the draw to win a{" "}
+              <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
+            </div>
+
+            {/* badge (bottom-right like mock) */}
+            <div
+              className="absolute right-3 bottom-3 rounded-2xl border border-white/15 bg-black/55 px-3 py-2"
+              style={{ boxShadow: "0 0 22px rgba(0,229,255,0.10)" }}
+            >
+              <div className="text-[11px] font-black tracking-[0.14em] text-white/65">SPONSOR</div>
+              <div className="mt-0.5 text-[22px] font-black" style={{ color: "rgba(255,46,77,0.95)" }}>
+                $250
+              </div>
+            </div>
+          </div>
+
+          {/* footer note */}
+          <div className="mt-3 text-center text-[11px] text-white/45">
+            * One sponsor question per round. Hidden until lock.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const MatchTimerPill = ({ status }: { status: QuestionStatus }) => {
     if (status === "final") return <div className="screamr-timer screamr-timer--final">FINAL</div>;
     if (status === "void") return <div className="screamr-timer screamr-timer--final">VOID</div>;
     if (matchLockMs === null) return <div className="screamr-timer">—</div>;
-    if (matchIsLive) return <div className="screamr-timer screamr-timer--live">LIVE</div>;
-    return <div className="screamr-timer">{msToCountdown(matchLockMs)}</div>;
+    if (matchIsLocked) return <div className="screamr-timer screamr-timer--live">LOCKED</div>;
+    return <div className="screamr-timer">{msToRevealCountdown(matchLockMs)}</div>;
   };
 
   return (
@@ -784,7 +939,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(0,0,0,0.55);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 124px;
+          min-width: 140px;
           text-align: center;
         }
         .screamr-timer--live{
@@ -825,7 +980,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting Torpie all season long</div>
+        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting SCREAMR all season long</div>
       </div>
 
       <div className="max-w-6xl mx-auto px-4 py-6">
@@ -860,9 +1015,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="rounded-full border border-white/15 px-3 py-1">
               {matchLockMs === null
                 ? "Auto-locks at bounce"
-                : matchIsLive
-                ? "LIVE — picks locked"
-                : `Locks in ${msToCountdown(matchLockMs)}`}
+                : matchIsLocked
+                ? "LOCKED — sponsor revealed"
+                : `Locks in ${msToRevealCountdown(matchLockMs)}`}
             </div>
           </div>
         </div>
@@ -872,15 +1027,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const status = safeStatus(q.status);
             const qNum = String(idx + 1).padStart(2, "0");
 
+            // ✅ sponsor gets the special “Mystery Gamble” card UI
+            if (q.isSponsorQuestion) {
+              return <SponsorMysteryCard key={q.id} q={q} status={status} qNum={qNum} />;
+            }
+
             const playerName = extractPlayerName(q.question);
-            const isSponsored = !!q.isSponsorQuestion;
-            const isRevealed = !!revealed[q.id];
             const isPlayerPick = !!playerName;
 
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
             const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-            const sponsorName = (q.sponsorName || "REBEL SPORT").toUpperCase();
             const selected = picks[q.id] || "none";
 
             const isLocked = status !== "open";
@@ -891,20 +1048,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             return (
               <div key={q.id} className="screamr-card p-4 flex flex-col">
-                {/* background image */}
                 <div className="pointer-events-none absolute inset-0 opacity-[0.14]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
-
-                {/* sparks overlay */}
                 <div className="screamr-sparks" />
 
-                <div
-                  className={`relative flex flex-col flex-1 ${
-                    isSponsored && !isRevealed ? "pointer-events-none select-none blur-[1px]" : ""
-                  }`}
-                >
-                  {/* header row like the mock */}
+                <div className="relative flex flex-col flex-1">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
@@ -922,9 +1071,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                           correctPick={q.correctPick}
                           outcome={q.correctOutcome ?? q.outcome}
                         />
-                        {isSaving ? (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span>
-                        ) : null}
+                        {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
                       </div>
                     </div>
 
@@ -946,14 +1093,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </div>
                   </div>
 
-                  {/* hero */}
                   <div className="mt-4 flex justify-center">
                     {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
                   </div>
 
                   <QuestionText text={q.question} />
 
-                  {/* pick panel */}
                   <div className="mt-auto pt-4">
                     <div className="rounded-2xl border border-white/10 bg-black/55 p-4">
                       <div className="grid grid-cols-2 gap-3">
@@ -984,47 +1129,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </div>
                   </div>
                 </div>
-
-                {isSponsored && !isRevealed && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" />
-
-                    <div className="relative w-full h-full rounded-2xl border border-white/15 bg-white/10 p-5 flex flex-col">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-[11px] font-black tracking-[0.22em] text-white/80">SPONSOR QUESTION</div>
-                          <div className="mt-1 text-[12px] font-semibold text-white/70">
-                            Proudly by <span className="font-black text-white">{sponsorName}</span>
-                          </div>
-                        </div>
-
-                        <div className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[10px] font-black tracking-[0.18em] text-white/70">
-                          SPONSORED
-                        </div>
-                      </div>
-
-                      <div className="mt-5 flex-1 rounded-2xl border border-white/10 bg-black/55 p-4 flex flex-col items-center justify-center text-center">
-                        <div className="text-[14px] font-bold text-white/90">
-                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
-                        </div>
-
-                        <button
-                          type="button"
-                          className="mt-4 inline-flex items-center justify-center rounded-full border border-white/20 px-6 py-2 text-sm font-extrabold text-white/90 active:scale-[0.99]"
-                          style={{
-                            background: "rgba(255,46,77,0.20)",
-                            boxShadow: "0 0 18px rgba(255,46,77,0.14)",
-                          }}
-                          onClick={() => setRevealed((prev) => ({ ...prev, [q.id]: true }))}
-                        >
-                          Tap to reveal
-                        </button>
-                      </div>
-
-                      <div className="mt-4 text-[11px] text-white/45">* Tap to reveal to make your pick</div>
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })}
