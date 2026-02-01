@@ -419,8 +419,7 @@ function ResultPill({
   const isDone = status === "final" || status === "void";
   if (!isDone) return null;
 
-  const base =
-    "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black tracking-[0.18em]";
+  const base = "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black tracking-[0.18em]";
 
   if (status === "void" || outcome === "void") {
     return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>VOID</span>;
@@ -464,15 +463,39 @@ function QuestionText({ text }: { text: string }) {
   );
 }
 
-function msToClock(ms: number) {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const mm = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  const hh = Math.floor(s / 3600);
+/**
+ * ✅ Countdown formatter that shows DAYS + HOURS when needed.
+ * Examples:
+ * - 2d 03h 12m
+ * - 03h 12m 09s
+ * - 12m 09s
+ */
+function msToCountdown(ms: number) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+
+  const days = Math.floor(totalSec / 86400);
+  const remAfterDays = totalSec % 86400;
+
+  const hours = Math.floor(remAfterDays / 3600);
+  const remAfterHours = remAfterDays % 3600;
+
+  const mins = Math.floor(remAfterHours / 60);
+  const secs = remAfterHours % 60;
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
-  if (hh > 0) return `${hh}:${pad2(mm)}:${pad2(ss)}`;
-  return `${pad2(mm)}:${pad2(ss)}`;
+
+  if (days > 0) {
+    // days + hours + mins
+    return `${days}d ${pad2(hours)}h ${pad2(mins)}m`;
+  }
+
+  if (hours > 0) {
+    // hours + mins + secs
+    return `${pad2(hours)}h ${pad2(mins)}m ${pad2(secs)}s`;
+  }
+
+  // mins + secs (keep it compact)
+  return `${pad2(mins)}m ${pad2(secs)}s`;
 }
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
@@ -693,7 +716,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (status === "void") return <div className="screamr-timer screamr-timer--final">VOID</div>;
     if (matchLockMs === null) return <div className="screamr-timer">—</div>;
     if (matchIsLive) return <div className="screamr-timer screamr-timer--live">LIVE</div>;
-    return <div className="screamr-timer">{msToClock(matchLockMs)}</div>;
+    return <div className="screamr-timer">{msToCountdown(matchLockMs)}</div>;
   };
 
   return (
@@ -761,7 +784,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(0,0,0,0.55);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 84px;
+          min-width: 124px;
           text-align: center;
         }
         .screamr-timer--live{
@@ -835,7 +858,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               Locks: <span className="font-semibold text-white">{lockedCount}</span>
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
-              {matchLockMs === null ? "Auto-locks at bounce" : matchIsLive ? "LIVE — picks locked" : `Locks in ${msToClock(matchLockMs)}`}
+              {matchLockMs === null
+                ? "Auto-locks at bounce"
+                : matchIsLive
+                ? "LIVE — picks locked"
+                : `Locks in ${msToCountdown(matchLockMs)}`}
             </div>
           </div>
         </div>
@@ -859,10 +886,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isLocked = status !== "open";
             const isSaving = !!saving[q.id];
 
-            const yesBtn =
-              selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
-            const noBtn =
-              selected === "no" ? "btn-no btn-no--selected" : "btn-no";
+            const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
+            const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
             return (
               <div key={q.id} className="screamr-card p-4 flex flex-col">
@@ -980,8 +1005,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                       <div className="mt-5 flex-1 rounded-2xl border border-white/10 bg-black/55 p-4 flex flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-bold text-white/90">
-                          {q.sponsorBlurb ||
-                            "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
+                          {q.sponsorBlurb || "Get this pick correct and go in the draw to win $100 Rebel Sport Gift Card"}
                         </div>
 
                         <button
