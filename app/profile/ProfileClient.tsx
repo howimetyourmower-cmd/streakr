@@ -4,7 +4,15 @@
 import { useEffect, useMemo, useState, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db, storage } from "@/lib/firebaseClient";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  collection,
+  getDocs,
+  DocumentData,
+} from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { useAuth } from "@/hooks/useAuth";
@@ -87,6 +95,137 @@ function heatLabel(streak: number): { label: string; tone: "cold" | "warm" | "ho
   return { label: "ALIVE", tone: "cold" };
 }
 
+type RoundInfo = {
+  id: string;
+  number: number | null; // 0 = Opening Round
+  label: string; // "Opening Round" | "Round X" | fallback
+};
+
+function roundLabelFromNumber(n: number | null): string {
+  if (n === null) return "Round —";
+  if (n === 0) return "Opening Round";
+  return `Round ${n}`;
+}
+
+function parseRoundNumberFromId(id: string): number | null {
+  const s = (id || "").toLowerCase();
+
+  if (s.includes("opening")) return 0;
+  if (s.includes("round-0") || s.includes("round_0") || s.includes("r0")) return 0;
+
+  // afl-2026-r2, afl-2026-r23
+  const m1 = s.match(/(?:^|-)r(\d+)(?:$|-)/);
+  if (m1?.[1]) return Number(m1[1]);
+
+  // round-2
+  const m2 = s.match(/round[-_](\d+)/);
+  if (m2?.[1]) return Number(m2[1]);
+
+  // 2026-2, afl-2026-2
+  const m3 = s.match(/(?:^|-)20\d{2}-(\d+)(?:$|-)/);
+  if (m3?.[1]) return Number(m3[1]);
+
+  // trailing -2
+  const m4 = s.match(/-(\d+)$/);
+  if (m4?.[1]) return Number(m4[1]);
+
+  return null;
+}
+
+function pickBestCurrentRound(candidates: Array<{ id: string; data: DocumentData }>): RoundInfo | null {
+  if (!candidates.length) return null;
+
+  // Prefer explicit "current" markers if they exist
+  const currentish = candidates.filter(({ data }) => {
+    const status = String(data?.status ?? "").toLowerCase();
+    const isCurrent = data?.isCurrent === true;
+    const isActive = data?.isActive === true;
+    const isOpen = data?.isOpen === true;
+    return isCurrent || isActive || isOpen || status === "current" || status === "active" || status === "open";
+  });
+
+  const pool = currentish.length ? currentish : candidates;
+
+  // Choose highest round number available (best fallback)
+  let best: { id: string; n: number | null } | null = null;
+  for (const r of pool) {
+    const n = parseRoundNumberFromId(r.id);
+    if (best === null) best = { id: r.id, n };
+    else {
+      const a = best.n ?? -9999;
+      const b = n ?? -9999;
+      if (b > a) best = { id: r.id, n };
+    }
+  }
+
+  if (!best) return null;
+  return { id: best.id, number: best.n, label: roundLabelFromNumber(best.n) };
+}
+
+async function loadCurrentRound(): Promise<RoundInfo | null> {
+  // 1) Try config docs (super common pattern)
+  // Your screenshot shows a top-level collection called "config"
+  const configDocIds = ["currentRound", "season", "settings", "app"];
+  const roundFieldCandidates = [
+    "currentRoundId",
+    "activeRoundId",
+    "roundId",
+    "currentRound",
+    "activeRound",
+  ];
+
+  for (const docId of configDocIds) {
+    try {
+      const snap = await getDoc(doc(db, "config", docId));
+      if (!snap.exists()) continue;
+      const d = snap.data() as Record<string, unknown>;
+
+      // Direct field containing id
+      for (const key of roundFieldCandidates) {
+        const v = d?.[key];
+        if (typeof v === "string" && v.trim().length) {
+          const id = v.trim();
+          const n = parseRoundNumberFromId(id);
+          return { id, number: n, label: roundLabelFromNumber(n) };
+        }
+      }
+
+      // Sometimes nested: { afl: { currentRoundId: "..." } }
+      const afl = (d as any)?.afl;
+      if (afl && typeof afl === "object") {
+        for (const key of roundFieldCandidates) {
+          const v = (afl as any)?.[key];
+          if (typeof v === "string" && v.trim().length) {
+            const id = v.trim();
+            const n = parseRoundNumberFromId(id);
+            return { id, number: n, label: roundLabelFromNumber(n) };
+          }
+        }
+      }
+    } catch {
+      // ignore and continue
+    }
+  }
+
+  // 2) Fallback: scan top-level rounds collection and infer
+  try {
+    const snap = await getDocs(collection(db, "rounds"));
+    const candidates: Array<{ id: string; data: DocumentData }> = [];
+    snap.forEach((d) => candidates.push({ id: d.id, data: d.data() }));
+
+    // Keep ones that look like AFL round docs (loose filter; safe)
+    const filtered = candidates.filter(({ id }) => {
+      const s = id.toLowerCase();
+      return s.includes("afl") || s.includes("round") || s.includes("2026") || s.includes("-r");
+    });
+
+    const best = pickBestCurrentRound(filtered.length ? filtered : candidates);
+    return best;
+  } catch {
+    return null;
+  }
+}
+
 export default function ProfileClient() {
   const router = useRouter();
   const { user } = useAuth();
@@ -104,6 +243,10 @@ export default function ProfileClient() {
   const [isEditing, setIsEditing] = useState(false);
   const [formValues, setFormValues] = useState<ProfileData>({});
   const [localBadges, setLocalBadges] = useState<Record<string, boolean>>({});
+
+  // ✅ actual current round (derived from config/rounds)
+  const [currentRound, setCurrentRound] = useState<RoundInfo | null>(null);
+  const [roundLoading, setRoundLoading] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -134,7 +277,7 @@ export default function ProfileClient() {
           const levelBadges: Record<string, boolean> = {};
           [3, 5, 10, 15, 20].forEach((lvl) => {
             const key = `badges_level${lvl}`;
-            if (firestoreData[key] === true) {
+            if ((firestoreData as any)[key] === true) {
               levelBadges[String(lvl)] = true;
             }
           });
@@ -158,7 +301,7 @@ export default function ProfileClient() {
             phone: "",
             gender: "",
             favouriteAflTeam: "",
-            avatarUrl: user.photoURL || "",
+            avatarUrl: (user as any).photoURL || "",
             currentStreak: 0,
             longestStreak: 0,
             lifetimeBestStreak: 0,
@@ -192,6 +335,23 @@ export default function ProfileClient() {
     };
 
     load();
+  }, [user]);
+
+  // ✅ Load "current round" from the same Firestore area your app already has
+  useEffect(() => {
+    const run = async () => {
+      if (!user) return;
+      setRoundLoading(true);
+      try {
+        const r = await loadCurrentRound();
+        setCurrentRound(r);
+      } catch (e) {
+        console.error("Failed to load current round", e);
+      } finally {
+        setRoundLoading(false);
+      }
+    };
+    run();
   }, [user]);
 
   const handleFieldChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -335,11 +495,12 @@ export default function ProfileClient() {
   const heat = useMemo(() => heatLabel(currentStreak), [currentStreak]);
   const heatPct = useMemo(() => clamp(Math.round((currentStreak / 20) * 100), 0, 100), [currentStreak]);
 
-  // UI-only (looks real now, wire later)
+  // ✅ REAL current round label (from Firestore config/rounds)
   const uiRoundLabel = useMemo(() => {
-    if (roundsPlayed <= 0) return "Round —";
-    return `Round ${roundsPlayed}`;
-  }, [roundsPlayed]);
+    if (roundLoading) return "Round …";
+    if (currentRound?.label) return currentRound.label;
+    return "Round —";
+  }, [currentRound?.label, roundLoading]);
 
   const uiLastMatch = useMemo(() => {
     // placeholder only — you can wire from picks/history later
@@ -413,7 +574,10 @@ export default function ProfileClient() {
         >
           <span
             className="h-2 w-2 rounded-full"
-            style={{ background: "rgba(255,255,255,0.92)", boxShadow: "0 0 14px rgba(255,255,255,0.35)" }}
+            style={{
+              background: "rgba(255,255,255,0.92)",
+              boxShadow: "0 0 14px rgba(255,255,255,0.35)",
+            }}
           />
           {text}
         </span>
@@ -546,7 +710,9 @@ export default function ProfileClient() {
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
-          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">Proudly supporting SCREAMR all season long</div>
+          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">
+            Proudly supporting SCREAMR all season long
+          </div>
         </div>
       </div>
 
@@ -555,16 +721,23 @@ export default function ProfileClient() {
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-3 flex-wrap">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em] uppercase">Locker Room</h1>
+              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em] uppercase">Player HQ</h1>
+
               <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black tracking-[0.14em]">
                 SCREAMR
               </span>
+
               <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black">
-                <span className="h-2 w-2 rounded-full" style={{ background: SCREAMR.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: SCREAMR.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }}
+                />
                 LIVE
               </span>
+
               <TonePill text={heat.label} tone={heat.tone} />
             </div>
+
             <p className="mt-2 text-sm text-white/65">
               Welcome back, <span className="font-semibold text-white">{displayName}</span>. Your identity card, streak heat and badges live here.
             </p>
@@ -717,10 +890,29 @@ export default function ProfileClient() {
                       <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black">
                         {profile.favouriteAflTeam ? `⭐ ${profile.favouriteAflTeam}` : "⭐ Set favourite team"}
                       </span>
-                      <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black" style={{ borderColor: "rgba(0,229,255,0.20)" }}>
+
+                      <span
+                        className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black"
+                        style={{ borderColor: "rgba(0,229,255,0.20)" }}
+                      >
                         ID: {user.uid.slice(0, 6).toUpperCase()}
                       </span>
-                      <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,46,77,0.25)", background: "rgba(255,46,77,0.10)" }}>
+
+                      <span
+                        className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black"
+                        style={{
+                          borderColor: "rgba(255,46,77,0.25)",
+                          background: "rgba(255,46,77,0.10)",
+                        }}
+                        title={currentRound?.id ? `Source: ${currentRound.id}` : "Current round"}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{
+                            background: roundLoading ? "rgba(255,255,255,0.35)" : SCREAMR.red,
+                            boxShadow: roundLoading ? "none" : "0 0 14px rgba(255,46,77,0.55)",
+                          }}
+                        />
                         {uiRoundLabel}
                       </span>
                     </div>
@@ -767,7 +959,7 @@ export default function ProfileClient() {
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <LockerTile label="This round" value={uiRoundLabel} hint="UI-only now. Wire to actual round later." accent="cyan" />
+                    <LockerTile label="This round" value={uiRoundLabel} hint="Pulled from Firestore config/rounds." accent="cyan" />
                     <LockerTile label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak." accent="red" />
                     <LockerTile label="Rounds played" value={String(roundsPlayed)} hint="Total rounds you’ve joined." accent="white" />
                   </div>
@@ -968,7 +1160,11 @@ function LockerTile({
 }) {
   const glow = accent === "red" ? SCREAMR.red : accent === "cyan" ? SCREAMR.cyan : "rgba(255,255,255,0.35)";
   const border =
-    accent === "red" ? "rgba(255,46,77,0.22)" : accent === "cyan" ? "rgba(0,229,255,0.18)" : "rgba(255,255,255,0.12)";
+    accent === "red"
+      ? "rgba(255,46,77,0.22)"
+      : accent === "cyan"
+      ? "rgba(0,229,255,0.18)"
+      : "rgba(255,255,255,0.12)";
 
   return (
     <div className="rounded-3xl border p-4 relative overflow-hidden" style={{ borderColor: border, background: "rgba(255,255,255,0.04)" }}>
@@ -1087,7 +1283,11 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
 
       <div className="relative mb-2 h-24 w-20">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imageSrc} alt={`Streak badge level ${level}`} className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`} />
+        <img
+          src={imageSrc}
+          alt={`Streak badge level ${level}`}
+          className={`h-full w-full object-contain ${unlocked ? "" : "grayscale opacity-70"}`}
+        />
         {!unlocked && (
           <div
             className="absolute inset-0 flex items-center justify-center text-[10px] font-black tracking-[0.18em]"
