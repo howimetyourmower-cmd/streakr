@@ -992,7 +992,7 @@ export default function ProfileClient() {
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <LockerTile label="This round" value={uiRoundLabel} hint="Pulled from Firestore config/season-2026." accent="cyan" />
+                    <LockerTile label="This round" value={uiRoundLabel} hint="season-2026." accent="cyan" />
                     <LockerTile label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak." accent="red" />
                     <LockerTile label="Rounds played" value={String(roundsPlayed)} hint="Total rounds you’ve joined." accent="white" />
                   </div>
