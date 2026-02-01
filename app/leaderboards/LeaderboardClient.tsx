@@ -1,6 +1,5 @@
-"use client";
-
 // /app/leaderboards/page.tsx
+"use client";
 
 import { useEffect, useState, useCallback, useRef, ChangeEvent, useMemo } from "react";
 import Link from "next/link";
@@ -635,7 +634,11 @@ export default function LeaderboardsPage() {
                       </span>
                     </h1>
                     <p className="mt-1 text-sm text-white/70">
-                      Ranked by <span className="font-black" style={{ color: SCREAMR_RED }}>CURRENT STREAK</span>. One wrong pick in a match and you’re cooked.
+                      Ranked by{" "}
+                      <span className="font-black" style={{ color: SCREAMR_RED }}>
+                        CURRENT STREAK
+                      </span>
+                      . One wrong pick in a match and you’re cooked.
                     </p>
                   </div>
 
@@ -660,9 +663,7 @@ export default function LeaderboardsPage() {
                     />
                     <div className="relative">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
-                          Leader streak
-                        </div>
+                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Leader streak</div>
                         <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
                           Updated {lastUpdatedLabel || "—"}
                         </span>
@@ -685,7 +686,10 @@ export default function LeaderboardsPage() {
                             <div
                               className="h-full"
                               style={{
-                                width: `${Math.max(8, Math.min(100, (leaderStreak / Math.max(leaderStreak, 12)) * 100))}%`,
+                                width: `${Math.max(
+                                  8,
+                                  Math.min(100, (leaderStreak / Math.max(leaderStreak, 12)) * 100)
+                                )}%`,
                                 background: `linear-gradient(90deg, rgba(${SCREAMR_RED_RGB},0.95) 0%, rgba(${SCREAMR_RED_RGB},0.35) 100%)`,
                               }}
                             />
@@ -700,9 +704,7 @@ export default function LeaderboardsPage() {
                   <div className="rounded-3xl border border-white/10 bg-black/70 p-5 relative overflow-hidden">
                     <div className="screamr-scanlines" />
                     <div className="relative">
-                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
-                        Chase the leader
-                      </div>
+                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Chase the leader</div>
 
                       {user ? (
                         userEntry ? (
@@ -796,9 +798,7 @@ export default function LeaderboardsPage() {
                           />
                           PODIUM
                         </span>
-                        <span className="text-[12px] font-black text-white/55 hidden sm:inline">
-                          Finalists on stage
-                        </span>
+                        <span className="text-[12px] font-black text-white/55 hidden sm:inline">Finalists on stage</span>
                       </div>
                       <div className="text-[12px] font-black text-white/55">Updated {lastUpdatedLabel || "—"}</div>
                     </div>
@@ -808,10 +808,7 @@ export default function LeaderboardsPage() {
                         const isYou = user && e.uid === user.uid;
 
                         const isFirst = idx === 0;
-                        const glow = isFirst
-                          ? `0 0 30px rgba(${SCREAMR_RED_RGB},0.20)`
-                          : `0 0 22px rgba(255,255,255,0.06)`;
-
+                        const glow = isFirst ? `0 0 30px rgba(${SCREAMR_RED_RGB},0.20)` : `0 0 22px rgba(255,255,255,0.06)`;
                         const border = isFirst ? `rgba(${SCREAMR_RED_RGB},0.65)` : "rgba(255,255,255,0.12)";
 
                         return (
@@ -824,7 +821,13 @@ export default function LeaderboardsPage() {
                               transform: isFirst ? "scale(1.02)" : "none",
                             }}
                           >
-                            <div className="absolute inset-0" style={{ background: "radial-gradient(520px 180px at 50% 0%, rgba(255,46,77,0.12), rgba(0,0,0,0) 70%)" }} />
+                            <div
+                              className="absolute inset-0"
+                              style={{
+                                background:
+                                  "radial-gradient(520px 180px at 50% 0%, rgba(255,46,77,0.12), rgba(0,0,0,0) 70%)",
+                              }}
+                            />
                             <div className="relative flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 {renderAvatar(e, 44)}
@@ -883,9 +886,7 @@ export default function LeaderboardsPage() {
                       </span>
                       <span className="text-[12px] font-black text-white/55 hidden sm:inline">Run the board</span>
                     </div>
-                    <div className="text-[12px] font-black text-white/55">
-                      {totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}
-                    </div>
+                    <div className="text-[12px] font-black text-white/55">{totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}</div>
                   </div>
 
                   {top10.length === 0 ? (
@@ -900,8 +901,7 @@ export default function LeaderboardsPage() {
                           <li
                             key={e.uid}
                             className="px-4 py-3 hover:bg-white/5 transition"
-                            style
-                            ={{
+                            style={{
                               outline: isYou ? `2px solid rgba(${SCREAMR_RED_RGB},0.55)` : "none",
                               outlineOffset: isYou ? "-2px" : 0,
                             }}
@@ -927,6 +927,7 @@ export default function LeaderboardsPage() {
                                       </span>
                                     ) : null}
                                   </div>
+
                                   {e.username ? (
                                     <div className="text-[12px] text-white/55 truncate">@{e.username}</div>
                                   ) : (
