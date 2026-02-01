@@ -1,6 +1,6 @@
-// /app/picks/PicksClient.tsx
 "use client";
 
+// /app/picks/PicksClient.tsx
 export const dynamic = "force-dynamic";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -177,7 +177,52 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
 }
 
 /**
- * ✅ Picks page TeamLogo — MatchPicks squircle style
+ * ✅ This is your saved photo background.
+ * File lives at: /public/screamr/markbackground.jpg
+ *
+ * - Used behind Next Up hero and every match tile
+ * - 50% opacity target (we use 0.5)
+ */
+function MarkBg({ opacity = 0.5 }: { opacity?: number }) {
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true" style={{ zIndex: 0 }}>
+      <Image
+        src="/screamr/markbackground.jpg"
+        alt=""
+        fill
+        sizes="(max-width: 1024px) 100vw, 1024px"
+        style={{
+          objectFit: "cover",
+          opacity,
+          transform: "scale(1.04)",
+          filter: "contrast(1.08) saturate(1.02) brightness(0.82)",
+        }}
+        priority={false}
+      />
+      {/* readability overlay (light, so your photo still shows) */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.56) 55%, rgba(0,0,0,0.78) 100%)",
+        }}
+      />
+      {/* subtle vignette */}
+      <div
+        className="absolute inset-0"
+        style={{
+          boxShadow: "inset 0 0 120px rgba(0,0,0,0.60)",
+        }}
+      />
+    </div>
+  );
+}
+
+/**
+ * ✅ Logo tile: make it match MatchPicksClient squircle vibe.
+ * - cream inner panel
+ * - red squircle border
+ * - soft glow
  */
 const TeamLogo = React.memo(function TeamLogoInner({
   teamName,
@@ -200,43 +245,62 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const candidates = slug ? logoCandidates(slug) : [];
   const src = slug ? candidates[Math.min(idx, candidates.length - 1)] : "";
 
+  const rOuter = Math.round(size * 0.26); // squircle-ish rounding
+  const rInner = Math.max(10, rOuter - 6);
+
   const tile: React.CSSProperties = {
     width: size,
     height: size,
-    borderRadius: 22,
+    borderRadius: rOuter,
   };
 
-  const innerRadius = 16;
+  const outer: React.CSSProperties = {
+    borderRadius: rOuter,
+    background:
+      "linear-gradient(135deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.42) 55%, rgba(255,46,77,0.85) 100%)",
+    boxShadow:
+      "0 18px 40px rgba(255,46,77,0.14), 0 0 0 1px rgba(0,0,0,0.45) inset, 0 0 22px rgba(255,46,77,0.18)",
+  };
+
+  const inner: React.CSSProperties = {
+    borderRadius: rInner,
+    background: "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(245,245,245,0.92) 100%)",
+    boxShadow: "0 10px 22px rgba(0,0,0,0.28), 0 0 0 1px rgba(0,0,0,0.14) inset",
+    overflow: "hidden",
+  };
+
+  if (!slug || dead) {
+    return (
+      <div className="relative p-[3px]" style={tile} title={teamName}>
+        <div className="absolute inset-0" style={outer} />
+        <div className="absolute inset-[4px]" style={inner}>
+          <div className="absolute inset-0 flex items-center justify-center font-black tracking-wide text-black/80">
+            {fallbackInitials || "AFL"}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative" style={tile} title={teamName}>
-      <div className="absolute inset-0 screamr-squircleFrame" style={{ borderRadius: 22 }} />
-      <div className="absolute inset-[7px] screamr-squircleInner" style={{ borderRadius: innerRadius }}>
-        <div className="absolute inset-0 screamr-squircleGloss" style={{ borderRadius: innerRadius }} />
-        <div className="absolute inset-0 p-3">
-          {slug && !dead ? (
-            <Image
-              src={src}
-              alt={`${teamName} logo`}
-              fill
-              sizes={`${size}px`}
-              style={{
-                objectFit: "contain",
-                filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.25))",
-              }}
-              onError={() => {
-                setIdx((p) => {
-                  if (p + 1 < candidates.length) return p + 1;
-                  setDead(true);
-                  return p;
-                });
-              }}
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center font-black tracking-wide text-black/70">
-              {fallbackInitials || "AFL"}
-            </div>
-          )}
+    <div className="relative p-[3px]" style={tile} title={teamName}>
+      <div className="absolute inset-0" style={outer} />
+      <div className="absolute inset-[4px]" style={inner}>
+        <div className="absolute inset-0 p-2">
+          <Image
+            src={src}
+            alt={`${teamName} logo`}
+            fill
+            sizes={`${size}px`}
+            style={{ objectFit: "contain" }}
+            onError={() => {
+              setIdx((p) => {
+                if (p + 1 < candidates.length) return p + 1;
+                setDead(true);
+                return p;
+              });
+            }}
+          />
         </div>
       </div>
     </div>
@@ -256,48 +320,6 @@ function XIcon({ size = 18, color = COLORS.red }: { size?: number; color?: strin
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M6 6l12 12M18 6L6 18" stroke={color} strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
-  );
-}
-
-/**
- * ✅ MUCH more “game show” background (non-boring):
- * - dot-wall + moving spotlight sweep
- * - red/cyan corner glows
- * - optional silhouette image for texture
- */
-function CardShowBg({ useImage = true }: { useImage?: boolean }) {
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      {/* base dot wall */}
-      <div className="absolute inset-0 screamr-dotwall" />
-
-      {/* moving sweep */}
-      <div className="absolute inset-0 screamr-sweep" />
-
-      {/* corner glows */}
-      <div className="absolute inset-0 screamr-cornerGlows" />
-
-      {/* optional grayscale action texture */}
-      {useImage ? (
-        <div className="absolute inset-0 opacity-[0.22]">
-          <Image
-            src="/afl1.png"
-            alt=""
-            fill
-            sizes="(max-width: 1024px) 100vw, 1024px"
-            style={{
-              objectFit: "cover",
-              filter: "grayscale(1) brightness(0.55) contrast(1.35)",
-              transform: "scale(1.05)",
-            }}
-            priority={false}
-          />
-        </div>
-      ) : null}
-
-      {/* cinematic vignette */}
-      <div className="absolute inset-0 screamr-vignette" />
-    </div>
   );
 }
 
@@ -485,7 +507,7 @@ export default function PicksClient() {
     loadPicks("initial");
   }, [loadPicks]);
 
-  // ✅ silent refresh (NO visible “REFRESHING…” text)
+  // silent refresh (NO visible "REFRESHING..." text anywhere)
   useEffect(() => {
     const id = window.setInterval(() => loadPicks("refresh"), 15000);
     return () => window.clearInterval(id);
@@ -676,9 +698,7 @@ export default function PicksClient() {
                     <div className="text-[10px] uppercase tracking-widest text-white/55 font-black">Chase</div>
                     <div className="text-[12px] font-black text-white truncate">{chaseText}</div>
                     <div className="text-[11px] text-white/55 font-semibold truncate">
-                      {stableLeaderScore === null
-                        ? ""
-                        : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
+                      {stableLeaderScore === null ? "" : `Leader ${stableLeaderScore}${stableLeaderName ? ` • ${stableLeaderName}` : ""}`}
                     </div>
                   </div>
                 </div>
@@ -705,7 +725,8 @@ export default function PicksClient() {
   };
 
   const DashboardStrip = () => {
-    const leaderText = stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
+    const leaderText =
+      stableLeaderScore === null ? "Leader loading…" : stableLeaderName ? `${stableLeaderName} leads` : "Leader";
 
     const leaderHint =
       stableLeaderScore === null
@@ -737,7 +758,7 @@ export default function PicksClient() {
               className="screamr-pill inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-black"
               title="SCREAMR is live and updating"
             >
-              <span className="h-2 w-2 rounded-full screamr-liveDot" />
+              <span className="h-2 w-2 rounded-full" style={{ background: COLORS.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
               LIVE
             </span>
           </div>
@@ -969,13 +990,7 @@ export default function PicksClient() {
     const href = `/picks/${g.id}`;
 
     return (
-      <Link
-        href={href}
-        className="block rounded-2xl overflow-hidden"
-        style={{
-          textDecoration: "none",
-        }}
-      >
+      <Link href={href} className="block rounded-2xl overflow-hidden" style={{ textDecoration: "none" }}>
         <div className="relative p-[1px] rounded-2xl screamr-cardBorder">
           <div
             className="relative rounded-2xl overflow-hidden border"
@@ -986,9 +1001,12 @@ export default function PicksClient() {
             }}
           >
             <div className="relative p-4 overflow-hidden" style={{ minHeight: 198 }}>
-              <div className="screamr-sparks" />
-              <div className="absolute inset-0 screamr-spotlights" />
-              <CardShowBg useImage />
+              {/* ✅ Your image background (VISIBLE) */}
+              <MarkBg opacity={0.5} />
+
+              {/* ✅ subtle FX above the photo */}
+              <div className="screamr-sparks" style={{ zIndex: 1 }} />
+              <div className="absolute inset-0 screamr-spotlights" style={{ zIndex: 1 }} />
 
               <div className="relative z-10">
                 <div className="flex items-center justify-between gap-3">
@@ -1041,7 +1059,10 @@ export default function PicksClient() {
                     {picksCount}/12 picked
                   </span>
 
-                  <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border" style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}>
+                  <span
+                    className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border"
+                    style={{ borderColor: COLORS.border, background: COLORS.soft, color: COLORS.text }}
+                  >
                     {isLocked ? "Auto-locked" : "Auto-locks at bounce"}
                   </span>
                 </div>
@@ -1072,17 +1093,17 @@ export default function PicksClient() {
       className="min-h-screen text-white"
       style={{
         backgroundColor: COLORS.bg,
-        opacity: refreshing ? 0.98 : 1, // ✅ barely noticeable
+        opacity: refreshing ? 0.96 : 1,
         transition: "opacity 120ms ease",
       }}
     >
-      {/* 🎪 GAME SHOW STYLE (cards + labels + logo tiles) */}
+      {/* 🎪 GAME SHOW STYLE */}
       <style>{`
         .screamr-sparks {
           position: absolute;
           inset: 0;
           pointer-events: none;
-          opacity: 0.16;
+          opacity: 0.14;
           mix-blend-mode: screen;
           background-image:
             radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
@@ -1100,7 +1121,7 @@ export default function PicksClient() {
           pointer-events: none;
           position: absolute;
           inset: 0;
-          opacity: 0.55;
+          opacity: 0.40;
           background:
             radial-gradient(700px 260px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
             radial-gradient(700px 260px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
@@ -1177,79 +1198,6 @@ export default function PicksClient() {
         }
         .screamr-cta:hover { filter: brightness(1.04); }
         .screamr-cta:active { transform: translateY(1px); }
-
-        /* ✅ MatchPicks squircle logo style */
-        .screamr-squircleFrame {
-          background: linear-gradient(180deg, rgba(255, 46, 77, 0.98) 0%, rgba(168, 16, 43, 0.98) 100%);
-          box-shadow:
-            0 18px 52px rgba(255, 46, 77, 0.22),
-            0 0 0 1px rgba(0, 0, 0, 0.45) inset,
-            0 0 28px rgba(255, 46, 77, 0.14);
-        }
-        .screamr-squircleInner {
-          background: rgba(255, 255, 255, 0.96);
-          border: 1px solid rgba(255, 255, 255, 0.55);
-          box-shadow:
-            0 0 0 1px rgba(0, 0, 0, 0.08) inset,
-            0 18px 44px rgba(0, 0, 0, 0.30);
-          overflow: hidden;
-        }
-        .screamr-squircleGloss {
-          pointer-events: none;
-          position: absolute;
-          inset: 0;
-          background:
-            radial-gradient(240px 120px at 50% 0%, rgba(255, 46, 77, 0.14) 0%, rgba(255, 255, 255, 0.0) 70%),
-            linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.0) 40%);
-          opacity: 0.85;
-        }
-
-        /* ✅ Non-boring “main event” background layers */
-        .screamr-dotwall {
-          opacity: 0.25;
-          background-image:
-            radial-gradient(circle at 1px 1px, rgba(255,255,255,0.14) 0 1px, transparent 2px);
-          background-size: 14px 14px;
-          filter: blur(0px);
-        }
-        .screamr-sweep {
-          opacity: 0.75;
-          background:
-            radial-gradient(800px 260px at 15% 20%, rgba(0,229,255,0.16) 0%, rgba(0,0,0,0) 68%),
-            radial-gradient(900px 320px at 85% 30%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
-            linear-gradient(120deg, rgba(255,255,255,0.00) 0%, rgba(255,255,255,0.07) 18%, rgba(255,255,255,0.00) 36%);
-          animation: sweepMove 6.8s ease-in-out infinite;
-        }
-        @keyframes sweepMove {
-          0% { transform: translateX(-8%); }
-          50% { transform: translateX(8%); }
-          100% { transform: translateX(-8%); }
-        }
-        .screamr-cornerGlows {
-          opacity: 0.9;
-          background:
-            radial-gradient(600px 380px at 0% 0%, rgba(255,46,77,0.22) 0%, rgba(0,0,0,0) 70%),
-            radial-gradient(600px 380px at 100% 0%, rgba(0,229,255,0.18) 0%, rgba(0,0,0,0) 70%),
-            radial-gradient(900px 520px at 50% 120%, rgba(255,46,77,0.10) 0%, rgba(0,0,0,0) 75%);
-          mix-blend-mode: screen;
-        }
-        .screamr-vignette {
-          background:
-            linear-gradient(180deg, rgba(0,0,0,0.12) 0%, rgba(0,0,0,0.68) 58%, rgba(0,0,0,0.92) 100%),
-            radial-gradient(1200px 520px at 50% 10%, rgba(0,0,0,0.00) 0%, rgba(0,0,0,0.75) 70%);
-        }
-
-        /* subtle live dot pulse (replaces “REFRESHING…”) */
-        .screamr-liveDot {
-          background: ${COLORS.red};
-          box-shadow: 0 0 14px rgba(255,46,77,0.55);
-          animation: livePulse 1.5s ease-in-out infinite;
-        }
-        @keyframes livePulse {
-          0% { transform: scale(1); opacity: 0.75; }
-          50% { transform: scale(1.25); opacity: 1; }
-          100% { transform: scale(1); opacity: 0.75; }
-        }
       `}</style>
 
       <HowToPlayModal open={howOpen} onClose={closeHow} />
@@ -1267,7 +1215,7 @@ export default function PicksClient() {
                 </span>
               ) : null}
 
-              {/* ✅ Removed visible “REFRESHING…” completely */}
+              {/* ✅ removed the visible "REFRESHING..." text completely */}
             </div>
 
             <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
@@ -1303,11 +1251,12 @@ export default function PicksClient() {
                   }}
                 >
                   <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
-                    <div className="screamr-sparks" />
-                    <div className="absolute inset-0 screamr-spotlights" />
+                    {/* ✅ Your image background (VISIBLE) */}
+                    <MarkBg opacity={0.5} />
 
-                    {/* ✅ upgraded background for main event */}
-                    <CardShowBg useImage />
+                    {/* ✅ subtle FX above the photo */}
+                    <div className="screamr-sparks" style={{ zIndex: 1 }} />
+                    <div className="absolute inset-0 screamr-spotlights" style={{ zIndex: 1 }} />
 
                     <div className="relative z-10">
                       <div className="flex items-center justify-between gap-3">
@@ -1319,7 +1268,7 @@ export default function PicksClient() {
                               boxShadow: isNextUpLive ? "0 0 14px rgba(255,46,77,0.55)" : "0 0 14px rgba(0,229,255,0.50)",
                             }}
                           />
-                          TONIGHT’S MAIN EVENT
+                          NEXT UP
                         </span>
 
                         <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
@@ -1341,16 +1290,10 @@ export default function PicksClient() {
                       })()}
 
                       <div className="mt-3 text-center">
-                        <div
-                          className="text-[22px] sm:text-[28px] font-black leading-tight"
-                          style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
-                        >
+                        <div className="text-[22px] sm:text-[28px] font-black leading-tight" style={{ color: "rgba(255,255,255,0.98)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}>
                           {nextUpStable.match}
                         </div>
-                        <div
-                          className="mt-2 text-[12px] font-semibold"
-                          style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}
-                        >
+                        <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
                           {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
                         </div>
                       </div>
