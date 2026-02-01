@@ -1,5 +1,6 @@
-// /app/leaderboards/page.tsx
 "use client";
+
+// /app/leaderboards/page.tsx
 
 import { useEffect, useState, useCallback, useRef, ChangeEvent, useMemo } from "react";
 import Link from "next/link";
@@ -57,7 +58,7 @@ type LeaderboardApiResponse = {
   roundComplete?: boolean;
 };
 
-const BASE_SCOPE_OPTIONS: { value: Scope; label: string }[] = [
+const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
   { value: "overall", label: "Overall" },
   { value: "opening-round", label: "Opening Round" },
   { value: "round-1", label: "Round 1" },
@@ -85,32 +86,6 @@ const BASE_SCOPE_OPTIONS: { value: Scope; label: string }[] = [
   { value: "round-23", label: "Round 23" },
   { value: "finals", label: "Finals" },
 ];
-
-const ALL_SCOPES = new Set<Scope>(BASE_SCOPE_OPTIONS.map((o) => o.value));
-
-function getConfiguredCurrentScope(): Scope | null {
-  // Set this in Vercel / env:
-  // NEXT_PUBLIC_SCREAMR_CURRENT_SCOPE=round-4
-  const raw = (process.env.NEXT_PUBLIC_SCREAMR_CURRENT_SCOPE ?? "").trim();
-  if (!raw) return null;
-  const v = raw as Scope;
-  return ALL_SCOPES.has(v) ? v : null;
-}
-
-function buildScopeOptionsWithCurrentFirst(): { value: Scope; label: string }[] {
-  const current = getConfiguredCurrentScope();
-  if (!current) return BASE_SCOPE_OPTIONS;
-
-  const currentOpt = BASE_SCOPE_OPTIONS.find((o) => o.value === current);
-  if (!currentOpt) return BASE_SCOPE_OPTIONS;
-
-  const rest = BASE_SCOPE_OPTIONS.filter((o) => o.value !== current);
-
-  return [
-    { ...currentOpt, label: `${currentOpt.label} (Current)` },
-    ...rest,
-  ];
-}
 
 const SCREAMR_RED = "#FF2E4D";
 const SCREAMR_RED_RGB = "255,46,77";
@@ -206,10 +181,7 @@ function MarkBg({ opacity = 0.22 }: { opacity?: number }) {
 export default function LeaderboardsPage() {
   const { user } = useAuth();
 
-  const scopeOptions = useMemo(() => buildScopeOptionsWithCurrentFirst(), []);
-  const configuredCurrentScope = useMemo(() => getConfiguredCurrentScope(), []);
-
-  const [scope, setScope] = useState<Scope>(configuredCurrentScope ?? "overall");
+  const [scope, setScope] = useState<Scope>("overall");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null);
 
@@ -353,7 +325,7 @@ export default function LeaderboardsPage() {
     const base = "inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black border";
     if (tone === "hot") {
       return (
-        <span className={`${base} text-black`} style={{ background: "#FF2E4D", borderColor: "rgba(0,0,0,0.10)" }}>
+        <span className={`${base} text-black`} style={{ background: SCREAMR_RED, borderColor: "rgba(0,0,0,0.10)" }}>
           {text}
         </span>
       );
@@ -436,9 +408,15 @@ export default function LeaderboardsPage() {
     >
       {/* GAME SHOW FX */}
       <style>{`
-        .screamr-vignette { box-shadow: inset 0 0 140px rgba(0,0,0,0.70); }
+        .screamr-vignette {
+          box-shadow: inset 0 0 140px rgba(0,0,0,0.70);
+        }
         .screamr-sparks {
-          position: absolute; inset: 0; pointer-events: none; opacity: 0.14; mix-blend-mode: screen;
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.14;
+          mix-blend-mode: screen;
           background-image:
             radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
             radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
@@ -446,14 +424,22 @@ export default function LeaderboardsPage() {
           background-size: 220px 220px;
           animation: sparksMove 6.5s linear infinite;
         }
-        @keyframes sparksMove { 0% { transform: translate3d(0,0,0); } 100% { transform: translate3d(-220px, -220px, 0); } }
+        @keyframes sparksMove {
+          0% { transform: translate3d(0,0,0); }
+          100% { transform: translate3d(-220px, -220px, 0); }
+        }
+
         .screamr-spotlights {
-          pointer-events: none; position: absolute; inset: 0; opacity: 0.42;
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          opacity: 0.42;
           background:
             radial-gradient(900px 340px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
             radial-gradient(900px 340px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
             radial-gradient(1100px 420px at 50% 115%, rgba(255,46,77,0.08) 0%, rgba(0,0,0,0) 70%);
         }
+
         .screamr-cardBorder {
           background: linear-gradient(135deg,
             rgba(255,46,77,0.52) 0%,
@@ -461,18 +447,25 @@ export default function LeaderboardsPage() {
             rgba(0,229,255,0.12) 55%,
             rgba(255,46,77,0.40) 100%);
         }
+
         .screamr-pill {
           position: relative;
           border: 1px solid rgba(255,255,255,0.14);
-          background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
           color: rgba(255,255,255,0.92);
-          box-shadow: 0 10px 26px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.12) inset;
+          box-shadow:
+            0 10px 26px rgba(0,0,0,0.35),
+            0 0 0 1px rgba(0,0,0,0.12) inset;
           overflow: hidden;
         }
         .screamr-pill::after {
           content: "";
-          position: absolute; top: -50%; left: -35%;
-          width: 60%; height: 200%;
+          position: absolute;
+          top: -50%;
+          left: -35%;
+          width: 60%;
+          height: 200%;
           transform: rotate(22deg);
           background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
           animation: pillShine 3.6s ease-in-out infinite;
@@ -483,8 +476,12 @@ export default function LeaderboardsPage() {
           40% { transform: translateX(210%) rotate(22deg); opacity: 0; }
           100% { transform: translateX(210%) rotate(22deg); opacity: 0; }
         }
+
         .screamr-scanlines {
-          position: absolute; inset: 0; pointer-events: none; opacity: 0.18;
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.18;
           background: repeating-linear-gradient(
             180deg,
             rgba(255,255,255,0.08) 0px,
@@ -494,12 +491,28 @@ export default function LeaderboardsPage() {
           );
           mix-blend-mode: overlay;
         }
-        .screamr-digit { font-weight: 900; line-height: 0.92; font-size: 64px; letter-spacing: -0.03em; }
-        @media (min-width: 640px) { .screamr-digit { font-size: 76px; } }
+
+        .screamr-digit {
+          font-weight: 900;
+          line-height: 0.92;
+          font-size: 64px;
+          letter-spacing: -0.03em;
+        }
+        @media (min-width: 640px) {
+          .screamr-digit { font-size: 76px; }
+        }
+
         .screamr-deltaUp { animation: deltaPopUp 600ms ease-out; }
         .screamr-deltaDown { animation: deltaPopDown 600ms ease-out; }
-        @keyframes deltaPopUp { 0% { transform: translateY(4px); opacity: 0.0; } 100% { transform: translateY(0px); opacity: 1.0; } }
-        @keyframes deltaPopDown { 0% { transform: translateY(-4px); opacity: 0.0; } 100% { transform: translateY(0px); opacity: 1.0; } }
+        @keyframes deltaPopUp {
+          0% { transform: translateY(4px); opacity: 0.0; }
+          100% { transform: translateY(0px); opacity: 1.0; }
+        }
+        @keyframes deltaPopDown {
+          0% { transform: translateY(-4px); opacity: 0.0; }
+          100% { transform: translateY(0px); opacity: 1.0; }
+        }
+
         .screamr-btn {
           border: 1px solid rgba(255,46,77,0.32);
           background: linear-gradient(180deg, rgba(255,46,77,0.98) 0%, rgba(255,46,77,0.72) 100%);
@@ -507,6 +520,7 @@ export default function LeaderboardsPage() {
         }
         .screamr-btn:hover { filter: brightness(1.04); }
         .screamr-btn:active { transform: translateY(1px); }
+
         .screamr-frame {
           border: 1px solid rgba(255,255,255,0.10);
           background: rgba(0,0,0,0.80);
@@ -555,7 +569,7 @@ export default function LeaderboardsPage() {
                       boxShadow: `0 0 18px rgba(${SCREAMR_RED_RGB},0.12)`,
                     }}
                   >
-                    {scopeOptions.map((opt) => (
+                    {SCOPE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
@@ -591,7 +605,7 @@ export default function LeaderboardsPage() {
                     boxShadow: `0 0 18px rgba(${SCREAMR_RED_RGB},0.12)`,
                   }}
                 >
-                  {scopeOptions.map((opt) => (
+                  {SCOPE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
@@ -621,11 +635,7 @@ export default function LeaderboardsPage() {
                       </span>
                     </h1>
                     <p className="mt-1 text-sm text-white/70">
-                      Ranked by{" "}
-                      <span className="font-black" style={{ color: SCREAMR_RED }}>
-                        CURRENT STREAK
-                      </span>
-                      . One wrong pick in a match and you’re cooked.
+                      Ranked by <span className="font-black" style={{ color: SCREAMR_RED }}>CURRENT STREAK</span>. One wrong pick in a match and you’re cooked.
                     </p>
                   </div>
 
@@ -650,7 +660,9 @@ export default function LeaderboardsPage() {
                     />
                     <div className="relative">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Leader streak</div>
+                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
+                          Leader streak
+                        </div>
                         <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
                           Updated {lastUpdatedLabel || "—"}
                         </span>
@@ -688,7 +700,9 @@ export default function LeaderboardsPage() {
                   <div className="rounded-3xl border border-white/10 bg-black/70 p-5 relative overflow-hidden">
                     <div className="screamr-scanlines" />
                     <div className="relative">
-                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Chase the leader</div>
+                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
+                        Chase the leader
+                      </div>
 
                       {user ? (
                         userEntry ? (
@@ -760,7 +774,253 @@ export default function LeaderboardsPage() {
         </div>
 
         {/* CONTENT */}
-        {loading && !hasLoadedRef.current ? renderSkeleton() : null}
+        {loading && !hasLoadedRef.current ? (
+          renderSkeleton()
+        ) : (
+          <>
+            {/* PODIUM */}
+            {top3.length > 0 ? (
+              <div className="mb-4 rounded-3xl overflow-hidden">
+                <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
+                  <div className="relative rounded-3xl overflow-hidden screamr-frame">
+                    <MarkBg opacity={0.12} />
+                    <div className="screamr-scanlines" />
+                    <div className="absolute inset-0 screamr-spotlights" />
+
+                    <div className="relative px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ background: SCREAMR_CYAN, boxShadow: "0 0 14px rgba(0,229,255,0.50)" }}
+                          />
+                          PODIUM
+                        </span>
+                        <span className="text-[12px] font-black text-white/55 hidden sm:inline">
+                          Finalists on stage
+                        </span>
+                      </div>
+                      <div className="text-[12px] font-black text-white/55">Updated {lastUpdatedLabel || "—"}</div>
+                    </div>
+
+                    <div className="relative p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {top3.map((e, idx) => {
+                        const isYou = user && e.uid === user.uid;
+
+                        const isFirst = idx === 0;
+                        const glow = isFirst
+                          ? `0 0 30px rgba(${SCREAMR_RED_RGB},0.20)`
+                          : `0 0 22px rgba(255,255,255,0.06)`;
+
+                        const border = isFirst ? `rgba(${SCREAMR_RED_RGB},0.65)` : "rgba(255,255,255,0.12)";
+
+                        return (
+                          <div
+                            key={e.uid}
+                            className="rounded-3xl border bg-white/5 p-4 relative overflow-hidden"
+                            style={{
+                              borderColor: border,
+                              boxShadow: glow,
+                              transform: isFirst ? "scale(1.02)" : "none",
+                            }}
+                          >
+                            <div className="absolute inset-0" style={{ background: "radial-gradient(520px 180px at 50% 0%, rgba(255,46,77,0.12), rgba(0,0,0,0) 70%)" }} />
+                            <div className="relative flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                {renderAvatar(e, 44)}
+                                <div className="min-w-0">
+                                  <div className="text-sm font-black truncate">
+                                    #{e.rank} {safeName(e.displayName)}
+                                    {isYou ? (
+                                      <span className="ml-2 text-[12px] font-black" style={{ color: SCREAMR_RED }}>
+                                        YOU
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {e.username ? <div className="text-[12px] text-white/55 truncate">@{e.username}</div> : null}
+                                  <div className="mt-2 flex items-center gap-2">
+                                    {idx === 0 ? tonePill("👑 #1", "hot") : tonePill(`TOP ${e.rank}`, "cold")}
+                                    <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                                      LIVE
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <div className="text-[10px] text-white/55 font-black uppercase">Streak</div>
+                                <div className="text-3xl font-black" style={{ color: SCREAMR_RED }}>
+                                  {e.currentStreak ?? 0}
+                                </div>
+                                <div className="mt-1">{renderRankDelta(e.rankDelta)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {/* TOP 10 */}
+            <div className="rounded-3xl overflow-hidden">
+              <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
+                <div className="relative rounded-3xl overflow-hidden screamr-frame">
+                  <MarkBg opacity={0.10} />
+                  <div className="screamr-scanlines" />
+                  <div className="absolute inset-0 screamr-spotlights" />
+
+                  <div className="relative px-4 py-3 border-b border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide">
+                        <span
+                          className="h-2 w-2 rounded-full"
+                          style={{ background: SCREAMR_RED, boxShadow: `0 0 14px rgba(${SCREAMR_RED_RGB},0.55)` }}
+                        />
+                        TOP 10
+                      </span>
+                      <span className="text-[12px] font-black text-white/55 hidden sm:inline">Run the board</span>
+                    </div>
+                    <div className="text-[12px] font-black text-white/55">
+                      {totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}
+                    </div>
+                  </div>
+
+                  {top10.length === 0 ? (
+                    <div className="relative p-4 text-sm text-white/70">No players yet. Be the first — go pick.</div>
+                  ) : (
+                    <ul className="relative divide-y divide-white/10">
+                      {top10.map((e) => {
+                        const isYou = user && e.uid === user.uid;
+                        const tag = streakTag(e.currentStreak ?? 0);
+
+                        return (
+                          <li
+                            key={e.uid}
+                            className="px-4 py-3 hover:bg-white/5 transition"
+                            style
+                            ={{
+                              outline: isYou ? `2px solid rgba(${SCREAMR_RED_RGB},0.55)` : "none",
+                              outlineOffset: isYou ? "-2px" : 0,
+                            }}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-[58px] flex flex-col">
+                                  <div className="text-sm font-black text-white/90">
+                                    #{e.rank}
+                                    {e.rank === 1 ? <span className="ml-1">👑</span> : null}
+                                  </div>
+                                  {renderRankDelta(e.rankDelta)}
+                                </div>
+
+                                {renderAvatar(e, 36)}
+
+                                <div className="min-w-0">
+                                  <div className="text-sm font-black truncate">
+                                    {safeName(e.displayName)}
+                                    {isYou ? (
+                                      <span className="ml-2 text-[12px] font-black" style={{ color: SCREAMR_RED }}>
+                                        YOU
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  {e.username ? (
+                                    <div className="text-[12px] text-white/55 truncate">@{e.username}</div>
+                                  ) : (
+                                    <div className="text-[12px] text-white/35 truncate">&nbsp;</div>
+                                  )}
+
+                                  <div className="mt-2 flex items-center gap-2">
+                                    {tonePill(tag.label, tag.tone)}
+                                    <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
+                                      STREAK
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="text-right">
+                                <div className="text-[10px] text-white/55 font-black uppercase">Current</div>
+                                <div className="text-3xl font-black leading-none" style={{ color: SCREAMR_RED }}>
+                                  {e.currentStreak ?? 0}
+                                </div>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* YOUR POSITION IF OUTSIDE TOP10 */}
+            {user && userOutsideTop10 && userEntry ? (
+              <div className="mt-4 rounded-3xl overflow-hidden">
+                <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
+                  <div className="relative rounded-3xl overflow-hidden screamr-frame">
+                    <MarkBg opacity={0.10} />
+                    <div className="screamr-scanlines" />
+                    <div className="relative p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide">
+                          <span
+                            className="h-2 w-2 rounded-full"
+                            style={{ background: SCREAMR_GREEN, boxShadow: "0 0 14px rgba(45,255,122,0.40)" }}
+                          />
+                          YOUR POSITION
+                        </span>
+                        <Link
+                          href="/picks"
+                          className="rounded-2xl px-4 py-2 text-[12px] font-black text-white screamr-btn"
+                          style={{ textDecoration: "none" }}
+                        >
+                          GO PICK
+                        </Link>
+                      </div>
+
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {renderAvatar(userEntry, 40)}
+                          <div className="min-w-0">
+                            <div className="text-sm font-black truncate">
+                              #{userEntry.rank} {safeName(userEntry.displayName)}
+                            </div>
+                            {userEntry.username ? <div className="text-[12px] text-white/55 truncate">@{userEntry.username}</div> : null}
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] text-white/55 font-black uppercase">Current</div>
+                          <div className="text-3xl font-black" style={{ color: SCREAMR_RED }}>
+                            {userEntry.currentStreak ?? 0}
+                          </div>
+                          {leaderStreak > (userEntry.currentStreak ?? 0) ? (
+                            <div className="mt-1 text-[12px] text-white/65">
+                              Need{" "}
+                              <span className="font-black" style={{ color: SCREAMR_RED }}>
+                                {leaderStreak - (userEntry.currentStreak ?? 0)}
+                              </span>{" "}
+                              to catch the lead.
+                            </div>
+                          ) : (
+                            <div className="mt-1 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                              You’re right there.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
 
         {/* FIXED MOBILE CTA BAR */}
         <div className="fixed left-0 right-0 bottom-0 z-50 md:hidden">
