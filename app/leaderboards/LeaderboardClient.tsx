@@ -6,8 +6,11 @@ import { useEffect, useState, useCallback, useRef, ChangeEvent, useMemo } from "
 import Link from "next/link";
 import Image from "next/image";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/lib/firebaseClient";
+import { collection, getDoc, getDocs, doc, DocumentData } from "firebase/firestore";
 
 type Scope =
+  | "current-round"
   | "overall"
   | "opening-round"
   | "round-1"
@@ -58,7 +61,14 @@ type LeaderboardApiResponse = {
   roundComplete?: boolean;
 };
 
+type RoundInfo = {
+  id: string;
+  number: number | null; // 0 = Opening Round
+  label: string; // "Opening Round" | "Round X" | fallback
+};
+
 const SCOPE_OPTIONS: { value: Scope; label: string }[] = [
+  { value: "current-round", label: "Current Round" },
   { value: "overall", label: "Overall" },
   { value: "opening-round", label: "Opening Round" },
   { value: "round-1", label: "Round 1" },
@@ -178,10 +188,129 @@ function MarkBg({ opacity = 0.22 }: { opacity?: number }) {
   );
 }
 
+/* ───────────── Current round resolver (same approach as Profile) ───────────── */
+
+function roundLabelFromNumber(n: number | null): string {
+  if (n === null) return "Round —";
+  if (n === 0) return "Opening Round";
+  return `Round ${n}`;
+}
+
+function parseRoundNumberFromId(id: string): number | null {
+  const s = (id || "").toLowerCase();
+
+  if (s.includes("opening")) return 0;
+  if (s.includes("round-0") || s.includes("round_0") || s.includes("r0")) return 0;
+
+  const m1 = s.match(/(?:^|-)r(\d+)(?:$|-)/); // afl-2026-r2
+  if (m1?.[1]) return Number(m1[1]);
+
+  const m2 = s.match(/round[-_](\d+)/); // round-2
+  if (m2?.[1]) return Number(m2[1]);
+
+  const m3 = s.match(/(?:^|-)20\d{2}-(\d+)(?:$|-)/); // 2026-2
+  if (m3?.[1]) return Number(m3[1]);
+
+  const m4 = s.match(/-(\d+)$/); // trailing -2
+  if (m4?.[1]) return Number(m4[1]);
+
+  return null;
+}
+
+function pickBestCurrentRound(candidates: Array<{ id: string; data: DocumentData }>): RoundInfo | null {
+  if (!candidates.length) return null;
+
+  const currentish = candidates.filter(({ data }) => {
+    const status = String(data?.status ?? "").toLowerCase();
+    const isCurrent = data?.isCurrent === true;
+    const isActive = data?.isActive === true;
+    const isOpen = data?.isOpen === true;
+    return isCurrent || isActive || isOpen || status === "current" || status === "active" || status === "open";
+  });
+
+  const pool = currentish.length ? currentish : candidates;
+
+  let best: { id: string; n: number | null } | null = null;
+  for (const r of pool) {
+    const n = parseRoundNumberFromId(r.id);
+    if (best === null) best = { id: r.id, n };
+    else {
+      const a = best.n ?? -9999;
+      const b = n ?? -9999;
+      if (b > a) best = { id: r.id, n };
+    }
+  }
+
+  if (!best) return null;
+  return { id: best.id, number: best.n, label: roundLabelFromNumber(best.n) };
+}
+
+async function loadCurrentRound(): Promise<RoundInfo | null> {
+  const configDocIds = ["currentRound", "season", "settings", "app"];
+  const roundFieldCandidates = ["currentRoundId", "activeRoundId", "roundId", "currentRound", "activeRound"];
+
+  for (const docId of configDocIds) {
+    try {
+      const snap = await getDoc(doc(db, "config", docId));
+      if (!snap.exists()) continue;
+      const d = snap.data() as Record<string, unknown>;
+
+      for (const key of roundFieldCandidates) {
+        const v = d?.[key];
+        if (typeof v === "string" && v.trim().length) {
+          const id = v.trim();
+          const n = parseRoundNumberFromId(id);
+          return { id, number: n, label: roundLabelFromNumber(n) };
+        }
+      }
+
+      const afl = (d as any)?.afl;
+      if (afl && typeof afl === "object") {
+        for (const key of roundFieldCandidates) {
+          const v = (afl as any)?.[key];
+          if (typeof v === "string" && v.trim().length) {
+            const id = v.trim();
+            const n = parseRoundNumberFromId(id);
+            return { id, number: n, label: roundLabelFromNumber(n) };
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Fallback: scan rounds
+  try {
+    const snap = await getDocs(collection(db, "rounds"));
+    const candidates: Array<{ id: string; data: DocumentData }> = [];
+    snap.forEach((d) => candidates.push({ id: d.id, data: d.data() }));
+
+    const filtered = candidates.filter(({ id }) => {
+      const s = id.toLowerCase();
+      return s.includes("afl") || s.includes("round") || s.includes("2026") || s.includes("-r");
+    });
+
+    const best = pickBestCurrentRound(filtered.length ? filtered : candidates);
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+function scopeToRoundNumber(scope: Scope): number | null {
+  if (scope === "opening-round") return 0;
+  const m = String(scope).match(/^round-(\d+)$/);
+  if (m?.[1]) return Number(m[1]);
+  return null;
+}
+
+/* ─────────────────────────────────────────────────────────────── */
+
 export default function LeaderboardsPage() {
   const { user } = useAuth();
 
-  const [scope, setScope] = useState<Scope>("overall");
+  const [scope, setScope] = useState<Scope>("current-round");
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [userEntry, setUserEntry] = useState<LeaderboardEntry | null>(null);
 
@@ -193,6 +322,69 @@ export default function LeaderboardsPage() {
   const lastUpdatedAtRef = useRef<number>(0);
 
   const [lastUpdatedLabel, setLastUpdatedLabel] = useState<string>("");
+
+  // ✅ current round info (for dropdown + fetch)
+  const [currentRound, setCurrentRound] = useState<RoundInfo | null>(null);
+  const [currentRoundLoading, setCurrentRoundLoading] = useState(false);
+
+  // Load current round once (and occasionally refresh)
+  useEffect(() => {
+    let alive = true;
+
+    const run = async () => {
+      setCurrentRoundLoading(true);
+      try {
+        const r = await loadCurrentRound();
+        if (!alive) return;
+        setCurrentRound(r);
+      } catch (e) {
+        console.error("Failed to load current round for leaderboard", e);
+      } finally {
+        if (alive) setCurrentRoundLoading(false);
+      }
+    };
+
+    run();
+
+    // refresh every 60s (lightweight, keeps current round accurate)
+    const id = setInterval(run, 60000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  // For UI: show "Current Round (Round X)" once resolved
+  const scopeOptionsWithCurrentLabel = useMemo(() => {
+    const resolvedLabel = currentRound?.label;
+    return SCOPE_OPTIONS.map((opt) => {
+      if (opt.value !== "current-round") return opt;
+      if (!resolvedLabel) return { ...opt, label: currentRoundLoading ? "Current Round (…)" : "Current Round" };
+      return { ...opt, label: `Current Round (${resolvedLabel})` };
+    });
+  }, [currentRound?.label, currentRoundLoading]);
+
+  // Build the scope param to send to API
+  const resolveScopeForApi = useCallback(
+    (selectedScope: Scope): { apiScope: string; displayScopeLabel: string } => {
+      // If user selected Current Round, send the resolved round id (best),
+      // else fallback to round-x / opening-round etc.
+      if (selectedScope === "current-round") {
+        const label = currentRound?.label ?? "Current Round";
+        const id = currentRound?.id;
+
+        // Best case: API can accept the round doc id
+        if (id && id.trim().length) return { apiScope: id.trim(), displayScopeLabel: label };
+
+        // Fallback if we haven't resolved yet
+        return { apiScope: "overall", displayScopeLabel: label };
+      }
+
+      // Normal scope values
+      return { apiScope: selectedScope, displayScopeLabel: SCOPE_OPTIONS.find((o) => o.value === selectedScope)?.label ?? "Scope" };
+    },
+    [currentRound?.id, currentRound?.label]
+  );
 
   const loadLeaderboard = useCallback(
     async (selectedScope: Scope, options?: { silent?: boolean }) => {
@@ -214,7 +406,21 @@ export default function LeaderboardsPage() {
           }
         }
 
-        const res = await fetch(`/api/leaderboard?scope=${selectedScope}`, {
+        const resolved = resolveScopeForApi(selectedScope);
+
+        // If "current-round" selected but API cannot handle doc ids, we try a round-x fallback
+        // e.g. currentRound.label => Round 3 => scope=round-3
+        let apiScope = resolved.apiScope;
+
+        if (selectedScope === "current-round") {
+          // If apiScope is a doc id, keep it. Otherwise try to infer from currentRound number.
+          const inferredN = currentRound?.number ?? null;
+          if (!currentRound?.id && inferredN !== null) {
+            apiScope = inferredN === 0 ? "opening-round" : `round-${inferredN}`;
+          }
+        }
+
+        const res = await fetch(`/api/leaderboard?scope=${encodeURIComponent(apiScope)}`, {
           headers: { ...authHeader },
           cache: "no-store",
         });
@@ -253,7 +459,7 @@ export default function LeaderboardsPage() {
         if (!silent) setLoading(false);
       }
     },
-    [user]
+    [user, resolveScopeForApi, currentRound?.id, currentRound?.number]
   );
 
   useEffect(() => {
@@ -408,15 +614,9 @@ export default function LeaderboardsPage() {
     >
       {/* GAME SHOW FX */}
       <style>{`
-        .screamr-vignette {
-          box-shadow: inset 0 0 140px rgba(0,0,0,0.70);
-        }
+        .screamr-vignette { box-shadow: inset 0 0 140px rgba(0,0,0,0.70); }
         .screamr-sparks {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          opacity: 0.14;
-          mix-blend-mode: screen;
+          position: absolute; inset: 0; pointer-events: none; opacity: 0.14; mix-blend-mode: screen;
           background-image:
             radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
             radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
@@ -428,18 +628,13 @@ export default function LeaderboardsPage() {
           0% { transform: translate3d(0,0,0); }
           100% { transform: translate3d(-220px, -220px, 0); }
         }
-
         .screamr-spotlights {
-          pointer-events: none;
-          position: absolute;
-          inset: 0;
-          opacity: 0.42;
+          pointer-events: none; position: absolute; inset: 0; opacity: 0.42;
           background:
             radial-gradient(900px 340px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
             radial-gradient(900px 340px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
             radial-gradient(1100px 420px at 50% 115%, rgba(255,46,77,0.08) 0%, rgba(0,0,0,0) 70%);
         }
-
         .screamr-cardBorder {
           background: linear-gradient(135deg,
             rgba(255,46,77,0.52) 0%,
@@ -447,25 +642,15 @@ export default function LeaderboardsPage() {
             rgba(0,229,255,0.12) 55%,
             rgba(255,46,77,0.40) 100%);
         }
-
         .screamr-pill {
-          position: relative;
-          border: 1px solid rgba(255,255,255,0.14);
-          background:
-            linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+          position: relative; border: 1px solid rgba(255,255,255,0.14);
+          background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
           color: rgba(255,255,255,0.92);
-          box-shadow:
-            0 10px 26px rgba(0,0,0,0.35),
-            0 0 0 1px rgba(0,0,0,0.12) inset;
+          box-shadow: 0 10px 26px rgba(0,0,0,0.35), 0 0 0 1px rgba(0,0,0,0.12) inset;
           overflow: hidden;
         }
         .screamr-pill::after {
-          content: "";
-          position: absolute;
-          top: -50%;
-          left: -35%;
-          width: 60%;
-          height: 200%;
+          content: ""; position: absolute; top: -50%; left: -35%; width: 60%; height: 200%;
           transform: rotate(22deg);
           background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
           animation: pillShine 3.6s ease-in-out infinite;
@@ -476,12 +661,8 @@ export default function LeaderboardsPage() {
           40% { transform: translateX(210%) rotate(22deg); opacity: 0; }
           100% { transform: translateX(210%) rotate(22deg); opacity: 0; }
         }
-
         .screamr-scanlines {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          opacity: 0.18;
+          position: absolute; inset: 0; pointer-events: none; opacity: 0.18;
           background: repeating-linear-gradient(
             180deg,
             rgba(255,255,255,0.08) 0px,
@@ -491,28 +672,12 @@ export default function LeaderboardsPage() {
           );
           mix-blend-mode: overlay;
         }
-
-        .screamr-digit {
-          font-weight: 900;
-          line-height: 0.92;
-          font-size: 64px;
-          letter-spacing: -0.03em;
-        }
-        @media (min-width: 640px) {
-          .screamr-digit { font-size: 76px; }
-        }
-
+        .screamr-digit { font-weight: 900; line-height: 0.92; font-size: 64px; letter-spacing: -0.03em; }
+        @media (min-width: 640px) { .screamr-digit { font-size: 76px; } }
         .screamr-deltaUp { animation: deltaPopUp 600ms ease-out; }
         .screamr-deltaDown { animation: deltaPopDown 600ms ease-out; }
-        @keyframes deltaPopUp {
-          0% { transform: translateY(4px); opacity: 0.0; }
-          100% { transform: translateY(0px); opacity: 1.0; }
-        }
-        @keyframes deltaPopDown {
-          0% { transform: translateY(-4px); opacity: 0.0; }
-          100% { transform: translateY(0px); opacity: 1.0; }
-        }
-
+        @keyframes deltaPopUp { 0% { transform: translateY(4px); opacity: 0.0; } 100% { transform: translateY(0px); opacity: 1.0; } }
+        @keyframes deltaPopDown { 0% { transform: translateY(-4px); opacity: 0.0; } 100% { transform: translateY(0px); opacity: 1.0; } }
         .screamr-btn {
           border: 1px solid rgba(255,46,77,0.32);
           background: linear-gradient(180deg, rgba(255,46,77,0.98) 0%, rgba(255,46,77,0.72) 100%);
@@ -520,7 +685,6 @@ export default function LeaderboardsPage() {
         }
         .screamr-btn:hover { filter: brightness(1.04); }
         .screamr-btn:active { transform: translateY(1px); }
-
         .screamr-frame {
           border: 1px solid rgba(255,255,255,0.10);
           background: rgba(0,0,0,0.80);
@@ -569,7 +733,7 @@ export default function LeaderboardsPage() {
                       boxShadow: `0 0 18px rgba(${SCREAMR_RED_RGB},0.12)`,
                     }}
                   >
-                    {SCOPE_OPTIONS.map((opt) => (
+                    {scopeOptionsWithCurrentLabel.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
                       </option>
@@ -605,7 +769,7 @@ export default function LeaderboardsPage() {
                     boxShadow: `0 0 18px rgba(${SCREAMR_RED_RGB},0.12)`,
                   }}
                 >
-                  {SCOPE_OPTIONS.map((opt) => (
+                  {scopeOptionsWithCurrentLabel.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
@@ -900,8 +1064,7 @@ export default function LeaderboardsPage() {
                           <li
                             key={e.uid}
                             className="px-4 py-3 hover:bg-white/5 transition"
-                            style
-                            ={{
+                            style={{
                               outline: isYou ? `2px solid rgba(${SCREAMR_RED_RGB},0.55)` : "none",
                               outlineOffset: isYou ? "-2px" : 0,
                             }}
