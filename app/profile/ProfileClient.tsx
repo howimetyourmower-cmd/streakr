@@ -54,17 +54,37 @@ const AFL_TEAMS = [
   "Western Bulldogs",
 ];
 
-// ✅ swap orange vibe -> Torpie/Streakr red theme
-const TORPIE = {
+const SCREAMR = {
   bg: "#000000",
   red: "#FF2E4D",
-  red2: "#d11b2f",
+  cyan: "#00E5FF",
+  green: "#2DFF7A",
   white: "#FFFFFF",
+
+  panel: "rgba(10,10,12,0.90)",
+  panel2: "rgba(0,0,0,0.28)",
+  border: "rgba(255,255,255,0.10)",
+  soft: "rgba(255,255,255,0.06)",
+  soft2: "rgba(255,255,255,0.03)",
+  text: "rgba(255,255,255,0.92)",
+  muted: "rgba(255,255,255,0.70)",
+  muted2: "rgba(255,255,255,0.55)",
 };
 
 function toNum(v: unknown, fallback = 0): number {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function heatLabel(streak: number): { label: string; tone: "cold" | "warm" | "hot" | "nuclear" } {
+  if (streak >= 15) return { label: "NUCLEAR", tone: "nuclear" };
+  if (streak >= 10) return { label: "ON FIRE", tone: "hot" };
+  if (streak >= 5) return { label: "HEATING UP", tone: "warm" };
+  return { label: "ALIVE", tone: "cold" };
 }
 
 export default function ProfileClient() {
@@ -85,7 +105,6 @@ export default function ProfileClient() {
   const [formValues, setFormValues] = useState<ProfileData>({});
   const [localBadges, setLocalBadges] = useState<Record<string, boolean>>({});
 
-  // Auth listener (keeps redirect logic you had)
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setAuthUser(u);
@@ -96,7 +115,6 @@ export default function ProfileClient() {
     return () => unsub();
   }, [router]);
 
-  // Load profile
   useEffect(() => {
     const load = async () => {
       if (!user) {
@@ -113,7 +131,6 @@ export default function ProfileClient() {
         if (snap.exists()) {
           const firestoreData = (snap.data() as Record<string, unknown>) || {};
 
-          // Map existing boolean fields like badges_level3 etc
           const levelBadges: Record<string, boolean> = {};
           [3, 5, 10, 15, 20].forEach((lvl) => {
             const key = `badges_level${lvl}`;
@@ -212,7 +229,6 @@ export default function ProfileClient() {
     try {
       const userRef = doc(db, "users", user.uid);
 
-      // DO NOT allow username or DOB to change from UI
       await updateDoc(userRef, {
         firstName: formValues.firstName || "",
         lastName: formValues.lastName || "",
@@ -250,7 +266,6 @@ export default function ProfileClient() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // quick client validation (UI-only)
     if (!file.type.startsWith("image/")) {
       setError("Please select an image file.");
       return;
@@ -296,14 +311,9 @@ export default function ProfileClient() {
     }
   };
 
-  // Derived stats (UI-only — backend comes later)
   const currentStreak = toNum(profile.currentStreak, 0);
   const longestStreak = toNum(profile.longestStreak, 0);
   const lifetimeBestStreak = toNum(profile.lifetimeBestStreak, 0);
-
-  // ✅ IMPORTANT:
-  // - Current streak = live streak right now.
-  // - Best streak = all-time peak (and should never display lower than current).
   const bestStreakDisplay = Math.max(currentStreak, lifetimeBestStreak, longestStreak);
 
   const lifetimeWins = toNum(profile.lifetimeWins, 0);
@@ -312,7 +322,6 @@ export default function ProfileClient() {
   const totalPicks = lifetimeWins + lifetimeLosses;
   const correctPercent = totalPicks > 0 ? Math.round((lifetimeWins / totalPicks) * 100) : 0;
 
-  // Avatar source
   const avatarUrl = profile.avatarUrl || profile.photoURL || authUser?.photoURL || "";
 
   const displayName = useMemo(() => {
@@ -320,8 +329,22 @@ export default function ProfileClient() {
       authUser?.displayName ||
       profile.username ||
       [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim();
-    return name || "Torpie Player";
+    return name || "SCREAMR Player";
   }, [authUser?.displayName, profile.username, profile.firstName, profile.lastName]);
+
+  const heat = useMemo(() => heatLabel(currentStreak), [currentStreak]);
+  const heatPct = useMemo(() => clamp(Math.round((currentStreak / 20) * 100), 0, 100), [currentStreak]);
+
+  // UI-only (looks real now, wire later)
+  const uiRoundLabel = useMemo(() => {
+    if (roundsPlayed <= 0) return "Round —";
+    return `Round ${roundsPlayed}`;
+  }, [roundsPlayed]);
+
+  const uiLastMatch = useMemo(() => {
+    // placeholder only — you can wire from picks/history later
+    return roundsPlayed > 0 ? "Last match: Coming soon" : "No match played yet";
+  }, [roundsPlayed]);
 
   if (loading) {
     return (
@@ -339,19 +362,191 @@ export default function ProfileClient() {
     );
   }
 
+  const TonePill = ({ text, tone }: { text: string; tone: "cold" | "warm" | "hot" | "nuclear" }) => {
+    const base =
+      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black tracking-[0.14em]";
+    if (tone === "nuclear") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(0,229,255,0.28)",
+            background:
+              "linear-gradient(180deg, rgba(0,229,255,0.18) 0%, rgba(255,46,77,0.14) 100%)",
+            boxShadow: "0 10px 26px rgba(0,229,255,0.10)",
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: SCREAMR.cyan, boxShadow: "0 0 16px rgba(0,229,255,0.65)" }}
+          />
+          {text}
+        </span>
+      );
+    }
+    if (tone === "hot") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(255,46,77,0.35)",
+            background: "rgba(255,46,77,0.16)",
+            boxShadow: "0 10px 26px rgba(255,46,77,0.12)",
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: SCREAMR.red, boxShadow: "0 0 16px rgba(255,46,77,0.65)" }}
+          />
+          {text}
+        </span>
+      );
+    }
+    if (tone === "warm") {
+      return (
+        <span
+          className={base}
+          style={{
+            borderColor: "rgba(255,255,255,0.14)",
+            background: "rgba(255,255,255,0.06)",
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: "rgba(255,255,255,0.92)", boxShadow: "0 0 14px rgba(255,255,255,0.35)" }}
+          />
+          {text}
+        </span>
+      );
+    }
+    return (
+      <span
+        className={base}
+        style={{
+          borderColor: "rgba(255,255,255,0.12)",
+          background: "rgba(0,0,0,0.32)",
+        }}
+      >
+        <span className="h-2 w-2 rounded-full" style={{ background: "rgba(255,255,255,0.35)" }} />
+        {text}
+      </span>
+    );
+  };
+
   return (
-    <div className="min-h-screen text-white" style={{ backgroundColor: TORPIE.bg }}>
+    <div className="min-h-screen text-white" style={{ backgroundColor: SCREAMR.bg }}>
+      <style>{`
+        .screamr-sparks {
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          opacity: 0.16;
+          mix-blend-mode: screen;
+          background-image:
+            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.20) 0 1px, transparent 2px);
+          background-size: 220px 220px;
+          animation: sparksMove 6.5s linear infinite;
+        }
+        @keyframes sparksMove {
+          0% { transform: translate3d(0,0,0); }
+          100% { transform: translate3d(-220px, -220px, 0); }
+        }
+
+        .screamr-spotlights {
+          pointer-events: none;
+          position: absolute;
+          inset: 0;
+          opacity: 0.55;
+          background:
+            radial-gradient(700px 260px at 20% 0%, rgba(0,229,255,0.14) 0%, rgba(0,0,0,0) 70%),
+            radial-gradient(700px 260px at 80% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0) 70%),
+            radial-gradient(900px 340px at 50% 110%, rgba(255,46,77,0.08) 0%, rgba(0,0,0,0) 70%);
+        }
+
+        .screamr-cardBorder {
+          background: linear-gradient(135deg,
+            rgba(255,46,77,0.52) 0%,
+            rgba(255,46,77,0.10) 25%,
+            rgba(0,229,255,0.10) 55%,
+            rgba(255,46,77,0.40) 100%);
+          box-shadow: 0 24px 80px rgba(0,0,0,0.75);
+        }
+
+        .screamr-pill {
+          position: relative;
+          border: 1px solid rgba(255,255,255,0.14);
+          background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.04) 100%);
+          color: rgba(255,255,255,0.92);
+          box-shadow:
+            0 10px 26px rgba(0,0,0,0.35),
+            0 0 0 1px rgba(0,0,0,0.12) inset;
+          overflow: hidden;
+        }
+        .screamr-pill::after {
+          content: "";
+          position: absolute;
+          top: -50%;
+          left: -35%;
+          width: 60%;
+          height: 200%;
+          transform: rotate(22deg);
+          background: linear-gradient(90deg, rgba(255,255,255,0.00), rgba(255,255,255,0.16), rgba(255,255,255,0.00));
+          animation: pillShine 3.6s ease-in-out infinite;
+        }
+        @keyframes pillShine {
+          0% { transform: translateX(-40%) rotate(22deg); opacity: 0; }
+          18% { opacity: 0.65; }
+          40% { transform: translateX(210%) rotate(22deg); opacity: 0; }
+          100% { transform: translateX(210%) rotate(22deg); opacity: 0; }
+        }
+
+        .heatTrack {
+          position: relative;
+          height: 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.06);
+          overflow: hidden;
+        }
+        .heatFill {
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg,
+            rgba(0,229,255,0.85) 0%,
+            rgba(255,46,77,0.90) 55%,
+            rgba(255,46,77,1.00) 100%);
+          box-shadow: 0 0 24px rgba(255,46,77,0.18);
+          animation: heatPulse 1.8s ease-in-out infinite;
+        }
+        @keyframes heatPulse {
+          0% { filter: brightness(0.95); }
+          50% { filter: brightness(1.10); }
+          100% { filter: brightness(0.95); }
+        }
+
+        .badgeUnlocked {
+          animation: popIn 420ms ease-out both;
+          box-shadow: 0 18px 60px rgba(255,46,77,0.12);
+        }
+        @keyframes popIn {
+          0% { transform: scale(0.92); opacity: 0.0; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
+
       {/* top sponsor strip */}
       <div
         className="w-full border-b"
         style={{
           borderColor: "rgba(255,255,255,0.08)",
-          background: "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.00) 100%)",
+          background: "linear-gradient(180deg, rgba(255,46,77,0.10) 0%, rgba(0,0,0,0.00) 100%)",
         }}
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="text-[11px] tracking-[0.18em] font-semibold text-white/55">OFFICIAL PARTNER</div>
-          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">Proudly supporting Torpie all season long</div>
+          <div className="text-[11px] tracking-[0.12em] text-white/35 truncate">Proudly supporting SCREAMR all season long</div>
         </div>
       </div>
 
@@ -359,21 +554,19 @@ export default function ProfileClient() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em]">PROFILE</h1>
-              <span
-                className="inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
-                style={{
-                  borderColor: "rgba(255,46,77,0.35)",
-                  background: "rgba(255,46,77,0.12)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-              >
-                TORPIE
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-3xl sm:text-4xl font-black tracking-[0.10em] uppercase">Locker Room</h1>
+              <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black tracking-[0.14em]">
+                SCREAMR
               </span>
+              <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black">
+                <span className="h-2 w-2 rounded-full" style={{ background: SCREAMR.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
+                LIVE
+              </span>
+              <TonePill text={heat.label} tone={heat.tone} />
             </div>
-            <p className="mt-1 text-sm text-white/65">
-              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Track streaks, badges and details here.
+            <p className="mt-2 text-sm text-white/65">
+              Welcome back, <span className="font-semibold text-white">{displayName}</span>. Your identity card, streak heat and badges live here.
             </p>
           </div>
 
@@ -461,77 +654,126 @@ export default function ProfileClient() {
           </div>
         )}
 
-        {/* Identity strip */}
-        <div
-          className="rounded-3xl border p-4 sm:p-5 mb-6"
-          style={{
-            borderColor: "rgba(255,255,255,0.10)",
-            background: "rgba(255,255,255,0.03)",
-            boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
-          }}
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="relative">
-                <div
-                  className="h-14 w-14 rounded-2xl p-[3px]"
-                  style={{
-                    background: "linear-gradient(180deg, rgba(255,46,77,0.95) 0%, rgba(255,46,77,0.55) 100%)",
-                    boxShadow: "0 12px 28px rgba(255,46,77,0.18)",
-                  }}
-                >
-                  <div
-                    className="h-full w-full overflow-hidden rounded-[14px]"
-                    style={{
-                      background: "rgba(0,0,0,0.40)",
-                      border: "1px solid rgba(255,255,255,0.10)",
-                    }}
-                  >
-                    {avatarUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="h-full w-full flex items-center justify-center text-xl font-black">
-                        {(displayName?.[0] || "T").toUpperCase()}
+        {/* PLAYER CARD HERO */}
+        <div className="relative rounded-3xl overflow-hidden mb-4">
+          <div className="absolute inset-0 screamr-sparks" />
+          <div className="absolute inset-0 screamr-spotlights" />
+          <div className="relative p-[1px] rounded-3xl screamr-cardBorder">
+            <div
+              className="rounded-3xl border overflow-hidden"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                background: "rgba(0,0,0,0.55)",
+              }}
+            >
+              <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <div
+                      className="h-16 w-16 rounded-[22px] p-[3px]"
+                      style={{
+                        background:
+                          "linear-gradient(135deg, rgba(255,46,77,0.85) 0%, rgba(0,229,255,0.18) 60%, rgba(255,46,77,0.55) 100%)",
+                        boxShadow: "0 16px 34px rgba(255,46,77,0.16)",
+                      }}
+                    >
+                      <div
+                        className="h-full w-full overflow-hidden rounded-[18px]"
+                        style={{
+                          background: "rgba(0,0,0,0.40)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                        }}
+                      >
+                        {avatarUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="h-full w-full flex items-center justify-center text-xl font-black">
+                            {(displayName?.[0] || "S").toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {uploadingAvatar && (
+                      <div
+                        className="absolute inset-0 rounded-[22px] flex items-center justify-center text-[11px] font-black"
+                        style={{
+                          background: "rgba(0,0,0,0.65)",
+                          border: "1px solid rgba(255,255,255,0.10)",
+                        }}
+                      >
+                        Uploading…
                       </div>
                     )}
                   </div>
+
+                  <div className="min-w-0">
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">Player card</div>
+                    <div className="mt-1 text-[16px] font-black text-white truncate">{displayName}</div>
+                    <div className="mt-1 text-[12px] text-white/55 font-semibold truncate">{authUser.email ?? "No email"}</div>
+
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black">
+                        {profile.favouriteAflTeam ? `⭐ ${profile.favouriteAflTeam}` : "⭐ Set favourite team"}
+                      </span>
+                      <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black" style={{ borderColor: "rgba(0,229,255,0.20)" }}>
+                        ID: {user.uid.slice(0, 6).toUpperCase()}
+                      </span>
+                      <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[10px] font-black" style={{ borderColor: "rgba(255,46,77,0.25)", background: "rgba(255,46,77,0.10)" }}>
+                        {uiRoundLabel}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {uploadingAvatar && (
-                  <div
-                    className="absolute inset-0 rounded-2xl flex items-center justify-center text-[11px] font-black"
+                <div className="flex flex-wrap gap-2">
+                  <label
+                    className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black cursor-pointer"
                     style={{
-                      background: "rgba(0,0,0,0.65)",
-                      border: "1px solid rgba(255,255,255,0.10)",
+                      borderColor: "rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "rgba(255,255,255,0.92)",
                     }}
                   >
-                    Uploading…
-                  </div>
-                )}
-              </div>
-
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Logged in as</div>
-                <div className="mt-1 text-[14px] font-black text-white truncate">{authUser.email ?? "No email"}</div>
-                <div className="mt-1 text-[12px] text-white/55 font-semibold truncate">
-                  {profile.favouriteAflTeam ? `Favourite: ${profile.favouriteAflTeam}` : "Set your favourite team below"}
+                    {uploadingAvatar ? "Uploading…" : "Change picture"}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
+                  </label>
                 </div>
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <label
-                className="inline-flex items-center justify-center rounded-full border px-4 py-2 text-[11px] font-black cursor-pointer"
-                style={{
-                  borderColor: "rgba(255,255,255,0.14)",
-                  background: "rgba(255,255,255,0.06)",
-                  color: "rgba(255,255,255,0.92)",
-                }}
-              >
-                {uploadingAvatar ? "Uploading…" : "Change picture"}
-                <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
-              </label>
+              {/* HEAT METER STRIP */}
+              <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+                <div className="rounded-3xl border p-4" style={{ borderColor: SCREAMR.border, background: "rgba(0,0,0,0.30)" }}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Streak heat meter</div>
+                      <div className="mt-1 text-[14px] font-black text-white">
+                        Current streak: <span style={{ color: SCREAMR.red }}>{currentStreak}</span>
+                      </div>
+                      <div className="mt-1 text-[12px] text-white/55 font-semibold">{uiLastMatch}</div>
+                    </div>
+
+                    <div className="text-right">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Heat</div>
+                      <div className="mt-1 text-[18px] font-black" style={{ color: SCREAMR.cyan }}>
+                        {heatPct}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 heatTrack">
+                    <div className="heatFill" style={{ width: `${heatPct}%` }} />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <LockerTile label="This round" value={uiRoundLabel} hint="UI-only now. Wire to actual round later." accent="cyan" />
+                    <LockerTile label="Best streak" value={String(bestStreakDisplay)} hint="Your all-time peak." accent="red" />
+                    <LockerTile label="Rounds played" value={String(roundsPlayed)} hint="Total rounds you’ve joined." accent="white" />
+                  </div>
+                </div>
+              </div>
+              {/* /HEAT METER STRIP */}
             </div>
           </div>
         </div>
@@ -540,8 +782,8 @@ export default function ProfileClient() {
         <section
           className="rounded-3xl border p-4 sm:p-6 mb-6"
           style={{
-            borderColor: "rgba(255,255,255,0.10)",
-            background: "rgba(255,255,255,0.03)",
+            borderColor: SCREAMR.border,
+            background: SCREAMR.soft2,
             boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
           }}
         >
@@ -551,22 +793,8 @@ export default function ProfileClient() {
               <div className="mt-1 text-[14px] font-black text-white">Your season snapshot</div>
             </div>
 
-            <span
-              className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black"
-              style={{
-                borderColor: "rgba(255,46,77,0.32)",
-                background: "rgba(255,46,77,0.10)",
-                color: "rgba(255,255,255,0.92)",
-              }}
-              title="Torpie theme"
-            >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{
-                  background: TORPIE.red,
-                  boxShadow: "0 0 14px rgba(255,46,77,0.55)",
-                }}
-              />
+            <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black" title="Live">
+              <span className="h-2 w-2 rounded-full" style={{ background: SCREAMR.red, boxShadow: "0 0 14px rgba(255,46,77,0.55)" }} />
               LIVE
             </span>
           </div>
@@ -577,29 +805,17 @@ export default function ProfileClient() {
             <StatCard label="Rounds played" value={String(roundsPlayed)} hint="How many rounds you've played." accent="white" />
           </div>
 
-          <div
-            className="mt-4 rounded-3xl border p-4 sm:p-5"
-            style={{
-              borderColor: "rgba(255,255,255,0.10)",
-              background: "rgba(0,0,0,0.28)",
-            }}
-          >
+          <div className="mt-4 rounded-3xl border p-4 sm:p-5" style={{ borderColor: SCREAMR.border, background: "rgba(0,0,0,0.28)" }}>
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.22em] text-white/50 font-semibold">Lifetime record</div>
                 <div className="mt-1 text-[14px] font-black text-white">All-time picks</div>
-                <div className="mt-1 text-[12px] text-white/60 font-semibold">(UI-only for now — we’ll wire real computed stats in step 2)</div>
+                <div className="mt-1 text-[12px] text-white/60 font-semibold">(UI-only for now — real computed stats later)</div>
               </div>
 
-              <div
-                className="rounded-2xl border px-3 py-2 text-center"
-                style={{
-                  borderColor: "rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.06)",
-                }}
-              >
+              <div className="rounded-2xl border px-3 py-2 text-center" style={{ borderColor: "rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.06)" }}>
                 <div className="text-[10px] uppercase tracking-[0.18em] text-white/55 font-black">Correct</div>
-                <div className="text-[18px] font-black" style={{ color: TORPIE.red }}>
+                <div className="text-[18px] font-black" style={{ color: SCREAMR.red }}>
                   {correctPercent}%
                 </div>
               </div>
@@ -620,7 +836,7 @@ export default function ProfileClient() {
                 <div className="mt-1 text-[14px] font-black text-white">Unlock as you climb</div>
               </div>
 
-              <div className="text-[11px] text-white/55 font-semibold">Tip: badges match the streak animation</div>
+              <div className="text-[11px] text-white/55 font-semibold">Unlocked badges animate</div>
             </div>
 
             <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -637,8 +853,8 @@ export default function ProfileClient() {
         <section
           className="rounded-3xl border p-4 sm:p-6"
           style={{
-            borderColor: "rgba(255,255,255,0.10)",
-            background: "rgba(255,255,255,0.03)",
+            borderColor: SCREAMR.border,
+            background: SCREAMR.soft2,
             boxShadow: "0 18px 60px rgba(0,0,0,0.65)",
           }}
         >
@@ -730,7 +946,7 @@ export default function ProfileClient() {
             <div className="mt-1 text-[12px] text-white/55 font-semibold">(Clickable image / CTA in phase 2)</div>
           </div>
 
-          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">TORPIE © 2026</div>
+          <div className="mt-8 pb-2 text-center text-[11px] text-white/50 font-semibold">SCREAMR © 2026</div>
         </section>
       </div>
     </div>
@@ -739,16 +955,51 @@ export default function ProfileClient() {
 
 /* ───────── Helper components ───────── */
 
-function StatCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent: "red" | "white" }) {
-  const vColor = accent === "red" ? TORPIE.red : "rgba(255,255,255,0.92)";
+function LockerTile({
+  label,
+  value,
+  hint,
+  accent,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  accent: "red" | "cyan" | "white";
+}) {
+  const glow = accent === "red" ? SCREAMR.red : accent === "cyan" ? SCREAMR.cyan : "rgba(255,255,255,0.35)";
+  const border =
+    accent === "red" ? "rgba(255,46,77,0.22)" : accent === "cyan" ? "rgba(0,229,255,0.18)" : "rgba(255,255,255,0.12)";
 
   return (
-    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
-      <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
-      <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
-        {value}
+    <div className="rounded-3xl border p-4 relative overflow-hidden" style={{ borderColor: border, background: "rgba(255,255,255,0.04)" }}>
+      <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full blur-3xl opacity-35" style={{ background: glow }} />
+      <div className="relative">
+        <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
+        <div className="mt-2 text-[22px] font-black" style={{ color: accent === "white" ? "rgba(255,255,255,0.92)" : glow }}>
+          {value}
+        </div>
+        <div className="mt-1 text-[11px] text-white/55 font-semibold">{hint}</div>
       </div>
-      <div className="mt-1 text-[12px] text-white/55 font-semibold">{hint}</div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, hint, accent }: { label: string; value: string; hint: string; accent: "red" | "white" }) {
+  const vColor = accent === "red" ? SCREAMR.red : "rgba(255,255,255,0.92)";
+
+  return (
+    <div className="rounded-3xl border p-4 relative overflow-hidden" style={{ borderColor: SCREAMR.border, background: "rgba(0,0,0,0.28)" }}>
+      <div className="absolute inset-0 pointer-events-none opacity-[0.12]">
+        <div className="absolute -top-16 -right-16 h-56 w-56 rounded-full blur-3xl" style={{ background: accent === "red" ? SCREAMR.red : SCREAMR.cyan }} />
+      </div>
+
+      <div className="relative">
+        <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
+        <div className="mt-2 text-4xl font-black" style={{ color: vColor }}>
+          {value}
+        </div>
+        <div className="mt-1 text-[12px] text-white/55 font-semibold">{hint}</div>
+      </div>
     </div>
   );
 }
@@ -757,7 +1008,7 @@ function MiniStat({ label, value, good, bad }: { label: string; value: string; g
   const color = good ? "rgba(45,255,122,0.92)" : bad ? "rgba(255,46,77,0.92)" : "rgba(255,255,255,0.92)";
 
   return (
-    <div className="rounded-2xl border p-3" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(255,255,255,0.04)" }}>
+    <div className="rounded-2xl border p-3" style={{ borderColor: SCREAMR.border, background: "rgba(255,255,255,0.04)" }}>
       <div className="text-[10px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-1 text-[18px] font-black" style={{ color }}>
         {value}
@@ -768,7 +1019,7 @@ function MiniStat({ label, value, good, bad }: { label: string; value: string; g
 
 function ReadOnlyRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-3xl border p-4" style={{ borderColor: "rgba(255,255,255,0.10)", background: "rgba(0,0,0,0.28)" }}>
+    <div className="rounded-3xl border p-4" style={{ borderColor: SCREAMR.border, background: "rgba(0,0,0,0.28)" }}>
       <div className="text-[11px] uppercase tracking-[0.22em] text-white/55 font-semibold">{label}</div>
       <div className="mt-2 text-[14px] font-black text-white">{value}</div>
       <div className="mt-1 text-[11px] text-white/45 font-semibold">Locked</div>
@@ -802,7 +1053,7 @@ function Field({ label, name, value, onChange, disabled, type = "text", placehol
         disabled={disabled}
         placeholder={placeholder}
         className="w-full rounded-2xl border px-3 py-3 text-sm font-semibold focus:outline-none disabled:opacity-70"
-        style={{ borderColor, background: bg, color: "rgba(255,255,255,0.92)" }}
+        style={{ borderColor, background: bg, color: SCREAMR.text }}
       />
     </div>
   );
@@ -820,18 +1071,19 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
 
   return (
     <div
-      className="relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden"
+      className={`relative rounded-3xl border p-3 flex flex-col items-center text-center overflow-hidden ${
+        unlocked ? "badgeUnlocked" : ""
+      }`}
       style={{
-        borderColor: unlocked ? "rgba(255,46,77,0.40)" : "rgba(255,255,255,0.10)",
+        borderColor: unlocked ? "rgba(255,46,77,0.40)" : SCREAMR.border,
         background: unlocked
           ? "radial-gradient(900px 140px at 50% 0%, rgba(255,46,77,0.18) 0%, rgba(0,0,0,0.00) 70%), rgba(0,0,0,0.28)"
           : "rgba(0,0,0,0.28)",
-        boxShadow: unlocked ? "0 18px 60px rgba(255,46,77,0.10)" : "none",
       }}
     >
-      <div className="absolute inset-0 pointer-events-none opacity-[0.10]">
-        <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.00) 100%)" }} />
-      </div>
+      {unlocked ? (
+        <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full blur-3xl opacity-30" style={{ background: SCREAMR.red }} />
+      ) : null}
 
       <div className="relative mb-2 h-24 w-20">
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -839,11 +1091,28 @@ function BadgeCard({ level, title, subtitle, unlocked }: BadgeProps) {
         {!unlocked && (
           <div
             className="absolute inset-0 flex items-center justify-center text-[10px] font-black tracking-[0.18em]"
-            style={{ color: "rgba(255,255,255,0.75)", textShadow: "0 2px 12px rgba(0,0,0,0.70)" }}
+            style={{
+              color: "rgba(255,255,255,0.80)",
+              textShadow: "0 2px 12px rgba(0,0,0,0.70)",
+              background: "rgba(0,0,0,0.30)",
+            }}
           >
             LOCKED
           </div>
         )}
+        {unlocked ? (
+          <div
+            className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full px-2 py-0.5 text-[9px] font-black tracking-[0.16em]"
+            style={{
+              border: "1px solid rgba(0,229,255,0.22)",
+              background: "rgba(0,229,255,0.10)",
+              color: "rgba(255,255,255,0.92)",
+              boxShadow: "0 10px 26px rgba(0,229,255,0.10)",
+            }}
+          >
+            NEW
+          </div>
+        ) : null}
       </div>
 
       <p className="relative text-[12px] font-black text-white">{title}</p>
