@@ -55,14 +55,51 @@ const BRAND_RED = "#FF2E4D";
 const BRAND_BG = "#000000";
 const BRAND_CYAN = "#00E5FF";
 
-/** ✅ Pricing constants (UI + future paywall messaging) */
-const PREMIUM_PRICING = {
-  perRound: 2.99,
-  fourRounds: 7.99,
-  season: 49.99,
-} as const;
+/**
+ * ✅ Premium detection (production-clean): custom claim `premium: true`
+ * NOTE: FREE vs PREMIUM in this file now only gates premium-only *extras*
+ * (community percentages / future stats / powerups). All questions remain selectable for everyone.
+ */
+function usePremiumStatus(user: any) {
+  const [isPremium, setIsPremium] = useState(false);
+  const [premiumLoaded, setPremiumLoaded] = useState(false);
 
-const FREE_MAX_SELECTABLE = 8;
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      try {
+        if (!user) {
+          if (!cancelled) {
+            setIsPremium(false);
+            setPremiumLoaded(true);
+          }
+          return;
+        }
+
+        const tokenResult = await user.getIdTokenResult(true);
+        const claim = Boolean((tokenResult?.claims as any)?.premium);
+
+        if (!cancelled) {
+          setIsPremium(claim);
+          setPremiumLoaded(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setIsPremium(false);
+          setPremiumLoaded(true);
+        }
+      }
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  return { isPremium, premiumLoaded };
+}
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -468,60 +505,13 @@ function msToRevealCountdown(ms: number) {
   return msToLockCountdown(ms);
 }
 
-function formatMoneyAUD(n: number) {
-  try {
-    return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", maximumFractionDigits: 2 }).format(n);
-  } catch {
-    return `$${n.toFixed(2)}`;
-  }
-}
-
-/** ✅ Premium detection (production-clean): custom claim `premium: true` */
-function usePremiumStatus(user: any) {
-  const [isPremium, setIsPremium] = useState(false);
-  const [premiumLoaded, setPremiumLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      try {
-        if (!user) {
-          if (!cancelled) {
-            setIsPremium(false);
-            setPremiumLoaded(true);
-          }
-          return;
-        }
-
-        const tokenResult = await user.getIdTokenResult(true);
-        const claim = Boolean((tokenResult?.claims as any)?.premium);
-
-        if (!cancelled) {
-          setIsPremium(claim);
-          setPremiumLoaded(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setIsPremium(false);
-          setPremiumLoaded(true);
-        }
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  return { isPremium, premiumLoaded };
+function playerSlugFromName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
 }
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
-
-  const { isPremium, premiumLoaded } = usePremiumStatus(user);
+  const { isPremium } = usePremiumStatus(user);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -619,33 +609,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return [...qs].sort((a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id));
   }, [stableGame]);
 
-  const sponsorQuestionId = useMemo(() => {
-    const hit = questions.find((q) => q.isSponsorQuestion);
-    return hit?.id || null;
-  }, [questions]);
-
-  const selectableIdsForUser = useMemo(() => {
-    // Premium: all
-    if (isPremium) return new Set<string>(questions.map((q) => q.id));
-
-    // Free: 8 selectable. Sponsor question should remain selectable (and counts toward 8).
-    const ids = questions.map((q) => q.id);
-
-    const sponsorId = sponsorQuestionId;
-    const selected = ids.slice(0, Math.max(0, Math.min(FREE_MAX_SELECTABLE, ids.length)));
-
-    if (sponsorId) {
-      const hasSponsorInSelected = selected.includes(sponsorId);
-      if (!hasSponsorInSelected) {
-        // Ensure sponsor is included by replacing the last slot (if we have any slots)
-        if (selected.length > 0) selected[selected.length - 1] = sponsorId;
-        else selected.push(sponsorId);
-      }
-    }
-
-    return new Set<string>(selected);
-  }, [isPremium, questions, sponsorQuestionId]);
-
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
 
   const lockedCount = useMemo(() => questions.filter((q) => safeStatus(q.status) !== "open").length, [questions]);
@@ -693,9 +656,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     }
   }
 
-  async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus, isSelectableByTier: boolean) {
+  async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus) {
     if (status !== "open") return;
-    if (!isSelectableByTier) return;
 
     setPicks((prev) => {
       const current = prev[questionId] || "none";
@@ -705,9 +667,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  async function clearPick(questionId: string, status: QuestionStatus, isSelectableByTier: boolean) {
+  async function clearPick(questionId: string, status: QuestionStatus) {
     if (status !== "open") return;
-    if (!isSelectableByTier) return;
 
     setPicks((prev) => {
       void persistPick(questionId, "none");
@@ -754,44 +715,22 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home, away } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
-  const allowedSelectableCount = isPremium ? 15 : FREE_MAX_SELECTABLE;
-
-  function UpgradePill() {
-    return (
-      <div
-        className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black tracking-[0.14em]"
-        style={{
-          borderColor: "rgba(255,46,77,0.35)",
-          background: "rgba(255,46,77,0.10)",
-          boxShadow: "0 0 18px rgba(255,46,77,0.12)",
-        }}
-      >
-        <span style={{ color: "rgba(255,255,255,0.95)" }}>🔒 UPGRADE TO PREMIUM</span>
-        <span className="text-white/40">•</span>
-        <span className="text-white/80">
-          {formatMoneyAUD(PREMIUM_PRICING.perRound)}/ROUND
-        </span>
-      </div>
-    );
-  }
-
-  // ✅ Sponsor style card: blind until lock, then auto-reveal when match locks.
+  // ✅ “Mystery Gamble” sponsor style card, blind until lock, auto reveal at lock.
   function SponsorMysteryCard({ q, status, qNum }: { q: ApiQuestion; status: QuestionStatus; qNum: string }) {
     const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
     const selected = picks[q.id] || "none";
     const isSaving = !!saving[q.id];
 
-    // Always blind until lock.
     const isRevealTime = matchIsLocked;
     const showQuestionText = isRevealTime;
 
-    // Sponsor pick is available until match locks (bounce), regardless of other question timings.
+    // pickable until bounce; after bounce disabled
     const locked = status !== "open" || isRevealTime;
 
     const yesSelected = selected === "yes";
     const noSelected = selected === "no";
 
-    // Sponsor question must show community pick % even for Free users.
+    // Sponsor must always show community pick %
     const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
     const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
@@ -830,7 +769,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 }`}
                 aria-label="Clear pick"
                 disabled={locked || isSaving}
-                onClick={() => void clearPick(q.id, status, true)}
+                onClick={() => void clearPick(q.id, status)}
                 title="Clear pick"
               >
                 <span className="text-white/85 font-black">×</span>
@@ -854,10 +793,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 }}
               >
                 <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
-                  MYSTERY SPONSOR PICK
+                  MYSTERY SPONSOR QUESTION
                 </div>
               </div>
-              <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">PICK BLIND • REVEALS AT BOUNCE</div>
+              <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">BLIND PICK • REVEALS AT BOUNCE</div>
             </div>
           </div>
 
@@ -919,7 +858,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
-                onClick={() => void setPick(q.id, "yes", status, true)}
+                onClick={() => void setPick(q.id, "yes", status)}
               >
                 <span className="inline-flex items-center justify-center gap-2">
                   <span className="text-[18px] leading-none">🥤</span>
@@ -933,7 +872,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
-                onClick={() => void setPick(q.id, "no", status, true)}
+                onClick={() => void setPick(q.id, "no", status)}
               >
                 <span className="inline-flex items-center justify-center gap-2">
                   <span className="text-[18px] leading-none">🥤</span>
@@ -946,8 +885,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
               <span className="text-white/90 font-black">+3 points</span> if correct •{" "}
-              <span className="text-white/85 font-black">wrong does NOT break streak</span> • correct pick goes into the draw for{" "}
-              <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
+              <span className="text-white/85 font-black">wrong does NOT break streak</span>
             </div>
 
             <div
@@ -975,23 +913,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return <div className="screamr-timer">{msToLockCountdown(matchLockMs)}</div>;
   };
 
-  function LockedOverlay() {
-    return (
-      <div className="absolute inset-0 rounded-[22px] overflow-hidden">
-        <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px]" />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
-          <div className="text-[28px] leading-none">🔒</div>
-          <div className="text-[12px] font-black tracking-[0.22em] text-white/80">UPGRADE TO PREMIUM</div>
-          <div className="text-[12px] text-white/60">
-            Unlock all 15 questions • See pick % • Free Kick • Panic Button
-          </div>
-          <div className="mt-1">
-            <UpgradePill />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const showCommunityPulseForNormalQs = isPremium; // ✅ premium-only feature gating remains
 
   return (
     <div
@@ -1124,13 +1046,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
           <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {allowedSelectableCount}
+              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 15
             </div>
-
             <div className="rounded-full border border-white/15 px-3 py-1">
               Locks: <span className="font-semibold text-white">{lockedCount}</span>
             </div>
-
             <div className="rounded-full border border-white/15 px-3 py-1">
               {matchLockMs === null
                 ? "Auto-locks at bounce"
@@ -1138,19 +1058,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 ? "LOCKED — sponsor revealed"
                 : `Locks in ${msToLockCountdown(matchLockMs)}`}
             </div>
-
-            {!premiumLoaded ? (
-              <div className="rounded-full border border-white/15 px-3 py-1 text-white/50">Checking access…</div>
-            ) : isPremium ? (
+            {!showCommunityPulseForNormalQs ? (
+              <div className="rounded-full border border-white/15 px-3 py-1 text-white/50">🔒 Premium shows pick % + stats</div>
+            ) : (
               <div className="rounded-full border border-white/15 px-3 py-1" style={{ borderColor: "rgba(0,229,255,0.28)" }}>
                 <span className="font-black tracking-[0.14em]" style={{ color: "rgba(0,229,255,0.95)" }}>
                   PREMIUM
                 </span>
                 <span className="text-white/35"> • </span>
-                <span className="text-white/70">All 15 unlocked</span>
+                <span className="text-white/70">Pick % enabled</span>
               </div>
-            ) : (
-              <UpgradePill />
             )}
           </div>
         </div>
@@ -1160,7 +1077,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const status = safeStatus(q.status);
             const qNum = String(idx + 1).padStart(2, "0");
 
-            // ✅ sponsor gets the special “Mystery Sponsor Pick” card UI
             if (q.isSponsorQuestion) {
               return <SponsorMysteryCard key={q.id} q={q} status={status} qNum={qNum} />;
             }
@@ -1173,18 +1089,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             const selected = picks[q.id] || "none";
 
-            const isLockedByStatus = status !== "open";
+            const isLocked = status !== "open";
             const isSaving = !!saving[q.id];
-
-            const isSelectableByTier = selectableIdsForUser.has(q.id);
-            const isLockedByTier = !isSelectableByTier;
 
             const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
             const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
-
-            const disableButtons = isLockedByStatus || isSaving || isLockedByTier;
-
-            const showCommunityPulse = isPremium; // Free users do NOT see pick % (except sponsor, handled separately)
 
             return (
               <div key={q.id} className="screamr-card p-4 flex flex-col">
@@ -1207,9 +1116,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       <div className="mt-2 flex items-center gap-2">
                         <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
                         {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
-                        {!isPremium && isLockedByTier ? (
-                          <span className="text-[11px] font-black tracking-[0.12em] text-white/35">LOCKED</span>
-                        ) : null}
                       </div>
                     </div>
 
@@ -1219,11 +1125,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       <button
                         type="button"
                         className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                          disableButtons ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                          isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
                         }`}
                         aria-label="Clear pick"
-                        disabled={disableButtons}
-                        onClick={() => void clearPick(q.id, status, isSelectableByTier)}
+                        disabled={isLocked || isSaving}
+                        onClick={() => void clearPick(q.id, status)}
                         title="Clear pick"
                       >
                         <span className="text-white/85 font-black">×</span>
@@ -1238,38 +1144,36 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   <QuestionText text={q.question} />
 
                   <div className="mt-auto pt-4">
-                    <div className="relative rounded-2xl border border-white/10 bg-black/55 p-4 overflow-hidden">
-                      <div className={`grid grid-cols-2 gap-3 ${!isPremium && isLockedByTier ? "blur-[2px]" : ""}`}>
+                    <div className="rounded-2xl border border-white/10 bg-black/55 p-4">
+                      <div className="grid grid-cols-2 gap-3">
                         <button
                           type="button"
-                          disabled={disableButtons}
+                          disabled={isLocked || isSaving}
                           className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                            disableButtons ? "opacity-50 cursor-not-allowed" : ""
+                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                           } ${yesBtn}`}
-                          onClick={() => void setPick(q.id, "yes", status, isSelectableByTier)}
+                          onClick={() => void setPick(q.id, "yes", status)}
                         >
                           YES
                         </button>
 
                         <button
                           type="button"
-                          disabled={disableButtons}
+                          disabled={isLocked || isSaving}
                           className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                            disableButtons ? "opacity-50 cursor-not-allowed" : ""
+                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                           } ${noBtn}`}
-                          onClick={() => void setPick(q.id, "no", status, isSelectableByTier)}
+                          onClick={() => void setPick(q.id, "no", status)}
                         >
                           NO
                         </button>
                       </div>
 
-                      {showCommunityPulse ? <CommunityPulse yes={yes} no={no} /> : null}
+                      {showCommunityPulseForNormalQs ? <CommunityPulse yes={yes} no={no} /> : null}
 
-                      {!isPremium && isLockedByTier ? <LockedOverlay /> : null}
-
-                      {!isPremium && !isLockedByTier && !showCommunityPulse ? (
-                        <div className="mt-4 flex justify-center">
-                          <div className="text-[11px] font-black tracking-[0.20em] text-white/45">🔒 Premium shows pick % + stats</div>
+                      {!showCommunityPulseForNormalQs ? (
+                        <div className="mt-4 text-center text-[11px] font-black tracking-[0.18em] text-white/45">
+                          🔒 Upgrade to Premium to see Community Pulse + player stats
                         </div>
                       ) : null}
                     </div>
@@ -1282,15 +1186,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
         <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
-            <div className="flex items-center gap-3">
-              <div className="rounded-full border border-white/15 px-3 py-1">
-                Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {allowedSelectableCount}
-              </div>
-              {!isPremium ? (
-                <div className="hidden sm:block">
-                  <UpgradePill />
-                </div>
-              ) : null}
+            <div className="rounded-full border border-white/15 px-3 py-1">
+              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 15
             </div>
 
             <button
