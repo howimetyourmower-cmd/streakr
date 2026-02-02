@@ -1,6 +1,6 @@
+// /app/picks/[gameId]/MatchPicksClient.tsx
 "use client";
 
-// /app/picks/[gameId]/MatchPicksClient.tsx
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
@@ -54,52 +54,6 @@ type PicksApiResponse = {
 const BRAND_RED = "#FF2E4D";
 const BRAND_BG = "#000000";
 const BRAND_CYAN = "#00E5FF";
-
-/**
- * ✅ Premium detection (production-clean): custom claim `premium: true`
- * NOTE: FREE vs PREMIUM in this file now only gates premium-only *extras*
- * (community percentages / future stats / powerups). All questions remain selectable for everyone.
- */
-function usePremiumStatus(user: any) {
-  const [isPremium, setIsPremium] = useState(false);
-  const [premiumLoaded, setPremiumLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
-      try {
-        if (!user) {
-          if (!cancelled) {
-            setIsPremium(false);
-            setPremiumLoaded(true);
-          }
-          return;
-        }
-
-        const tokenResult = await user.getIdTokenResult(true);
-        const claim = Boolean((tokenResult?.claims as any)?.premium);
-
-        if (!cancelled) {
-          setIsPremium(claim);
-          setPremiumLoaded(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setIsPremium(false);
-          setPremiumLoaded(true);
-        }
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
-
-  return { isPremium, premiumLoaded };
-}
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -478,13 +432,12 @@ function QuestionText({ text }: { text: string }) {
 }
 
 /**
- * ✅ Countdown display rules:
- * - If more than 24h remain: "Xd HH:MM:SS" (e.g. 31d 09:46:58)
- * - Else: "HH:MM:SS"
+ * ✅ Countdown supports DAYS + HOURS:
+ * 31d 09:46:58
+ * 0d 02:12:03 (still fine under 24h)
  */
-function msToLockCountdown(ms: number) {
+function msToRevealCountdown(ms: number) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
-
   const d = Math.floor(totalSec / 86400);
   const rem = totalSec % 86400;
 
@@ -493,25 +446,11 @@ function msToLockCountdown(ms: number) {
   const ss = rem % 60;
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
-
-  if (totalSec >= 86400) return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-  return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-}
-
-/**
- * ✅ Sponsor reveal countdown uses the same display rule (days+hours supported)
- */
-function msToRevealCountdown(ms: number) {
-  return msToLockCountdown(ms);
-}
-
-function playerSlugFromName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
+  return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
 }
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
-  const { isPremium } = usePremiumStatus(user);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -715,24 +654,23 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home, away } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
-  // ✅ “Mystery Gamble” sponsor style card, blind until lock, auto reveal at lock.
-  function SponsorMysteryCard({ q, status, qNum }: { q: ApiQuestion; status: QuestionStatus; qNum: string }) {
+  // ✅ Sponsor “Mystery Gamble” card:
+  // - Blind YES/NO visible pre-lock
+  // - Question revealed automatically once match locks
+  function SponsorMysteryCard({ q, status }: { q: ApiQuestion; status: QuestionStatus }) {
     const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
     const selected = picks[q.id] || "none";
     const isSaving = !!saving[q.id];
 
+    // Always hidden until lock
     const isRevealTime = matchIsLocked;
     const showQuestionText = isRevealTime;
 
-    // pickable until bounce; after bounce disabled
+    // Can pick up until lock; after lock, disabled
     const locked = status !== "open" || isRevealTime;
 
     const yesSelected = selected === "yes";
     const noSelected = selected === "no";
-
-    // Sponsor must always show community pick %
-    const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
-    const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
     return (
       <div className="screamr-card p-4 flex flex-col">
@@ -745,7 +683,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
-                SPONSOR - {formatQuarterLabel(q.quarter)}
+                SPONSOR — {formatQuarterLabel(q.quarter)}
               </div>
               <div className="mt-1 text-[12px] text-white/60">
                 Status: <span className="text-white/70">{status}</span>
@@ -793,10 +731,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 }}
               >
                 <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
-                  MYSTERY SPONSOR QUESTION
+                  MYSTERY GAMBLE
                 </div>
               </div>
-              <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">BLIND PICK • REVEALS AT BOUNCE</div>
+              <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">THE VAULT IS LOCKED!</div>
             </div>
           </div>
 
@@ -881,11 +819,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               </button>
             </div>
 
-            <CommunityPulse yes={yes} no={no} />
-
             <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
-              <span className="text-white/90 font-black">+3 points</span> if correct •{" "}
-              <span className="text-white/85 font-black">wrong does NOT break streak</span>
+              Correct pick goes into the draw to win a <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
             </div>
 
             <div
@@ -894,7 +829,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             >
               <div className="text-[11px] font-black tracking-[0.14em] text-white/65">SPONSOR</div>
               <div className="mt-0.5 text-[22px] font-black" style={{ color: "rgba(255,46,77,0.95)" }}>
-                +3
+                $250
               </div>
             </div>
           </div>
@@ -910,10 +845,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (status === "void") return <div className="screamr-timer screamr-timer--final">VOID</div>;
     if (matchLockMs === null) return <div className="screamr-timer">—</div>;
     if (matchIsLocked) return <div className="screamr-timer screamr-timer--live">LOCKED</div>;
-    return <div className="screamr-timer">{msToLockCountdown(matchLockMs)}</div>;
+    return <div className="screamr-timer">{msToRevealCountdown(matchLockMs)}</div>;
   };
 
-  const showCommunityPulseForNormalQs = isPremium; // ✅ premium-only feature gating remains
+  const totalQuestions = questions.length || 0;
 
   return (
     <div
@@ -1046,29 +981,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
           <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 15
+              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
               Locks: <span className="font-semibold text-white">{lockedCount}</span>
             </div>
             <div className="rounded-full border border-white/15 px-3 py-1">
-              {matchLockMs === null
-                ? "Auto-locks at bounce"
-                : matchIsLocked
-                ? "LOCKED — sponsor revealed"
-                : `Locks in ${msToLockCountdown(matchLockMs)}`}
+              {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED — sponsor revealed" : `Locks in ${msToRevealCountdown(matchLockMs)}`}
             </div>
-            {!showCommunityPulseForNormalQs ? (
-              <div className="rounded-full border border-white/15 px-3 py-1 text-white/50">🔒 Premium shows pick % + stats</div>
-            ) : (
-              <div className="rounded-full border border-white/15 px-3 py-1" style={{ borderColor: "rgba(0,229,255,0.28)" }}>
-                <span className="font-black tracking-[0.14em]" style={{ color: "rgba(0,229,255,0.95)" }}>
-                  PREMIUM
-                </span>
-                <span className="text-white/35"> • </span>
-                <span className="text-white/70">Pick % enabled</span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -1078,7 +998,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const qNum = String(idx + 1).padStart(2, "0");
 
             if (q.isSponsorQuestion) {
-              return <SponsorMysteryCard key={q.id} q={q} status={status} qNum={qNum} />;
+              return <SponsorMysteryCard key={q.id} q={q} status={status} />;
             }
 
             const playerName = extractPlayerName(q.question);
@@ -1106,7 +1026,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
-                        Q{qNum} - {formatQuarterLabel(q.quarter)}
+                        Q{qNum} — {formatQuarterLabel(q.quarter)}
                       </div>
 
                       <div className="mt-1 text-[12px] text-white/60">
@@ -1137,9 +1057,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex justify-center">
-                    {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
-                  </div>
+                  <div className="mt-4 flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}</div>
 
                   <QuestionText text={q.question} />
 
@@ -1169,13 +1087,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         </button>
                       </div>
 
-                      {showCommunityPulseForNormalQs ? <CommunityPulse yes={yes} no={no} /> : null}
-
-                      {!showCommunityPulseForNormalQs ? (
-                        <div className="mt-4 text-center text-[11px] font-black tracking-[0.18em] text-white/45">
-                          🔒 Upgrade to Premium to see Community Pulse + player stats
-                        </div>
-                      ) : null}
+                      <CommunityPulse yes={yes} no={no} />
                     </div>
                   </div>
                 </div>
@@ -1187,7 +1099,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
           <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
             <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / 15
+              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
             </div>
 
             <button
