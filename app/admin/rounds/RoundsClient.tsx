@@ -1,7 +1,7 @@
 // /app/admin/rounds/RoundsClient.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import { collection, getDocs, doc, updateDoc, setDoc, getDoc } from "firebase/firestore";
@@ -39,6 +39,24 @@ function getRoundCode(roundNumber: number): string {
   return `R${roundNumber}`;
 }
 
+// ✅ Must match /app/api/picks/route.ts stableQuestionId exactly
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function stableQuestionId(params: { roundNumber: number; gameId: string; quarter: number; question: string }): string {
+  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(params.question || "")
+    .trim()
+    .toLowerCase()}`;
+  const hash = fnv1a(base);
+  return `${params.gameId}-Q${params.quarter}-${hash}`;
+}
+
 export default function RoundsClient() {
   const { user, isAdmin, loading } = useAuth();
   const [rounds, setRounds] = useState<RoundMeta[]>([]);
@@ -47,10 +65,7 @@ export default function RoundsClient() {
   const [initialised, setInitialised] = useState(false);
 
   const [sponsorRoundId, setSponsorRoundId] = useState<string | null>(null);
-  const [sponsorSelection, setSponsorSelection] = useState<{
-    gameIndex: number;
-    questionIndex: number;
-  } | null>(null);
+  const [sponsorSelection, setSponsorSelection] = useState<{ gameIndex: number; questionIndex: number } | null>(null);
   const [sponsorSaving, setSponsorSaving] = useState(false);
   const [sponsorSavedMessage, setSponsorSavedMessage] = useState<string | null>(null);
 
@@ -80,11 +95,7 @@ export default function RoundsClient() {
           });
         });
 
-        list.sort((a, b) =>
-          a.roundNumber === b.roundNumber
-            ? a.id.localeCompare(b.id)
-            : a.roundNumber - b.roundNumber
-        );
+        list.sort((a, b) => (a.roundNumber === b.roundNumber ? a.id.localeCompare(b.id) : a.roundNumber - b.roundNumber));
 
         const configRef = doc(db, "config", `season-${SEASON}`);
         const configSnap = await getDoc(configRef);
@@ -96,9 +107,7 @@ export default function RoundsClient() {
         }
 
         const withPublished = list.map((round) => {
-          if (currentRoundId) {
-            return { ...round, published: round.id === currentRoundId };
-          }
+          if (currentRoundId) return { ...round, published: round.id === currentRoundId };
           return round;
         });
 
@@ -204,16 +213,22 @@ export default function RoundsClient() {
           ...q,
           isSponsorQuestion: gi === gameIndex && qi === questionIndex,
         }));
-
         return { ...game, questions };
       });
 
-      await updateDoc(doc(db, "rounds", round.id), {
-        games: updatedGames,
-      });
+      await updateDoc(doc(db, "rounds", round.id), { games: updatedGames });
 
+      // ✅ Compute the SAME stable questionId that /api/picks uses
       const roundCode = getRoundCode(round.roundNumber);
-      const sponsorQuestionId = `${roundCode}-G${gameIndex + 1}-Q${questionIndex + 1}`;
+      const gameId = `${roundCode}-G${gameIndex + 1}`;
+      const pickedQuestion = updatedGames?.[gameIndex]?.questions?.[questionIndex];
+
+      const sponsorQuestionId = stableQuestionId({
+        roundNumber: round.roundNumber,
+        gameId,
+        quarter: Number(pickedQuestion?.quarter ?? 1),
+        question: String(pickedQuestion?.question ?? ""),
+      });
 
       const configRef = doc(db, "config", `season-${SEASON}`);
       await setDoc(
@@ -229,9 +244,7 @@ export default function RoundsClient() {
 
       setRounds((prev) => prev.map((r) => (r.id === round.id ? { ...r, games: updatedGames } : r)));
 
-      setSponsorSavedMessage(
-        `Sponsor question saved: ${sponsorQuestionId} (Round ${round.roundNumber}).`
-      );
+      setSponsorSavedMessage(`Sponsor question saved: ${sponsorQuestionId} (Round ${round.roundNumber}).`);
     } catch (err) {
       console.error("Error saving sponsor question", err);
       setError("Failed to save sponsor question.");
@@ -240,7 +253,10 @@ export default function RoundsClient() {
     }
   };
 
-  const activeSponsorRound = sponsorRoundId ? rounds.find((r) => r.id === sponsorRoundId) : null;
+  const activeSponsorRound = useMemo(
+    () => (sponsorRoundId ? rounds.find((r) => r.id === sponsorRoundId) : null),
+    [rounds, sponsorRoundId]
+  );
 
   if (loading) {
     return <div className="p-6 text-white">Checking admin access…</div>;
@@ -262,12 +278,11 @@ export default function RoundsClient() {
         <br />
         2) update the <code>config / season-{SEASON}</code> document that the Picks API and Settlement console read.
         <br />
-        Saving a <strong>Sponsor question</strong> will also write <code>config / season-{SEASON} / sponsorQuestion</code>, which the Picks API uses to tag the sponsor question.
+        Saving a <strong>Sponsor question</strong> will also write <code>config / season-{SEASON} / sponsorQuestion</code>,
+        which the Picks API uses to tag the sponsor question.
       </p>
 
-      {error && (
-        <div className="mb-4 rounded bg-red-700/80 px-4 py-2 text-sm">{error}</div>
-      )}
+      {error && <div className="mb-4 rounded bg-red-700/80 px-4 py-2 text-sm">{error}</div>}
 
       {!initialised ? (
         <div>Loading rounds…</div>
@@ -289,10 +304,7 @@ export default function RoundsClient() {
             </thead>
             <tbody>
               {rounds.map((round) => {
-                const questionCount = round.games.reduce(
-                  (total, g: GameMeta) => total + (g.questions?.length ?? 0),
-                  0
-                );
+                const questionCount = round.games.reduce((total, g: GameMeta) => total + (g.questions?.length ?? 0), 0);
 
                 return (
                   <tr key={round.id} className="border-b border-slate-800 align-top">
@@ -303,13 +315,9 @@ export default function RoundsClient() {
                     <td className="px-3 py-2">{questionCount}</td>
                     <td className="px-3 py-2">
                       {round.published ? (
-                        <span className="rounded bg-green-700/70 px-2 py-1 text-xs font-semibold">
-                          PUBLISHED
-                        </span>
+                        <span className="rounded bg-green-700/70 px-2 py-1 text-xs font-semibold">PUBLISHED</span>
                       ) : (
-                        <span className="rounded bg-slate-700/70 px-2 py-1 text-xs font-semibold">
-                          DRAFT
-                        </span>
+                        <span className="rounded bg-slate-700/70 px-2 py-1 text-xs font-semibold">DRAFT</span>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right space-x-2">
@@ -344,8 +352,7 @@ export default function RoundsClient() {
           {activeSponsorRound && (
             <div className="mt-6 rounded border border-slate-700 bg-slate-900/60 p-4">
               <h2 className="mb-2 text-lg font-semibold">
-                Sponsor Question – Season {activeSponsorRound.season}, Round {activeSponsorRound.roundNumber} (
-                {activeSponsorRound.label})
+                Sponsor Question – Season {activeSponsorRound.season}, Round {activeSponsorRound.roundNumber} ({activeSponsorRound.label})
               </h2>
 
               {activeSponsorRound.games.length === 0 ? (
@@ -361,9 +368,7 @@ export default function RoundsClient() {
                       {game.questions && game.questions.length > 0 ? (
                         <div className="space-y-1">
                           {game.questions.map((q, qi) => {
-                            const isSelected =
-                              sponsorSelection?.gameIndex === gi &&
-                              sponsorSelection?.questionIndex === qi;
+                            const isSelected = sponsorSelection?.gameIndex === gi && sponsorSelection?.questionIndex === qi;
                             const isCurrentSponsor = !!q.isSponsorQuestion;
 
                             return (
@@ -373,13 +378,10 @@ export default function RoundsClient() {
                                   name="sponsor-question"
                                   className="mt-0.5"
                                   checked={isSelected}
-                                  onChange={() =>
-                                    setSponsorSelection({ gameIndex: gi, questionIndex: qi })
-                                  }
+                                  onChange={() => setSponsorSelection({ gameIndex: gi, questionIndex: qi })}
                                 />
                                 <span>
-                                  <span className="font-semibold">Q{q.quarter ?? "?"}:</span>{" "}
-                                  {q.question ?? "No question text"}
+                                  <span className="font-semibold">Q{q.quarter ?? "?"}:</span> {q.question ?? "No question text"}
                                   {isCurrentSponsor && !isSelected && (
                                     <span className="ml-2 rounded bg-amber-600/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                                       CURRENT SPONSOR
@@ -405,12 +407,9 @@ export default function RoundsClient() {
 
               <div className="mt-4 flex items-center justify-between gap-2">
                 <div className="text-[11px] text-gray-400">
-                  Only one Sponsor Question is allowed per round. Saving will mark the selected question as the Sponsor
-                  Question and update <code>config/season-{SEASON}.sponsorQuestion</code> to match the new ID (e.g.
-                  OR-G1-Q1).
-                  {sponsorSavedMessage && (
-                    <div className="mt-1 text-emerald-400">{sponsorSavedMessage}</div>
-                  )}
+                  Only one Sponsor Question is allowed per round. Saving will mark the selected question as the Sponsor Question and update{" "}
+                  <code>config/season-{SEASON}.sponsorQuestion</code> to the <strong>stable questionId</strong> (hash-based).
+                  {sponsorSavedMessage && <div className="mt-1 text-emerald-400">{sponsorSavedMessage}</div>}
                 </div>
 
                 <div className="flex items-center gap-2">
