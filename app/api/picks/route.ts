@@ -33,7 +33,11 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
+
+  // ✅ Keep for compatibility, but ALWAYS true now.
+  // All questions/picks are available to everyone (no free/premium gating).
   isUnlockedForPicks?: boolean;
+
   questions: ApiQuestion[];
 };
 
@@ -59,13 +63,6 @@ type QuestionStatusDoc = {
   outcome?: QuestionOutcome | "lock" | string;
   result?: QuestionOutcome | "lock" | string;
   updatedAt?: FirebaseFirestore.Timestamp | any;
-};
-
-type GameLockDoc = {
-  roundNumber?: number;
-  gameId: string;
-  isUnlockedForPicks?: boolean;
-  updatedAt?: FirebaseFirestore.Timestamp;
 };
 
 type FirestoreRoundDoc = {
@@ -153,15 +150,8 @@ function fnv1a(str: string): string {
   return (h >>> 0).toString(36);
 }
 
-function stableQuestionId(params: {
-  roundNumber: number;
-  gameId: string;
-  quarter: number;
-  question: string;
-}): string {
-  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(
-    params.question || ""
-  )
+function stableQuestionId(params: { roundNumber: number; gameId: string; quarter: number; question: string }): string {
+  const base = `${params.roundNumber}|${params.gameId}|Q${params.quarter}|${String(params.question || "")
     .trim()
     .toLowerCase()}`;
   const hash = fnv1a(base);
@@ -257,8 +247,7 @@ async function getSponsorQuestionConfig(): Promise<SponsorQuestionConfig | null>
     if (!snap.exists) return null;
 
     const data = snap.data() || {};
-    const sponsorQuestion =
-      (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
+    const sponsorQuestion = (data.sponsorQuestion as SponsorQuestionConfig | undefined) || undefined;
 
     if (!sponsorQuestion || !sponsorQuestion.questionId) return null;
     return sponsorQuestion;
@@ -308,9 +297,7 @@ async function getQuestionStatusForQuestionIds(params: {
   const ids = Array.from(questionIds);
   if (!ids.length) return {};
 
-  const refs = ids.map((qid) =>
-    db.collection("questionStatus").doc(questionStatusDocId(roundNumber, qid))
-  );
+  const refs = ids.map((qid) => db.collection("questionStatus").doc(questionStatusDocId(roundNumber, qid)));
 
   try {
     // @ts-ignore admin supports getAll
@@ -322,8 +309,7 @@ async function getQuestionStatusForQuestionIds(params: {
       const data = (snap.data() as QuestionStatusDoc) || {};
 
       const qid =
-        (typeof data.questionId === "string" && data.questionId) ||
-        snap.id.split("__").slice(1).join("__");
+        (typeof data.questionId === "string" && data.questionId) || snap.id.split("__").slice(1).join("__");
 
       const status = data.status as QuestionStatus | undefined;
       if (!qid || !status) continue;
@@ -350,32 +336,7 @@ async function getQuestionStatusForQuestionIds(params: {
   return clean;
 }
 
-async function getGameLocksForGameIds(gameIds: string[]): Promise<Record<string, boolean>> {
-  const map: Record<string, boolean> = {};
-  if (!gameIds.length) return map;
-
-  const chunks: string[][] = [];
-  for (let i = 0; i < gameIds.length; i += 10) chunks.push(gameIds.slice(i, i + 10));
-
-  try {
-    for (const chunk of chunks) {
-      const snap = await db.collection("gameLocks").where("gameId", "in", chunk).get();
-      snap.forEach((docSnap) => {
-        const data = docSnap.data() as GameLockDoc;
-        if (!data.gameId) return;
-        map[data.gameId] = !!data.isUnlockedForPicks;
-      });
-    }
-  } catch (error) {
-    console.error("[/api/picks] Error fetching gameLocks", error);
-  }
-
-  return map;
-}
-
-async function loadPicksByUserForQuestionIds(
-  questionIds: Set<string>
-): Promise<Record<string, Record<string, "yes" | "no">>> {
+async function loadPicksByUserForQuestionIds(questionIds: Set<string>): Promise<Record<string, Record<string, "yes" | "no">>> {
   const out: Record<string, Record<string, "yes" | "no">> = {};
   if (!questionIds.size) return out;
 
@@ -422,10 +383,7 @@ async function readUsername(uid: string): Promise<string | null> {
 // ✅ Streak (outcome-based)
 // ─────────────────────────────────────────────
 
-function computeRunningStreakAcrossGames(
-  games: ApiGame[],
-  picksForUser: Record<string, "yes" | "no">
-): number {
+function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
   const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
   let running = 0;
 
@@ -513,9 +471,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const sponsorConfig = await getSponsorQuestionConfig();
     const commentCounts = await getCommentCountsForRound(roundNumber);
 
-    const gameIdsForRound = roundDoc.games.map((_, idx) => `${roundCode}-G${idx + 1}`);
-    const gameLocks = await getGameLocksForGameIds(gameIdsForRound);
-
     // build questionIds set for stats/status reads
     const questionIdsForRound = new Set<string>();
     roundDoc.games.forEach((g, gi) => {
@@ -568,9 +523,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         const effectiveStatus: QuestionStatus = statusInfo?.status ?? normaliseStatusValue(q.status ?? "open");
 
         const effectiveOutcome =
-          effectiveStatus === "final" || effectiveStatus === "void"
-            ? statusInfo?.outcome
-            : undefined;
+          effectiveStatus === "final" || effectiveStatus === "void" ? statusInfo?.outcome : undefined;
 
         const userPick = userPicks[questionId];
 
@@ -585,9 +538,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         }
 
         const isSponsorQuestion =
-          !!sponsorConfig &&
-          sponsorConfig.roundNumber === roundNumber &&
-          sponsorConfig.questionId === questionId;
+          !!sponsorConfig && sponsorConfig.roundNumber === roundNumber && sponsorConfig.questionId === questionId;
 
         return {
           id: questionId,
@@ -602,9 +553,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           commentCount: commentCounts[questionId] ?? 0,
 
           isSponsorQuestion,
-          sponsorName: isSponsorQuestion
-            ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER"
-            : undefined,
+          sponsorName: isSponsorQuestion ? sponsorConfig?.sponsorName ?? "OFFICIAL PARTNER" : undefined,
           sponsorBlurb: isSponsorQuestion ? sponsorConfig?.sponsorBlurb : undefined,
 
           correctOutcome: finalOutcome,
@@ -618,18 +567,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         match,
         venue,
         startTime,
-        isUnlockedForPicks: !!gameLocks[gameId],
-        questions: [...questions].sort(
-          (a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question)
-        ),
+
+        // ✅ ALWAYS unlocked now (all questions available to everyone)
+        isUnlockedForPicks: true,
+
+        questions: [...questions].sort((a, b) => a.quarter - b.quarter || a.question.localeCompare(b.question)),
       };
     });
 
     const sortedGames = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
 
-    const currentStreak = currentUserId
-      ? computeRunningStreakAcrossGames(sortedGames, userPicks)
-      : 0;
+    const currentStreak = currentUserId ? computeRunningStreakAcrossGames(sortedGames, userPicks) : 0;
 
     let leaderScore = 0;
     let leaderUid: string | null = null;
