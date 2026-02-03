@@ -1190,7 +1190,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="relative">
               <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
                 <div className="flex justify-center">
-                  {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
+                  {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame?.match ?? " "} />}
                 </div>
 
                 <div>
