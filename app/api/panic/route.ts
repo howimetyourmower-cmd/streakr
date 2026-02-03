@@ -1,8 +1,12 @@
 // /app/api/panic/route.ts
-import { NextResponse } from "next/server";
-import { adminDb, adminAuth } from "@/lib/firebaseAdmin";
+import { NextRequest, NextResponse } from "next/server";
+import { db, auth } from "@/lib/admin";
 
-type Body = {
+export const dynamic = "force-dynamic";
+
+const SEASON = 2026;
+
+type PanicBody = {
   roundNumber?: number;
   gameId?: string;
   questionId?: string;
@@ -12,107 +16,135 @@ function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-async function getBearerUid(req: Request) {
-  const auth = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (!m) return null;
+async function getUserIdFromRequest(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+  const idToken = authHeader.substring("Bearer ".length).trim();
+  if (!idToken) return null;
 
   try {
-    const decoded = await adminAuth.verifyIdToken(m[1]);
-    return decoded.uid || null;
-  } catch {
+    const decoded = await auth.verifyIdToken(idToken);
+    return decoded.uid ?? null;
+  } catch (error) {
+    console.error("[/api/panic] Failed to verify ID token", error);
+    return null;
+  }
+}
+
+async function getSponsorQuestionIdForSeason(): Promise<string | null> {
+  try {
+    const snap = await db.collection("config").doc(`season-${SEASON}`).get();
+    if (!snap.exists) return null;
+    const data = snap.data() as any;
+    const qid = String(data?.sponsorQuestion?.questionId ?? "").trim();
+    return qid ? qid : null;
+  } catch (e) {
+    console.warn("[/api/panic] Failed to read sponsorQuestion config", e);
     return null;
   }
 }
 
 /**
- * PANIC BUTTON — one per round (per user)
+ * PANIC BUTTON
+ * - Requires the question already answered (a pick exists)
+ * - One per round per user
+ * - Decision is final
+ * - Does NOT apply to sponsor question
  *
- * POST /api/panic
- * Body: { roundNumber, gameId, questionId }
+ * Writes:
+ * panic/{uid}__{roundNumber}   (locks the one-per-round use)
+ * panicVoids/{uid}__{roundNumber}__{questionId}  (optional explicit marker)
  *
- * Rules:
- * - must be authenticated
- * - only 1 per round per user
- * - question must belong to that round (light check here; heavy check can be added)
- * - create/lock panic record atomically
- *
- * Result:
- * - marks this question "panic void" for this user+round
- * - (optionally) deletes the pick doc for that question for this user
+ * Also deletes:
+ * picks/{uid}_{questionId}   (so it won't count)
  */
-export async function POST(req: Request) {
-  const uid = await getBearerUid(req);
+export async function POST(req: NextRequest) {
+  const uid = await getUserIdFromRequest(req);
   if (!uid) return jsonError("Unauthorized", 401);
 
-  let body: Body = {};
+  let body: PanicBody = {};
   try {
-    body = (await req.json()) as Body;
+    body = (await req.json()) as PanicBody;
   } catch {
     return jsonError("Invalid JSON body", 400);
   }
 
   const roundNumber = Number(body.roundNumber);
-  const gameId = String(body.gameId || "").trim();
-  const questionId = String(body.questionId || "").trim();
+  const gameId = String(body.gameId ?? "").trim();
+  const questionId = String(body.questionId ?? "").trim();
 
   if (!Number.isFinite(roundNumber) || roundNumber < 0) return jsonError("roundNumber is required", 400);
   if (!gameId) return jsonError("gameId is required", 400);
   if (!questionId) return jsonError("questionId is required", 400);
 
-  // One-per-round doc (unique key)
-  const panicDocId = `${uid}__${roundNumber}`;
-  const panicRef = adminDb.collection("panic").doc(panicDocId);
+  // Block sponsor question
+  const sponsorQuestionId = await getSponsorQuestionIdForSeason();
+  if (sponsorQuestionId && sponsorQuestionId === questionId) {
+    return NextResponse.json({ ok: false, error: "Panic is not allowed on the sponsor question." }, { status: 409 });
+  }
+
+  const panicLockId = `${uid}__${roundNumber}`;
+  const panicLockRef = db.collection("panic").doc(panicLockId);
+
+  const pickRef = db.collection("picks").doc(`${uid}_${questionId}`);
+
+  const panicVoidRef = db.collection("panicVoids").doc(`${uid}__${roundNumber}__${questionId}`);
 
   try {
-    const result = await adminDb.runTransaction(async (tx) => {
-      const snap = await tx.get(panicRef);
-
-      // If already used, reject
-      if (snap.exists) {
-        const prev = snap.data() as any;
-        const prevQ = String(prev?.questionId || "");
+    const result = await db.runTransaction(async (tx) => {
+      // 1) One per round
+      const lockSnap = await tx.get(panicLockRef);
+      if (lockSnap.exists) {
+        const data = lockSnap.data() as any;
         return {
           ok: false as const,
           error: "Panic already used for this round.",
-          usedQuestionId: prevQ || null,
+          usedQuestionId: String(data?.questionId ?? "") || null,
         };
       }
 
-      // OPTIONAL: sanity check that question exists
-      // If you don't have a questions collection, remove this block.
-      const qRef = adminDb.collection("questions").doc(questionId);
-      const qSnap = await tx.get(qRef);
-      if (!qSnap.exists) {
-        return { ok: false as const, error: "Question not found.", usedQuestionId: null };
+      // 2) Must already have answered this question
+      const pickSnap = await tx.get(pickRef);
+      if (!pickSnap.exists) {
+        return {
+          ok: false as const,
+          error: "Panic requires a question already answered.",
+          usedQuestionId: null,
+        };
       }
 
-      const qData = qSnap.data() as any;
-
-      // OPTIONAL: verify the question belongs to the round passed in (best-effort)
-      const qRound = Number(qData?.roundNumber);
-      if (Number.isFinite(qRound) && qRound !== roundNumber) {
-        return { ok: false as const, error: "Question does not belong to this round.", usedQuestionId: null };
+      const pickData = pickSnap.data() as any;
+      const pickVal = String(pickData?.pick ?? "").toLowerCase();
+      if (pickVal !== "yes" && pickVal !== "no") {
+        return {
+          ok: false as const,
+          error: "Panic requires a valid YES/NO pick.",
+          usedQuestionId: null,
+        };
       }
 
-      // OPTIONAL: prevent panic on sponsor question (best-effort)
-      const isSponsor = !!qData?.isSponsorQuestion;
-      if (isSponsor) {
-        return { ok: false as const, error: "Sponsor question cannot be panic-voided.", usedQuestionId: null };
-      }
-
-      // Create panic record
-      tx.set(panicRef, {
+      // 3) Write lock + marker (final)
+      tx.set(panicLockRef, {
         userId: uid,
+        season: SEASON,
         roundNumber,
         gameId,
         questionId,
         createdAt: new Date(),
       });
 
-      // OPTIONAL: remove pick for this question so it can't score.
-      // Your pick id format in client: `${uid}_${questionId}`
-      const pickRef = adminDb.collection("picks").doc(`${uid}_${questionId}`);
+      tx.set(panicVoidRef, {
+        userId: uid,
+        season: SEASON,
+        roundNumber,
+        gameId,
+        questionId,
+        previousPick: pickVal,
+        createdAt: new Date(),
+      });
+
+      // 4) Remove the pick so it won't count
       tx.delete(pickRef);
 
       return { ok: true as const, questionId };
@@ -126,8 +158,8 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, questionId: result.questionId });
-  } catch (e: any) {
-    console.error("[/api/panic] error", e);
+  } catch (e) {
+    console.error("[/api/panic] Transaction error", e);
     return jsonError("Server error", 500);
   }
 }
