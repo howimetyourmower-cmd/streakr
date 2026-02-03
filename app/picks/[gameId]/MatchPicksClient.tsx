@@ -46,20 +46,16 @@ type ApiGame = {
   questions: ApiQuestion[];
 };
 
-type FreeKickInfo = {
-  used: boolean;
-  gameId?: string;
-};
-
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
-  freeKick?: FreeKickInfo;
 };
 
 const BRAND_RED = "#FF2E4D";
 const BRAND_BG = "#000000";
 const BRAND_CYAN = "#00E5FF";
+const BRAND_GOLD = "#F6C64B";
+const SEASON = 2026; // used only for localStorage keys (beta)
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -76,7 +72,6 @@ function roundNumberFromGameId(gameId: string): number {
 function extractPlayerName(question: string) {
   const q = String(question || "").trim();
   const lower = q.toLowerCase();
-
   if (!lower.startsWith("will ")) return null;
 
   const start = 5;
@@ -139,7 +134,7 @@ function safeStatus(s: any): QuestionStatus {
   if (v === "open") return "open";
   if (v === "final") return "final";
   if (v === "pending") return "pending";
-  if (v === "locked") return "pending"; // ✅ map locked → pending
+  if (v === "locked") return "pending";
   if (v === "void") return "void";
   return "open";
 }
@@ -289,9 +284,9 @@ function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="relative h-[92px] w-[92px] rounded-[22px] p-[3px]" style={{ background: BRAND_RED }}>
-        <div className="absolute inset-0 rounded-[22px] opacity-55 blur-[10px]" style={{ background: BRAND_RED }} />
-        <div className="relative h-full w-full overflow-hidden rounded-[19px]" style={{ background: "rgba(0,0,0,0.35)" }}>
+      <div className="relative h-[104px] w-[104px] rounded-[28px] p-[3px]" style={{ background: BRAND_RED }}>
+        <div className="absolute inset-0 rounded-[28px] opacity-55 blur-[12px]" style={{ background: BRAND_RED }} />
+        <div className="relative h-full w-full overflow-hidden rounded-[25px]" style={{ background: "rgba(0,0,0,0.35)" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={src}
@@ -311,10 +306,10 @@ function PlayerAvatar({ name }: { name: string }) {
 
 function TeamLogoSquircle({ teamName }: { teamName: string }) {
   return (
-    <div className="relative h-[92px] w-[92px] rounded-[22px] p-[3px]" style={{ background: BRAND_RED }}>
-      <div className="absolute inset-0 rounded-[22px] opacity-45 blur-[10px]" style={{ background: BRAND_RED }} />
-      <div className="relative h-full w-full overflow-hidden rounded-[19px] flex items-center justify-center bg-black/35">
-        <TeamLogo teamName={teamName} size={72} />
+    <div className="relative h-[104px] w-[104px] rounded-[28px] p-[3px]" style={{ background: BRAND_RED }}>
+      <div className="absolute inset-0 rounded-[28px] opacity-45 blur-[12px]" style={{ background: BRAND_RED }} />
+      <div className="relative h-full w-full overflow-hidden rounded-[25px] flex items-center justify-center bg-black/35">
+        <TeamLogo teamName={teamName} size={78} />
       </div>
     </div>
   );
@@ -358,7 +353,7 @@ function CommunityPulse({ yes, no }: { yes: number; no: number }) {
   const noPct = Math.round(n);
 
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <div className="text-[11px] font-black tracking-[0.22em] text-white/60 text-center">COMMUNITY PULSE</div>
 
       <div className="mt-2 h-[10px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10">
@@ -427,11 +422,9 @@ function ResultPill({
 function QuestionText({ text }: { text: string }) {
   return (
     <div
-      className="mt-4 text-[18px] font-extrabold text-white break-words text-center"
+      className="text-[17px] md:text-[18px] font-extrabold text-white break-words"
       style={{
         lineHeight: 1.25,
-        minHeight: 72,
-        maxHeight: 72,
         display: "-webkit-box",
         WebkitLineClamp: 3 as any,
         WebkitBoxOrient: "vertical" as any,
@@ -472,8 +465,107 @@ type FreeKickModalState =
   | null
   | {
       gameId: string;
-      matchTitle: string;
+      label: string;
     };
+
+function FeatureTile({
+  variant,
+  disabled,
+  onClick,
+}: {
+  variant: "panic" | "freekick";
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const isPanic = variant === "panic";
+  const title = isPanic ? "PANIC\nBUTTON" : "FREE\nKICK";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`relative h-[92px] w-full rounded-2xl border overflow-hidden text-left ${
+        disabled ? "opacity-45 cursor-not-allowed" : "hover:opacity-[0.98] active:scale-[0.99]"
+      }`}
+      style={{
+        borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
+        background: "rgba(0,0,0,0.55)",
+        boxShadow: isPanic ? "0 0 26px rgba(255,46,77,0.22)" : "0 0 26px rgba(246,198,75,0.18)",
+      }}
+      aria-label={isPanic ? "Panic Button" : "Free Kick"}
+    >
+      <div
+        className="absolute inset-0 opacity-[0.60]"
+        style={{
+          background: isPanic
+            ? "radial-gradient(420px 160px at 30% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 60%)"
+            : "radial-gradient(420px 160px at 30% 0%, rgba(246,198,75,0.33), rgba(0,0,0,0) 60%)",
+        }}
+      />
+      <div
+        className="absolute -right-8 -top-8 h-40 w-40 rounded-full blur-2xl"
+        style={{ background: isPanic ? "rgba(255,46,77,0.18)" : "rgba(246,198,75,0.16)" }}
+      />
+
+      {/* “metal plate” look */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(120deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01) 35%, rgba(0,0,0,0.15))",
+        }}
+      />
+
+      {/* crack lines for panic */}
+      {isPanic ? (
+        <div
+          className="absolute inset-0 opacity-[0.45]"
+          style={{
+            backgroundImage:
+              "linear-gradient(135deg, transparent 0 46%, rgba(255,255,255,0.40) 47% 48%, transparent 49% 100%), linear-gradient(25deg, transparent 0 56%, rgba(255,255,255,0.30) 57% 58%, transparent 59% 100%)",
+          }}
+        />
+      ) : null}
+
+      <div className="relative h-full w-full flex items-center justify-center">
+        <div className="text-center">
+          <div
+            className="text-[18px] font-black tracking-[0.12em] leading-[1.05]"
+            style={{
+              color: isPanic ? "rgba(255,255,255,0.96)" : "rgba(20,20,20,0.95)",
+              textShadow: isPanic ? "0 0 18px rgba(255,46,77,0.35)" : "0 0 18px rgba(246,198,75,0.15)",
+              background: isPanic ? "transparent" : "linear-gradient(180deg, rgba(246,198,75,0.95), rgba(246,198,75,0.55))",
+              WebkitBackgroundClip: !isPanic ? "text" : undefined,
+              WebkitTextFillColor: !isPanic ? "transparent" : undefined,
+            }}
+          >
+            {title.split("\n").map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+
+          {!isPanic ? (
+            <div className="mt-2 inline-flex items-center justify-center">
+              <div
+                className="h-8 w-8 rounded-xl border flex items-center justify-center"
+                style={{
+                  borderColor: "rgba(246,198,75,0.60)",
+                  background: "rgba(0,0,0,0.35)",
+                }}
+              >
+                <div
+                  className="h-3 w-3 rounded-[3px]"
+                  style={{ background: "rgba(246,198,75,0.90)", boxShadow: "0 0 14px rgba(246,198,75,0.20)" }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </button>
+  );
+}
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
@@ -487,17 +579,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
-  // ✅ PANIC state
+  // ✅ PANIC (per-round, after lock)
   const [panicUsed, setPanicUsed] = useState(false);
   const [personalVoids, setPersonalVoids] = useState<Record<string, true>>({});
   const [panicModal, setPanicModal] = useState<PanicModalState>(null);
   const [panicBusy, setPanicBusy] = useState(false);
   const [panicErr, setPanicErr] = useState<string | null>(null);
 
-  // ✅ GOLDEN FREE KICK state (once per SEASON)
-  const [freeKick, setFreeKick] = useState<FreeKickInfo>({ used: false });
+  // ✅ FREE KICK (per-season, after a loss, settled)
+  const [freeKickUsedSeason, setFreeKickUsedSeason] = useState(false);
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
-  const [freeKickBusy, setFreeKickBusy] = useState(false);
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -507,16 +598,15 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, []);
 
   const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
-
   const uidForStorage = user?.uid || "anon";
 
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
-
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
+  const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
 
-  const personalVoidsKey = useMemo(
-    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
-    [uidForStorage, roundNumber]
+  const freeKickUsedSeasonKey = useMemo(
+    () => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`,
+    [uidForStorage]
   );
 
   // Load cached picks
@@ -536,7 +626,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } catch {}
   }, [picks, picksStorageKey]);
 
-  // Load panic used + personal voids
+  // Load panic used + personal voids + free kick used
   useEffect(() => {
     try {
       const rawUsed = localStorage.getItem(panicUsedKey);
@@ -544,13 +634,20 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } catch {}
     try {
       const rawVoids = localStorage.getItem(personalVoidsKey);
-      if (!rawVoids) return setPersonalVoids({});
-      const parsed = JSON.parse(rawVoids) as Record<string, true>;
-      if (parsed && typeof parsed === "object") setPersonalVoids(parsed);
+      if (!rawVoids) setPersonalVoids({});
+      else {
+        const parsed = JSON.parse(rawVoids) as Record<string, true>;
+        if (parsed && typeof parsed === "object") setPersonalVoids(parsed);
+      }
     } catch {
       setPersonalVoids({});
     }
-  }, [panicUsedKey, personalVoidsKey]);
+
+    try {
+      const rawFK = localStorage.getItem(freeKickUsedSeasonKey);
+      setFreeKickUsedSeason(rawFK === "1");
+    } catch {}
+  }, [panicUsedKey, personalVoidsKey, freeKickUsedSeasonKey]);
 
   // Persist personal voids
   useEffect(() => {
@@ -576,14 +673,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       if (!res.ok) throw new Error(`API error (${res.status})`);
 
       const data = (await res.json()) as PicksApiResponse;
-
       const found = (data.games || []).find((g) => g.id === gameId);
       if (!found) throw new Error("Game not found for this gameId");
 
       setGame(found);
       lastGameRef.current = found;
-
-      setFreeKick(data.freeKick ?? { used: false });
 
       // seed picks from API (userPick)
       const seeded: Record<string, LocalPick> = {};
@@ -613,6 +707,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [stableGame]);
 
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
+  const totalQuestions = questions.length || 0;
 
   // Locked count (pending/final/void/locked) + personal voids count as locked
   const lockedCount = useMemo(() => {
@@ -634,6 +729,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [matchStartMs, nowMs]);
 
   const matchIsLocked = matchLockMs !== null ? matchLockMs <= 0 : false;
+
+  // For the “picks selected: x / y” bar inside the mock
+  const selectedPct = useMemo(() => {
+    if (totalQuestions <= 0) return 0;
+    return Math.max(0, Math.min(100, Math.round((selectedCount / totalQuestions) * 100)));
+  }, [selectedCount, totalQuestions]);
 
   async function persistPick(questionId: string, next: LocalPick) {
     if (!user) return;
@@ -687,6 +788,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
+  // ✅ PANIC rules (same as before)
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
     if (!matchIsLocked) return false;
@@ -739,73 +841,50 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     }
   }
 
-  // ✅ Golden Free Kick eligibility for THIS game
-  const freeKickEligible = useMemo(() => {
+  // ✅ FREE KICK (beta UI only for now)
+  // Shown once game is fully settled and the user LOST (has at least one wrong answered question in this game).
+  const freeKickEligibleForThisGame = useMemo(() => {
     if (!user) return false;
-    if (freeKick?.used) return false;
+    if (!stableGame) return false;
+    if (freeKickUsedSeason) return false;
 
-    // must have at least 1 pick in this game
-    const pickedQs = questions.filter((q) => {
-      const p = picks[q.id];
-      return p === "yes" || p === "no";
+    const answered = (stableGame.questions || []).filter((q) => {
+      const pick = picks[q.id];
+      return pick === "yes" || pick === "no";
     });
-    if (pickedQs.length === 0) return false;
 
-    // game settled for user = all picked qs are final/void
-    const settled = pickedQs.every((q) => {
+    if (answered.length === 0) return false;
+
+    const allSettled = answered.every((q) => {
       const st = safeStatus(q.status);
       return st === "final" || st === "void";
     });
-    if (!settled) return false;
+    if (!allSettled) return false;
 
-    // user lost = at least one wrong (ignoring void)
-    const anyWrong = pickedQs.some((q) => {
+    const anyWrong = answered.some((q) => {
       const st = safeStatus(q.status);
-      const outcome = q.correctOutcome ?? q.outcome;
+      if (st === "void") return false;
+      if (personalVoids[q.id]) return false;
 
-      if (st !== "final") return false;
-      if (outcome !== "yes" && outcome !== "no") return false;
+      const out = (q.correctOutcome ?? q.outcome) as any;
+      if (out !== "yes" && out !== "no") return false;
 
-      const p = picks[q.id];
-      if (p !== "yes" && p !== "no") return false;
-
-      return p !== outcome;
+      const pick = picks[q.id];
+      return pick === "yes" || pick === "no" ? pick !== out : false;
     });
 
     return anyWrong;
-  }, [user, freeKick?.used, questions, picks]);
+  }, [user, stableGame, freeKickUsedSeason, picks, personalVoids]);
 
-  async function triggerFreeKickUse() {
-    if (!user) return;
+  function triggerFreeKickSeasonUse() {
+    // NOTE: You’ll wire the real backend in 2027.
+    // For beta, we lock it client-side so the UX exists exactly once per season.
     setFreeKickErr(null);
-    setFreeKickBusy(true);
-
     try {
-      const token = await user.getIdToken();
-
-      const res = await fetch("/api/freekick", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ gameId }),
-      });
-
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Free kick failed (${res.status})`);
-      }
-
-      // refresh picks + streak calc etc
-      void fetchMatch("refresh");
-      setFreeKickModal(null);
-    } catch (e: any) {
-      console.error("[MatchPicksClient] free kick failed", e);
-      setFreeKickErr(e?.message || "Free kick failed");
-    } finally {
-      setFreeKickBusy(false);
-    }
+      localStorage.setItem(freeKickUsedSeasonKey, "1");
+    } catch {}
+    setFreeKickUsedSeason(true);
+    setFreeKickModal(null);
   }
 
   if (loading && !stableGame) {
@@ -844,9 +923,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  const { home, away } = parseTeams(stableGame.match);
-  const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
+  const { home } = parseTeams(stableGame.match);
+  const matchTitle = `${home.toUpperCase()}`;
 
+  // ✅ Sponsor card left as-is (still renders)
   function SponsorMysteryCard({ q, status }: { q: ApiQuestion; status: QuestionStatus }) {
     const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
     const selected = picks[q.id] || "none";
@@ -860,8 +940,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     const noSelected = selected === "no";
 
     return (
-      <div className="screamr-card p-4 flex flex-col">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.16]">
+      <div className="screamr-screen-card p-5 flex flex-col">
+        <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
           <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
         </div>
         <div className="screamr-sparks" />
@@ -883,7 +963,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             <div className="flex items-start gap-2">
-              <div className="screamr-timer screamr-timer--final" style={{ minWidth: 110 }}>
+              <div className="screamr-chip" style={{ minWidth: 110 }}>
                 {isRevealTime ? "LOCKED" : "VAULT"}
               </div>
 
@@ -902,7 +982,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 px-4 py-3 text-center relative overflow-hidden">
+          <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
             <div
               className="absolute inset-0 opacity-[0.55]"
               style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }}
@@ -910,7 +990,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="relative">
               <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
               <div
-                className="mt-1 inline-block rounded-xl px-4 py-2 border"
+                className="mt-2 inline-block rounded-xl px-4 py-2 border"
                 style={{
                   borderColor: "rgba(255,46,77,0.65)",
                   boxShadow: "0 0 26px rgba(255,46,77,0.20)",
@@ -925,21 +1005,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
-            <div
-              className="absolute inset-0 opacity-[0.16]"
-              style={{
-                backgroundImage:
-                  "radial-gradient(circle at 15% 30%, rgba(255,255,255,0.35) 0 1px, transparent 2px), radial-gradient(circle at 75% 55%, rgba(255,255,255,0.25) 0 1px, transparent 2px)",
-                backgroundSize: "240px 240px",
-              }}
-            />
-
-            <div className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden" style={{ minHeight: 140 }}>
+          <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+            <div className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden" style={{ minHeight: 150 }}>
               {!showQuestionText ? (
                 <>
                   <div className="absolute inset-0 backdrop-blur-[2px]" />
-                  <div className="relative flex items-center justify-center" style={{ minHeight: 120 }}>
+                  <div className="relative flex items-center justify-center" style={{ minHeight: 130 }}>
                     <div
                       className="text-[90px] font-black"
                       style={{
@@ -952,14 +1023,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   </div>
                 </>
               ) : (
-                <div className="relative flex flex-col items-center justify-center text-center" style={{ minHeight: 120 }}>
+                <div className="relative flex flex-col items-center justify-center text-center" style={{ minHeight: 130 }}>
                   <div className="text-[15px] font-extrabold text-white/95">{q.question}</div>
-
-                  {status === "final" && (q.correctOutcome === "yes" || q.correctOutcome === "no") ? (
-                    <div className="mt-3 inline-flex items-center rounded-full border border-white/15 bg-white/5 px-3 py-1 text-[12px] font-black text-white/80">
-                      Answer: {q.correctOutcome.toUpperCase()}
-                    </div>
-                  ) : null}
                 </div>
               )}
             </div>
@@ -985,10 +1050,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
                 onClick={() => void setPick(q.id, "yes", status)}
               >
-                <span className="inline-flex items-center justify-center gap-2">
-                  <span className="text-[18px] leading-none">🥤</span>
-                  <span>{isRevealTime ? "YES" : "BLIND YES"}</span>
-                </span>
+                BLIND YES
               </button>
 
               <button
@@ -999,25 +1061,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
                 onClick={() => void setPick(q.id, "no", status)}
               >
-                <span className="inline-flex items-center justify-center gap-2">
-                  <span className="text-[18px] leading-none">🥤</span>
-                  <span>{isRevealTime ? "NO" : "BLIND NO"}</span>
-                </span>
+                BLIND NO
               </button>
             </div>
 
             <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
               Correct pick goes into the draw to win a <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
-            </div>
-
-            <div
-              className="absolute right-3 bottom-3 rounded-2xl border border-white/15 bg-black/55 px-3 py-2"
-              style={{ boxShadow: "0 0 22px rgba(0,229,255,0.10)" }}
-            >
-              <div className="text-[11px] font-black tracking-[0.14em] text-white/65">SPONSOR</div>
-              <div className="mt-0.5 text-[22px] font-black" style={{ color: "rgba(255,46,77,0.95)" }}>
-                $250
-              </div>
             </div>
           </div>
 
@@ -1028,14 +1077,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   const MatchTimerPill = ({ status }: { status: QuestionStatus }) => {
-    if (status === "final") return <div className="screamr-timer screamr-timer--final">FINAL</div>;
-    if (status === "void") return <div className="screamr-timer screamr-timer--final">VOID</div>;
-    if (matchLockMs === null) return <div className="screamr-timer">—</div>;
-    if (matchIsLocked) return <div className="screamr-timer screamr-timer--live">LOCKED</div>;
-    return <div className="screamr-timer">{msToRevealCountdown(matchLockMs)}</div>;
+    if (status === "final") return <div className="screamr-chip screamr-chip--final">FINAL</div>;
+    if (status === "void") return <div className="screamr-chip screamr-chip--final">VOID</div>;
+    if (matchLockMs === null) return <div className="screamr-chip">—</div>;
+    if (matchIsLocked) return <div className="screamr-chip screamr-chip--live">LOCKED</div>;
+    return <div className="screamr-chip">{msToRevealCountdown(matchLockMs)}</div>;
   };
-
-  const totalQuestions = questions.length || 0;
 
   return (
     <div
@@ -1047,39 +1094,39 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       }}
     >
       <style>{`
-        .screamr-card {
+        .screamr-screen-card{
           position: relative;
-          border-radius: 22px;
+          border-radius: 26px;
           overflow: hidden;
-          background: rgba(10,10,12,0.88);
+          background: rgba(10,10,12,0.90);
           border: 1px solid rgba(255,255,255,0.10);
-          box-shadow: 0 18px 60px rgba(0,0,0,0.72);
+          box-shadow: 0 22px 80px rgba(0,0,0,0.78);
         }
-        .screamr-card::before {
-          content: "";
-          position: absolute;
-          inset: 0;
-          border-radius: 22px;
+        .screamr-screen-card::before{
+          content:"";
+          position:absolute;
+          inset:0;
+          border-radius: 26px;
           padding: 2px;
-          background: linear-gradient(180deg, rgba(255,46,77,0.85), rgba(255,46,77,0.15));
+          background: linear-gradient(180deg, rgba(255,46,77,0.85), rgba(255,46,77,0.12));
           -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
           -webkit-mask-composite: xor;
           mask-composite: exclude;
-          pointer-events: none;
-          opacity: 0.65;
+          pointer-events:none;
+          opacity:0.70;
         }
-        .screamr-card::after {
-          content: "";
-          position: absolute;
-          inset: -40px;
-          background: radial-gradient(500px 220px at 50% 0%, rgba(255,46,77,0.22), rgba(0,0,0,0) 65%);
-          pointer-events: none;
+        .screamr-screen-card::after{
+          content:"";
+          position:absolute;
+          inset:-40px;
+          background: radial-gradient(600px 260px at 50% 0%, rgba(255,46,77,0.20), rgba(0,0,0,0) 65%);
+          pointer-events:none;
         }
-        .screamr-sparks {
-          position: absolute;
-          inset: 0;
-          pointer-events: none;
-          opacity: 0.22;
+        .screamr-sparks{
+          position:absolute;
+          inset:0;
+          pointer-events:none;
+          opacity:0.20;
           mix-blend-mode: screen;
           background-image:
             radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
@@ -1088,55 +1135,56 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background-size: 220px 220px;
           animation: sparksMove 6.5s linear infinite;
         }
-        @keyframes sparksMove {
-          0% { transform: translate3d(0,0,0); }
-          100% { transform: translate3d(-220px, -220px, 0); }
+        @keyframes sparksMove{
+          0%{ transform: translate3d(0,0,0); }
+          100%{ transform: translate3d(-220px, -220px, 0); }
         }
-        .screamr-timer {
+
+        .screamr-chip{
           font-size: 12px;
           font-weight: 900;
           letter-spacing: 0.14em;
           padding: 8px 10px;
-          border-radius: 12px;
+          border-radius: 14px;
           border: 1px solid rgba(255,46,77,0.35);
           background: rgba(0,0,0,0.55);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 140px;
-          text-align: center;
+          min-width: 160px;
+          text-align:center;
         }
-        .screamr-timer--live{
+        .screamr-chip--live{
           border-color: rgba(0,229,255,0.45);
           box-shadow: 0 0 18px rgba(0,229,255,0.18);
         }
-        .screamr-timer--final{
+        .screamr-chip--final{
           border-color: rgba(255,255,255,0.18);
           box-shadow: none;
           color: rgba(255,255,255,0.70);
         }
 
         .btn-yes {
-          border: 1px solid rgba(0,229,255,0.45);
-          background: rgba(0,229,255,0.10);
-          box-shadow: 0 0 22px rgba(0,229,255,0.16);
+          border: 1px solid rgba(0,229,255,0.50);
+          background: rgba(0,229,255,0.12);
+          box-shadow: 0 0 26px rgba(0,229,255,0.16);
           color: rgba(255,255,255,0.95);
         }
         .btn-yes--selected {
           background: linear-gradient(180deg, rgba(0,229,255,0.95), rgba(0,229,255,0.40));
-          border-color: rgba(0,229,255,0.75);
-          box-shadow: 0 0 28px rgba(0,229,255,0.22);
+          border-color: rgba(0,229,255,0.80);
+          box-shadow: 0 0 34px rgba(0,229,255,0.22);
           color: rgba(0,0,0,0.92);
         }
         .btn-no {
-          border: 1px solid rgba(255,46,77,0.45);
-          background: rgba(255,46,77,0.10);
-          box-shadow: 0 0 22px rgba(255,46,77,0.14);
+          border: 1px solid rgba(255,46,77,0.50);
+          background: rgba(255,46,77,0.12);
+          box-shadow: 0 0 26px rgba(255,46,77,0.14);
           color: rgba(255,255,255,0.95);
         }
         .btn-no--selected {
           background: linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,46,77,0.35));
-          border-color: rgba(255,46,77,0.75);
-          box-shadow: 0 0 28px rgba(255,46,77,0.20);
+          border-color: rgba(255,46,77,0.80);
+          box-shadow: 0 0 34px rgba(255,46,77,0.20);
           color: rgba(255,255,255,0.98);
         }
 
@@ -1165,32 +1213,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(255,46,77,0.95);
           box-shadow: 0 0 18px rgba(255,46,77,0.25);
         }
-
-        .freeKick-btn {
-          height: 40px;
-          padding: 0 14px;
-          border-radius: 999px;
-          border: 1px solid rgba(255,215,110,0.45);
-          background: rgba(0,0,0,0.55);
-          color: rgba(255,255,255,0.92);
-          font-weight: 900;
-          letter-spacing: 0.14em;
-          box-shadow: 0 0 22px rgba(255,215,110,0.14);
-          transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .freeKick-btn:hover { background: rgba(255,215,110,0.10); }
-        .freeKick-btn:active { transform: scale(0.99); }
-        .freeKick-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
-        .freeKick-dot {
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
-          background: rgba(255,215,110,0.95);
-          box-shadow: 0 0 18px rgba(255,215,110,0.22);
-        }
       `}</style>
 
       {/* Panic modal */}
@@ -1203,7 +1225,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="mt-2 text-[18px] font-black text-white leading-snug">This will void this question for this round.</div>
 
             <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
-              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round. Decision is final.
+              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round.
+              Decision is final.
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
@@ -1212,7 +1235,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             {panicErr ? (
-              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">{panicErr}</div>
+              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">
+                {panicErr}
+              </div>
             ) : null}
 
             <div className="mt-5 flex items-center justify-end gap-2">
@@ -1240,37 +1265,35 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       ) : null}
 
-      {/* Free Kick modal */}
+      {/* Free kick modal */}
       {freeKickModal ? (
-        <div className="fixed inset-0 z-[91] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/75" onClick={() => (freeKickBusy ? null : setFreeKickModal(null))} />
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => setFreeKickModal(null)} />
           <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
             <div className="text-[12px] font-black tracking-[0.24em] text-white/55">GOLDEN FREE KICK</div>
 
-            <div className="mt-2 text-[18px] font-black text-white leading-snug">
-              Reinstate your streak for this game.
-            </div>
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">Use your one-time season insurance?</div>
 
             <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
-              You can use this <span className="text-white font-black">ONCE per season</span>.
-              <br />
-              When used, your streak won’t reset — and <span className="text-white font-black">no correct picks from this game will count</span>.
+              If you lost this game, using Free Kick will protect your streak for this game.
+              <span className="text-white/90 font-black"> You only get ONE for the whole season.</span>
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
-              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">MATCH</div>
-              <div className="mt-1 text-[14px] font-extrabold text-white/90">{freeKickModal.matchTitle}</div>
+              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME</div>
+              <div className="mt-1 text-[14px] font-extrabold text-white/90">{freeKickModal.label}</div>
             </div>
 
             {freeKickErr ? (
-              <div className="mt-4 rounded-2xl border border-yellow-400/20 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-100/90">{freeKickErr}</div>
+              <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-2 text-sm text-amber-200/90">
+                {freeKickErr}
+              </div>
             ) : null}
 
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-                disabled={freeKickBusy}
                 onClick={() => setFreeKickModal(null)}
               >
                 CANCEL
@@ -1278,113 +1301,82 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
               <button
                 type="button"
-                className="rounded-full border border-yellow-400/25 bg-yellow-500/15 px-4 py-2 font-extrabold text-yellow-100"
-                disabled={freeKickBusy}
-                onClick={() => void triggerFreeKickUse()}
+                className="rounded-full border border-amber-400/25 bg-amber-500/15 px-4 py-2 font-extrabold text-amber-100"
+                onClick={() => triggerFreeKickSeasonUse()}
               >
-                {freeKickBusy ? "USING…" : "USE FREE KICK"}
+                USE FREE KICK
               </button>
             </div>
 
-            <div className="mt-3 text-[11px] text-white/40">ONE TIME ONLY.</div>
+            <div className="mt-3 text-[11px] text-white/40">Decision is final.</div>
           </div>
         </div>
       ) : null}
 
-      <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
-        <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
-        <div className="text-[11px] tracking-[0.12em] text-white/35">Proudly supporting SCREAMR all season long</div>
-      </div>
+      {/* Top app bar (like your mock) */}
+      <div className="max-w-[980px] mx-auto px-4 pt-6">
+        <div className="flex items-center justify-between">
+          <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
 
-      <div className="max-w-6xl mx-auto px-4 py-6">
-        <div className="flex flex-col gap-3">
-          <div className="flex items-end justify-between gap-3">
-            <div className="text-4xl md:text-5xl font-black italic tracking-wide">{matchTitle}</div>
-            <div className="flex items-center gap-2">
-              {refreshing ? <div className="text-[11px] font-black tracking-[0.12em] text-white/35">REFRESHING…</div> : null}
-              <button
-                type="button"
-                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-                onClick={() => void fetchMatch("refresh")}
-              >
-                REFRESH
-              </button>
-            </div>
-          </div>
-
-          {err ? (
-            <div className="text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
-          ) : null}
-
-          <div className="flex flex-wrap items-center gap-3 text-sm text-white/70">
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
-            </div>
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Locks: <span className="font-semibold text-white">{lockedCount}</span>
-            </div>
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED — sponsor revealed" : `Locks in ${msToRevealCountdown(matchLockMs)}`}
-            </div>
-
-            {user ? (
-              <div className="rounded-full border border-white/15 px-3 py-1">
-                Panic:{" "}
-                <span className={`font-semibold ${panicUsed ? "text-white/70" : "text-white"}`}>
-                  {panicUsed ? "USED" : "AVAILABLE"}
-                </span>
-              </div>
-            ) : null}
-
-            {user ? (
-              <div className="rounded-full border border-white/15 px-3 py-1">
-                Free Kick:{" "}
-                <span className={`font-semibold ${freeKick?.used ? "text-white/70" : "text-white"}`}>
-                  {freeKick?.used ? "USED" : "AVAILABLE"}
-                </span>
-              </div>
-            ) : null}
-
-            {freeKick?.used && freeKick?.gameId ? (
-              <div className="rounded-full border border-white/15 px-3 py-1 text-white/55">
-                Used on: <span className="text-white/80 font-semibold">{freeKick.gameId}</span>
-              </div>
-            ) : null}
-
-            {freeKickEligible ? (
-              <button
-                type="button"
-                className="freeKick-btn"
-                disabled={freeKickBusy}
-                onClick={() =>
-                  setFreeKickModal({
-                    gameId,
-                    matchTitle,
-                  })
-                }
-                title="Golden Free Kick"
-              >
-                <span className="freeKick-dot" />
-                GOLDEN FREE KICK
-              </button>
-            ) : null}
-          </div>
-
-          {freeKickEligible ? (
-            <div className="text-[12px] text-white/45">
-              You lost this settled game. Use your <span className="text-white/75 font-black">one-time Golden Free Kick</span> to keep your streak alive (no correct picks from this game will count).
-            </div>
-          ) : null}
+          <button
+            type="button"
+            className="rounded-xl border px-4 py-2 font-black tracking-[0.10em]"
+            style={{
+              borderColor: "rgba(0,229,255,0.45)",
+              background: "rgba(0,0,0,0.55)",
+              color: "rgba(0,229,255,0.95)",
+              boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+            }}
+            onClick={() => void fetchMatch("refresh")}
+          >
+            REFRESH
+          </button>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        <div className="mt-4 flex items-center justify-between text-[13px] text-white/75">
+          <div>
+            Picks selected:{" "}
+            <span className="text-white font-black">
+              {selectedCount} / {totalQuestions}
+            </span>
+          </div>
+          <div>
+            Locks: <span className="text-white font-black">{lockedCount}</span>
+          </div>
+        </div>
+
+        <div className="mt-2 h-[8px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10">
+          <div
+            className="h-full"
+            style={{
+              width: `${selectedPct}%`,
+              background: `linear-gradient(90deg, rgba(255,46,77,0.95), rgba(255,46,77,0.45))`,
+              boxShadow: "0 0 18px rgba(255,46,77,0.18)",
+            }}
+          />
+        </div>
+
+        <div className="mt-3 text-[12px] text-white/55">
+          {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : `Locks in ${msToRevealCountdown(matchLockMs)}`}
+        </div>
+
+        {err ? (
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
+        ) : null}
+      </div>
+
+      {/* Questions (each card now matches the “screen” look) */}
+      <div className="max-w-[980px] mx-auto px-4 pb-24 pt-5">
+        <div className="grid grid-cols-1 gap-4">
           {questions.map((q, idx) => {
             const baseStatus = safeStatus(q.status);
             const isPersonallyVoided = !!personalVoids[q.id];
-
             const status: QuestionStatus = isPersonallyVoided ? "void" : baseStatus;
 
             const qNum = String(idx + 1).padStart(2, "0");
+            const selected = picks[q.id] || "none";
+            const isSaving = !!saving[q.id];
+            const isLocked = status !== "open";
 
             if (q.isSponsorQuestion) {
               return <SponsorMysteryCard key={q.id} q={q} status={status} />;
@@ -1396,24 +1388,20 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
             const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-            const selected = picks[q.id] || "none";
-
-            const isLocked = status !== "open";
-            const isSaving = !!saving[q.id];
-
             const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
             const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
             const showPanic = canShowPanic(q, status, selected);
 
             return (
-              <div key={q.id} className="screamr-card p-4 flex flex-col">
-                <div className="pointer-events-none absolute inset-0 opacity-[0.14]">
+              <div key={q.id} className="screamr-screen-card p-5">
+                <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
                   <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
                 </div>
                 <div className="screamr-sparks" />
 
-                <div className="relative flex flex-col flex-1">
+                <div className="relative">
+                  {/* Q header + timer */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
@@ -1421,7 +1409,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       </div>
 
                       <div className="mt-1 text-[12px] text-white/60">
-                        Status: <span className="text-white/70">{status}</span>
+                        Status: <span className="text-white/75">{status}</span>
                       </div>
 
                       <div className="mt-2 flex items-center gap-2">
@@ -1444,12 +1432,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                             type="button"
                             className="panic-btn"
                             disabled={panicBusy}
-                            onClick={() =>
-                              setPanicModal({
-                                questionId: q.id,
-                                questionText: q.question,
-                              })
-                            }
+                            onClick={() => setPanicModal({ questionId: q.id, questionText: q.question })}
                             title="Panic Button"
                           >
                             <span className="panic-dot" />
@@ -1473,17 +1456,87 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}</div>
+                  {/* Feature tiles row (matches your mock) */}
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <FeatureTile
+                      variant="panic"
+                      disabled={!showPanic}
+                      onClick={
+                        showPanic
+                          ? () => setPanicModal({ questionId: q.id, questionText: q.question })
+                          : undefined
+                      }
+                    />
+                    <FeatureTile
+                      variant="freekick"
+                      disabled={!freeKickEligibleForThisGame}
+                      onClick={
+                        freeKickEligibleForThisGame
+                          ? () => setFreeKickModal({ gameId: stableGame.id, label: `${stableGame.match}` })
+                          : undefined
+                      }
+                    />
+                  </div>
 
-                  <QuestionText text={q.question} />
+                  {/* Main question panel (like the mock) */}
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+                    <div
+                      className="absolute inset-0 opacity-[0.35]"
+                      style={{
+                        background: "radial-gradient(700px 240px at 50% 0%, rgba(255,46,77,0.25), rgba(0,0,0,0) 65%)",
+                      }}
+                    />
+                    <div className="relative">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
+                          Q{qNum} — {formatQuarterLabel(q.quarter)}
+                        </div>
+                        <div className="text-[12px] font-black tracking-[0.14em] text-white/55">
+                          {matchLockMs === null ? "LOCKS IN: —" : `LOCKS IN: ${msToRevealCountdown(Math.max(0, matchLockMs))}`}
+                        </div>
+                      </div>
 
-                  <div className="mt-auto pt-4">
-                    <div className="rounded-2xl border border-white/10 bg-black/55 p-4">
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="mt-4 grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
+                        <div className="flex justify-center">
+                          {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={stableGame.match} />}
+                        </div>
+
+                        <div>
+                          <QuestionText text={q.question} />
+
+                          {/* Player intel block (visual placeholder, matches mock vibe) */}
+                          <div className="mt-4">
+                            <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
+                            <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
+
+                            <div className="mt-2 flex items-end gap-2 h-10">
+                              {[7, 14, 10, 18, 12].map((h, i) => (
+                                <div
+                                  key={i}
+                                  className="w-4 rounded-sm"
+                                  style={{
+                                    height: `${h * 1.8}px`,
+                                    background: i === 3 ? "rgba(0,229,255,0.85)" : "rgba(0,229,255,0.45)",
+                                    boxShadow: "0 0 14px rgba(0,229,255,0.12)",
+                                  }}
+                                />
+                              ))}
+                            </div>
+
+                            <div className="mt-2 text-[12px] text-white/70">
+                              Avg: <span className="font-black text-white/85">7.2 Disp</span> / <span className="font-black text-white/85">1.5 Goals</span>
+                              <span className="text-white/35"> (beta placeholder)</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* YES / NO */}
+                      <div className="mt-5 grid grid-cols-2 gap-3">
                         <button
                           type="button"
                           disabled={isLocked || isSaving || isPersonallyVoided}
-                          className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                          className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                             isLocked || isSaving || isPersonallyVoided ? "opacity-50 cursor-not-allowed" : ""
                           } ${yesBtn}`}
                           onClick={() => void setPick(q.id, "yes", status)}
@@ -1494,7 +1547,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         <button
                           type="button"
                           disabled={isLocked || isSaving || isPersonallyVoided}
-                          className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                          className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                             isLocked || isSaving || isPersonallyVoided ? "opacity-50 cursor-not-allowed" : ""
                           } ${noBtn}`}
                           onClick={() => void setPick(q.id, "no", status)}
@@ -1511,9 +1564,15 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         </div>
                       ) : null}
 
-                      {matchIsLocked && !panicUsed && !q.isSponsorQuestion && (selected === "yes" || selected === "no") && status !== "final" && status !== "void" ? (
-                        <div className="mt-3 text-center text-[11px] text-white/45">
-                          Panic available: void one answered question this round (streak won’t break).
+                      {freeKickUsedSeason ? (
+                        <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">
+                          FREE KICK: USED (SEASON)
+                        </div>
+                      ) : null}
+
+                      {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
+                        <div className="mt-3 text-center text-[11px] text-white/55">
+                          Free Kick available (season): you lost this game — use once to protect streak.
                         </div>
                       ) : null}
                     </div>
@@ -1523,25 +1582,26 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             );
           })}
         </div>
-
-        <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
-          <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
-            <div className="rounded-full border border-white/15 px-3 py-1">
-              Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
-            </div>
-
-            <button
-              type="button"
-              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
-              onClick={() => void fetchMatch("refresh")}
-            >
-              REFRESH
-            </button>
-          </div>
-        </div>
-
-        <div className="h-16" />
       </div>
+
+      {/* Bottom sticky (kept) */}
+      <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
+        <div className="max-w-[980px] mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
+          <div className="rounded-full border border-white/15 px-3 py-1">
+            Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
+          </div>
+
+          <button
+            type="button"
+            className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+            onClick={() => void fetchMatch("refresh")}
+          >
+            REFRESH
+          </button>
+        </div>
+      </div>
+
+      <div className="h-16" />
     </div>
   );
 }
