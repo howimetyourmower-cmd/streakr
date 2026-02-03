@@ -46,9 +46,15 @@ type ApiGame = {
   questions: ApiQuestion[];
 };
 
+type FreeKickInfo = {
+  used: boolean;
+  gameId?: string;
+};
+
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber?: number;
+  freeKick?: FreeKickInfo;
 };
 
 const BRAND_RED = "#FF2E4D";
@@ -462,6 +468,13 @@ type PanicModalState =
       questionText: string;
     };
 
+type FreeKickModalState =
+  | null
+  | {
+      gameId: string;
+      matchTitle: string;
+    };
+
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
@@ -474,14 +487,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
-  // ✅ PANIC state (client-side UX):
-  // - one per user per round
-  // - per-question personal void (local UX + will call /api/panic)
+  // ✅ PANIC state
   const [panicUsed, setPanicUsed] = useState(false);
   const [personalVoids, setPersonalVoids] = useState<Record<string, true>>({});
   const [panicModal, setPanicModal] = useState<PanicModalState>(null);
   const [panicBusy, setPanicBusy] = useState(false);
   const [panicErr, setPanicErr] = useState<string | null>(null);
+
+  // ✅ GOLDEN FREE KICK state (once per SEASON)
+  const [freeKick, setFreeKick] = useState<FreeKickInfo>({ used: false });
+  const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
+  const [freeKickBusy, setFreeKickBusy] = useState(false);
+  const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -493,17 +510,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const uidForStorage = user?.uid || "anon";
 
-  const picksStorageKey = useMemo(() => {
-    return `torpie:picks:${uidForStorage}:${gameId}`;
-  }, [uidForStorage, gameId]);
+  const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
 
-  const panicUsedKey = useMemo(() => {
-    return `torpie:panicUsed:${uidForStorage}:R${roundNumber}`;
-  }, [uidForStorage, roundNumber]);
+  const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
 
-  const personalVoidsKey = useMemo(() => {
-    return `torpie:personalVoids:${uidForStorage}:R${roundNumber}`;
-  }, [uidForStorage, roundNumber]);
+  const personalVoidsKey = useMemo(
+    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
+    [uidForStorage, roundNumber]
+  );
 
   // Load cached picks
   useEffect(() => {
@@ -562,11 +576,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       if (!res.ok) throw new Error(`API error (${res.status})`);
 
       const data = (await res.json()) as PicksApiResponse;
+
       const found = (data.games || []).find((g) => g.id === gameId);
       if (!found) throw new Error("Game not found for this gameId");
 
       setGame(found);
       lastGameRef.current = found;
+
+      setFreeKick(data.freeKick ?? { used: false });
 
       // seed picks from API (userPick)
       const seeded: Record<string, LocalPick> = {};
@@ -670,20 +687,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  // ✅ PANIC rules:
-  // - shown only AFTER lock (matchIsLocked)
-  // - requires the question already answered (user has yes/no selected)
-  // - one per round (panicUsed)
-  // - not shown for sponsor question
-  // - cannot be used on final/void (already settled/void)
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
-    if (!user) return false; // panic is a user action, needs auth
-    if (!matchIsLocked) return false; // shown only once match locked
-    if (q.isSponsorQuestion) return false; // never show on sponsor question
-    if (panicUsed) return false; // one per round
-    if (personalVoids[q.id]) return false; // already personally voided
+    if (!user) return false;
+    if (!matchIsLocked) return false;
+    if (q.isSponsorQuestion) return false;
+    if (panicUsed) return false;
+    if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
-    if (!(selected === "yes" || selected === "no")) return false; // must have a pick already
+    if (!(selected === "yes" || selected === "no")) return false;
     return true;
   }
 
@@ -712,15 +723,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         throw new Error(txt || `Panic failed (${res.status})`);
       }
 
-      // ✅ UX: mark panic used for this round + personally void this question
       setPanicUsed(true);
       try {
         localStorage.setItem(panicUsedKey, "1");
       } catch {}
 
       setPersonalVoids((prev) => ({ ...prev, [questionId]: true }));
-
-      // refresh to keep other stats updated
       void fetchMatch("refresh");
     } catch (e: any) {
       console.error("[MatchPicksClient] panic failed", e);
@@ -728,6 +736,75 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } finally {
       setPanicBusy(false);
       setPanicModal(null);
+    }
+  }
+
+  // ✅ Golden Free Kick eligibility for THIS game
+  const freeKickEligible = useMemo(() => {
+    if (!user) return false;
+    if (freeKick?.used) return false;
+
+    // must have at least 1 pick in this game
+    const pickedQs = questions.filter((q) => {
+      const p = picks[q.id];
+      return p === "yes" || p === "no";
+    });
+    if (pickedQs.length === 0) return false;
+
+    // game settled for user = all picked qs are final/void
+    const settled = pickedQs.every((q) => {
+      const st = safeStatus(q.status);
+      return st === "final" || st === "void";
+    });
+    if (!settled) return false;
+
+    // user lost = at least one wrong (ignoring void)
+    const anyWrong = pickedQs.some((q) => {
+      const st = safeStatus(q.status);
+      const outcome = q.correctOutcome ?? q.outcome;
+
+      if (st !== "final") return false;
+      if (outcome !== "yes" && outcome !== "no") return false;
+
+      const p = picks[q.id];
+      if (p !== "yes" && p !== "no") return false;
+
+      return p !== outcome;
+    });
+
+    return anyWrong;
+  }, [user, freeKick?.used, questions, picks]);
+
+  async function triggerFreeKickUse() {
+    if (!user) return;
+    setFreeKickErr(null);
+    setFreeKickBusy(true);
+
+    try {
+      const token = await user.getIdToken();
+
+      const res = await fetch("/api/freekick", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ gameId }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Free kick failed (${res.status})`);
+      }
+
+      // refresh picks + streak calc etc
+      void fetchMatch("refresh");
+      setFreeKickModal(null);
+    } catch (e: any) {
+      console.error("[MatchPicksClient] free kick failed", e);
+      setFreeKickErr(e?.message || "Free kick failed");
+    } finally {
+      setFreeKickBusy(false);
     }
   }
 
@@ -770,19 +847,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home, away } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()} VS ${away.toUpperCase()}`;
 
-  // ✅ Sponsor “Mystery Gamble” card:
-  // - Blind YES/NO visible pre-lock
-  // - Question revealed automatically once match locks
   function SponsorMysteryCard({ q, status }: { q: ApiQuestion; status: QuestionStatus }) {
     const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
     const selected = picks[q.id] || "none";
     const isSaving = !!saving[q.id];
 
-    // Always hidden until lock
     const isRevealTime = matchIsLocked;
     const showQuestionText = isRevealTime;
-
-    // Can pick up until lock; after lock, disabled
     const locked = status !== "open" || isRevealTime;
 
     const yesSelected = selected === "yes";
@@ -1094,6 +1165,32 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(255,46,77,0.95);
           box-shadow: 0 0 18px rgba(255,46,77,0.25);
         }
+
+        .freeKick-btn {
+          height: 40px;
+          padding: 0 14px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,215,110,0.45);
+          background: rgba(0,0,0,0.55);
+          color: rgba(255,255,255,0.92);
+          font-weight: 900;
+          letter-spacing: 0.14em;
+          box-shadow: 0 0 22px rgba(255,215,110,0.14);
+          transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .freeKick-btn:hover { background: rgba(255,215,110,0.10); }
+        .freeKick-btn:active { transform: scale(0.99); }
+        .freeKick-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+        .freeKick-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 999px;
+          background: rgba(255,215,110,0.95);
+          box-shadow: 0 0 18px rgba(255,215,110,0.22);
+        }
       `}</style>
 
       {/* Panic modal */}
@@ -1103,9 +1200,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
             <div className="text-[12px] font-black tracking-[0.24em] text-white/55">PANIC BUTTON</div>
 
-            <div className="mt-2 text-[18px] font-black text-white leading-snug">
-              This will void this question for this round.
-            </div>
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">This will void this question for this round.</div>
 
             <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
               No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round. Decision is final.
@@ -1117,9 +1212,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             {panicErr ? (
-              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">
-                {panicErr}
-              </div>
+              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">{panicErr}</div>
             ) : null}
 
             <div className="mt-5 flex items-center justify-end gap-2">
@@ -1143,6 +1236,57 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             <div className="mt-3 text-[11px] text-white/40">ARE YOU SURE?</div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Free Kick modal */}
+      {freeKickModal ? (
+        <div className="fixed inset-0 z-[91] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => (freeKickBusy ? null : setFreeKickModal(null))} />
+          <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
+            <div className="text-[12px] font-black tracking-[0.24em] text-white/55">GOLDEN FREE KICK</div>
+
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">
+              Reinstate your streak for this game.
+            </div>
+
+            <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
+              You can use this <span className="text-white font-black">ONCE per season</span>.
+              <br />
+              When used, your streak won’t reset — and <span className="text-white font-black">no correct picks from this game will count</span>.
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
+              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">MATCH</div>
+              <div className="mt-1 text-[14px] font-extrabold text-white/90">{freeKickModal.matchTitle}</div>
+            </div>
+
+            {freeKickErr ? (
+              <div className="mt-4 rounded-2xl border border-yellow-400/20 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-100/90">{freeKickErr}</div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+                disabled={freeKickBusy}
+                onClick={() => setFreeKickModal(null)}
+              >
+                CANCEL
+              </button>
+
+              <button
+                type="button"
+                className="rounded-full border border-yellow-400/25 bg-yellow-500/15 px-4 py-2 font-extrabold text-yellow-100"
+                disabled={freeKickBusy}
+                onClick={() => void triggerFreeKickUse()}
+              >
+                {freeKickBusy ? "USING…" : "USE FREE KICK"}
+              </button>
+            </div>
+
+            <div className="mt-3 text-[11px] text-white/40">ONE TIME ONLY.</div>
           </div>
         </div>
       ) : null}
@@ -1191,7 +1335,46 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 </span>
               </div>
             ) : null}
+
+            {user ? (
+              <div className="rounded-full border border-white/15 px-3 py-1">
+                Free Kick:{" "}
+                <span className={`font-semibold ${freeKick?.used ? "text-white/70" : "text-white"}`}>
+                  {freeKick?.used ? "USED" : "AVAILABLE"}
+                </span>
+              </div>
+            ) : null}
+
+            {freeKick?.used && freeKick?.gameId ? (
+              <div className="rounded-full border border-white/15 px-3 py-1 text-white/55">
+                Used on: <span className="text-white/80 font-semibold">{freeKick.gameId}</span>
+              </div>
+            ) : null}
+
+            {freeKickEligible ? (
+              <button
+                type="button"
+                className="freeKick-btn"
+                disabled={freeKickBusy}
+                onClick={() =>
+                  setFreeKickModal({
+                    gameId,
+                    matchTitle,
+                  })
+                }
+                title="Golden Free Kick"
+              >
+                <span className="freeKick-dot" />
+                GOLDEN FREE KICK
+              </button>
+            ) : null}
           </div>
+
+          {freeKickEligible ? (
+            <div className="text-[12px] text-white/45">
+              You lost this settled game. Use your <span className="text-white/75 font-black">one-time Golden Free Kick</span> to keep your streak alive (no correct picks from this game will count).
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1199,7 +1382,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const baseStatus = safeStatus(q.status);
             const isPersonallyVoided = !!personalVoids[q.id];
 
-            // Personal void overrides UI status/outcome
             const status: QuestionStatus = isPersonallyVoided ? "void" : baseStatus;
 
             const qNum = String(idx + 1).padStart(2, "0");
