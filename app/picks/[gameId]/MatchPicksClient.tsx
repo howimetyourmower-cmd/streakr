@@ -80,7 +80,7 @@ function extractPlayerName(question: string) {
   const name = q.slice(start, parenIdx).trim();
   if (!name) return null;
 
-  const words = name.split(/\s+/).filter(Boolean);
+  const words = name.split(/\s+/).filter(Boolean known).filter(Boolean);
   if (words.length < 2) return null;
 
   const badFirstWords = new Set([
