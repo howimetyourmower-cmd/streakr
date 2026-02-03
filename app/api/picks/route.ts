@@ -41,12 +41,20 @@ type ApiGame = {
   questions: ApiQuestion[];
 };
 
+type FreeKickInfo = {
+  used: boolean;
+  gameId?: string;
+};
+
 type PicksApiResponse = {
   games: ApiGame[];
   roundNumber: number;
   currentStreak: number;
   leaderScore: number;
   leaderName: string | null;
+
+  // ✅ golden free kick insurance (once per season)
+  freeKick: FreeKickInfo;
 };
 
 type SponsorQuestionConfig = {
@@ -379,11 +387,29 @@ async function readUsername(uid: string): Promise<string | null> {
   }
 }
 
+async function getFreeKickInfoForUser(uid: string | null): Promise<FreeKickInfo> {
+  if (!uid) return { used: false };
+  try {
+    const snap = await db.collection("freeKickUses").doc(`${SEASON}__${uid}`).get();
+    if (!snap.exists) return { used: false };
+    const data = snap.data() as any;
+    const gameId = typeof data?.gameId === "string" ? data.gameId : undefined;
+    return { used: true, gameId };
+  } catch (e) {
+    console.error("[/api/picks] Failed to read freeKickUses", e);
+    return { used: false };
+  }
+}
+
 // ─────────────────────────────────────────────
-// ✅ Streak (outcome-based)
+// ✅ Streak (outcome-based) + Golden Free Kick
 // ─────────────────────────────────────────────
 
-function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<string, "yes" | "no">): number {
+function computeRunningStreakAcrossGames(
+  games: ApiGame[],
+  picksForUser: Record<string, "yes" | "no">,
+  freeKick: FreeKickInfo
+): number {
   const sorted = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
   let running = 0;
 
@@ -411,6 +437,13 @@ function computeRunningStreakAcrossGames(games: ApiGame[], picksForUser: Record<
     });
 
     if (anyWrong) {
+      // ✅ Golden Free Kick logic:
+      // If user used the free kick on THIS game, streak does NOT reset,
+      // and NO correct questions from this game count.
+      if (freeKick?.used && freeKick?.gameId && freeKick.gameId === g.id) {
+        continue; // keep running as-is
+      }
+
       running = 0;
       continue;
     }
@@ -453,8 +486,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
 
     const currentUserId = await getUserIdFromRequest(req);
-    const roundCode = getRoundCode(roundNumber);
+    const freeKick = await getFreeKickInfoForUser(currentUserId);
 
+    const roundCode = getRoundCode(roundNumber);
     const roundDoc = await getRoundDocByNumber(roundNumber);
 
     if (!roundDoc || !Array.isArray(roundDoc.games) || roundDoc.games.length === 0) {
@@ -464,6 +498,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         currentStreak: 0,
         leaderScore: 0,
         leaderName: null,
+        freeKick,
       };
       return NextResponse.json(empty, { headers: { "Cache-Control": "no-store" } });
     }
@@ -577,15 +612,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const sortedGames = [...games].sort((a, b) => safeTimeMs(a.startTime) - safeTimeMs(b.startTime));
 
-    const currentStreak = currentUserId ? computeRunningStreakAcrossGames(sortedGames, userPicks) : 0;
+    const currentStreak = currentUserId ? computeRunningStreakAcrossGames(sortedGames, userPicks, freeKick) : 0;
 
     let leaderScore = 0;
     let leaderUid: string | null = null;
 
     const picksByUser = await loadPicksByUserForQuestionIds(questionIdsForRound);
 
+    // for leader we do NOT apply free kick (optional).
+    // If you want leaderboards to include free kicks, you'd need to load each user's freeKick doc too.
+    // Keeping it simple for now: leader is pure streak without insurance.
     for (const uid of Object.keys(picksByUser)) {
-      const score = computeRunningStreakAcrossGames(sortedGames, picksByUser[uid]);
+      const score = computeRunningStreakAcrossGames(sortedGames, picksByUser[uid], { used: false });
       if (score > leaderScore) {
         leaderScore = score;
         leaderUid = uid;
@@ -600,6 +638,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       currentStreak,
       leaderScore,
       leaderName,
+      freeKick,
     };
 
     return NextResponse.json(response, {
@@ -619,6 +658,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         currentStreak: 0,
         leaderScore: 0,
         leaderName: null,
+        freeKick: { used: false },
       },
       { status: 500, headers: { "Cache-Control": "no-store" } }
     );
