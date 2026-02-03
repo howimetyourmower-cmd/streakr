@@ -80,7 +80,7 @@ function extractPlayerName(question: string) {
   const name = q.slice(start, parenIdx).trim();
   if (!name) return null;
 
-  const words = name.split(/\s+/).filter(Boolean);
+  const words = name.split(/\s+/).filter(Boolean known).filter(Boolean);
   if (words.length < 2) return null;
 
   const badFirstWords = new Set([
@@ -123,11 +123,17 @@ function playerSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
 }
 
+/**
+ * ✅ IMPORTANT:
+ * - Firestore may contain "locked"
+ * - UI treats "locked" as "pending" (locked for picks but not settled)
+ */
 function safeStatus(s: any): QuestionStatus {
   const v = String(s || "").toLowerCase().trim();
   if (v === "open") return "open";
   if (v === "final") return "final";
   if (v === "pending") return "pending";
+  if (v === "locked") return "pending"; // ✅ map locked → pending
   if (v === "void") return "void";
   return "open";
 }
@@ -434,7 +440,7 @@ function QuestionText({ text }: { text: string }) {
 /**
  * ✅ Countdown supports DAYS + HOURS:
  * 31d 09:46:58
- * 0d 02:12:03 (still fine under 24h)
+ * 0d 02:12:03
  */
 function msToRevealCountdown(ms: number) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -449,6 +455,13 @@ function msToRevealCountdown(ms: number) {
   return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
 }
 
+type PanicModalState =
+  | null
+  | {
+      questionId: string;
+      questionText: string;
+    };
+
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
 
@@ -461,6 +474,15 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
+  // ✅ PANIC state (client-side UX):
+  // - one per user per round
+  // - per-question personal void (local UX + will call /api/panic)
+  const [panicUsed, setPanicUsed] = useState(false);
+  const [personalVoids, setPersonalVoids] = useState<Record<string, true>>({});
+  const [panicModal, setPanicModal] = useState<PanicModalState>(null);
+  const [panicBusy, setPanicBusy] = useState(false);
+  const [panicErr, setPanicErr] = useState<string | null>(null);
+
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -469,11 +491,21 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
 
-  const picksStorageKey = useMemo(() => {
-    const uid = user?.uid || "anon";
-    return `torpie:picks:${uid}:${gameId}`;
-  }, [user?.uid, gameId]);
+  const uidForStorage = user?.uid || "anon";
 
+  const picksStorageKey = useMemo(() => {
+    return `torpie:picks:${uidForStorage}:${gameId}`;
+  }, [uidForStorage, gameId]);
+
+  const panicUsedKey = useMemo(() => {
+    return `torpie:panicUsed:${uidForStorage}:R${roundNumber}`;
+  }, [uidForStorage, roundNumber]);
+
+  const personalVoidsKey = useMemo(() => {
+    return `torpie:personalVoids:${uidForStorage}:R${roundNumber}`;
+  }, [uidForStorage, roundNumber]);
+
+  // Load cached picks
   useEffect(() => {
     try {
       const raw = localStorage.getItem(picksStorageKey);
@@ -483,11 +515,35 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } catch {}
   }, [picksStorageKey]);
 
+  // Persist cached picks
   useEffect(() => {
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
     } catch {}
   }, [picks, picksStorageKey]);
+
+  // Load panic used + personal voids
+  useEffect(() => {
+    try {
+      const rawUsed = localStorage.getItem(panicUsedKey);
+      setPanicUsed(rawUsed === "1");
+    } catch {}
+    try {
+      const rawVoids = localStorage.getItem(personalVoidsKey);
+      if (!rawVoids) return setPersonalVoids({});
+      const parsed = JSON.parse(rawVoids) as Record<string, true>;
+      if (parsed && typeof parsed === "object") setPersonalVoids(parsed);
+    } catch {
+      setPersonalVoids({});
+    }
+  }, [panicUsedKey, personalVoidsKey]);
+
+  // Persist personal voids
+  useEffect(() => {
+    try {
+      localStorage.setItem(personalVoidsKey, JSON.stringify(personalVoids));
+    } catch {}
+  }, [personalVoids, personalVoidsKey]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
     if (mode === "initial") setLoading(true);
@@ -512,22 +568,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setGame(found);
       lastGameRef.current = found;
 
-      if (user) {
-        const seeded: Record<string, LocalPick> = {};
-        for (const q of found.questions || []) {
-          if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
-        }
-        setPicks((prev) => ({ ...prev, ...seeded }));
-      } else {
-        setPicks((prev) => {
-          if (Object.keys(prev || {}).length > 0) return prev;
-          const seeded: Record<string, LocalPick> = {};
-          for (const q of found.questions || []) {
-            if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
-          }
-          return seeded;
-        });
+      // seed picks from API (userPick)
+      const seeded: Record<string, LocalPick> = {};
+      for (const q of found.questions || []) {
+        if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
       }
+
+      setPicks((prev) => ({ ...prev, ...seeded }));
     } catch (e: any) {
       setErr(e?.message || "Failed to load picks");
     } finally {
@@ -550,7 +597,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
 
-  const lockedCount = useMemo(() => questions.filter((q) => safeStatus(q.status) !== "open").length, [questions]);
+  // Locked count (pending/final/void/locked) + personal voids count as locked
+  const lockedCount = useMemo(() => {
+    return questions.filter((q) => {
+      if (personalVoids[q.id]) return true;
+      return safeStatus(q.status) !== "open";
+    }).length;
+  }, [questions, personalVoids]);
 
   const matchStartMs = useMemo(() => {
     const iso = stableGame?.startTime;
@@ -597,6 +650,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus) {
     if (status !== "open") return;
+    if (personalVoids[questionId]) return;
 
     setPicks((prev) => {
       const current = prev[questionId] || "none";
@@ -608,11 +662,73 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   async function clearPick(questionId: string, status: QuestionStatus) {
     if (status !== "open") return;
+    if (personalVoids[questionId]) return;
 
     setPicks((prev) => {
       void persistPick(questionId, "none");
       return { ...prev, [questionId]: "none" };
     });
+  }
+
+  // ✅ PANIC rules:
+  // - shown only AFTER lock (matchIsLocked)
+  // - requires the question already answered (user has yes/no selected)
+  // - one per round (panicUsed)
+  // - not shown for sponsor question
+  // - cannot be used on final/void (already settled/void)
+  function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
+    if (!user) return false; // panic is a user action, needs auth
+    if (!matchIsLocked) return false; // shown only once match locked
+    if (q.isSponsorQuestion) return false; // never show on sponsor question
+    if (panicUsed) return false; // one per round
+    if (personalVoids[q.id]) return false; // already personally voided
+    if (displayStatus === "final" || displayStatus === "void") return false;
+    if (!(selected === "yes" || selected === "no")) return false; // must have a pick already
+    return true;
+  }
+
+  async function triggerPanic(questionId: string) {
+    if (!user) return;
+    setPanicErr(null);
+    setPanicBusy(true);
+
+    try {
+      const token = await user.getIdToken();
+
+      const res = await fetch("/api/panic", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roundNumber,
+          questionId,
+        }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `Panic failed (${res.status})`);
+      }
+
+      // ✅ UX: mark panic used for this round + personally void this question
+      setPanicUsed(true);
+      try {
+        localStorage.setItem(panicUsedKey, "1");
+      } catch {}
+
+      setPersonalVoids((prev) => ({ ...prev, [questionId]: true }));
+
+      // refresh to keep other stats updated
+      void fetchMatch("refresh");
+    } catch (e: any) {
+      console.error("[MatchPicksClient] panic failed", e);
+      setPanicErr(e?.message || "Panic failed");
+    } finally {
+      setPanicBusy(false);
+      setPanicModal(null);
+    }
   }
 
   if (loading && !stableGame) {
@@ -952,7 +1068,84 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           box-shadow: 0 0 28px rgba(255,46,77,0.20);
           color: rgba(255,255,255,0.98);
         }
+
+        .panic-btn {
+          height: 40px;
+          padding: 0 14px;
+          border-radius: 999px;
+          border: 1px solid rgba(255,46,77,0.40);
+          background: rgba(0,0,0,0.55);
+          color: rgba(255,255,255,0.92);
+          font-weight: 900;
+          letter-spacing: 0.14em;
+          box-shadow: 0 0 18px rgba(255,46,77,0.14);
+          transition: transform 120ms ease, background 120ms ease, opacity 120ms ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .panic-btn:hover { background: rgba(255,46,77,0.12); }
+        .panic-btn:active { transform: scale(0.99); }
+        .panic-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+        .panic-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 999px;
+          background: rgba(255,46,77,0.95);
+          box-shadow: 0 0 18px rgba(255,46,77,0.25);
+        }
       `}</style>
+
+      {/* Panic modal */}
+      {panicModal ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => (panicBusy ? null : setPanicModal(null))} />
+          <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
+            <div className="text-[12px] font-black tracking-[0.24em] text-white/55">PANIC BUTTON</div>
+
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">
+              This will void this question for this round.
+            </div>
+
+            <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
+              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round. Decision is final.
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
+              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">QUESTION</div>
+              <div className="mt-1 text-[14px] font-extrabold text-white/90">{panicModal.questionText}</div>
+            </div>
+
+            {panicErr ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">
+                {panicErr}
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+                disabled={panicBusy}
+                onClick={() => setPanicModal(null)}
+              >
+                CANCEL
+              </button>
+
+              <button
+                type="button"
+                className="rounded-full border border-rose-400/25 bg-rose-500/15 px-4 py-2 font-extrabold text-rose-100"
+                disabled={panicBusy}
+                onClick={() => void triggerPanic(panicModal.questionId)}
+              >
+                {panicBusy ? "VOIDING…" : "VOID"}
+              </button>
+            </div>
+
+            <div className="mt-3 text-[11px] text-white/40">ARE YOU SURE?</div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
         <div className="text-[11px] tracking-[0.18em] font-semibold text-white/50">OFFICIAL PARTNER</div>
@@ -989,12 +1182,26 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="rounded-full border border-white/15 px-3 py-1">
               {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED — sponsor revealed" : `Locks in ${msToRevealCountdown(matchLockMs)}`}
             </div>
+
+            {user ? (
+              <div className="rounded-full border border-white/15 px-3 py-1">
+                Panic:{" "}
+                <span className={`font-semibold ${panicUsed ? "text-white/70" : "text-white"}`}>
+                  {panicUsed ? "USED" : "AVAILABLE"}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {questions.map((q, idx) => {
-            const status = safeStatus(q.status);
+            const baseStatus = safeStatus(q.status);
+            const isPersonallyVoided = !!personalVoids[q.id];
+
+            // Personal void overrides UI status/outcome
+            const status: QuestionStatus = isPersonallyVoided ? "void" : baseStatus;
+
             const qNum = String(idx + 1).padStart(2, "0");
 
             if (q.isSponsorQuestion) {
@@ -1015,6 +1222,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
             const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
+            const showPanic = canShowPanic(q, status, selected);
+
             return (
               <div key={q.id} className="screamr-card p-4 flex flex-col">
                 <div className="pointer-events-none absolute inset-0 opacity-[0.14]">
@@ -1034,26 +1243,51 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       </div>
 
                       <div className="mt-2 flex items-center gap-2">
-                        <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+                        <ResultPill
+                          status={status}
+                          selected={selected}
+                          correctPick={q.correctPick}
+                          outcome={isPersonallyVoided ? "void" : (q.correctOutcome ?? q.outcome)}
+                        />
                         {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
                       </div>
                     </div>
 
-                    <div className="flex items-start gap-2">
+                    <div className="flex flex-col items-end gap-2">
                       <MatchTimerPill status={status} />
 
-                      <button
-                        type="button"
-                        className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                          isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
-                        }`}
-                        aria-label="Clear pick"
-                        disabled={isLocked || isSaving}
-                        onClick={() => void clearPick(q.id, status)}
-                        title="Clear pick"
-                      >
-                        <span className="text-white/85 font-black">×</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {showPanic ? (
+                          <button
+                            type="button"
+                            className="panic-btn"
+                            disabled={panicBusy}
+                            onClick={() =>
+                              setPanicModal({
+                                questionId: q.id,
+                                questionText: q.question,
+                              })
+                            }
+                            title="Panic Button"
+                          >
+                            <span className="panic-dot" />
+                            PANIC
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                            isLocked || isPersonallyVoided ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                          }`}
+                          aria-label="Clear pick"
+                          disabled={isLocked || isSaving || isPersonallyVoided}
+                          onClick={() => void clearPick(q.id, status)}
+                          title="Clear pick"
+                        >
+                          <span className="text-white/85 font-black">×</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -1066,9 +1300,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       <div className="grid grid-cols-2 gap-3">
                         <button
                           type="button"
-                          disabled={isLocked || isSaving}
+                          disabled={isLocked || isSaving || isPersonallyVoided}
                           className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                            isLocked || isSaving || isPersonallyVoided ? "opacity-50 cursor-not-allowed" : ""
                           } ${yesBtn}`}
                           onClick={() => void setPick(q.id, "yes", status)}
                         >
@@ -1077,9 +1311,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
                         <button
                           type="button"
-                          disabled={isLocked || isSaving}
+                          disabled={isLocked || isSaving || isPersonallyVoided}
                           className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                            isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                            isLocked || isSaving || isPersonallyVoided ? "opacity-50 cursor-not-allowed" : ""
                           } ${noBtn}`}
                           onClick={() => void setPick(q.id, "no", status)}
                         >
@@ -1088,6 +1322,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                       </div>
 
                       <CommunityPulse yes={yes} no={no} />
+
+                      {isPersonallyVoided ? (
+                        <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/55">
+                          PERSONAL VOID — streak protected
+                        </div>
+                      ) : null}
+
+                      {matchIsLocked && !panicUsed && !q.isSponsorQuestion && (selected === "yes" || selected === "no") && status !== "final" && status !== "void" ? (
+                        <div className="mt-3 text-center text-[11px] text-white/45">
+                          Panic available: void one answered question this round (streak won’t break).
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
