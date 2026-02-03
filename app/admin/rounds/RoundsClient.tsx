@@ -32,6 +32,13 @@ type RoundMeta = {
   published: boolean;
 };
 
+type SponsorQuestionConfig = {
+  roundNumber: number;
+  questionId: string; // ✅ hashed stableQuestionId
+  sponsorName?: string;
+  sponsorBlurb?: string;
+};
+
 const SEASON = 2026;
 
 function getRoundCode(roundNumber: number): string {
@@ -57,6 +64,32 @@ function stableQuestionId(params: { roundNumber: number; gameId: string; quarter
   return `${params.gameId}-Q${params.quarter}-${hash}`;
 }
 
+function findSelectionByHashedQuestionId(round: RoundMeta, hashedQuestionId: string) {
+  const roundCode = getRoundCode(round.roundNumber);
+
+  for (let gi = 0; gi < (round.games ?? []).length; gi++) {
+    const game = round.games[gi];
+    const gameId = `${roundCode}-G${gi + 1}`;
+    const qs = game.questions ?? [];
+
+    for (let qi = 0; qi < qs.length; qi++) {
+      const q = qs[qi];
+      const computed = stableQuestionId({
+        roundNumber: round.roundNumber,
+        gameId,
+        quarter: Number(q.quarter ?? 1),
+        question: String(q.question ?? ""),
+      });
+
+      if (computed === hashedQuestionId) {
+        return { gameIndex: gi, questionIndex: qi };
+      }
+    }
+  }
+
+  return null;
+}
+
 export default function RoundsClient() {
   const { user, isAdmin, loading } = useAuth();
   const [rounds, setRounds] = useState<RoundMeta[]>([]);
@@ -68,6 +101,9 @@ export default function RoundsClient() {
   const [sponsorSelection, setSponsorSelection] = useState<{ gameIndex: number; questionIndex: number } | null>(null);
   const [sponsorSaving, setSponsorSaving] = useState(false);
   const [sponsorSavedMessage, setSponsorSavedMessage] = useState<string | null>(null);
+
+  // shows what is stored in config for the opened round
+  const [activeSponsorConfig, setActiveSponsorConfig] = useState<SponsorQuestionConfig | null>(null);
 
   useEffect(() => {
     if (loading) return;
@@ -174,25 +210,50 @@ export default function RoundsClient() {
     }
   };
 
-  const openSponsorEditor = (round: RoundMeta) => {
+  const openSponsorEditor = async (round: RoundMeta) => {
     setSponsorRoundId(round.id);
     setSponsorSavedMessage(null);
+    setActiveSponsorConfig(null);
 
-    let found: { gameIndex: number; questionIndex: number } | null = null;
-
+    // 1) Try round doc flag first (fast UX)
+    let foundByFlag: { gameIndex: number; questionIndex: number } | null = null;
     round.games.forEach((game, gi) => {
       (game.questions ?? []).forEach((q, qi) => {
-        if (q.isSponsorQuestion) found = { gameIndex: gi, questionIndex: qi };
+        if (q.isSponsorQuestion) foundByFlag = { gameIndex: gi, questionIndex: qi };
       });
     });
+    setSponsorSelection(foundByFlag);
 
-    setSponsorSelection(found);
+    // 2) Then load config (source of truth for API) and sync selection
+    try {
+      const configRef = doc(db, "config", `season-${SEASON}`);
+      const configSnap = await getDoc(configRef);
+
+      if (!configSnap.exists()) return;
+
+      const cfg = (configSnap.data() as any) || {};
+      const sponsorQuestion = (cfg.sponsorQuestion as SponsorQuestionConfig | undefined) || null;
+
+      if (!sponsorQuestion || typeof sponsorQuestion.questionId !== "string") return;
+
+      setActiveSponsorConfig(sponsorQuestion);
+
+      // Only apply if it matches this round
+      if (Number(sponsorQuestion.roundNumber) !== Number(round.roundNumber)) return;
+
+      const foundByHash = findSelectionByHashedQuestionId(round, sponsorQuestion.questionId);
+      if (foundByHash) setSponsorSelection(foundByHash);
+    } catch (e) {
+      console.warn("[RoundsClient] Failed to read sponsorQuestion config", e);
+      // non-blocking
+    }
   };
 
   const cancelSponsorEditor = () => {
     setSponsorRoundId(null);
     setSponsorSelection(null);
     setSponsorSavedMessage(null);
+    setActiveSponsorConfig(null);
   };
 
   const handleSaveSponsorQuestion = async () => {
@@ -223,11 +284,16 @@ export default function RoundsClient() {
       const gameId = `${roundCode}-G${gameIndex + 1}`;
       const pickedQuestion = updatedGames?.[gameIndex]?.questions?.[questionIndex];
 
+      const questionText = String(pickedQuestion?.question ?? "").trim();
+      if (!questionText) {
+        throw new Error("Selected sponsor question has no question text.");
+      }
+
       const sponsorQuestionId = stableQuestionId({
         roundNumber: round.roundNumber,
         gameId,
         quarter: Number(pickedQuestion?.quarter ?? 1),
-        question: String(pickedQuestion?.question ?? ""),
+        question: questionText,
       });
 
       const configRef = doc(db, "config", `season-${SEASON}`);
@@ -238,16 +304,22 @@ export default function RoundsClient() {
             roundNumber: round.roundNumber,
             questionId: sponsorQuestionId,
           },
+          updatedAt: dayjs().toISOString(),
         },
         { merge: true }
       );
 
+      setActiveSponsorConfig({
+        roundNumber: round.roundNumber,
+        questionId: sponsorQuestionId,
+      });
+
       setRounds((prev) => prev.map((r) => (r.id === round.id ? { ...r, games: updatedGames } : r)));
 
       setSponsorSavedMessage(`Sponsor question saved: ${sponsorQuestionId} (Round ${round.roundNumber}).`);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error saving sponsor question", err);
-      setError("Failed to save sponsor question.");
+      setError(err?.message ? String(err.message) : "Failed to save sponsor question.");
     } finally {
       setSponsorSaving(false);
     }
@@ -337,7 +409,7 @@ export default function RoundsClient() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => openSponsorEditor(round)}
+                        onClick={() => void openSponsorEditor(round)}
                         className="rounded-full bg-amber-600 px-3 py-1 text-xs font-semibold"
                       >
                         Sponsor question
@@ -354,6 +426,13 @@ export default function RoundsClient() {
               <h2 className="mb-2 text-lg font-semibold">
                 Sponsor Question – Season {activeSponsorRound.season}, Round {activeSponsorRound.roundNumber} ({activeSponsorRound.label})
               </h2>
+
+              <div className="mb-3 text-xs text-gray-300">
+                <div>
+                  <span className="text-gray-400">Config sponsor (hash):</span>{" "}
+                  <span className="font-mono text-gray-200">{activeSponsorConfig?.questionId ?? "—"}</span>
+                </div>
+              </div>
 
               {activeSponsorRound.games.length === 0 ? (
                 <p className="text-sm text-gray-300">This round has no games configured yet.</p>
@@ -413,11 +492,7 @@ export default function RoundsClient() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={cancelSponsorEditor}
-                    className="rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold"
-                  >
+                  <button type="button" onClick={cancelSponsorEditor} className="rounded-full bg-slate-600 px-4 py-1.5 text-xs font-semibold">
                     Cancel
                   </button>
                   <button
