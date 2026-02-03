@@ -508,7 +508,6 @@ function FeatureTile({
         style={{ background: isPanic ? "rgba(255,46,77,0.18)" : "rgba(246,198,75,0.16)" }}
       />
 
-      {/* “metal plate” look */}
       <div
         className="absolute inset-0"
         style={{
@@ -517,7 +516,6 @@ function FeatureTile({
         }}
       />
 
-      {/* crack lines for panic */}
       {isPanic ? (
         <div
           className="absolute inset-0 opacity-[0.45]"
@@ -579,14 +577,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [picks, setPicks] = useState<Record<string, LocalPick>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
 
-  // ✅ PANIC (per-round, after lock)
   const [panicUsed, setPanicUsed] = useState(false);
   const [personalVoids, setPersonalVoids] = useState<Record<string, true>>({});
   const [panicModal, setPanicModal] = useState<PanicModalState>(null);
   const [panicBusy, setPanicBusy] = useState(false);
   const [panicErr, setPanicErr] = useState<string | null>(null);
 
-  // ✅ FREE KICK (per-season, after a loss, settled)
   const [freeKickUsedSeason, setFreeKickUsedSeason] = useState(false);
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
@@ -603,13 +599,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
   const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
+  const freeKickUsedSeasonKey = useMemo(() => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`, [uidForStorage]);
 
-  const freeKickUsedSeasonKey = useMemo(
-    () => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`,
-    [uidForStorage]
-  );
-
-  // Load cached picks
   useEffect(() => {
     try {
       const raw = localStorage.getItem(picksStorageKey);
@@ -619,14 +610,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } catch {}
   }, [picksStorageKey]);
 
-  // Persist cached picks
   useEffect(() => {
     try {
       localStorage.setItem(picksStorageKey, JSON.stringify(picks));
     } catch {}
   }, [picks, picksStorageKey]);
 
-  // Load panic used + personal voids + free kick used
   useEffect(() => {
     try {
       const rawUsed = localStorage.getItem(panicUsedKey);
@@ -649,7 +638,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     } catch {}
   }, [panicUsedKey, personalVoidsKey, freeKickUsedSeasonKey]);
 
-  // Persist personal voids
   useEffect(() => {
     try {
       localStorage.setItem(personalVoidsKey, JSON.stringify(personalVoids));
@@ -679,7 +667,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setGame(found);
       lastGameRef.current = found;
 
-      // seed picks from API (userPick)
       const seeded: Record<string, LocalPick> = {};
       for (const q of found.questions || []) {
         if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
@@ -709,7 +696,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
   const totalQuestions = questions.length || 0;
 
-  // Locked count (pending/final/void/locked) + personal voids count as locked
   const lockedCount = useMemo(() => {
     return questions.filter((q) => {
       if (personalVoids[q.id]) return true;
@@ -730,7 +716,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const matchIsLocked = matchLockMs !== null ? matchLockMs <= 0 : false;
 
-  // For the “picks selected: x / y” bar inside the mock
   const selectedPct = useMemo(() => {
     if (totalQuestions <= 0) return 0;
     return Math.max(0, Math.min(100, Math.round((selectedCount / totalQuestions) * 100)));
@@ -788,7 +773,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  // ✅ PANIC rules (same as before)
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
     if (!matchIsLocked) return false;
@@ -841,8 +825,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     }
   }
 
-  // ✅ FREE KICK (beta UI only for now)
-  // Shown once game is fully settled and the user LOST (has at least one wrong answered question in this game).
   const freeKickEligibleForThisGame = useMemo(() => {
     if (!user) return false;
     if (!stableGame) return false;
@@ -877,8 +859,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }, [user, stableGame, freeKickUsedSeason, picks, personalVoids]);
 
   function triggerFreeKickSeasonUse() {
-    // NOTE: You’ll wire the real backend in 2027.
-    // For beta, we lock it client-side so the UX exists exactly once per season.
     setFreeKickErr(null);
     try {
       localStorage.setItem(freeKickUsedSeasonKey, "1");
@@ -926,7 +906,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home } = parseTeams(stableGame.match);
   const matchTitle = `${home.toUpperCase()}`;
 
-  // ✅ Sponsor card left as-is (still renders)
   function SponsorMysteryCard({ q, status }: { q: ApiQuestion; status: QuestionStatus }) {
     const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
     const selected = picks[q.id] || "none";
@@ -1313,8 +1292,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       ) : null}
 
-      {/* Top app bar (like your mock) */}
-      <div className="max-w-[980px] mx-auto px-4 pt-6">
+      {/* Top app bar */}
+      <div className="max-w-6xl mx-auto px-4 pt-6">
         <div className="flex items-center justify-between">
           <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
 
@@ -1365,9 +1344,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         ) : null}
       </div>
 
-      {/* Questions (each card now matches the “screen” look) */}
-      <div className="max-w-[980px] mx-auto px-4 pb-24 pt-5">
-        <div className="grid grid-cols-1 gap-4">
+      {/* ✅ FIX: 3 columns on desktop */}
+      <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
             const baseStatus = safeStatus(q.status);
             const isPersonallyVoided = !!personalVoids[q.id];
@@ -1401,7 +1380,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 <div className="screamr-sparks" />
 
                 <div className="relative">
-                  {/* Q header + timer */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
@@ -1456,29 +1434,19 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                     </div>
                   </div>
 
-                  {/* Feature tiles row (matches your mock) */}
                   <div className="mt-4 grid grid-cols-2 gap-3">
                     <FeatureTile
                       variant="panic"
                       disabled={!showPanic}
-                      onClick={
-                        showPanic
-                          ? () => setPanicModal({ questionId: q.id, questionText: q.question })
-                          : undefined
-                      }
+                      onClick={showPanic ? () => setPanicModal({ questionId: q.id, questionText: q.question }) : undefined}
                     />
                     <FeatureTile
                       variant="freekick"
                       disabled={!freeKickEligibleForThisGame}
-                      onClick={
-                        freeKickEligibleForThisGame
-                          ? () => setFreeKickModal({ gameId: stableGame.id, label: `${stableGame.match}` })
-                          : undefined
-                      }
+                      onClick={freeKickEligibleForThisGame ? () => setFreeKickModal({ gameId: stableGame.id, label: `${stableGame.match}` }) : undefined}
                     />
                   </div>
 
-                  {/* Main question panel (like the mock) */}
                   <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
                     <div
                       className="absolute inset-0 opacity-[0.35]"
@@ -1504,7 +1472,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         <div>
                           <QuestionText text={q.question} />
 
-                          {/* Player intel block (visual placeholder, matches mock vibe) */}
                           <div className="mt-4">
                             <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
                             <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
@@ -1531,7 +1498,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                         </div>
                       </div>
 
-                      {/* YES / NO */}
                       <div className="mt-5 grid grid-cols-2 gap-3">
                         <button
                           type="button"
@@ -1584,9 +1550,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       </div>
 
-      {/* Bottom sticky (kept) */}
       <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
-        <div className="max-w-[980px] mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
           <div className="rounded-full border border-white/15 px-3 py-1">
             Picks selected: <span className="font-semibold text-white">{selectedCount}</span> / {totalQuestions}
           </div>
