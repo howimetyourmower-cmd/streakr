@@ -4,7 +4,7 @@
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -52,7 +52,7 @@ type PicksApiResponse = {
 };
 
 const BRAND_BG = "#000000";
-const SEASON = 2026; // used only for localStorage keys (beta)
+const SEASON = 2026; // beta localStorage only
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -122,9 +122,8 @@ function playerSlug(name: string) {
 }
 
 /**
- * ✅ IMPORTANT:
- * - Firestore may contain "locked"
- * - UI treats "locked" as "pending" (locked for picks but not settled)
+ * Firestore may contain "locked"
+ * UI treats "locked" as "pending"
  */
 function safeStatus(s: any): QuestionStatus {
   const v = String(s || "").toLowerCase().trim();
@@ -153,6 +152,24 @@ function truncateText(s: string, n: number) {
   const t = String(s || "");
   if (t.length <= n) return t;
   return t.slice(0, Math.max(0, n - 1)).trimEnd() + "…";
+}
+
+function clampPct(n: number) {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function msToCountdown(ms: number) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(totalSec / 86400);
+  const rem = totalSec % 86400;
+
+  const hh = Math.floor(rem / 3600);
+  const mm = Math.floor((rem % 3600) / 60);
+  const ss = rem % 60;
+
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
 }
 
 /* Teams */
@@ -213,7 +230,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = ({ teamName, size = 72 }: { teamName: string; size?: number }) => {
+const TeamLogo = React.memo(function TeamLogo({ teamName, size = 72 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
@@ -275,16 +292,11 @@ const TeamLogo = ({ teamName, size = 72 }: { teamName: string; size?: number }) 
       </div>
     </div>
   );
-};
+});
 
 /* UI bits */
 
-function clampPct(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, n));
-}
-
-function CommunityPulse({ yes, no }: { yes: number; no: number }) {
+const CommunityPulse = React.memo(function CommunityPulse({ yes, no }: { yes: number; no: number }) {
   let y = clampPct(yes);
   let n = clampPct(no);
 
@@ -330,7 +342,7 @@ function CommunityPulse({ yes, no }: { yes: number; no: number }) {
       </div>
     </div>
   );
-}
+});
 
 function ResultPill({
   status,
@@ -384,22 +396,9 @@ function QuestionText({ text }: { text: string }) {
   );
 }
 
-function msToRevealCountdown(ms: number) {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(totalSec / 86400);
-  const rem = totalSec % 86400;
-
-  const hh = Math.floor(rem / 3600);
-  const mm = Math.floor((rem % 3600) / 60);
-  const ss = rem % 60;
-
-  const pad2 = (n: number) => String(n).padStart(2, "0");
-  return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-}
-
 /* Avatars / Logos */
 
-function PlayerAvatar({ name }: { name: string }) {
+const PlayerAvatar = React.memo(function PlayerAvatar({ name }: { name: string }) {
   const exact = `/players/${encodeURIComponent(name)}.jpg`;
   const slug = `/players/${playerSlug(name)}.jpg`;
   const [src, setSrc] = useState(exact);
@@ -415,6 +414,8 @@ function PlayerAvatar({ name }: { name: string }) {
             src={src}
             alt={name}
             className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
             onError={() => {
               if (src === exact) setSrc(slug);
             }}
@@ -429,9 +430,9 @@ function PlayerAvatar({ name }: { name: string }) {
       <div className="text-[11px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
     </div>
   );
-}
+});
 
-function TeamLogoRing({ teamName }: { teamName: string }) {
+const TeamLogoRing = React.memo(function TeamLogoRing({ teamName }: { teamName: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-[112px] w-[112px]">
@@ -449,7 +450,7 @@ function TeamLogoRing({ teamName }: { teamName: string }) {
       <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
     </div>
   );
-}
+});
 
 function GamePickHeader({ match }: { match: string }) {
   const { home, away } = parseTeams(match);
@@ -465,6 +466,8 @@ function GamePickHeader({ match }: { match: string }) {
   );
 }
 
+/* Feature UI helpers */
+
 type PanicModalState =
   | null
   | {
@@ -478,6 +481,37 @@ type FreeKickModalState =
       gameId: string;
       label: string;
     };
+
+function MiniFeatureButton({
+  variant,
+  disabled,
+  onClick,
+}: {
+  variant: "panic" | "freekick";
+  disabled: boolean;
+  onClick?: () => void;
+}) {
+  const isPanic = variant === "panic";
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`h-9 px-3 rounded-full border text-[11px] font-black tracking-[0.16em] ${
+        disabled ? "opacity-40 cursor-not-allowed" : "hover:opacity-[0.98] active:scale-[0.99]"
+      }`}
+      style={{
+        borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
+        background: "rgba(0,0,0,0.50)",
+        color: isPanic ? "rgba(255,255,255,0.92)" : "rgba(246,198,75,0.95)",
+        boxShadow: isPanic ? "0 0 18px rgba(255,46,77,0.16)" : "0 0 18px rgba(246,198,75,0.12)",
+      }}
+      aria-label={isPanic ? "Panic Button" : "Free Kick"}
+    >
+      {isPanic ? "PANIC" : "FREE KICK"}
+    </button>
+  );
+}
 
 function FeatureTile({
   variant,
@@ -631,6 +665,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       const rawUsed = localStorage.getItem(panicUsedKey);
       setPanicUsed(rawUsed === "1");
     } catch {}
+
     try {
       const rawVoids = localStorage.getItem(personalVoidsKey);
       if (!rawVoids) setPersonalVoids({});
@@ -681,7 +716,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       for (const q of found.questions || []) {
         if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
       }
-
       setPicks((prev) => ({ ...prev, ...seeded }));
     } catch (e: any) {
       setErr(e?.message || "Failed to load picks");
@@ -844,7 +878,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       const pick = picks[q.id];
       return pick === "yes" || pick === "no";
     });
-
     if (answered.length === 0) return false;
 
     const allSettled = answered.every((q) => {
@@ -896,6 +929,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const topPanicEnabled = panicEligibleList.length > 0;
 
+  // Loading skeleton
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -911,6 +945,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
+  // Hard fail
   if ((err && !stableGame) || !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-10" style={{ background: BRAND_BG }}>
@@ -932,7 +967,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  const { home } = parseTeams(stableGame.match);
+  // ✅ TS: lock-in a non-null game for everything below
+  const sg = stableGame as ApiGame;
+
+  const { home } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}`;
 
   function SponsorMysteryCard({ q, status }: { q: ApiQuestion; status: QuestionStatus }) {
@@ -946,6 +984,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     const yesSelected = selected === "yes";
     const noSelected = selected === "no";
+
+    // feature buttons per question (free kick shown everywhere, panic shown when eligible)
+    const panicEligible = canShowPanic(q, status, selected);
 
     return (
       <div className="screamr-card p-5 flex flex-col">
@@ -970,9 +1011,30 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               </div>
             </div>
 
-            <div className="flex items-start gap-2">
+            <div className="flex flex-col items-end gap-2">
               <div className="screamr-chip" style={{ minWidth: 110 }}>
                 {isRevealTime ? "LOCKED" : "VAULT"}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <MiniFeatureButton
+                  variant="panic"
+                  disabled={!panicEligible}
+                  onClick={
+                    panicEligible
+                      ? () => setPanicModal({ questionId: q.id, questionText: q.question })
+                      : undefined
+                  }
+                />
+                <MiniFeatureButton
+                  variant="freekick"
+                  disabled={!freeKickEligibleForThisGame}
+                  onClick={
+                    freeKickEligibleForThisGame
+                      ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
+                      : undefined
+                  }
+                />
               </div>
 
               <button
@@ -1040,7 +1102,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             {!isRevealTime && matchLockMs !== null ? (
               <div className="mt-4 text-center">
                 <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
-                  REVEAL IN: {msToRevealCountdown(matchLockMs)}
+                  REVEAL IN: {msToCountdown(matchLockMs)}
                 </div>
               </div>
             ) : (
@@ -1110,9 +1172,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
     const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-    // --- NEW: inline mini actions per question ---
-    const showPanicOnThisCard = canShowPanic(q, status, selected);
-    const showFreeKickOnThisCard = freeKickEligibleForThisGame && !freeKickUsedSeason;
+    const panicEligible = canShowPanic(q, status, selected);
 
     return (
       <div className="screamr-card p-5">
@@ -1135,7 +1195,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   status={status}
                   selected={selected}
                   correctPick={q.correctPick}
-                  outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
+                  outcome={isPersonallyVoided ? "void" : (q.correctOutcome ?? q.outcome)}
                 />
                 {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
               </div>
@@ -1143,7 +1203,27 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
             <div className="flex flex-col items-end gap-2">
               <div className="screamr-chip">
-                {matchLockMs === null ? "—" : matchIsLocked ? "LOCKED" : msToRevealCountdown(matchLockMs)}
+                {matchLockMs === null ? "—" : matchIsLocked ? "LOCKED" : msToCountdown(matchLockMs)}
+              </div>
+
+              {/* ✅ per-question Panic + Free Kick */}
+              <div className="flex items-center gap-2">
+                <MiniFeatureButton
+                  variant="panic"
+                  disabled={!panicEligible}
+                  onClick={
+                    panicEligible ? () => setPanicModal({ questionId: q.id, questionText: q.question }) : undefined
+                  }
+                />
+                <MiniFeatureButton
+                  variant="freekick"
+                  disabled={!freeKickEligibleForThisGame}
+                  onClick={
+                    freeKickEligibleForThisGame
+                      ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
+                      : undefined
+                  }
+                />
               </div>
 
               <button
@@ -1161,64 +1241,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
           </div>
 
-          {/* NEW: per-card action strip */}
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              disabled={!showPanicOnThisCard}
-              onClick={() => {
-                if (!showPanicOnThisCard) return;
-                setPanicModal({ questionId: q.id, questionText: q.question });
-              }}
-              className="relative h-[70px] rounded-2xl border overflow-hidden font-black tracking-[0.12em]"
-              style={{
-                borderColor: showPanicOnThisCard ? "rgba(255,46,77,0.60)" : "rgba(255,46,77,0.22)",
-                background: "rgba(0,0,0,0.55)",
-                opacity: showPanicOnThisCard ? 1 : 0.45,
-                boxShadow: "0 0 26px rgba(255,46,77,0.18)",
-              }}
-            >
-              <div
-                className="absolute inset-0 opacity-[0.55]"
-                style={{
-                  background:
-                    "linear-gradient(135deg, transparent 0 46%, rgba(255,255,255,0.28) 47% 48%, transparent 49% 100%), radial-gradient(520px 190px at 25% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 62%)",
-                }}
-              />
-              <div className="relative leading-tight">
-                <div>PANIC</div>
-                <div>BUTTON</div>
-              </div>
-            </button>
-
-            <button
-              type="button"
-              disabled={!showFreeKickOnThisCard}
-              onClick={() => {
-                if (!showFreeKickOnThisCard) return;
-                setFreeKickModal({ gameId: sg.id, label: `${sg.match}` });
-              }}
-              className="relative h-[70px] rounded-2xl border overflow-hidden font-black tracking-[0.12em]"
-              style={{
-                borderColor: showFreeKickOnThisCard ? "rgba(246,198,75,0.60)" : "rgba(246,198,75,0.22)",
-                background: "rgba(0,0,0,0.55)",
-                opacity: showFreeKickOnThisCard ? 1 : 0.45,
-                boxShadow: "0 0 26px rgba(246,198,75,0.14)",
-              }}
-            >
-              <div
-                className="absolute inset-0 opacity-[0.60]"
-                style={{
-                  background: "radial-gradient(520px 190px at 25% 0%, rgba(246,198,75,0.32), rgba(0,0,0,0) 62%)",
-                }}
-              />
-              <div className="relative leading-tight" style={{ color: "rgba(246,198,75,0.95)" }}>
-                <div>FREE</div>
-                <div>KICK</div>
-              </div>
-            </button>
-          </div>
-
           <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
             <div
               className="absolute inset-0 opacity-[0.35]"
@@ -1227,8 +1249,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               }}
             />
             <div className="relative">
-              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
-                <div className="flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}</div>
+              <div className
+                className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center"
+              >
+                <div className="flex justify-center">
+                  {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}
+                </div>
 
                 <div>
                   <QuestionText text={q.question} />
@@ -1295,6 +1321,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               {freeKickUsedSeason ? (
                 <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">
                   FREE KICK: USED (SEASON)
+                </div>
+              ) : null}
+
+              {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
+                <div className="mt-3 text-center text-[11px] text-white/55">
+                  Free Kick available (season): you lost this game — use once to protect streak.
                 </div>
               ) : null}
             </div>
@@ -1411,7 +1443,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             <div className="text-[12px] font-black tracking-[0.24em] text-white/55">PANIC BUTTON</div>
             <div className="mt-2 text-[18px] font-black text-white leading-snug">This will void this question for this round.</div>
             <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
-              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round. Decision is final.
+              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round.
+              Decision is final.
             </div>
 
             <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
@@ -1602,7 +1635,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
 
         <div className="mt-3 text-[12px] text-white/55">
-          {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : `Locks in ${msToRevealCountdown(matchLockMs)}`}
+          {matchLockMs === null ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : `Locks in ${msToCountdown(matchLockMs)}`}
         </div>
 
         {err ? (
@@ -1617,12 +1650,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <FeatureTile
             variant="freekick"
             disabled={!freeKickEligibleForThisGame}
-            onClick={freeKickEligibleForThisGame ? () => setFreeKickModal({ gameId: stableGame.id, label: `${stableGame.match}` }) : undefined}
+            onClick={freeKickEligibleForThisGame ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` }) : undefined}
           />
         </div>
       </div>
 
-      {/* 3 columns on desktop */}
+      {/* 3 columns desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
@@ -1643,13 +1676,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 qNum={qNum}
                 status={status}
                 isPersonallyVoided={isPersonallyVoided}
-                match={stableGame.match}
+                match={sg.match}
               />
             );
           })}
         </div>
       </div>
 
+      {/* Bottom bar */}
       <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
           <div className="rounded-full border border-white/15 px-3 py-1">
