@@ -1196,7 +1196,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               disabled={!showFreeKickOnThisCard}
               onClick={() => {
                 if (!showFreeKickOnThisCard) return;
-                setFreeKickModal({ gameId: stableGame.id, label: `${stableGame.match}` });
+                setFreeKickModal({ gameId: sg.id, label: `${sg.match}` });
               }}
               className="relative h-[70px] rounded-2xl border overflow-hidden font-black tracking-[0.12em]"
               style={{
