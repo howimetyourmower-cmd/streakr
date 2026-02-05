@@ -4,7 +4,7 @@
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -52,7 +52,7 @@ type PicksApiResponse = {
 };
 
 const BRAND_BG = "#000000";
-const SEASON = 2026; // beta localStorage only
+const SEASON = 2026; // localStorage keys only (beta)
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -154,11 +154,6 @@ function truncateText(s: string, n: number) {
   return t.slice(0, Math.max(0, n - 1)).trimEnd() + "…";
 }
 
-function clampPct(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, n));
-}
-
 function msToCountdown(ms: number) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
   const d = Math.floor(totalSec / 86400);
@@ -230,7 +225,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = React.memo(function TeamLogo({ teamName, size = 72 }: { teamName: string; size?: number }) {
+const TeamLogo = memo(function TeamLogo({ teamName, size = 72 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
@@ -296,7 +291,12 @@ const TeamLogo = React.memo(function TeamLogo({ teamName, size = 72 }: { teamNam
 
 /* UI bits */
 
-const CommunityPulse = React.memo(function CommunityPulse({ yes, no }: { yes: number; no: number }) {
+function clampPct(n: number) {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+const CommunityPulse = memo(function CommunityPulse({ yes, no }: { yes: number; no: number }) {
   let y = clampPct(yes);
   let n = clampPct(no);
 
@@ -379,7 +379,7 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-function QuestionText({ text }: { text: string }) {
+const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   return (
     <div
       className="text-[17px] md:text-[18px] font-extrabold text-white break-words"
@@ -394,14 +394,14 @@ function QuestionText({ text }: { text: string }) {
       {text}
     </div>
   );
-}
+});
 
 /* Avatars / Logos */
 
-const PlayerAvatar = React.memo(function PlayerAvatar({ name }: { name: string }) {
-  const exact = `/players/${encodeURIComponent(name)}.jpg`;
-  const slug = `/players/${playerSlug(name)}.jpg`;
-  const [src, setSrc] = useState(exact);
+const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
+  const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
+  const slug = useRef(`/players/${playerSlug(name)}.jpg`);
+  const [src, setSrc] = useState(exact.current);
 
   return (
     <div className="flex flex-col items-center gap-2">
@@ -417,7 +417,7 @@ const PlayerAvatar = React.memo(function PlayerAvatar({ name }: { name: string }
             loading="lazy"
             decoding="async"
             onError={() => {
-              if (src === exact) setSrc(slug);
+              if (src === exact.current) setSrc(slug.current);
             }}
           />
         </div>
@@ -432,7 +432,7 @@ const PlayerAvatar = React.memo(function PlayerAvatar({ name }: { name: string }
   );
 });
 
-const TeamLogoRing = React.memo(function TeamLogoRing({ teamName }: { teamName: string }) {
+const TeamLogoRing = memo(function TeamLogoRing({ teamName }: { teamName: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-[112px] w-[112px]">
@@ -452,7 +452,7 @@ const TeamLogoRing = React.memo(function TeamLogoRing({ teamName }: { teamName: 
   );
 });
 
-function GamePickHeader({ match }: { match: string }) {
+const GamePickHeader = memo(function GamePickHeader({ match }: { match: string }) {
   const { home, away } = parseTeams(match);
 
   return (
@@ -464,9 +464,7 @@ function GamePickHeader({ match }: { match: string }) {
       <TeamLogoRing teamName={away || "AFL"} />
     </div>
   );
-}
-
-/* Feature UI helpers */
+});
 
 type PanicModalState =
   | null
@@ -484,27 +482,31 @@ type FreeKickModalState =
 
 function MiniFeatureButton({
   variant,
-  disabled,
+  enabled,
   onClick,
 }: {
   variant: "panic" | "freekick";
-  disabled: boolean;
+  enabled: boolean;
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
   return (
     <button
       type="button"
-      disabled={disabled}
       onClick={onClick}
-      className={`h-9 px-3 rounded-full border text-[11px] font-black tracking-[0.16em] ${
-        disabled ? "opacity-40 cursor-not-allowed" : "hover:opacity-[0.98] active:scale-[0.99]"
+      disabled={!enabled}
+      className={`h-9 px-3 rounded-full border text-[11px] font-black tracking-[0.18em] ${
+        enabled ? "hover:opacity-[0.96] active:scale-[0.99]" : "opacity-40 cursor-not-allowed"
       }`}
       style={{
         borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
         background: "rgba(0,0,0,0.50)",
         color: isPanic ? "rgba(255,255,255,0.92)" : "rgba(246,198,75,0.95)",
-        boxShadow: isPanic ? "0 0 18px rgba(255,46,77,0.16)" : "0 0 18px rgba(246,198,75,0.12)",
+        boxShadow: enabled
+          ? isPanic
+            ? "0 0 16px rgba(255,46,77,0.14)"
+            : "0 0 16px rgba(246,198,75,0.12)"
+          : "none",
       }}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
     >
@@ -559,15 +561,6 @@ function FeatureTile({
             "linear-gradient(120deg, rgba(255,255,255,0.06), rgba(255,255,255,0.015) 35%, rgba(0,0,0,0.18))",
         }}
       />
-      {isPanic ? (
-        <div
-          className="absolute inset-0 opacity-[0.50]"
-          style={{
-            backgroundImage:
-              "linear-gradient(135deg, transparent 0 46%, rgba(255,255,255,0.42) 47% 48%, transparent 49% 100%), linear-gradient(25deg, transparent 0 56%, rgba(255,255,255,0.32) 57% 58%, transparent 59% 100%)",
-          }}
-        />
-      ) : null}
 
       <div className="relative h-full w-full flex items-center justify-center">
         <div className="text-center">
@@ -614,6 +607,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
   const [game, setGame] = useState<ApiGame | null>(null);
   const lastGameRef = useRef<ApiGame | null>(null);
 
@@ -716,6 +710,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       for (const q of found.questions || []) {
         if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
       }
+
       setPicks((prev) => ({ ...prev, ...seeded }));
     } catch (e: any) {
       setErr(e?.message || "Failed to load picks");
@@ -878,6 +873,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       const pick = picks[q.id];
       return pick === "yes" || pick === "no";
     });
+
     if (answered.length === 0) return false;
 
     const allSettled = answered.every((q) => {
@@ -929,7 +925,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const topPanicEnabled = panicEligibleList.length > 0;
 
-  // Loading skeleton
+  // ---------- RENDER GUARDS ----------
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -945,7 +941,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  // Hard fail
   if ((err && !stableGame) || !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-10" style={{ background: BRAND_BG }}>
@@ -967,8 +962,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  // ✅ TS: lock-in a non-null game for everything below
-  const sg = stableGame as ApiGame;
+  // ✅ stableGame is non-null from here
+  const sg: ApiGame = stableGame;
 
   const { home } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}`;
@@ -985,8 +980,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     const yesSelected = selected === "yes";
     const noSelected = selected === "no";
 
-    // feature buttons per question (free kick shown everywhere, panic shown when eligible)
-    const panicEligible = canShowPanic(q, status, selected);
+    const freeKickEnabledHere = freeKickEligibleForThisGame;
 
     return (
       <div className="screamr-card p-5 flex flex-col">
@@ -1012,29 +1006,20 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             <div className="flex flex-col items-end gap-2">
-              <div className="screamr-chip" style={{ minWidth: 110 }}>
-                {isRevealTime ? "LOCKED" : "VAULT"}
-              </div>
-
               <div className="flex items-center gap-2">
-                <MiniFeatureButton
-                  variant="panic"
-                  disabled={!panicEligible}
-                  onClick={
-                    panicEligible
-                      ? () => setPanicModal({ questionId: q.id, questionText: q.question })
-                      : undefined
-                  }
-                />
+                <MiniFeatureButton variant="panic" enabled={false} />
                 <MiniFeatureButton
                   variant="freekick"
-                  disabled={!freeKickEligibleForThisGame}
-                  onClick={
-                    freeKickEligibleForThisGame
-                      ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
-                      : undefined
-                  }
+                  enabled={freeKickEnabledHere}
+                  onClick={() => {
+                    if (!freeKickEnabledHere) return;
+                    setFreeKickModal({ gameId: sg.id, label: `${sg.match}` });
+                  }}
                 />
+              </div>
+
+              <div className="screamr-chip" style={{ minWidth: 110 }}>
+                {isRevealTime ? "LOCKED" : "VAULT"}
               </div>
 
               <button
@@ -1172,7 +1157,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
     const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-    const panicEligible = canShowPanic(q, status, selected);
+    const panicEnabledHere = canShowPanic(q, status, selected);
+    const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
     return (
       <div className="screamr-card p-5">
@@ -1202,28 +1188,27 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             </div>
 
             <div className="flex flex-col items-end gap-2">
-              <div className="screamr-chip">
-                {matchLockMs === null ? "—" : matchIsLocked ? "LOCKED" : msToCountdown(matchLockMs)}
-              </div>
-
-              {/* ✅ per-question Panic + Free Kick */}
               <div className="flex items-center gap-2">
                 <MiniFeatureButton
                   variant="panic"
-                  disabled={!panicEligible}
-                  onClick={
-                    panicEligible ? () => setPanicModal({ questionId: q.id, questionText: q.question }) : undefined
-                  }
+                  enabled={panicEnabledHere}
+                  onClick={() => {
+                    if (!panicEnabledHere) return;
+                    setPanicModal({ questionId: q.id, questionText: q.question });
+                  }}
                 />
                 <MiniFeatureButton
                   variant="freekick"
-                  disabled={!freeKickEligibleForThisGame}
-                  onClick={
-                    freeKickEligibleForThisGame
-                      ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
-                      : undefined
-                  }
+                  enabled={freeKickEnabledHere}
+                  onClick={() => {
+                    if (!freeKickEnabledHere) return;
+                    setFreeKickModal({ gameId: sg.id, label: `${sg.match}` });
+                  }}
                 />
+              </div>
+
+              <div className="screamr-chip">
+                {matchLockMs === null ? "—" : matchIsLocked ? "LOCKED" : msToCountdown(matchLockMs)}
               </div>
 
               <button
@@ -1249,12 +1234,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               }}
             />
             <div className="relative">
-              <div className
-                className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center"
-              >
-                <div className="flex justify-center">
-                  {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}
-                </div>
+              {/* ✅ FIX: removed stray `<div className` line so we don't have duplicate className attributes */}
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
+                <div className="flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}</div>
 
                 <div>
                   <QuestionText text={q.question} />
@@ -1483,7 +1465,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       ) : null}
 
-      {/* Panic picker modal */}
+      {/* Optional picker (top tile) */}
       {panicPickerOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/75" onClick={() => setPanicPickerOpen(false)} />
@@ -1649,13 +1631,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           <FeatureTile variant="panic" disabled={!topPanicEnabled} onClick={topPanicEnabled ? () => setPanicPickerOpen(true) : undefined} />
           <FeatureTile
             variant="freekick"
-            disabled={!freeKickEligibleForThisGame}
-            onClick={freeKickEligibleForThisGame ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` }) : undefined}
+            disabled={!freeKickEligibleForThisGame || freeKickUsedSeason}
+            onClick={
+              freeKickEligibleForThisGame && !freeKickUsedSeason
+                ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
+                : undefined
+            }
           />
         </div>
       </div>
 
-      {/* 3 columns desktop */}
+      {/* ✅ 3 columns on desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
@@ -1669,21 +1655,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               return <SponsorMysteryCard key={q.id} q={q} status={status} />;
             }
 
-            return (
-              <PickCard
-                key={q.id}
-                q={q}
-                qNum={qNum}
-                status={status}
-                isPersonallyVoided={isPersonallyVoided}
-                match={sg.match}
-              />
-            );
+            return <PickCard key={q.id} q={q} qNum={qNum} status={status} isPersonallyVoided={isPersonallyVoided} match={sg.match} />;
           })}
         </div>
       </div>
 
-      {/* Bottom bar */}
       <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
           <div className="rounded-full border border-white/15 px-3 py-1">
