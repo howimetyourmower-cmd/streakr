@@ -434,12 +434,12 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
 
 const TeamLogoRing = memo(function TeamLogoRing({ teamName }: { teamName: string }) {
   return (
-    <div className="flex flex-col items-center gap-2" style={{ width: 132 }}>
-      <div className="relative h-[112px] w-[112px]">
+    <div className="flex flex-col items-center gap-2" style={{ width: 128 }}>
+      <div className="relative h-[104px] w-[104px]">
         <div className="absolute inset-0 rounded-full blur-[18px] opacity-45" style={{ background: "rgba(255,46,77,0.45)" }} />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden flex items-center justify-center">
-          <TeamLogo teamName={teamName} size={78} />
+          <TeamLogo teamName={teamName} size={72} />
         </div>
         <div
           className="absolute inset-0 rounded-full pointer-events-none"
@@ -456,19 +456,101 @@ const GamePickHeader = memo(function GamePickHeader({ match }: { match: string }
   const { home, away } = parseTeams(match);
 
   return (
-    <div className="w-full flex items-center justify-between gap-3">
-      <div className="flex justify-center">
+    <div className="w-full flex items-center justify-center gap-3">
+      <div className="flex justify-center shrink-0">
         <TeamLogoRing teamName={home || "AFL"} />
       </div>
 
-      <div className="flex flex-col items-center justify-center min-w-[44px]">
+      <div className="flex flex-col items-center justify-center shrink-0 w-10">
         <div className="text-[12px] font-black tracking-[0.25em] text-white/65">VS</div>
       </div>
 
-      <div className="flex justify-center">
+      <div className="flex justify-center shrink-0">
         <TeamLogoRing teamName={away || "AFL"} />
       </div>
     </div>
+  );
+});
+
+/* ✅ New in-card metal plate mini tiles (Image 3 vibe) */
+const MiniPlateButton = memo(function MiniPlateButton({
+  variant,
+  enabled,
+  onClick,
+}: {
+  variant: "panic" | "freekick";
+  enabled: boolean;
+  onClick?: () => void;
+}) {
+  const isPanic = variant === "panic";
+  const label = isPanic ? "PANIC" : "FREE\nKICK";
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!enabled}
+      className={`relative h-[44px] w-[96px] rounded-2xl overflow-hidden border ${
+        enabled ? "hover:opacity-[0.98] active:scale-[0.99]" : "opacity-45 cursor-not-allowed"
+      }`}
+      style={{
+        borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
+        background: isPanic
+          ? "linear-gradient(180deg, rgba(255,46,77,0.20), rgba(0,0,0,0.82))"
+          : "linear-gradient(180deg, rgba(246,198,75,0.20), rgba(0,0,0,0.82))",
+        boxShadow: enabled
+          ? isPanic
+            ? "0 0 22px rgba(255,46,77,0.14)"
+            : "0 0 22px rgba(246,198,75,0.12)"
+          : "none",
+      }}
+      aria-label={isPanic ? "Panic Button" : "Free Kick"}
+      title={isPanic ? "Panic" : "Free Kick"}
+    >
+      {/* bevel */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          boxShadow:
+            "inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 -14px 18px rgba(0,0,0,0.55), inset 0 14px 18px rgba(255,255,255,0.06)",
+        }}
+      />
+
+      {/* crack overlay for panic */}
+      {isPanic ? (
+        <div
+          className="absolute inset-0 opacity-[0.35] pointer-events-none"
+          style={{
+            backgroundImage:
+              "linear-gradient(115deg, transparent 0 44%, rgba(255,255,255,0.22) 45% 46%, transparent 47% 100%)," +
+              "linear-gradient(70deg, transparent 0 58%, rgba(255,255,255,0.16) 59% 60%, transparent 61% 100%)",
+          }}
+        />
+      ) : (
+        <div
+          className="absolute inset-0 opacity-[0.22] pointer-events-none"
+          style={{
+            backgroundImage:
+              "linear-gradient(135deg, rgba(255,255,255,0.10), transparent 40%)," +
+              "linear-gradient(315deg, rgba(255,255,255,0.08), transparent 40%)",
+          }}
+        />
+      )}
+
+      <div className="relative h-full w-full flex items-center justify-center">
+        <div
+          className="text-center text-[11px] font-black tracking-[0.18em] leading-[1.02]"
+          style={{
+            color: isPanic ? "rgba(255,255,255,0.92)" : "rgba(246,198,75,0.96)",
+            textShadow: isPanic ? "0 0 14px rgba(255,46,77,0.32)" : "0 0 14px rgba(246,198,75,0.18)",
+          }}
+        >
+          {label.split("\n").map((line, i) => (
+            <div key={i}>{line}</div>
+          ))}
+        </div>
+      </div>
+    </button>
   );
 });
 
@@ -485,143 +567,6 @@ type FreeKickModalState =
       gameId: string;
       label: string;
     };
-
-function MiniFeatureButton({
-  variant,
-  enabled,
-  onClick,
-}: {
-  variant: "panic" | "freekick";
-  enabled: boolean;
-  onClick?: () => void;
-}) {
-  const isPanic = variant === "panic";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!enabled}
-      className={`h-9 px-3 rounded-full border text-[11px] font-black tracking-[0.18em] ${
-        enabled ? "hover:opacity-[0.96] active:scale-[0.99]" : "opacity-40 cursor-not-allowed"
-      }`}
-      style={{
-        borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
-        background: "rgba(0,0,0,0.50)",
-        color: isPanic ? "rgba(255,255,255,0.92)" : "rgba(246,198,75,0.95)",
-        boxShadow: enabled
-          ? isPanic
-            ? "0 0 16px rgba(255,46,77,0.14)"
-            : "0 0 16px rgba(246,198,75,0.12)"
-          : "none",
-      }}
-      aria-label={isPanic ? "Panic Button" : "Free Kick"}
-    >
-      {isPanic ? "PANIC" : "FREE KICK"}
-    </button>
-  );
-}
-
-/**
- * ✅ Image 3 tiles: metal plates.
- */
-const FeatureTile = memo(function FeatureTile({
-  variant,
-  disabled,
-  onClick,
-}: {
-  variant: "panic" | "freekick";
-  disabled?: boolean;
-  onClick?: () => void;
-}) {
-  const isPanic = variant === "panic";
-  const label = isPanic ? "PANIC\nBUTTON" : "FREE\nKICK";
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`relative h-[118px] w-full rounded-3xl overflow-hidden text-left ${
-        disabled ? "opacity-45 cursor-not-allowed" : "hover:opacity-[0.98] active:scale-[0.99]"
-      }`}
-      style={{
-        background: isPanic
-          ? "linear-gradient(180deg, rgba(255,46,77,0.22), rgba(0,0,0,0.86))"
-          : "linear-gradient(180deg, rgba(246,198,75,0.22), rgba(0,0,0,0.86))",
-        border: isPanic ? "1px solid rgba(255,46,77,0.55)" : "1px solid rgba(246,198,75,0.55)",
-        boxShadow: isPanic ? "0 0 42px rgba(255,46,77,0.18)" : "0 0 42px rgba(246,198,75,0.14)",
-      }}
-      aria-label={isPanic ? "Panic Button" : "Free Kick"}
-    >
-      {/* Bevel frame */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          boxShadow:
-            "inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 -18px 28px rgba(0,0,0,0.55), inset 0 18px 28px rgba(255,255,255,0.06)",
-        }}
-      />
-
-      {/* Inner plate */}
-      <div
-        className="absolute inset-[10px] rounded-2xl pointer-events-none"
-        style={{
-          border: isPanic ? "1px solid rgba(255,46,77,0.35)" : "1px solid rgba(246,198,75,0.35)",
-          background: "rgba(0,0,0,0.55)",
-          boxShadow: isPanic
-            ? "0 0 0 1px rgba(255,46,77,0.10), 0 0 30px rgba(255,46,77,0.14)"
-            : "0 0 0 1px rgba(246,198,75,0.10), 0 0 30px rgba(246,198,75,0.12)",
-        }}
-      />
-
-      {/* Crack / grain overlay */}
-      {isPanic ? (
-        <div
-          className="absolute inset-0 opacity-[0.35] pointer-events-none"
-          style={{
-            backgroundImage:
-              "linear-gradient(115deg, transparent 0 44%, rgba(255,255,255,0.22) 45% 46%, transparent 47% 100%)," +
-              "linear-gradient(70deg, transparent 0 58%, rgba(255,255,255,0.16) 59% 60%, transparent 61% 100%)," +
-              "linear-gradient(160deg, transparent 0 72%, rgba(255,255,255,0.12) 73% 74%, transparent 75% 100%)",
-          }}
-        />
-      ) : (
-        <div
-          className="absolute inset-0 opacity-[0.25] pointer-events-none"
-          style={{
-            backgroundImage:
-              "linear-gradient(135deg, rgba(255,255,255,0.10), transparent 40%)," +
-              "linear-gradient(315deg, rgba(255,255,255,0.08), transparent 40%)",
-          }}
-        />
-      )}
-
-      {/* Glow orb */}
-      <div
-        className="absolute -left-10 -top-14 h-44 w-44 rounded-full blur-3xl pointer-events-none"
-        style={{ background: isPanic ? "rgba(255,46,77,0.28)" : "rgba(246,198,75,0.22)" }}
-      />
-      <div
-        className="absolute -right-12 -bottom-16 h-44 w-44 rounded-full blur-3xl pointer-events-none"
-        style={{ background: isPanic ? "rgba(255,46,77,0.20)" : "rgba(246,198,75,0.16)" }}
-      />
-
-      <div className="relative h-full w-full flex items-center justify-center">
-        <div
-          className="text-center text-[20px] font-black tracking-[0.12em] leading-[1.05]"
-          style={{
-            color: isPanic ? "rgba(255,255,255,0.94)" : "rgba(246,198,75,0.96)",
-            textShadow: isPanic ? "0 0 18px rgba(255,46,77,0.40)" : "0 0 18px rgba(246,198,75,0.22)",
-          }}
-        >
-          {label.split("\n").map((line, i) => (
-            <div key={i}>{line}</div>
-          ))}
-        </div>
-      </div>
-    </button>
-  );
-});
 
 /* ---------- Cards moved OUTSIDE main component to stop avatar flashing ---------- */
 
@@ -692,8 +637,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard({
 
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-2">
-              <MiniFeatureButton variant="panic" enabled={false} />
-              <MiniFeatureButton
+              <MiniPlateButton variant="panic" enabled={false} />
+              <MiniPlateButton
                 variant="freekick"
                 enabled={freeKickEnabledHere}
                 onClick={() => {
@@ -904,8 +849,9 @@ const PickCard = memo(function PickCard({
           </div>
 
           <div className="flex flex-col items-end gap-2">
+            {/* ✅ Updated in-card Panic + Free Kick styling */}
             <div className="flex items-center gap-2">
-              <MiniFeatureButton
+              <MiniPlateButton
                 variant="panic"
                 enabled={panicEnabledHere}
                 onClick={() => {
@@ -913,7 +859,7 @@ const PickCard = memo(function PickCard({
                   setPanicModal({ questionId: q.id, questionText: q.question });
                 }}
               />
-              <MiniFeatureButton
+              <MiniPlateButton
                 variant="freekick"
                 enabled={freeKickEnabledHere}
                 onClick={() => {
@@ -948,13 +894,15 @@ const PickCard = memo(function PickCard({
             }}
           />
           <div className="relative">
+            {/* ✅ Game pick header now guaranteed to fit both logos */}
             <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
-              <div className="flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}</div>
+              <div className="flex justify-center">
+                {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}
+              </div>
 
-              <div>
+              <div className="min-w-0">
                 <QuestionText text={q.question} />
 
-                {/* ✅ Only show “PLAYER INTEL” for player picks (game picks were looking wrong) */}
                 {isPlayerPick ? (
                   <div className="mt-4">
                     <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
@@ -1059,7 +1007,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [panicModal, setPanicModal] = useState<PanicModalState>(null);
   const [panicBusy, setPanicBusy] = useState(false);
   const [panicErr, setPanicErr] = useState<string | null>(null);
-  const [panicPickerOpen, setPanicPickerOpen] = useState(false);
 
   const [freeKickUsedSeason, setFreeKickUsedSeason] = useState(false);
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
@@ -1347,25 +1294,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setFreeKickModal(null);
   }
 
-  const panicEligibleList = useMemo(() => {
-    const list: Array<{ q: ApiQuestion; qNum: string }> = [];
-
-    questions.forEach((q, idx) => {
-      const baseStatus = safeStatus(q.status);
-      const isPersonallyVoided = !!personalVoids[q.id];
-      const status: QuestionStatus = isPersonallyVoided ? "void" : baseStatus;
-
-      const selected = picks[q.id] || "none";
-      const qNum = String(idx + 1).padStart(2, "0");
-
-      if (canShowPanic(q, status, selected)) list.push({ q, qNum });
-    });
-
-    return list;
-  }, [questions, personalVoids, picks, matchIsLocked, panicUsed, user]);
-
-  const topPanicEnabled = panicEligibleList.length > 0;
-
   // ---------- RENDER GUARDS ----------
   if (loading && !stableGame) {
     return (
@@ -1403,9 +1331,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
-
   const { home } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}`;
 
@@ -1556,65 +1482,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       ) : null}
 
-      {/* Optional picker (top tile) */}
-      {panicPickerOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/75" onClick={() => setPanicPickerOpen(false)} />
-          <div className="relative w-full max-w-2xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[12px] font-black tracking-[0.24em] text-white/55">PANIC BUTTON</div>
-                <div className="mt-2 text-[18px] font-black text-white leading-snug">Choose a question to void.</div>
-                <div className="mt-2 text-[13px] text-white/70">
-                  Only questions with a pick (YES/NO) after lock are eligible. One use per round.
-                </div>
-              </div>
-
-              <button
-                type="button"
-                className="h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center hover:bg-white/10"
-                aria-label="Close"
-                onClick={() => setPanicPickerOpen(false)}
-              >
-                <span className="text-white/85 font-black">×</span>
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-2 max-h-[60vh] overflow-auto pr-1">
-              {panicEligibleList.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-white/70">No eligible questions right now.</div>
-              ) : (
-                panicEligibleList.map(({ q, qNum }) => (
-                  <div key={q.id} className="rounded-2xl border border-white/10 bg-black/50 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[12px] font-black tracking-[0.18em] text-white/80">
-                          Q{qNum} — {formatQuarterLabel(q.quarter)}
-                        </div>
-                        <div className="mt-2 text-[14px] font-extrabold text-white/90">{truncateText(q.question, 110)}</div>
-                      </div>
-
-                      <button
-                        type="button"
-                        className="rounded-full border border-rose-400/25 bg-rose-500/15 px-4 py-2 font-extrabold text-rose-100"
-                        onClick={() => {
-                          setPanicPickerOpen(false);
-                          setPanicModal({ questionId: q.id, questionText: q.question });
-                        }}
-                      >
-                        VOID
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="mt-4 text-[11px] text-white/40">Pick carefully — decision is final.</div>
-          </div>
-        </div>
-      ) : null}
-
       {/* Free kick modal */}
       {freeKickModal ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
@@ -1714,23 +1581,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         ) : null}
       </div>
 
-      {/* Top tiles (Image 3 style) */}
-      <div className="max-w-6xl mx-auto px-4 pt-5">
-        <div className="grid grid-cols-2 gap-3">
-          <FeatureTile variant="panic" disabled={!topPanicEnabled} onClick={topPanicEnabled ? () => setPanicPickerOpen(true) : undefined} />
-          <FeatureTile
-            variant="freekick"
-            disabled={!freeKickEligibleForThisGame || freeKickUsedSeason}
-            onClick={
-              freeKickEligibleForThisGame && !freeKickUsedSeason
-                ? () => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })
-                : undefined
-            }
-          />
-        </div>
-      </div>
-
-      {/* ✅ 3 columns on desktop */}
+      {/* 3 columns on desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
