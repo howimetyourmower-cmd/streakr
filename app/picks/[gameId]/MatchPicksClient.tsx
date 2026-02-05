@@ -2,29 +2,21 @@
 "use client";
 
 /**
- * What this update does (makes it work + fixes your UI issues):
+ * WHAT THIS FILE DOES (HIGH LEVEL)
+ * - Renders the match picks page for a single game (gameId).
+ * - Fetches picks/questions for the round via /api/picks and shows them in cards.
+ * - Supports:
+ *   - Normal YES/NO picks (persisted to Firestore)
+ *   - Panic Button (1 per round, only after lock, voids ONE answered question via /api/panic)
+ *   - Free Kick (1 per season, eligibility computed client-side; stored in localStorage; protects streak)
+ * - UI:
+ *   - Player questions show player avatar left + question right.
+ *   - Game pick questions show BOTH team logos side-by-side ON TOP + question below (no overlap).
+ *   - Big Panic / Free Kick buttons now live UNDER the countdown timer inside each card (Image 4 vibe).
  *
- * ✅ Fixes the client-side crash by HARDENING the data shape:
- *    - Your API sometimes returns `questions` as an OBJECT (map) instead of an ARRAY.
- *    - This file now normalizes questions safely so `.map/.sort/.filter` never blow up.
- *
- * ✅ Removes the big top “PANIC BUTTON / FREE KICK” tiles (you said no need for them).
- *
- * ✅ Updates the in-card Panic + Free Kick buttons to match Image 3 style:
- *    - Uses your actual asset paths from /public/screamr:
- *        /screamr/panic-button.png
- *        /screamr/free-kick.png
- *    - Mini plates (glow + metallic inset + crisp contain)
- *
- * ✅ Fixes “avatars flashing every second”:
- *    - Previously the WHOLE page re-rendered every second (global timer).
- *    - Now the page does NOT tick every second.
- *    - Only the countdown chip itself ticks inside each card.
- *    - Match lock state updates once at bounce time via setTimeout (no 1s rerender loop).
- *
- * ✅ Fixes game-pick question layout:
- *    - BOTH team logos appear side-by-side on TOP
- *    - Question sits BELOW (no overlap / no logo floating over text)
+ * NOTE:
+ * - Panic button is server-backed (/api/panic) and also cached in localStorage (beta UX).
+ * - Free kick is client-backed (localStorage) by design for beta.
  */
 
 export const dynamic = "force-dynamic";
@@ -69,48 +61,20 @@ type ApiGame = {
   match: string;
   venue: string;
   startTime: string;
-  questions: any; // hardened: API can return array OR object
+  questions: ApiQuestion[];
 };
 
 type PicksApiResponse = {
-  games: any[];
+  games: ApiGame[];
   roundNumber?: number;
 };
 
 const BRAND_BG = "#000000";
 const SEASON = 2026; // localStorage keys only (beta)
 
-/* ----------------------------- HARDENING ----------------------------- */
-
-function normalizeQuestions(input: any): ApiQuestion[] {
-  // Supports:
-  // - array of questions
-  // - object/map of questions keyed by id
-  // - null/undefined/garbage -> []
-  try {
-    if (!input) return [];
-    if (Array.isArray(input)) return input as ApiQuestion[];
-
-    if (typeof input === "object") {
-      const vals = Object.values(input);
-      return (Array.isArray(vals) ? vals : []) as ApiQuestion[];
-    }
-
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function normalizeGames(input: any): ApiGame[] {
-  if (!input) return [];
-  if (Array.isArray(input)) return input as ApiGame[];
-  if (typeof input === "object") return Object.values(input) as ApiGame[];
-  return [];
-}
-
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
+  offerNoConsole();
   if (s.startsWith("OR-")) return 0;
   if (s.startsWith("R")) {
     const dash = s.indexOf("-");
@@ -119,6 +83,15 @@ function roundNumberFromGameId(gameId: string): number {
     if (Number.isFinite(n) && n >= 0) return n;
   }
   return 0;
+}
+
+// Defensive: some deployments throw when console is unavailable in certain embedded contexts.
+// This is ultra-safe and no-op in normal browsers.
+function offerNoConsole() {
+  try {
+    // eslint-disable-next-line no-console
+    if (typeof console === "undefined") return;
+  } catch {}
 }
 
 function extractPlayerName(question: string) {
@@ -447,7 +420,7 @@ const QuestionText = memo(function QuestionText({ text }: { text: string }) {
 /* Avatars / Logos */
 
 const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
-  // stable URLs (no timer-based cache busters)
+  // stable URLs (no changes on timer rerenders)
   const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
   const slug = useRef(`/players/${playerSlug(name)}.jpg`);
   const [src, setSrc] = useState(exact.current);
@@ -465,7 +438,6 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
             className="h-full w-full object-cover"
             loading="lazy"
             decoding="async"
-            draggable={false}
             onError={() => {
               if (src === exact.current) setSrc(slug.current);
             }}
@@ -482,7 +454,13 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   );
 });
 
-const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { teamName: string; size?: number }) {
+const TeamLogoBadge = memo(function TeamLogoBadge({
+  teamName,
+  size = 64,
+}: {
+  teamName: string;
+  size?: number;
+}) {
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
@@ -498,26 +476,28 @@ const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { tea
   );
 });
 
-const GamePickTopLogos = memo(function GamePickTopLogos({ match }: { match: string }) {
+const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: string }) {
   const { home, away } = parseTeams(match);
   return (
-    <div className="flex items-center justify-center gap-4">
+    <div className="flex items-center justify-center gap-3">
       <div className="flex flex-col items-center gap-2">
         <TeamLogoBadge teamName={home} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
 
       <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
 
       <div className="flex flex-col items-center gap-2">
         <TeamLogoBadge teamName={away || "AFL"} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
     </div>
   );
 });
 
-/* Feature plates (Image 3 style) */
+/* BIG Feature buttons (Image 4 vibe) */
 
-function MiniFeaturePlate({
+function BigFeatureButton({
   variant,
   disabled,
   onClick,
@@ -527,54 +507,70 @@ function MiniFeaturePlate({
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
-  // ✅ your actual repo paths: /public/screamr/...
+  // ✅ match your repo path from screenshot: /public/screamr/...
   const imgPath = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
+
+  const border = isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)";
+  const glow = isPanic ? "rgba(255,46,77,0.22)" : "rgba(246,198,75,0.18)";
+  const bg = isPanic
+    ? "linear-gradient(180deg, rgba(255,46,77,0.18), rgba(0,0,0,0.86))"
+    : "linear-gradient(180deg, rgba(246,198,75,0.14), rgba(0,0,0,0.86))";
 
   return (
     <button
       type="button"
-      onClick={onClick}
       disabled={!!disabled}
+      onClick={disabled ? undefined : onClick}
       className={[
-        "relative h-[44px] w-[96px] rounded-2xl overflow-hidden border",
+        "relative w-full rounded-2xl overflow-hidden border",
         "transition active:scale-[0.99]",
-        disabled ? "opacity-45 grayscale cursor-not-allowed" : "hover:brightness-110",
+        disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
       style={{
-        borderColor: isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)",
-        background: isPanic
-          ? "linear-gradient(180deg, rgba(255,46,77,0.22), rgba(0,0,0,0.84))"
-          : "linear-gradient(180deg, rgba(246,198,75,0.22), rgba(0,0,0,0.84))",
-        boxShadow: disabled
-          ? "none"
-          : isPanic
-          ? "0 0 22px rgba(255,46,77,0.14)"
-          : "0 0 22px rgba(246,198,75,0.12)",
+        borderColor: border,
+        background: bg,
+        boxShadow: disabled ? "none" : `0 0 36px ${glow}`,
       }}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
-      title={isPanic ? "Panic" : "Free Kick"}
+      title={isPanic ? "Panic Button" : "Free Kick"}
     >
+      {/* subtle frame highlight */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
           boxShadow:
-            "inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 -14px 18px rgba(0,0,0,0.55), inset 0 14px 18px rgba(255,255,255,0.06)",
+            "inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 -20px 26px rgba(0,0,0,0.55), inset 0 18px 22px rgba(255,255,255,0.06)",
         }}
       />
+
+      {/* image */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={imgPath}
-        alt={variant}
-        className="relative z-10 w-full h-full object-contain p-1"
+        alt={isPanic ? "Panic Button" : "Free Kick"}
+        className="relative z-10 w-full h-[92px] md:h-[100px] object-contain p-2"
         loading="lazy"
         decoding="async"
         draggable={false}
+        onError={(e) => {
+          // If image missing, avoid crash + show fallback text area
+          try {
+            (e.currentTarget as HTMLImageElement).style.display = "none";
+          } catch {}
+        }}
       />
+
+      {/* fallback label if image fails */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="text-[12px] font-black tracking-[0.20em] text-white/70">
+          {isPanic ? "PANIC" : "FREE KICK"}
+        </div>
+      </div>
     </button>
   );
 }
 
-/* Countdown chip (ONLY thing ticking each second) */
+/* Countdown chip */
 
 const CountdownChip = memo(function CountdownChip({ matchStartMs }: { matchStartMs: number | null }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -690,17 +686,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <MiniFeaturePlate variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-              <MiniFeaturePlate
-                variant="freekick"
-                disabled={!freeKickEnabledHere}
-                onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
-              />
-            </div>
-
+            {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
+            {/* Clear */}
             <button
               type="button"
               className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
@@ -716,6 +705,16 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
         </div>
 
+        {/* ✅ BIG buttons under countdown (Image 4 vibe) */}
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere}
+            onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
+          />
+        </div>
+
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.35]"
@@ -726,7 +725,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           <div className="relative">
             {/* Layout rules:
                 - PLAYER pick: avatar left, question right
-                - GAME pick: logos side-by-side on TOP, question underneath (no overlap)
+                - GAME pick: logos side-by-side on top, question underneath (no overlap)
             */}
             {isPlayerPick ? (
               <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
@@ -739,7 +738,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                     <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
                     <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
 
-                    <div className="mt-2 flex items-end justify-start gap-2 h-10">
+                    <div className="mt-2 flex items-end gap-2 h-10">
                       {[7, 14, 10, 18, 12].map((h, i) => (
                         <div
                           key={i}
@@ -763,12 +762,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               </div>
             ) : (
               <div>
-                {/* ✅ both team logos on top, side by side */}
                 <div className="flex justify-center">
-                  <GamePickTopLogos match={match} />
+                  <GamePickLogosRow match={match} />
                 </div>
 
-                {/* ✅ question below (no overlap) */}
                 <div className="mt-4 text-center">
                   <QuestionText text={q.question} />
                   <div className="mt-3 text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK — TEAM VS TEAM</div>
@@ -820,7 +817,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               </div>
             ) : null}
 
-            {!matchIsLocked ? <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div> : null}
+            {!matchIsLocked ? (
+              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -896,15 +895,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-2">
-              <MiniFeaturePlate variant="panic" disabled />
-              <MiniFeaturePlate
-                variant="freekick"
-                disabled={!freeKickEnabledHere || freeKickUsedSeason}
-                onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
-              />
-            </div>
-
             <CountdownChip matchStartMs={matchStartMs} />
 
             <button
@@ -922,6 +912,16 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
         </div>
 
+        {/* ✅ BIG Free Kick under countdown; Panic disabled */}
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <BigFeatureButton variant="panic" disabled />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere || freeKickUsedSeason}
+            onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+          />
+        </div>
+
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.55]"
@@ -937,7 +937,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -972,7 +975,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           {!isRevealTime && matchStartMs ? (
             <div className="mt-4 text-center">
               <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
-                REVEAL IN: <span className="text-white/90 font-black">see timer</span>
+                REVEAL IN: <span className="text-white/90">see timer</span>
               </div>
             </div>
           ) : (
@@ -1039,8 +1042,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
-  // ✅ stop whole-page 1s rerenders (prevents avatar flashing)
-  const [matchIsLocked, setMatchIsLocked] = useState(false);
+  // Only needed so the page knows when lock flips from false -> true.
+  // Cards are memoized + do not remount; avatars stop flashing.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const roundNumber = useMemo(() => roundNumberFromGameId(gameId), [gameId]);
   const uidForStorage = user?.uid || "anon";
@@ -1111,22 +1119,15 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       if (!res.ok) throw new Error(`API error (${res.status})`);
 
       const data = (await res.json()) as PicksApiResponse;
-
-      const gamesArr = normalizeGames(data.games);
-      const found = gamesArr.find((g: any) => String(g?.id) === String(gameId));
+      const found = (data.games || []).find((g) => g.id === gameId);
       if (!found) throw new Error("Game not found for this gameId");
 
-      const fixed: ApiGame = {
-        ...found,
-        questions: normalizeQuestions(found.questions),
-      };
-
-      setGame(fixed);
-      lastGameRef.current = fixed;
+      setGame(found);
+      lastGameRef.current = found;
 
       const seeded: Record<string, LocalPick> = {};
-      for (const q of normalizeQuestions(fixed.questions)) {
-        if (q?.userPick === "yes" || q?.userPick === "no") seeded[q.id] = q.userPick;
+      for (const q of found.questions || []) {
+        if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
       }
 
       setPicks((prev) => ({ ...prev, ...seeded }));
@@ -1146,34 +1147,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const stableGame = game ?? lastGameRef.current;
 
-  const matchStartMs = useMemo(() => {
-    const iso = stableGame?.startTime;
-    const t = iso ? new Date(iso).getTime() : Number.NaN;
-    return Number.isFinite(t) ? t : null;
-  }, [stableGame?.startTime]);
-
-  // ✅ match lock state updates ONCE at bounce, not every second
-  useEffect(() => {
-    if (!matchStartMs) {
-      setMatchIsLocked(false);
-      return;
-    }
-
-    const remaining = matchStartMs - Date.now();
-    if (remaining <= 0) {
-      setMatchIsLocked(true);
-      return;
-    }
-
-    setMatchIsLocked(false);
-    const id = window.setTimeout(() => setMatchIsLocked(true), remaining + 50);
-    return () => window.clearTimeout(id);
-  }, [matchStartMs]);
-
   const questions = useMemo(() => {
-    const qs = normalizeQuestions(stableGame?.questions);
-    const clean = qs.filter((q) => q && typeof q === "object" && typeof q.id === "string");
-    return [...clean].sort((a, b) => (a.quarter ?? 0) - (b.quarter ?? 0) || String(a.id).localeCompare(String(b.id)));
+    const qs = stableGame?.questions || [];
+    return [...qs].sort((a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id));
   }, [stableGame]);
 
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
@@ -1185,6 +1161,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       return safeStatus(q.status) !== "open";
     }).length;
   }, [questions, personalVoids]);
+
+  const matchStartMs = useMemo(() => {
+    const iso = stableGame?.startTime;
+    const t = iso ? new Date(iso).getTime() : Number.NaN;
+    return Number.isFinite(t) ? t : null;
+  }, [stableGame?.startTime]);
+
+  const matchIsLocked = useMemo(() => {
+    if (!matchStartMs) return false;
+    return matchStartMs - nowMs <= 0;
+  }, [matchStartMs, nowMs]);
 
   const selectedPct = useMemo(() => {
     if (totalQuestions <= 0) return 0;
@@ -1215,6 +1202,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       void fetchMatch("refresh");
     } catch (e) {
+      // eslint-disable-next-line no-console
       console.error("[MatchPicksClient] failed to persist pick", e);
     } finally {
       setSaving((prev) => ({ ...prev, [questionId]: false }));
@@ -1287,6 +1275,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setPersonalVoids((prev) => ({ ...prev, [questionId]: true }));
       void fetchMatch("refresh");
     } catch (e: unknown) {
+      // eslint-disable-next-line no-console
       console.error("[MatchPicksClient] panic failed", e);
       const msg = e instanceof Error ? e.message : "Panic failed";
       setPanicErr(msg);
@@ -1301,9 +1290,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (!stableGame) return false;
     if (freeKickUsedSeason) return false;
 
-    const qArr = normalizeQuestions(stableGame.questions);
-
-    const answered = qArr.filter((q) => {
+    const answered = (stableGame.questions || []).filter((q) => {
       const pick = picks[q.id];
       return pick === "yes" || pick === "no";
     });
@@ -1378,7 +1365,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   // ✅ stableGame is non-null from here
-  const sg: ApiGame = stableGame as ApiGame;
+  const sg: ApiGame = stableGame;
 
   const { home } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}`;
