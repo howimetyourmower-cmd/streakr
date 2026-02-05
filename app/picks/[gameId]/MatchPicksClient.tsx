@@ -374,7 +374,7 @@ function ResultPill({
 }
 
 /**
- * ✅ FIX: show FULL question (no clamping, no truncation)
+ * ✅ FULL question (no clamping, no truncation)
  */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   return (
@@ -394,7 +394,7 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="relative h-[112px] w-[112px]">
+      <div className="relative h-[96px] w-[96px] md:h-[112px] md:w-[112px]">
         <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
@@ -442,14 +442,14 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
   return (
     <div className="flex items-center justify-center gap-3">
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={home} size={76} />
+        <TeamLogoBadge teamName={home} size={72} />
         <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
 
       <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
 
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={away || "AFL"} size={76} />
+        <TeamLogoBadge teamName={away || "AFL"} size={72} />
         <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
     </div>
@@ -457,10 +457,9 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 });
 
 /**
- * BIG Feature Buttons (image 4 style)
- * ✅ FIX: separate VISUAL state from CLICK state
- * - Panic can be COLOURED (activeVisual) even when not clickable yet
- * - Free kick can remain greyed (activeVisual=false)
+ * ✅ Smaller feature tiles + cleaner top layout
+ * - reduced overall size
+ * - visual active can differ from click disabled
  */
 function BigFeatureButton({
   variant,
@@ -484,23 +483,20 @@ function BigFeatureButton({
       disabled={!!disabled}
       className={[
         "relative overflow-hidden rounded-2xl",
-        "h-[84px] w-[170px] md:h-[92px] md:w-[190px]",
+        "h-[64px] w-[128px] md:h-[70px] md:w-[140px]",
         "transition-transform active:scale-[0.99]",
         disabled ? "cursor-not-allowed" : "hover:brightness-110",
-        // VISUAL toggles:
-        visualOn ? "opacity-100" : "opacity-40 grayscale",
+        visualOn ? "opacity-100" : "opacity-35 grayscale",
       ].join(" ")}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
       title={isPanic ? "Panic Button" : "Free Kick"}
       style={{
-        border: `1px solid ${
-          isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"
-        }`,
+        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
         background: "rgba(0,0,0,0.55)",
         boxShadow: visualOn
           ? isPanic
-            ? "0 0 34px rgba(255,46,77,0.18)"
-            : "0 0 34px rgba(246,198,75,0.14)"
+            ? "0 0 24px rgba(255,46,77,0.14)"
+            : "0 0 24px rgba(246,198,75,0.12)"
           : "none",
       }}
     >
@@ -601,13 +597,14 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   return (
-    <div className="screamr-card p-5">
+    <div className="screamr-card p-4 md:p-5">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
       <div className="screamr-sparks" />
 
       <div className="relative">
+        {/* ✅ TOP OF CARD LAYOUT (clean + compact) */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
@@ -616,6 +613,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             <div className="mt-1 text-[12px] text-white/55">
               Status: <span className="text-white/70">{status}</span>
             </div>
+
             <div className="mt-2 flex items-center gap-2">
               <ResultPill
                 status={status}
@@ -628,23 +626,19 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* BIG buttons under the countdown (Image 4 layout) */}
-            <div className="flex items-center gap-3">
+            {/* ✅ Smaller tiles in a tight strip */}
+            <div className="flex items-center gap-2">
               <BigFeatureButton
                 variant="panic"
-                // click disabled unless fully eligible
                 disabled={!panicEnabledHere}
-                // ✅ visual active when locked (pending or match locked), even if not clickable yet
                 activeVisual={panicVisualActive}
                 onClick={panicEnabledHere ? onOpenPanic : undefined}
               />
               <BigFeatureButton
                 variant="freekick"
                 disabled={!freeKickEnabledHere}
-                // ✅ you said you're OK with grey Free Kick
                 activeVisual={false}
                 onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
               />
@@ -652,7 +646,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
             <button
               type="button"
-              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+              className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
                 isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
@@ -673,15 +667,12 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             }}
           />
           <div className="relative">
-            {/* Layout rules:
-                - PLAYER pick: avatar left, question right
-                - GAME pick: logos side-by-side on top, question underneath (no overlap)
-            */}
             {isPlayerPick ? (
-              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start">
+              // ✅ Better mobile layout: avatar + question stay in a single row (no weird centering)
+              <div className="grid grid-cols-[112px_1fr] md:grid-cols-[140px_1fr] gap-4 items-start">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
-                <div>
+                <div className="min-w-0">
                   <QuestionText text={q.question} />
 
                   <div className="mt-4">
@@ -713,7 +704,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             ) : (
               <div>
                 <div className="flex justify-center">
-                  <GamePickLogosRow match={matchIsLocked ? match : match} />
+                  <GamePickLogosRow match={match} />
                 </div>
 
                 <div className="mt-4 text-center">
@@ -767,9 +758,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               </div>
             ) : null}
 
-            {!matchIsLocked ? (
-              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
-            ) : null}
+            {!matchIsLocked ? <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div> : null}
           </div>
         </div>
       </div>
@@ -822,7 +811,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const noSelected = selected === "no";
 
   return (
-    <div className="screamr-card p-5 flex flex-col">
+    <div className="screamr-card p-4 md:p-5 flex flex-col">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
@@ -847,8 +836,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="flex flex-col items-end gap-2">
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* Sponsor: Panic always grey, Free Kick allowed if eligible (but you said grey is fine anyway) */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <BigFeatureButton variant="panic" disabled activeVisual={false} />
               <BigFeatureButton
                 variant="freekick"
@@ -860,7 +848,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
 
             <button
               type="button"
-              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+              className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
                 locked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
@@ -991,7 +979,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   // Only needed so the page knows when lock flips from false -> true.
-  // Cards are memoized + do not remount; avatars stop flashing.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -1178,10 +1165,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  /**
-   * Locked signal can come from match timer OR question status.
-   * ✅ PANIC VISUAL should be ON for pending (locked) even if click isn't allowed yet.
-   */
   function panicVisualForQuestion(q: ApiQuestion, displayStatus: QuestionStatus) {
     if (!user) return false;
 
@@ -1197,9 +1180,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return true;
   }
 
-  /**
-   * ✅ CLICK eligibility (stricter than visual)
-   */
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!panicVisualForQuestion(q, displayStatus)) return false;
     if (!(selected === "yes" || selected === "no")) return false;
@@ -1330,8 +1310,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
 
-  const { home } = parseTeams(sg.match);
-  const matchTitle = `${home.toUpperCase()}`;
+  // ✅ FIX: header should be "SYDNEY vs CARLTON" (not just home team)
+  const { home, away } = parseTeams(sg.match);
+  const matchTitle = `${home.toUpperCase()}${away ? ` vs ${away.toUpperCase()}` : ""}`;
+  const venueLine = sg.venue ? sg.venue : "";
 
   return (
     <div
@@ -1529,8 +1511,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
-        <div className="flex items-center justify-between">
-          <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[28px] md:text-[34px] font-black tracking-wide leading-none">{matchTitle}</div>
+            <div className="mt-2 text-[13px] text-white/65">
+              {venueLine ? (
+                <>
+                  <span className="font-black text-white/80">Venue:</span> {venueLine}
+                </>
+              ) : null}
+            </div>
+          </div>
 
           <button
             type="button"
@@ -1540,6 +1531,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               background: "rgba(0,0,0,0.55)",
               color: "rgba(0,229,255,0.95)",
               boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+              whiteSpace: "nowrap",
             }}
             onClick={() => void fetchMatch("refresh")}
           >
