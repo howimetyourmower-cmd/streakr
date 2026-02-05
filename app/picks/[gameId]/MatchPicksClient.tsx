@@ -373,17 +373,12 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
+/**
+ * ✅ FIX: show FULL question (no clamping, no truncation)
+ */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
-  const style: React.CSSProperties = {
-    lineHeight: 1.22,
-    display: "-webkit-box",
-    WebkitLineClamp: 3,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-  };
-
   return (
-    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words" style={style}>
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words leading-snug">
       {text}
     </div>
   );
@@ -426,13 +421,7 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   );
 });
 
-const TeamLogoBadge = memo(function TeamLogoBadge({
-  teamName,
-  size = 64,
-}: {
-  teamName: string;
-  size?: number;
-}) {
+const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { teamName: string; size?: number }) {
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
@@ -468,22 +457,25 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 });
 
 /**
- * BIG Feature Buttons (the “image 4” style)
- * - Uses your real assets:
- *   /public/screamr/panic-button.png
- *   /public/screamr/free-kick.png
+ * BIG Feature Buttons (image 4 style)
+ * ✅ FIX: separate VISUAL state from CLICK state
+ * - Panic can be COLOURED (activeVisual) even when not clickable yet
+ * - Free kick can remain greyed (activeVisual=false)
  */
 function BigFeatureButton({
   variant,
   disabled,
+  activeVisual,
   onClick,
 }: {
   variant: "panic" | "freekick";
   disabled?: boolean;
+  activeVisual?: boolean;
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
   const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
+  const visualOn = !!activeVisual;
 
   return (
     <button
@@ -494,18 +486,22 @@ function BigFeatureButton({
         "relative overflow-hidden rounded-2xl",
         "h-[84px] w-[170px] md:h-[92px] md:w-[190px]",
         "transition-transform active:scale-[0.99]",
-        disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
+        disabled ? "cursor-not-allowed" : "hover:brightness-110",
+        // VISUAL toggles:
+        visualOn ? "opacity-100" : "opacity-40 grayscale",
       ].join(" ")}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
       title={isPanic ? "Panic Button" : "Free Kick"}
       style={{
-        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
+        border: `1px solid ${
+          isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"
+        }`,
         background: "rgba(0,0,0,0.55)",
-        boxShadow: disabled
-          ? "none"
-          : isPanic
-          ? "0 0 34px rgba(255,46,77,0.18)"
-          : "0 0 34px rgba(246,198,75,0.14)",
+        boxShadow: visualOn
+          ? isPanic
+            ? "0 0 34px rgba(255,46,77,0.18)"
+            : "0 0 34px rgba(246,198,75,0.14)"
+          : "none",
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -562,6 +558,7 @@ type PickCardProps = {
   freeKickUsedSeason: boolean;
 
   panicEnabledHere: boolean;
+  panicVisualActive: boolean;
 
   onOpenPanic: () => void;
   onOpenFreeKick: () => void;
@@ -584,6 +581,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     freeKickEligibleForThisGame,
     freeKickUsedSeason,
     panicEnabledHere,
+    panicVisualActive,
     onOpenPanic,
     onOpenFreeKick,
     onSetPick,
@@ -635,10 +633,19 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
             {/* BIG buttons under the countdown (Image 4 layout) */}
             <div className="flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+              <BigFeatureButton
+                variant="panic"
+                // click disabled unless fully eligible
+                disabled={!panicEnabledHere}
+                // ✅ visual active when locked (pending or match locked), even if not clickable yet
+                activeVisual={panicVisualActive}
+                onClick={panicEnabledHere ? onOpenPanic : undefined}
+              />
               <BigFeatureButton
                 variant="freekick"
                 disabled={!freeKickEnabledHere}
+                // ✅ you said you're OK with grey Free Kick
+                activeVisual={false}
                 onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
               />
             </div>
@@ -671,7 +678,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 - GAME pick: logos side-by-side on top, question underneath (no overlap)
             */}
             {isPlayerPick ? (
-              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
                 <div>
@@ -706,7 +713,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             ) : (
               <div>
                 <div className="flex justify-center">
-                  <GamePickLogosRow match={match} />
+                  <GamePickLogosRow match={matchIsLocked ? match : match} />
                 </div>
 
                 <div className="mt-4 text-center">
@@ -840,12 +847,13 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="flex flex-col items-end gap-2">
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* Sponsor: Panic always disabled, Free Kick allowed if eligible */}
+            {/* Sponsor: Panic always grey, Free Kick allowed if eligible (but you said grey is fine anyway) */}
             <div className="flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled />
+              <BigFeatureButton variant="panic" disabled activeVisual={false} />
               <BigFeatureButton
                 variant="freekick"
                 disabled={!freeKickEnabledHere || freeKickUsedSeason}
+                activeVisual={false}
                 onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
               />
             </div>
@@ -1171,14 +1179,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   /**
-   * ✅ IMPORTANT FIX (your request):
-   * If a question status is "pending", that means it is LOCKED (even if matchStartMs logic thinks otherwise).
-   * So PANIC should be enabled on pending questions (as long as the other rules are met).
+   * Locked signal can come from match timer OR question status.
+   * ✅ PANIC VISUAL should be ON for pending (locked) even if click isn't allowed yet.
    */
-  function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
+  function panicVisualForQuestion(q: ApiQuestion, displayStatus: QuestionStatus) {
     if (!user) return false;
 
-    // Locked signal can come from match timer OR question status.
     const lockedByStatus = displayStatus === "pending";
     const lockedForPanic = matchIsLocked || lockedByStatus;
 
@@ -1187,8 +1193,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
-    if (!(selected === "yes" || selected === "no")) return false;
 
+    return true;
+  }
+
+  /**
+   * ✅ CLICK eligibility (stricter than visual)
+   */
+  function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
+    if (!panicVisualForQuestion(q, displayStatus)) return false;
+    if (!(selected === "yes" || selected === "no")) return false;
     return true;
   }
 
@@ -1578,6 +1592,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isSaving = !!saving[q.id];
 
             const panicEnabledHere = canShowPanic(q, status, selected);
+            const panicVisualActive = panicVisualForQuestion(q, status);
 
             if (q.isSponsorQuestion) {
               return (
@@ -1614,6 +1629,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 freeKickEligibleForThisGame={freeKickEligibleForThisGame}
                 freeKickUsedSeason={freeKickUsedSeason}
                 panicEnabledHere={panicEnabledHere}
+                panicVisualActive={panicVisualActive}
                 onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
                 onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
                 onSetPick={(v) => void setPick(q.id, v, status)}
