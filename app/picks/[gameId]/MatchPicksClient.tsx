@@ -18,7 +18,8 @@ type ApiQuestion = {
   id: string;
   quarter: number;
   question: string;
-  status: any;
+  // Firestore/API can send unknown values ("locked", etc). We normalize via safeStatus().
+  status: unknown;
 
   match?: string;
   venue?: string;
@@ -125,7 +126,7 @@ function playerSlug(name: string) {
  * Firestore may contain "locked"
  * UI treats "locked" as "pending"
  */
-function safeStatus(s: any): QuestionStatus {
+function safeStatus(s: unknown): QuestionStatus {
   const v = String(s || "").toLowerCase().trim();
   if (v === "open") return "open";
   if (v === "final") return "final";
@@ -380,17 +381,22 @@ function ResultPill({
 }
 
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
+  const style: React.CSSProperties = {
+    lineHeight: 1.22,
+    display: "-webkit-box",
+    overflow: "hidden",
+  };
+
+  // Add webkit-only properties without using `any`
+  const webkitStyle = style as React.CSSProperties & {
+    WebkitLineClamp: number;
+    WebkitBoxOrient: "vertical";
+  };
+  webkitStyle.WebkitLineClamp = 3;
+  webkitStyle.WebkitBoxOrient = "vertical";
+
   return (
-    <div
-      className="text-[17px] md:text-[18px] font-extrabold text-white break-words"
-      style={{
-        lineHeight: 1.22,
-        display: "-webkit-box",
-        WebkitLineClamp: 3 as any,
-        WebkitBoxOrient: "vertical" as any,
-        overflow: "hidden",
-      }}
-    >
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words" style={webkitStyle}>
       {text}
     </div>
   );
@@ -399,6 +405,7 @@ const QuestionText = memo(function QuestionText({ text }: { text: string }) {
 /* Avatars / Logos */
 
 const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
+  // useRef ensures stable image URLs (no timer-driven state changes)
   const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
   const slug = useRef(`/players/${playerSlug(name)}.jpg`);
   const [src, setSrc] = useState(exact.current);
@@ -636,7 +643,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
-  const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
+  const personalVoidsKey = useMemo(
+    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
+    [uidForStorage, roundNumber]
+  );
   const freeKickUsedSeasonKey = useMemo(() => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`, [uidForStorage]);
 
   useEffect(() => {
@@ -712,8 +722,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       }
 
       setPicks((prev) => ({ ...prev, ...seeded }));
-    } catch (e: any) {
-      setErr(e?.message || "Failed to load picks");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load picks";
+      setErr(msg);
     } finally {
       if (mode === "initial") setLoading(false);
       setRefreshing(false);
@@ -744,7 +755,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const matchStartMs = useMemo(() => {
     const iso = stableGame?.startTime;
-    const t = iso ? new Date(iso).getTime() : NaN;
+    const t = iso ? new Date(iso).getTime() : Number.NaN;
     return Number.isFinite(t) ? t : null;
   }, [stableGame?.startTime]);
 
@@ -814,9 +825,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
-    if (!matchIsLocked) return false;
+    if (!matchIsLocked) return false; // only usable after lock
     if (q.isSponsorQuestion) return false;
-    if (panicUsed) return false;
+    if (panicUsed) return false; // one per round
     if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
     if (!(selected === "yes" || selected === "no")) return false;
@@ -855,9 +866,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       setPersonalVoids((prev) => ({ ...prev, [questionId]: true }));
       void fetchMatch("refresh");
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("[MatchPicksClient] panic failed", e);
-      setPanicErr(e?.message || "Panic failed");
+      const msg = e instanceof Error ? e.message : "Panic failed";
+      setPanicErr(msg);
     } finally {
       setPanicBusy(false);
       setPanicModal(null);
@@ -865,6 +877,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   const freeKickEligibleForThisGame = useMemo(() => {
+    // Free Kick: one per season (beta), only usable after game loss (i.e., at least one wrong pick in this match)
     if (!user) return false;
     if (!stableGame) return false;
     if (freeKickUsedSeason) return false;
@@ -887,7 +900,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       if (st === "void") return false;
       if (personalVoids[q.id]) return false;
 
-      const out = (q.correctOutcome ?? q.outcome) as any;
+      const out = q.correctOutcome ?? q.outcome;
       if (out !== "yes" && out !== "no") return false;
 
       const pick = picks[q.id];
@@ -1000,7 +1013,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               </div>
 
               <div className="mt-2 flex items-center gap-2">
-                <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+                <ResultPill
+                  status={status}
+                  selected={selected}
+                  correctPick={q.correctPick}
+                  outcome={q.correctOutcome ?? q.outcome}
+                />
                 {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
               </div>
             </div>
@@ -1052,7 +1070,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   background: "rgba(0,0,0,0.35)",
                 }}
               >
-                <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+                <div
+                  className="text-[22px] font-black tracking-[0.12em] text-white"
+                  style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+                >
                   MYSTERY GAMBLE
                 </div>
               </div>
@@ -1181,13 +1202,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   status={status}
                   selected={selected}
                   correctPick={q.correctPick}
-                  outcome={isPersonallyVoided ? "void" : (q.correctOutcome ?? q.outcome)}
+                  outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
                 />
                 {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
               </div>
             </div>
 
             <div className="flex flex-col items-end gap-2">
+              {/* ✅ Panic + Free Kick on EVERY card */}
               <div className="flex items-center gap-2">
                 <MiniFeatureButton
                   variant="panic"
@@ -1234,15 +1256,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               }}
             />
             <div className="relative">
-              {/* ✅ FIX: removed stray `<div className` line so we don't have duplicate className attributes */}
               <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
-                <div className="flex justify-center">{isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}</div>
+                <div className="flex justify-center">
+                  {isPlayerPick ? <PlayerAvatar name={playerName!} /> : <GamePickHeader match={match} />}
+                </div>
 
                 <div>
                   <QuestionText text={q.question} />
 
                   <div className="mt-4">
-                    <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
+                    <div className="text-[12px] font-black tracking-[0.18em] text-white/70">
+                      {isPlayerPick ? "PLAYER INTEL" : "MATCH INTEL"}
+                    </div>
                     <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
 
                     <div className="mt-2 flex items-end gap-2 h-10">
