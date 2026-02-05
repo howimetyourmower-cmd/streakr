@@ -426,13 +426,7 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   );
 });
 
-const TeamLogoBadge = memo(function TeamLogoBadge({
-  teamName,
-  size = 64,
-}: {
-  teamName: string;
-  size?: number;
-}) {
+const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { teamName: string; size?: number }) {
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
@@ -468,10 +462,9 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 });
 
 /**
- * BIG Feature Buttons (the “image 4” style)
- * - Uses your real assets:
- *   /public/screamr/panic-button.png
- *   /public/screamr/free-kick.png
+ * BIG Feature Buttons (Panic / Free Kick)
+ * - Slightly bigger images
+ * - Tighter wrap (less padding + tighter radius)
  */
 function BigFeatureButton({
   variant,
@@ -491,8 +484,9 @@ function BigFeatureButton({
       onClick={disabled ? undefined : onClick}
       disabled={!!disabled}
       className={[
-        "relative overflow-hidden rounded-2xl",
-        "h-[84px] w-[170px] md:h-[92px] md:w-[190px]",
+        "relative overflow-hidden",
+        "rounded-[18px]", // tighter than 2xl
+        "h-[92px] w-[184px] md:h-[100px] md:w-[200px]", // slightly bigger
         "transition-transform active:scale-[0.99]",
         disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
@@ -509,7 +503,12 @@ function BigFeatureButton({
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={variant} className="h-full w-full object-contain p-2" draggable={false} />
+      <img
+        src={src}
+        alt={variant}
+        className="h-full w-full object-contain p-[6px]" // tighter wrap, bigger image
+        draggable={false}
+      />
     </button>
   );
 }
@@ -615,9 +614,8 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-            <div className="mt-1 text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
+
+            {/* ✅ moved STATUS out of here */}
             <div className="mt-2 flex items-center gap-2">
               <ResultPill
                 status={status}
@@ -633,8 +631,13 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* ✅ Move images down slightly (about 2 lines) */}
-            <div className="mt-3 flex items-center gap-3">
+            {/* ✅ STATUS directly under countdown */}
+            <div className="text-[12px] text-white/55">
+              Status: <span className="text-white/70">{status}</span>
+            </div>
+
+            {/* ✅ feature buttons moved down a touch */}
+            <div className="mt-2 flex items-center gap-3">
               <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
               <BigFeatureButton
                 variant="freekick"
@@ -823,10 +826,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
               SPONSOR — {formatQuarterLabel(q.quarter)}
             </div>
-            <div className="mt-1 text-[12px] text-white/60">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
 
+            {/* ✅ moved STATUS out of here */}
             <div className="mt-2 flex items-center gap-2">
               <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
               {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
@@ -836,8 +837,12 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="flex flex-col items-end gap-2">
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* ✅ Move images down slightly (about 2 lines) */}
-            <div className="mt-3 flex items-center gap-3">
+            {/* ✅ STATUS directly under countdown */}
+            <div className="text-[12px] text-white/55">
+              Status: <span className="text-white/70">{status}</span>
+            </div>
+
+            <div className="mt-2 flex items-center gap-3">
               <BigFeatureButton variant="panic" disabled />
               <BigFeatureButton
                 variant="freekick"
@@ -876,7 +881,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
                 MYSTERY GAMBLE
               </div>
             </div>
