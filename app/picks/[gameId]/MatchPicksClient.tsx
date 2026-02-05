@@ -219,7 +219,7 @@ function logoCandidates(teamSlug: TeamSlug): string[] {
   ];
 }
 
-const TeamLogo = memo(function TeamLogo({ teamName, size = 64 }: { teamName: string; size?: number }) {
+const TeamLogo = memo(function TeamLogo({ teamName, size = 72 }: { teamName: string; size?: number }) {
   const slug = teamNameToSlug(teamName);
   const [idx, setIdx] = useState(0);
   const [dead, setDead] = useState(false);
@@ -234,7 +234,7 @@ const TeamLogo = memo(function TeamLogo({ teamName, size = 64 }: { teamName: str
   if (!slug || dead) {
     return (
       <div
-        className="flex items-center justify-center rounded-full border font-black"
+        className="flex items-center justify-center rounded-2xl border font-black"
         style={{
           width: size,
           height: size,
@@ -254,7 +254,7 @@ const TeamLogo = memo(function TeamLogo({ teamName, size = 64 }: { teamName: str
 
   return (
     <div
-      className="relative rounded-full border overflow-hidden"
+      className="relative rounded-2xl border overflow-hidden"
       style={{
         width: size,
         height: size,
@@ -263,86 +263,294 @@ const TeamLogo = memo(function TeamLogo({ teamName, size = 64 }: { teamName: str
       }}
       title={teamName}
     >
-      <Image
-        src={src}
-        alt={teamName}
-        fill
-        sizes={`${size}px`}
-        style={{ objectFit: "contain" }}
-        onError={() => {
-          setIdx((p) => {
-            if (p + 1 < candidates.length) return p + 1;
-            setDead(true);
-            return p;
-          });
-        }}
-      />
+      <div className="absolute inset-0 p-2">
+        <Image
+          src={src}
+          alt={`${teamName} logo`}
+          fill
+          sizes={`${size}px`}
+          style={{ objectFit: "contain" }}
+          onError={() => {
+            setIdx((p) => {
+              if (p + 1 < candidates.length) return p + 1;
+              setDead(true);
+              return p;
+            });
+          }}
+        />
+      </div>
     </div>
   );
 });
 
-const PlayersHeadshot = memo(function PlayersHeadshot({ playerName, width = 92 }: { playerName: string; width?: number }) {
-  const [hide, setHide] = useState(false);
-  const url = `/afl-players/${playerSlug(playerName)}.jpg`;
-
-  if (hide) return null;
-
-  return (
-    <div
-      className="relative overflow-hidden rounded-full border-2 border-white/10"
-      style={{ width, height: width, background: "rgba(0,0,0,0.35)" }}
-      title={playerName}
-    >
-      <Image
-        src={url}
-        alt={playerName}
-        fill
-        sizes={`${width}px`}
-        style={{ objectFit: "cover" }}
-        onError={() => setHide(true)}
-      />
-    </div>
-  );
-});
-
-/* UI helpers */
+/* UI bits */
 
 function clampPct(n: number) {
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(100, n));
 }
 
-const CommunityPulseInline = memo(function CommunityPulseInline({ yes, no }: { yes: number; no: number }) {
-  const y = clampPct(yes);
-  const n = clampPct(no);
-
-  if (y <= 0 && n <= 0) return null;
+const CommunityPulse = memo(function CommunityPulse({ yes, no }: { yes: number; no: number }) {
+  let y = clampPct(yes);
+  let n = clampPct(no);
 
   const total = y + n;
-  const yesPct = Math.round(total > 0 ? (y / total) * 100 : 0);
-  const noPct = Math.max(0, 100 - yesPct);
+  if (total <= 0) {
+    y = 0;
+    n = 0;
+  } else if (Math.abs(total - 100) > 0.5) {
+    y = (y / total) * 100;
+    n = 100 - y;
+  }
+
+  const yesPct = Math.round(y);
+  const noPct = Math.round(n);
 
   return (
-    <div className="mt-3 text-[11px] text-white/50">
-      <div className="font-black tracking-[0.18em] text-white/60">COMMUNITY PULSE</div>
-      <div className="mt-1 flex items-center justify-center gap-2 text-white/75">
-        <div>Yes {yesPct}%</div>
-        <div>•</div>
-        <div>No {noPct}%</div>
+    <div className="mt-5">
+      <div className="text-[11px] font-black tracking-[0.22em] text-white/60 text-center">COMMUNITY PULSE</div>
+
+      <div className="mt-2 h-[10px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10">
+        <div className="h-full flex">
+          <div
+            className="h-full"
+            style={{
+              width: `${yesPct}%`,
+              background: `linear-gradient(90deg, rgba(0,229,255,0.95), rgba(0,229,255,0.55))`,
+              boxShadow: `0 0 18px rgba(0,229,255,0.25)`,
+            }}
+          />
+          <div
+            className="h-full"
+            style={{
+              width: `${Math.max(0, 100 - yesPct)}%`,
+              background: `linear-gradient(90deg, rgba(255,46,77,0.55), rgba(255,46,77,0.95))`,
+              boxShadow: `0 0 18px rgba(255,46,77,0.20)`,
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-2 text-[11px] font-semibold text-white/70 text-center">
+        Yes {yesPct}% <span className="text-white/35">•</span> No {noPct}%
       </div>
     </div>
   );
 });
 
-/* Cards (Claude layout merged into your current logic) */
+function ResultPill({
+  status,
+  selected,
+  correctPick,
+  outcome,
+}: {
+  status: QuestionStatus;
+  selected: LocalPick;
+  correctPick: boolean | null | undefined;
+  outcome: QuestionOutcome | undefined;
+}) {
+  const isDone = status === "final" || status === "void";
+  if (!isDone) return null;
+
+  const base = "inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-black tracking-[0.18em]";
+
+  if (status === "void" || outcome === "void") {
+    return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>VOID</span>;
+  }
+
+  if (selected === "none") {
+    return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>NO PICK</span>;
+  }
+
+  if (correctPick === true) {
+    return <span className={`${base} border-emerald-400/30 bg-emerald-400/10 text-emerald-200`}>✅ CORRECT</span>;
+  }
+
+  if (correctPick === false) {
+    return <span className={`${base} border-rose-400/30 bg-rose-400/10 text-rose-200`}>❌ WRONG</span>;
+  }
+
+  return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
+}
+
+const QuestionText = memo(function QuestionText({ text }: { text: string }) {
+  const style: React.CSSProperties = {
+    lineHeight: 1.22,
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  };
+
+  return (
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words" style={style}>
+      {text}
+    </div>
+  );
+});
+
+/* Avatars / Logos */
+
+const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
+  // stable URLs (no changes on timer rerenders)
+  const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
+  const slug = useRef(`/players/${playerSlug(name)}.jpg`);
+  const [src, setSrc] = useState(exact.current);
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="relative h-[112px] w-[112px]">
+        <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
+        <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
+        <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={name}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+            onError={() => {
+              if (src === exact.current) setSrc(slug.current);
+            }}
+          />
+        </div>
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none"
+          style={{ boxShadow: "0 0 28px rgba(255,46,77,0.35), inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+        />
+      </div>
+
+      <div className="text-[11px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
+    </div>
+  );
+});
+
+const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { teamName: string; size?: number }) {
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
+      <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
+      <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden flex items-center justify-center">
+        <TeamLogo teamName={teamName} size={Math.max(44, size - 22)} />
+      </div>
+      <div
+        className="absolute inset-0 rounded-full pointer-events-none"
+        style={{ boxShadow: "0 0 22px rgba(255,46,77,0.24), inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+      />
+    </div>
+  );
+});
+
+const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: string }) {
+  const { home, away } = parseTeams(match);
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <div className="flex flex-col items-center gap-2">
+        <TeamLogoBadge teamName={home} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+      </div>
+
+      <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
+
+      <div className="flex flex-col items-center gap-2">
+        <TeamLogoBadge teamName={away || "AFL"} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * BIG Feature Buttons (Panic / Free Kick)
+ * - Slightly bigger images
+ * - Tighter wrap (less padding + tighter radius)
+ */
+function BigFeatureButton({
+  variant,
+  disabled,
+  onClick,
+}: {
+  variant: "panic" | "freekick";
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  const isPanic = variant === "panic";
+  const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
+
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={!!disabled}
+      className={[
+        "relative overflow-hidden",
+        "rounded-[18px]", // tighter than 2xl
+        "h-[92px] w-[184px] md:h-[100px] md:w-[200px]", // slightly bigger
+        "transition-transform active:scale-[0.99]",
+        disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
+      ].join(" ")}
+      aria-label={isPanic ? "Panic Button" : "Free Kick"}
+      title={isPanic ? "Panic Button" : "Free Kick"}
+      style={{
+        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
+        background: "rgba(0,0,0,0.55)",
+        boxShadow: disabled
+          ? "none"
+          : isPanic
+          ? "0 0 34px rgba(255,46,77,0.18)"
+          : "0 0 34px rgba(246,198,75,0.14)",
+      }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={variant}
+        className="h-full w-full object-contain p-[6px]" // tighter wrap, bigger image
+        draggable={false}
+      />
+    </button>
+  );
+}
+
+/* Countdown chip */
+
+const CountdownChip = memo(function CountdownChip({ matchStartMs }: { matchStartMs: number | null }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!matchStartMs) return <div className="screamr-chip">—</div>;
+
+  const remaining = matchStartMs - nowMs;
+  if (remaining <= 0) return <div className="screamr-chip">LOCKED</div>;
+  return <div className="screamr-chip">{msToCountdown(remaining)}</div>;
+});
+
+type PanicModalState =
+  | null
+  | {
+      questionId: string;
+      questionText: string;
+    };
+
+type FreeKickModalState =
+  | null
+  | {
+      gameId: string;
+      label: string;
+    };
 
 type PickCardProps = {
   q: ApiQuestion;
   qNum: string;
   status: QuestionStatus;
   isPersonallyVoided: boolean;
-
   match: string;
+
   matchIsLocked: boolean;
   matchStartMs: number | null;
 
@@ -381,149 +589,181 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     onClearPick,
   } = props;
 
-  const { home, away } = parseTeams(match);
-  const disabled = status !== "open" || isSaving || isPersonallyVoided;
+  const isLocked = status !== "open" || isPersonallyVoided;
+  const playerName = extractPlayerName(q.question);
+  const isPlayerPick = !!playerName;
 
-  const yesPercent = typeof q.yesPercent === "number" ? q.yesPercent : 0;
-  const noPercent = typeof q.noPercent === "number" ? q.noPercent : 0;
+  const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
+  const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-  const playerNameParsed = extractPlayerName(q.question);
+  const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
+  const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-  const hasPickOutcome = status === "final" && (q.correctOutcome ?? q.outcome) && (q.correctOutcome ?? q.outcome) !== "void";
-  const wasCorrectPick = hasPickOutcome && q.correctPick === true;
-  const wasIncorrectPick = hasPickOutcome && q.correctPick === false;
-
-  const remainingMs = matchStartMs ? matchStartMs - Date.now() : null;
-  const showCountdown = remainingMs !== null && remainingMs > 0;
-
-  let bottomLine = "";
-  if (isPersonallyVoided) {
-    bottomLine = "You voided this question (no impact on streak).";
-  } else if (status === "void") {
-    bottomLine = "Voided (no outcome).";
-  } else if (status === "pending") {
-    bottomLine = "Awaiting official outcome…";
-  } else if (status === "final") {
-    const out = q.correctOutcome ?? q.outcome;
-    if (out === "void") bottomLine = "Voided (no outcome).";
-    else if (wasCorrectPick) bottomLine = "You got this one! +1 point.";
-    else if (wasIncorrectPick) bottomLine = "Missed. Your streak resets.";
-    else bottomLine = "Final.";
-  } else if (status === "open") {
-    if (matchIsLocked) bottomLine = "Game locked, check back soon…";
-    else if (showCountdown && remainingMs) bottomLine = `Locks in ${msToCountdown(remainingMs)}`;
-    else bottomLine = "Auto-locks at bounce.";
-  }
+  const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   return (
-    <div className="relative rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-xl overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 opacity-[0.08]">
+    <div className="screamr-card p-5">
+      <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
+      <div className="screamr-sparks" />
 
       <div className="relative">
-        <div className="flex items-center justify-between text-[12px] font-black tracking-[0.24em] text-white/55">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            Q{qNum} — {formatQuarterLabel(q.quarter)}
-          </div>
-          {isSaving ? <div className="text-[11px] tracking-[0.18em] text-white/35">SAVING…</div> : null}
-        </div>
-
-        {panicEnabledHere ? (
-          <div className="absolute top-0 right-0">
-            <button
-              type="button"
-              className="relative rounded-xl border border-rose-400/35 bg-gradient-to-br from-rose-500/20 to-rose-600/5 p-3 shadow-lg overflow-hidden group"
-              style={{ boxShadow: "0 0 24px rgba(255,46,77,0.12)" }}
-              onClick={(e) => {
-                e.preventDefault();
-                onOpenPanic();
-              }}
-              aria-label="Panic Button"
-              title="Panic Button"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-rose-400/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-              <Image
-                src="/icons/panic-button.svg"
-                alt="PANIC"
-                width={28}
-                height={28}
-                className="relative z-10 drop-shadow-[0_0_8px_rgba(255,46,77,0.4)]"
-              />
-            </button>
-          </div>
-        ) : null}
-
-        <div className="mt-5 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <TeamLogo teamName={home} size={64} />
-            <span className="text-[13px] font-black text-white/65 tracking-wider">VS</span>
-            <TeamLogo teamName={away || "AFL"} size={64} />
-          </div>
-
-          {playerNameParsed ? (
-            <div className="flex-shrink-0">
-              <PlayersHeadshot playerName={playerNameParsed} width={92} />
+            <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
+              Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-          ) : null}
-        </div>
 
-        <div className="mt-5 text-[15px] font-extrabold text-white leading-snug">{q.question}</div>
+            {/* ✅ moved STATUS out of here */}
+            <div className="mt-2 flex items-center gap-2">
+              <ResultPill
+                status={status}
+                selected={selected}
+                correctPick={q.correctPick}
+                outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
+              />
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+            </div>
+          </div>
 
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            className="flex-1 rounded-2xl border py-4 font-black tracking-[0.08em] disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              borderColor: selected === "yes" ? "rgba(0,229,255,0.55)" : "rgba(255,255,255,0.10)",
-              background:
-                selected === "yes"
-                  ? "linear-gradient(135deg, rgba(0,229,255,0.22) 0%, rgba(0,229,255,0.08) 100%)"
-                  : "rgba(0,0,0,0.35)",
-              color: selected === "yes" ? "rgb(0,229,255)" : "rgba(255,255,255,0.70)",
-              boxShadow: selected === "yes" ? "0 0 24px rgba(0,229,255,0.18)" : "none",
-            }}
-            disabled={disabled}
-            onClick={() => (selected === "yes" ? onClearPick() : onSetPick("yes"))}
-          >
-            YES
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            {/* countdown */}
+            <CountdownChip matchStartMs={matchStartMs} />
 
-          <button
-            type="button"
-            className="flex-1 rounded-2xl border py-4 font-black tracking-[0.08em] disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              borderColor: selected === "no" ? "rgba(255,46,77,0.55)" : "rgba(255,255,255,0.10)",
-              background:
-                selected === "no"
-                  ? "linear-gradient(135deg, rgba(255,46,77,0.22) 0%, rgba(255,46,77,0.08) 100%)"
-                  : "rgba(0,0,0,0.35)",
-              color: selected === "no" ? "rgb(255,46,77)" : "rgba(255,255,255,0.70)",
-              boxShadow: selected === "no" ? "0 0 24px rgba(255,46,77,0.18)" : "none",
-            }}
-            disabled={disabled}
-            onClick={() => (selected === "no" ? onClearPick() : onSetPick("no"))}
-          >
-            NO
-          </button>
-        </div>
+            {/* ✅ STATUS directly under countdown */}
+            <div className="text-[12px] text-white/55">
+              Status: <span className="text-white/70">{status}</span>
+            </div>
 
-        <CommunityPulseInline yes={yesPercent} no={noPercent} />
+            {/* ✅ feature buttons moved down a touch */}
+            <div className="mt-2 flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+              <BigFeatureButton
+                variant="freekick"
+                disabled={!freeKickEnabledHere}
+                onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
+              />
+            </div>
 
-        {freeKickEligibleForThisGame && status === "final" && wasIncorrectPick && !freeKickUsedSeason ? (
-          <div className="mt-4">
             <button
               type="button"
-              className="w-full rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-500/20 to-amber-600/5 py-3 text-sm font-black text-amber-100 tracking-wider"
-              style={{ boxShadow: "0 0 24px rgba(251,191,36,0.12)" }}
-              onClick={onOpenFreeKick}
+              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+              }`}
+              aria-label="Clear pick"
+              disabled={isLocked || isSaving}
+              onClick={onClearPick}
+              title="Clear pick"
             >
-              USE FREE KICK
+              <span className="text-white/85 font-black">×</span>
             </button>
           </div>
-        ) : null}
+        </div>
 
-        {bottomLine ? <div className="mt-4 text-[12px] text-white/60">{bottomLine}</div> : null}
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
+          <div
+            className="absolute inset-0 opacity-[0.35]"
+            style={{
+              background: "radial-gradient(760px 260px at 50% 0%, rgba(255,46,77,0.28), rgba(0,0,0,0) 65%)",
+            }}
+          />
+          <div className="relative">
+            {isPlayerPick ? (
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
+                <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
+
+                <div>
+                  <QuestionText text={q.question} />
+
+                  <div className="mt-4">
+                    <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
+                    <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
+
+                    <div className="mt-2 flex items-end gap-2 h-10">
+                      {[7, 14, 10, 18, 12].map((h, i) => (
+                        <div
+                          key={i}
+                          className="w-4 rounded-sm"
+                          style={{
+                            height: `${h * 1.8}px`,
+                            background: i === 3 ? "rgba(0,229,255,0.85)" : "rgba(0,229,255,0.45)",
+                            boxShadow: "0 0 14px rgba(0,229,255,0.12)",
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="mt-2 text-[12px] text-white/70">
+                      Avg: <span className="font-black text-white/85">7.2 Disp</span> /{" "}
+                      <span className="font-black text-white/85">1.5 Goals</span>
+                      <span className="text-white/35"> (beta placeholder)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="flex justify-center">
+                  <GamePickLogosRow match={match} />
+                </div>
+
+                <div className="mt-4 text-center">
+                  <QuestionText text={q.question} />
+                  <div className="mt-3 text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK — TEAM VS TEAM</div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={isLocked || isSaving}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${yesBtn}`}
+                onClick={() => onSetPick("yes")}
+              >
+                YES
+              </button>
+
+              <button
+                type="button"
+                disabled={isLocked || isSaving}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${noBtn}`}
+                onClick={() => onSetPick("no")}
+              >
+                NO
+              </button>
+            </div>
+
+            <CommunityPulse yes={yes} no={no} />
+
+            {isPersonallyVoided ? (
+              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/55">
+                PERSONAL VOID — streak protected
+              </div>
+            ) : null}
+
+            {freeKickUsedSeason ? (
+              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">
+                FREE KICK: USED (SEASON)
+              </div>
+            ) : null}
+
+            {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
+              <div className="mt-3 text-center text-[11px] text-white/55">
+                Free Kick available (season): you lost this game — use once to protect streak.
+              </div>
+            ) : null}
+
+            {!matchIsLocked ? (
+              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
+            ) : null}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -564,125 +804,164 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
     onSetPickNo,
   } = props;
 
-  const disabled = status !== "open" || isSaving;
+  const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
 
-  const hasPickOutcome = status === "final" && (q.correctOutcome ?? q.outcome) && (q.correctOutcome ?? q.outcome) !== "void";
-  const wasCorrectPick = hasPickOutcome && q.correctPick === true;
-  const wasIncorrectPick = hasPickOutcome && q.correctPick === false;
+  const isRevealTime = matchIsLocked;
+  const showQuestionText = isRevealTime;
+  const locked = status !== "open" || isRevealTime;
 
-  const remainingMs = matchStartMs ? matchStartMs - Date.now() : null;
-  const showCountdown = remainingMs !== null && remainingMs > 0;
-
-  let bottomLine = "";
-  if (status === "void") bottomLine = "Voided (no outcome).";
-  else if (status === "pending") bottomLine = "Awaiting official outcome…";
-  else if (status === "final") {
-    const out = q.correctOutcome ?? q.outcome;
-    if (out === "void") bottomLine = "Voided (no outcome).";
-    else if (wasCorrectPick) bottomLine = "You got this one! +1 point.";
-    else if (wasIncorrectPick) bottomLine = "Missed. Your streak resets.";
-    else bottomLine = "Final.";
-  } else if (status === "open") {
-    if (matchIsLocked) bottomLine = "Game locked, check back soon…";
-    else if (showCountdown && remainingMs) bottomLine = `Locks in ${msToCountdown(remainingMs)}`;
-    else bottomLine = "Auto-locks at bounce.";
-  }
+  const yesSelected = selected === "yes";
+  const noSelected = selected === "no";
 
   return (
-    <div className="relative rounded-3xl border border-white/10 bg-gradient-to-br from-purple-950/40 to-[#0b0b0e] p-5 shadow-xl overflow-hidden">
-      <div className="pointer-events-none absolute inset-0 opacity-[0.06]">
+    <div className="screamr-card p-5 flex flex-col">
+      <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
+      <div className="screamr-sparks" />
 
-      <div className="relative">
-        <div className="flex items-center justify-between text-[12px] font-black tracking-[0.24em] text-purple-300/75">
-          <div>MYSTERY Q — {formatQuarterLabel(q.quarter)}</div>
-          {isSaving ? <div className="text-[11px] tracking-[0.18em] text-white/35">SAVING…</div> : null}
-        </div>
+      <div className="relative flex flex-col flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
+              SPONSOR — {formatQuarterLabel(q.quarter)}
+            </div>
 
-        <div className="mt-5 text-center">
-          <div className="inline-block rounded-2xl border border-purple-400/25 bg-purple-500/10 px-6 py-4">
-            <div className="text-[11px] font-black tracking-[0.20em] text-purple-300/80">SPONSOR MYSTERY</div>
-            <div className="mt-1 text-[18px] font-black text-purple-200">{q.sponsorName || "Mystery Sponsor"}</div>
+            {/* ✅ moved STATUS out of here */}
+            <div className="mt-2 flex items-center gap-2">
+              <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+            </div>
           </div>
-        </div>
 
-        {q.sponsorBlurb ? (
-          <div className="mt-4 text-center text-[13px] text-white/70 italic">&ldquo;{q.sponsorBlurb}&rdquo;</div>
-        ) : null}
+          <div className="flex flex-col items-end gap-2">
+            <CountdownChip matchStartMs={matchStartMs} />
 
-        <div className="mt-5 text-[15px] font-extrabold text-white text-center leading-snug">{q.question}</div>
+            {/* ✅ STATUS directly under countdown */}
+            <div className="text-[12px] text-white/55">
+              Status: <span className="text-white/70">{status}</span>
+            </div>
 
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            className="flex-1 rounded-2xl border py-4 font-black tracking-[0.08em] disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              borderColor: selected === "yes" ? "rgba(192,132,252,0.55)" : "rgba(255,255,255,0.10)",
-              background:
-                selected === "yes"
-                  ? "linear-gradient(135deg, rgba(192,132,252,0.22) 0%, rgba(192,132,252,0.08) 100%)"
-                  : "rgba(0,0,0,0.35)",
-              color: selected === "yes" ? "rgb(192,132,252)" : "rgba(255,255,255,0.70)",
-              boxShadow: selected === "yes" ? "0 0 24px rgba(192,132,252,0.18)" : "none",
-            }}
-            disabled={disabled}
-            onClick={() => (selected === "yes" ? onClearPick() : onSetPickYes())}
-          >
-            YES
-          </button>
+            <div className="mt-2 flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled />
+              <BigFeatureButton
+                variant="freekick"
+                disabled={!freeKickEnabledHere || freeKickUsedSeason}
+                onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+              />
+            </div>
 
-          <button
-            type="button"
-            className="flex-1 rounded-2xl border py-4 font-black tracking-[0.08em] disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              borderColor: selected === "no" ? "rgba(192,132,252,0.55)" : "rgba(255,255,255,0.10)",
-              background:
-                selected === "no"
-                  ? "linear-gradient(135deg, rgba(192,132,252,0.22) 0%, rgba(192,132,252,0.08) 100%)"
-                  : "rgba(0,0,0,0.35)",
-              color: selected === "no" ? "rgb(192,132,252)" : "rgba(255,255,255,0.70)",
-              boxShadow: selected === "no" ? "0 0 24px rgba(192,132,252,0.18)" : "none",
-            }}
-            disabled={disabled}
-            onClick={() => (selected === "no" ? onClearPick() : onSetPickNo())}
-          >
-            NO
-          </button>
-        </div>
-
-        {freeKickEnabledHere && status === "final" && wasIncorrectPick && !freeKickUsedSeason ? (
-          <div className="mt-4">
             <button
               type="button"
-              className="w-full rounded-2xl border border-amber-400/35 bg-gradient-to-br from-amber-500/20 to-amber-600/5 py-3 text-sm font-black text-amber-100 tracking-wider"
-              style={{ boxShadow: "0 0 24px rgba(251,191,36,0.12)" }}
-              onClick={onOpenFreeKick}
+              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+                locked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+              }`}
+              aria-label="Clear pick"
+              disabled={locked || isSaving}
+              onClick={onClearPick}
+              title="Clear pick"
             >
-              USE FREE KICK
+              <span className="text-white/85 font-black">×</span>
             </button>
           </div>
-        ) : null}
+        </div>
 
-        {bottomLine ? <div className="mt-4 text-[12px] text-purple-200/60 text-center">{bottomLine}</div> : null}
+        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
+          <div
+            className="absolute inset-0 opacity-[0.55]"
+            style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }}
+          />
+          <div className="relative">
+            <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
+            <div
+              className="mt-2 inline-block rounded-xl px-4 py-2 border"
+              style={{
+                borderColor: "rgba(255,46,77,0.65)",
+                boxShadow: "0 0 26px rgba(255,46,77,0.20)",
+                background: "rgba(0,0,0,0.35)",
+              }}
+            >
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
+                MYSTERY GAMBLE
+              </div>
+            </div>
+            <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">THE VAULT IS LOCKED!</div>
+          </div>
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+          <div className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden" style={{ minHeight: 150 }}>
+            {!showQuestionText ? (
+              <>
+                <div className="absolute inset-0 backdrop-blur-[2px]" />
+                <div className="relative flex items-center justify-center" style={{ minHeight: 130 }}>
+                  <div
+                    className="text-[90px] font-black"
+                    style={{
+                      color: "rgba(255,215,110,0.95)",
+                      textShadow: "0 0 22px rgba(255,215,110,0.25)",
+                    }}
+                  >
+                    ?
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="relative flex flex-col items-center justify-center text-center" style={{ minHeight: 130 }}>
+                <div className="text-[15px] font-extrabold text-white/95">{q.question}</div>
+              </div>
+            )}
+          </div>
+
+          {!isRevealTime && matchStartMs ? (
+            <div className="mt-4 text-center">
+              <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
+                REVEAL IN: <span className="text-white/90">see timer</span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 text-center">
+              <div className="text-[12px] font-black tracking-[0.22em] text-white/70">REVEALED</div>
+            </div>
+          )}
+
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              disabled={locked || isSaving}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
+              onClick={onSetPickYes}
+            >
+              BLIND YES
+            </button>
+
+            <button
+              type="button"
+              disabled={locked || isSaving}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
+              onClick={onSetPickNo}
+            >
+              BLIND NO
+            </button>
+          </div>
+
+          <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
+            Correct pick goes into the draw to win a <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
+          </div>
+        </div>
+
+        <div className="mt-3 text-center text-[11px] text-white/45">* One sponsor question per round. Hidden until lock.</div>
       </div>
     </div>
   );
 });
-
-type PanicModalState =
-  | null
-  | {
-      questionId: string;
-      questionText: string;
-    };
-
-type FreeKickModalState =
-  | null
-  | {
-      gameId: string;
-      label: string;
-    };
 
 export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { user } = useAuth();
@@ -708,6 +987,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   // Only needed so the page knows when lock flips from false -> true.
+  // Cards are memoized + do not remount; avatars stop flashing.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -793,6 +1073,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       for (const q of found.questions || []) {
         if (q.userPick === "yes" || q.userPick === "no") seeded[q.id] = q.userPick;
       }
+
       setPicks((prev) => ({ ...prev, ...seeded }));
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to load picks";
@@ -1036,7 +1317,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
+
   const matchTitle = `${sg.match.toUpperCase()}`;
+  const venueLine = sg.venue ? `Venue: ${sg.venue}` : "";
 
   return (
     <div
@@ -1047,6 +1330,96 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         transition: "opacity 120ms ease",
       }}
     >
+      <style>{`
+        .screamr-card{
+          position: relative;
+          border-radius: 28px;
+          overflow: hidden;
+          background: rgba(10,10,12,0.92);
+          border: 1px solid rgba(255,255,255,0.10);
+          box-shadow:
+            0 26px 90px rgba(0,0,0,0.82),
+            0 0 0 1px rgba(255,46,77,0.06);
+        }
+        .screamr-card::before{
+          content:"";
+          position:absolute;
+          inset:0;
+          border-radius: 28px;
+          padding: 2px;
+          background: linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,46,77,0.10));
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          pointer-events:none;
+          opacity:0.80;
+        }
+        .screamr-card::after{
+          content:"";
+          position:absolute;
+          inset:-46px;
+          background: radial-gradient(680px 280px at 50% 0%, rgba(255,46,77,0.24), rgba(0,0,0,0) 64%);
+          pointer-events:none;
+        }
+
+        .screamr-sparks{
+          position:absolute;
+          inset:0;
+          pointer-events:none;
+          opacity:0.22;
+          mix-blend-mode: screen;
+          background-image:
+            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
+            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.38) 0 2px, transparent 3px),
+            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.22) 0 1px, transparent 2px);
+          background-size: 220px 220px;
+          animation: sparksMove 6.5s linear infinite;
+        }
+        @keyframes sparksMove{
+          0%{ transform: translate3d(0,0,0); }
+          100%{ transform: translate3d(-220px, -220px, 0); }
+        }
+
+        .screamr-chip{
+          font-size: 12px;
+          font-weight: 900;
+          letter-spacing: 0.14em;
+          padding: 8px 10px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,46,77,0.40);
+          background: rgba(0,0,0,0.60);
+          color: rgba(255,255,255,0.92);
+          box-shadow: 0 0 18px rgba(255,46,77,0.18);
+          min-width: 160px;
+          text-align:center;
+        }
+
+        .btn-yes {
+          border: 1px solid rgba(0,229,255,0.55);
+          background: rgba(0,229,255,0.14);
+          box-shadow: 0 0 28px rgba(0,229,255,0.18);
+          color: rgba(255,255,255,0.96);
+        }
+        .btn-yes--selected {
+          background: linear-gradient(180deg, rgba(0,229,255,0.98), rgba(0,229,255,0.40));
+          border-color: rgba(0,229,255,0.85);
+          box-shadow: 0 0 40px rgba(0,229,255,0.26);
+          color: rgba(0,0,0,0.92);
+        }
+        .btn-no {
+          border: 1px solid rgba(255,46,77,0.55);
+          background: rgba(255,46,77,0.14);
+          box-shadow: 0 0 28px rgba(255,46,77,0.16);
+          color: rgba(255,255,255,0.96);
+        }
+        .btn-no--selected {
+          background: linear-gradient(180deg, rgba(255,46,77,0.98), rgba(255,46,77,0.35));
+          border-color: rgba(255,46,77,0.85);
+          box-shadow: 0 0 40px rgba(255,46,77,0.22);
+          color: rgba(255,255,255,0.98);
+        }
+      `}</style>
+
       {/* Panic confirm modal */}
       {panicModal ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
@@ -1142,14 +1515,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       ) : null}
 
-      {/* ✅ Updated Top Section (Claude layout) */}
+      {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
-        <div className="flex items-center justify-between mb-1">
-          <div className="text-[28px] md:text-[34px] font-black tracking-wide text-white">{matchTitle}</div>
+        <div className="flex items-center justify-between">
+          <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
 
           <button
             type="button"
-            className="rounded-xl border px-4 py-2 font-black text-sm tracking-[0.10em]"
+            className="rounded-xl border px-4 py-2 font-black tracking-[0.10em]"
             style={{
               borderColor: "rgba(0,229,255,0.45)",
               background: "rgba(0,0,0,0.55)",
@@ -1162,21 +1535,23 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           </button>
         </div>
 
-        <div className="flex items-center justify-between text-[14px] text-white/80 mb-3">
+        {venueLine ? <div className="mt-1 text-[13px] text-white/55">{venueLine}</div> : null}
+
+        <div className="mt-4 flex items-center justify-between text-[13px] text-white/75">
           <div>
             Picks selected:{" "}
-            <span className="text-white font-bold">
+            <span className="text-white font-black">
               {selectedCount} / {totalQuestions}
             </span>
           </div>
           <div>
-            Locks: <span className="text-white font-bold">{lockedCount}</span>
+            Locks: <span className="text-white font-black">{lockedCount}</span>
           </div>
         </div>
 
-        <div className="h-[6px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10 mb-2">
+        <div className="mt-2 h-[8px] w-full overflow-hidden rounded-full bg-white/10 border border-white/10">
           <div
-            className="h-full transition-all duration-300"
+            className="h-full"
             style={{
               width: `${selectedPct}%`,
               background: `linear-gradient(90deg, rgba(255,46,77,0.95), rgba(255,46,77,0.45))`,
@@ -1185,14 +1560,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           />
         </div>
 
+        <div className="mt-3 text-[12px] text-white/55">
+          {!matchStartMs ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : "Locks in… see card timers"}
+        </div>
+
         {err ? (
-          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
-            {err}
-          </div>
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
         ) : null}
       </div>
 
-      {/* Cards Grid */}
+      {/* ✅ 3 columns on desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
@@ -1251,7 +1628,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       </div>
 
-      {/* Bottom bar */}
       <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
           <div className="rounded-full border border-white/15 px-3 py-1">
