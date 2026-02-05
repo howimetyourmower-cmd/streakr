@@ -140,11 +140,6 @@ function formatQuarterLabel(q: number) {
   return `QUARTER ${q}`;
 }
 
-function formatQuarterLabelCompact(q: number) {
-  if (q === 0) return "FULL GAME";
-  return `Q${q}`;
-}
-
 function parseTeams(match: string) {
   const m = String(match || "").trim();
   const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
@@ -379,19 +374,32 @@ function ResultPill({
 }
 
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
-  return <div className="text-[16px] md:text-[17px] font-extrabold text-white break-words leading-snug">{text}</div>;
+  const style: React.CSSProperties = {
+    lineHeight: 1.22,
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  };
+
+  return (
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words" style={style}>
+      {text}
+    </div>
+  );
 });
 
 /* Avatars / Logos */
 
 const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
+  // stable URLs (no changes on timer rerenders)
   const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
   const slug = useRef(`/players/${playerSlug(name)}.jpg`);
   const [src, setSrc] = useState(exact.current);
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="relative h-[92px] w-[92px] md:h-[104px] md:w-[104px]">
+      <div className="relative h-[112px] w-[112px]">
         <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
@@ -413,18 +421,24 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
         />
       </div>
 
-      <div className="text-[10px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
+      <div className="text-[11px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
     </div>
   );
 });
 
-const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { teamName: string; size?: number }) {
+const TeamLogoBadge = memo(function TeamLogoBadge({
+  teamName,
+  size = 64,
+}: {
+  teamName: string;
+  size?: number;
+}) {
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
       <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
       <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden flex items-center justify-center">
-        <TeamLogo teamName={teamName} size={Math.max(42, size - 22)} />
+        <TeamLogo teamName={teamName} size={Math.max(44, size - 22)} />
       </div>
       <div
         className="absolute inset-0 rounded-full pointer-events-none"
@@ -439,66 +453,63 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
   return (
     <div className="flex items-center justify-center gap-3">
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={home} size={68} />
-        <div className="text-[10px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+        <TeamLogoBadge teamName={home} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
 
       <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
 
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={away || "AFL"} size={68} />
-        <div className="text-[10px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+        <TeamLogoBadge teamName={away || "AFL"} size={76} />
+        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
     </div>
   );
 });
 
 /**
- * ✅ FIXED HEADER LOOK:
- * - small square tiles (no huge rectangles)
- * - panic tile can be visually "active" even if not clickable yet
+ * BIG Feature Buttons (the “image 4” style)
+ * - Uses your real assets:
+ *   /public/screamr/panic-button.png
+ *   /public/screamr/free-kick.png
  */
-function FeatureTile({
+function BigFeatureButton({
   variant,
   disabled,
-  activeVisual,
   onClick,
 }: {
   variant: "panic" | "freekick";
   disabled?: boolean;
-  activeVisual?: boolean;
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
   const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
-  const on = !!activeVisual;
 
   return (
     <button
       type="button"
-      disabled={!!disabled}
       onClick={disabled ? undefined : onClick}
+      disabled={!!disabled}
       className={[
         "relative overflow-hidden rounded-2xl",
-        "h-[54px] w-[54px] md:h-[58px] md:w-[58px]",
+        "h-[84px] w-[170px] md:h-[92px] md:w-[190px]",
         "transition-transform active:scale-[0.99]",
-        disabled ? "cursor-not-allowed" : "hover:brightness-110",
-        on ? "opacity-100" : "opacity-25 grayscale",
+        disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
-      style={{
-        border: `1px solid ${isPanic ? "rgba(255,46,77,0.40)" : "rgba(246,198,75,0.38)"}`,
-        background: "rgba(0,0,0,0.55)",
-        boxShadow: on
-          ? isPanic
-            ? "0 0 18px rgba(255,46,77,0.14)"
-            : "0 0 18px rgba(246,198,75,0.12)"
-          : "none",
-      }}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
       title={isPanic ? "Panic Button" : "Free Kick"}
+      style={{
+        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
+        background: "rgba(0,0,0,0.55)",
+        boxShadow: disabled
+          ? "none"
+          : isPanic
+          ? "0 0 34px rgba(255,46,77,0.18)"
+          : "0 0 34px rgba(246,198,75,0.14)",
+      }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={variant} className="h-full w-full object-contain p-1.5" draggable={false} />
+      <img src={src} alt={variant} className="h-full w-full object-contain p-2" draggable={false} />
     </button>
   );
 }
@@ -551,7 +562,6 @@ type PickCardProps = {
   freeKickUsedSeason: boolean;
 
   panicEnabledHere: boolean;
-  panicVisualActive: boolean;
 
   onOpenPanic: () => void;
   onOpenFreeKick: () => void;
@@ -574,7 +584,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     freeKickEligibleForThisGame,
     freeKickUsedSeason,
     panicEnabledHere,
-    panicVisualActive,
     onOpenPanic,
     onOpenFreeKick,
     onSetPick,
@@ -594,60 +603,49 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   return (
-    <div className="screamr-card p-4 md:p-5">
+    <div className="screamr-card p-5">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
       <div className="screamr-sparks" />
 
       <div className="relative">
-        {/* ✅ FIXED TOP HEADER GRID (stops that ugly wrap + overlap) */}
-        <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
-          <div className="min-w-0">
-            <div className="text-[13px] font-black tracking-[0.12em] text-white/90 whitespace-nowrap">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-
-            <div className="mt-1 flex items-center gap-2 text-[12px] text-white/60">
-              <span>
-                Status: <span className="text-white/75 font-semibold">{status}</span>
-              </span>
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+            <div className="mt-1 text-[12px] text-white/55">
+              Status: <span className="text-white/70">{status}</span>
             </div>
-
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <ResultPill
                 status={status}
                 selected={selected}
                 correctPick={q.correctPick}
                 outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
               />
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            {/* timer */}
+            {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* ✅ small square icons (panic/free kick) */}
-            <div className="flex items-center gap-2">
-              <FeatureTile
-                variant="panic"
-                disabled={!panicEnabledHere}
-                activeVisual={panicVisualActive}
-                onClick={panicEnabledHere ? onOpenPanic : undefined}
-              />
-              <FeatureTile
+            {/* ✅ Move images down slightly (about 2 lines) */}
+            <div className="mt-3 flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+              <BigFeatureButton
                 variant="freekick"
                 disabled={!freeKickEnabledHere}
-                activeVisual={false}
                 onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
               />
             </div>
 
             <button
               type="button"
-              className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
                 isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
@@ -669,10 +667,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           />
           <div className="relative">
             {isPlayerPick ? (
-              <div className="grid grid-cols-[104px_1fr] md:grid-cols-[140px_1fr] gap-4 items-start">
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
-                <div className="min-w-0">
+                <div>
                   <QuestionText text={q.question} />
 
                   <div className="mt-4">
@@ -758,7 +756,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               </div>
             ) : null}
 
-            {!matchIsLocked ? <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div> : null}
+            {!matchIsLocked ? (
+              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -811,48 +811,44 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const noSelected = selected === "no";
 
   return (
-    <div className="screamr-card p-4 md:p-5 flex flex-col">
+    <div className="screamr-card p-5 flex flex-col">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
       <div className="screamr-sparks" />
 
       <div className="relative flex flex-col flex-1">
-        {/* match the same header grid */}
-        <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
-          <div className="min-w-0">
-            <div className="text-[13px] font-black tracking-[0.10em] text-white/90 whitespace-nowrap">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
               SPONSOR — {formatQuarterLabel(q.quarter)}
             </div>
-
-            <div className="mt-1 flex items-center gap-2 text-[12px] text-white/60">
-              <span>
-                Status: <span className="text-white/75 font-semibold">{status}</span>
-              </span>
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+            <div className="mt-1 text-[12px] text-white/60">
+              Status: <span className="text-white/70">{status}</span>
             </div>
 
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
           </div>
 
           <div className="flex flex-col items-end gap-2">
             <CountdownChip matchStartMs={matchStartMs} />
 
-            <div className="flex items-center gap-2">
-              <FeatureTile variant="panic" disabled activeVisual={false} />
-              <FeatureTile
+            {/* ✅ Move images down slightly (about 2 lines) */}
+            <div className="mt-3 flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled />
+              <BigFeatureButton
                 variant="freekick"
                 disabled={!freeKickEnabledHere || freeKickUsedSeason}
-                activeVisual={false}
                 onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
               />
             </div>
 
             <button
               type="button"
-              className={`h-9 w-9 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
+              className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
                 locked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
@@ -983,6 +979,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   // Only needed so the page knows when lock flips from false -> true.
+  // Cards are memoized + do not remount; avatars stop flashing.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -1169,7 +1166,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  function panicVisualForQuestion(q: ApiQuestion, displayStatus: QuestionStatus) {
+  /**
+   * ✅ IMPORTANT FIX:
+   * pending = locked, so PANIC should be usable on pending (if picked, not sponsor, not used, etc)
+   */
+  function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
 
     const lockedByStatus = displayStatus === "pending";
@@ -1180,13 +1181,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
-
-    return true;
-  }
-
-  function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
-    if (!panicVisualForQuestion(q, displayStatus)) return false;
     if (!(selected === "yes" || selected === "no")) return false;
+
     return true;
   }
 
@@ -1274,6 +1270,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setFreeKickModal(null);
   }
 
+  // ---------- RENDER GUARDS ----------
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -1310,11 +1307,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
+  // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
 
-  const { home, away } = parseTeams(sg.match);
-  const matchTitle = `${home.toUpperCase()}${away ? ` vs ${away.toUpperCase()}` : ""}`;
-  const venueLine = sg.venue ? sg.venue : "";
+  const matchTitle = `${sg.match.toUpperCase()}`;
+  const venueLine = sg.venue ? `Venue: ${sg.venue}` : "";
 
   return (
     <div
@@ -1376,16 +1373,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
 
         .screamr-chip{
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 900;
           letter-spacing: 0.14em;
-          padding: 7px 10px;
+          padding: 8px 10px;
           border-radius: 14px;
           border: 1px solid rgba(255,46,77,0.40);
           background: rgba(0,0,0,0.60);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 132px;
+          min-width: 160px;
           text-align:center;
         }
 
@@ -1512,17 +1509,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[28px] md:text-[34px] font-black tracking-wide leading-none">{matchTitle}</div>
-            <div className="mt-2 text-[13px] text-white/65">
-              {venueLine ? (
-                <>
-                  <span className="font-black text-white/80">Venue:</span> {venueLine}
-                </>
-              ) : null}
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
 
           <button
             type="button"
@@ -1532,13 +1520,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
               background: "rgba(0,0,0,0.55)",
               color: "rgba(0,229,255,0.95)",
               boxShadow: "0 0 18px rgba(0,229,255,0.14)",
-              whiteSpace: "nowrap",
             }}
             onClick={() => void fetchMatch("refresh")}
           >
             REFRESH
           </button>
         </div>
+
+        {venueLine ? <div className="mt-1 text-[13px] text-white/55">{venueLine}</div> : null}
 
         <div className="mt-4 flex items-center justify-between text-[13px] text-white/75">
           <div>
@@ -1572,6 +1561,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         ) : null}
       </div>
 
+      {/* ✅ 3 columns on desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
@@ -1584,7 +1574,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isSaving = !!saving[q.id];
 
             const panicEnabledHere = canShowPanic(q, status, selected);
-            const panicVisualActive = panicVisualForQuestion(q, status);
 
             if (q.isSponsorQuestion) {
               return (
@@ -1621,7 +1610,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 freeKickEligibleForThisGame={freeKickEligibleForThisGame}
                 freeKickUsedSeason={freeKickUsedSeason}
                 panicEnabledHere={panicEnabledHere}
-                panicVisualActive={panicVisualActive}
                 onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
                 onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
                 onSetPick={(v) => void setPick(q.id, v, status)}
