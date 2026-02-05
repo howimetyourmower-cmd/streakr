@@ -1,10 +1,37 @@
 // /app/picks/[gameId]/MatchPicksClient.tsx
 "use client";
 
+/**
+ * MATCH PICKS (SCREAMR)
+ *
+ * What this page does:
+ * - Loads a single AFL match (by gameId) and renders all questions for that match.
+ * - Lets the user pick YES/NO per question, persisting to Firestore + caching in localStorage.
+ * - Shows per-question Countdown to lock (bounce), Community Pulse, and result state (final/void).
+ *
+ * Feature controls (per your images):
+ * - Removes the big top “PANIC BUTTON / FREE KICK” tiles entirely (no top tiles).
+ * - Adds Image-3 style MiniFeaturePlate buttons INSIDE each question card (top-right of card).
+ * - Uses real asset paths from /public/screamr:
+ *   - /screamr/panic-button.png
+ *   - /screamr/free-kick.png
+ *
+ * Fixes included:
+ * 1) Avatar flashing every second:
+ *    - Root cause: the page re-rendered every second (timer), and you were passing inline arrow functions
+ *      into memoized cards, which changed on every render and forced cards (and avatars) to re-render.
+ *    - Fix: cards now receive stable callbacks (useCallback) with IDs passed as params, so memoization works
+ *      and avatars stop re-rendering every second.
+ *
+ * 2) Game pick layout (Image-4):
+ *    - Game pick cards now show BOTH team logos side-by-side on top with a VS between them,
+ *      and the question text is rendered underneath (no overlap).
+ */
+
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
-import React, { memo, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebaseClient";
 import { deleteDoc, doc, serverTimestamp, setDoc } from "firebase/firestore";
@@ -146,12 +173,6 @@ function parseTeams(match: string) {
   const hit = m.match(re);
   if (hit) return { home: hit[1].trim(), away: hit[2].trim() };
   return { home: m, away: "" };
-}
-
-function truncateText(s: string, n: number) {
-  const t = String(s || "");
-  if (t.length <= n) return t;
-  return t.slice(0, Math.max(0, n - 1)).trimEnd() + "…";
 }
 
 function msToCountdown(ms: number) {
@@ -406,7 +427,10 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-[112px] w-[112px]">
-        <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
+        <div
+          className="absolute inset-0 rounded-full blur-[18px] opacity-60"
+          style={{ background: "rgba(255,46,77,0.55)" }}
+        />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -423,7 +447,9 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
         </div>
         <div
           className="absolute inset-0 rounded-full pointer-events-none"
-          style={{ boxShadow: "0 0 28px rgba(255,46,77,0.35), inset 0 0 0 1px rgba(255,255,255,0.08)" }}
+          style={{
+            boxShadow: "0 0 28px rgba(255,46,77,0.35), inset 0 0 0 1px rgba(255,255,255,0.08)",
+          }}
         />
       </div>
 
@@ -432,19 +458,13 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   );
 });
 
-const TeamLogoBadge = memo(function TeamLogoBadge({
-  teamName,
-  size = 64,
-}: {
-  teamName: string;
-  size?: number;
-}) {
+const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 60 }: { teamName: string; size?: number }) {
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
       <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
       <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden flex items-center justify-center">
-        <TeamLogo teamName={teamName} size={Math.max(44, size - 22)} />
+        <TeamLogo teamName={teamName} size={Math.max(40, size - 20)} />
       </div>
       <div
         className="absolute inset-0 rounded-full pointer-events-none"
@@ -454,21 +474,21 @@ const TeamLogoBadge = memo(function TeamLogoBadge({
   );
 });
 
-const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: string }) {
+/**
+ * GAME PICK layout (Image-4 fix):
+ * - Logos side-by-side on TOP
+ * - Question text rendered underneath (no overlap)
+ */
+const GamePickHeader = memo(function GamePickHeader({ match }: { match: string }) {
   const { home, away } = parseTeams(match);
   return (
-    <div className="flex items-center justify-center gap-3">
-      <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={home} size={76} />
-        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+    <div className="w-full">
+      <div className="flex items-center justify-center gap-3">
+        <TeamLogoBadge teamName={home} size={64} />
+        <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
+        <TeamLogoBadge teamName={away || "AFL"} size={64} />
       </div>
-
-      <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
-
-      <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={away || "AFL"} size={76} />
-        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
-      </div>
+      <div className="mt-3 text-center text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
     </div>
   );
 });
@@ -485,7 +505,8 @@ function MiniFeaturePlate({
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
-  const imgPath = isPanic ? "/assets/panic-button.png" : "/assets/free-kick.png";
+  // ✅ correct paths (public/screamr)
+  const imgPath = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
 
   return (
     <button
@@ -580,11 +601,11 @@ type PickCardProps = {
 
   panicEnabledHere: boolean;
 
-  onOpenPanic: () => void;
+  // ✅ stable callbacks (prevents flashing)
+  onOpenPanic: (questionId: string, questionText: string) => void;
   onOpenFreeKick: () => void;
-
-  onSetPick: (value: PickOutcome) => void;
-  onClearPick: () => void;
+  onSetPick: (questionId: string, value: PickOutcome, status: QuestionStatus) => void;
+  onClearPick: (questionId: string, status: QuestionStatus) => void;
 };
 
 const PickCard = memo(function PickCard(props: PickCardProps) {
@@ -648,7 +669,11 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           <div className="flex flex-col items-end gap-2">
             <div className="flex items-center gap-2">
-              <MiniFeaturePlate variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+              <MiniFeaturePlate
+                variant="panic"
+                disabled={!panicEnabledHere}
+                onClick={panicEnabledHere ? () => onOpenPanic(q.id, q.question) : undefined}
+              />
               <MiniFeaturePlate
                 variant="freekick"
                 disabled={!freeKickEnabledHere}
@@ -656,7 +681,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               />
             </div>
 
-            {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
             <button
@@ -666,7 +690,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               }`}
               aria-label="Clear pick"
               disabled={isLocked || isSaving}
-              onClick={onClearPick}
+              onClick={() => onClearPick(q.id, status)}
               title="Clear pick"
             >
               <span className="text-white/85 font-black">×</span>
@@ -682,10 +706,8 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             }}
           />
           <div className="relative">
-            {/* Layout rules:
-                - PLAYER pick: avatar left, question right
-                - GAME pick: logos side-by-side on top, question underneath (no overlap)
-            */}
+            {/* PLAYER pick: avatar + question
+                GAME pick: logos on top + question below */}
             {isPlayerPick ? (
               <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
@@ -722,12 +744,11 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             ) : (
               <div>
                 <div className="flex justify-center">
-                  <GamePickLogosRow match={match} />
+                  <GamePickHeader match={match} />
                 </div>
 
                 <div className="mt-4 text-center">
                   <QuestionText text={q.question} />
-                  <div className="mt-3 text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK — TEAM VS TEAM</div>
                 </div>
               </div>
             )}
@@ -739,7 +760,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${yesBtn}`}
-                onClick={() => onSetPick("yes")}
+                onClick={() => onSetPick(q.id, "yes", status)}
               >
                 YES
               </button>
@@ -750,7 +771,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${noBtn}`}
-                onClick={() => onSetPick("no")}
+                onClick={() => onSetPick(q.id, "no", status)}
               >
                 NO
               </button>
@@ -776,10 +797,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               </div>
             ) : null}
 
-            {/* This keeps sponsor/vault logic separate; showing here only as a hint when locked */}
-            {!matchIsLocked ? (
-              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
-            ) : null}
+            {!matchIsLocked ? <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div> : null}
           </div>
         </div>
       </div>
@@ -800,10 +818,10 @@ type SponsorCardProps = {
   freeKickEnabledHere: boolean;
   freeKickUsedSeason: boolean;
 
+  // ✅ stable callbacks
   onOpenFreeKick: () => void;
-  onClearPick: () => void;
-  onSetPickYes: () => void;
-  onSetPickNo: () => void;
+  onClearPick: (questionId: string, status: QuestionStatus) => void;
+  onSetPick: (questionId: string, value: PickOutcome, status: QuestionStatus) => void;
 };
 
 const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardProps) {
@@ -818,8 +836,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
     freeKickUsedSeason,
     onOpenFreeKick,
     onClearPick,
-    onSetPickYes,
-    onSetPickNo,
+    onSetPick,
   } = props;
 
   const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
@@ -873,7 +890,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               }`}
               aria-label="Clear pick"
               disabled={locked || isSaving}
-              onClick={onClearPick}
+              onClick={() => onClearPick(q.id, status)}
               title="Clear pick"
             >
               <span className="text-white/85 font-black">×</span>
@@ -896,7 +913,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -947,7 +967,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                 locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
               } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
-              onClick={onSetPickYes}
+              onClick={() => onSetPick(q.id, "yes", status)}
             >
               BLIND YES
             </button>
@@ -958,7 +978,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                 locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
               } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
-              onClick={onSetPickNo}
+              onClick={() => onSetPick(q.id, "no", status)}
             >
               BLIND NO
             </button>
@@ -999,7 +1019,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
   // Only needed so the page knows when lock flips from false -> true.
-  // Cards are memoized + do not remount; avatars stop flashing.
+  // Cards are memoized and now receive stable callbacks, so avatars stop flashing.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -1324,6 +1344,39 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const { home } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}`;
 
+  // ✅ stable callbacks (fixes flashing)
+  const handleOpenPanic = useCallback((questionId: string, questionText: string) => {
+    setPanicModal({ questionId, questionText });
+  }, []);
+
+  const handleOpenFreeKick = useCallback(() => {
+    setFreeKickModal({ gameId: sg.id, label: `${sg.match}` });
+  }, [sg.id, sg.match]);
+
+  const handleSetPick = useCallback(
+    (questionId: string, value: PickOutcome, status: QuestionStatus) => {
+      void setPick(questionId, value, status);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [personalVoids, user?.uid, matchIsLocked, panicUsed, picks]
+  );
+
+  const handleClearPick = useCallback(
+    (questionId: string, status: QuestionStatus) => {
+      void clearPick(questionId, status);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [personalVoids, user?.uid]
+  );
+
+  const handleSponsorSetPick = useCallback(
+    (questionId: string, value: PickOutcome, status: QuestionStatus) => {
+      void setPick(questionId, value, status);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [personalVoids, user?.uid]
+  );
+
   return (
     <div
       className="min-h-screen text-white"
@@ -1596,10 +1649,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   isSaving={isSaving}
                   freeKickEnabledHere={freeKickEligibleForThisGame}
                   freeKickUsedSeason={freeKickUsedSeason}
-                  onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
-                  onClearPick={() => void clearPick(q.id, status)}
-                  onSetPickYes={() => void setPick(q.id, "yes", status)}
-                  onSetPickNo={() => void setPick(q.id, "no", status)}
+                  onOpenFreeKick={handleOpenFreeKick}
+                  onClearPick={handleClearPick}
+                  onSetPick={handleSponsorSetPick}
                 />
               );
             }
@@ -1619,10 +1671,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 freeKickEligibleForThisGame={freeKickEligibleForThisGame}
                 freeKickUsedSeason={freeKickUsedSeason}
                 panicEnabledHere={panicEnabledHere}
-                onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
-                onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
-                onSetPick={(v) => void setPick(q.id, v, status)}
-                onClearPick={() => void clearPick(q.id, status)}
+                onOpenPanic={handleOpenPanic}
+                onOpenFreeKick={handleOpenFreeKick}
+                onSetPick={handleSetPick}
+                onClearPick={handleClearPick}
               />
             );
           })}
