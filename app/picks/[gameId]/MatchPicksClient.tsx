@@ -140,6 +140,11 @@ function formatQuarterLabel(q: number) {
   return `QUARTER ${q}`;
 }
 
+function formatQuarterLabelCompact(q: number) {
+  if (q === 0) return "FULL GAME";
+  return `Q${q}`;
+}
+
 function parseTeams(match: string) {
   const m = String(match || "").trim();
   const re = /^(.*?)\s+(?:vs|v)\s+(.*?)$/i;
@@ -373,28 +378,20 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-/**
- * ✅ FULL question (no clamping, no truncation)
- */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
-  return (
-    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words leading-snug">
-      {text}
-    </div>
-  );
+  return <div className="text-[16px] md:text-[17px] font-extrabold text-white break-words leading-snug">{text}</div>;
 });
 
 /* Avatars / Logos */
 
 const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
-  // stable URLs (no changes on timer rerenders)
   const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
   const slug = useRef(`/players/${playerSlug(name)}.jpg`);
   const [src, setSrc] = useState(exact.current);
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div className="relative h-[96px] w-[96px] md:h-[112px] md:w-[112px]">
+      <div className="relative h-[92px] w-[92px] md:h-[104px] md:w-[104px]">
         <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
@@ -416,7 +413,7 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
         />
       </div>
 
-      <div className="text-[11px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
+      <div className="text-[10px] font-black tracking-[0.20em] text-white/55">PLAYER PICK</div>
     </div>
   );
 });
@@ -427,7 +424,7 @@ const TeamLogoBadge = memo(function TeamLogoBadge({ teamName, size = 64 }: { tea
       <div className="absolute inset-0 rounded-full blur-[14px] opacity-35" style={{ background: "rgba(255,46,77,0.35)" }} />
       <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
       <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden flex items-center justify-center">
-        <TeamLogo teamName={teamName} size={Math.max(44, size - 22)} />
+        <TeamLogo teamName={teamName} size={Math.max(42, size - 22)} />
       </div>
       <div
         className="absolute inset-0 rounded-full pointer-events-none"
@@ -442,26 +439,26 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
   return (
     <div className="flex items-center justify-center gap-3">
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={home} size={72} />
-        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+        <TeamLogoBadge teamName={home} size={68} />
+        <div className="text-[10px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
 
       <div className="text-[12px] font-black tracking-[0.24em] text-white/55">VS</div>
 
       <div className="flex flex-col items-center gap-2">
-        <TeamLogoBadge teamName={away || "AFL"} size={72} />
-        <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
+        <TeamLogoBadge teamName={away || "AFL"} size={68} />
+        <div className="text-[10px] font-black tracking-[0.20em] text-white/55">GAME PICK</div>
       </div>
     </div>
   );
 });
 
 /**
- * ✅ Smaller feature tiles + cleaner top layout
- * - reduced overall size
- * - visual active can differ from click disabled
+ * ✅ FIXED HEADER LOOK:
+ * - small square tiles (no huge rectangles)
+ * - panic tile can be visually "active" even if not clickable yet
  */
-function BigFeatureButton({
+function FeatureTile({
   variant,
   disabled,
   activeVisual,
@@ -474,34 +471,34 @@ function BigFeatureButton({
 }) {
   const isPanic = variant === "panic";
   const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
-  const visualOn = !!activeVisual;
+  const on = !!activeVisual;
 
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
       disabled={!!disabled}
+      onClick={disabled ? undefined : onClick}
       className={[
         "relative overflow-hidden rounded-2xl",
-        "h-[64px] w-[128px] md:h-[70px] md:w-[140px]",
+        "h-[54px] w-[54px] md:h-[58px] md:w-[58px]",
         "transition-transform active:scale-[0.99]",
         disabled ? "cursor-not-allowed" : "hover:brightness-110",
-        visualOn ? "opacity-100" : "opacity-35 grayscale",
+        on ? "opacity-100" : "opacity-25 grayscale",
       ].join(" ")}
-      aria-label={isPanic ? "Panic Button" : "Free Kick"}
-      title={isPanic ? "Panic Button" : "Free Kick"}
       style={{
-        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
+        border: `1px solid ${isPanic ? "rgba(255,46,77,0.40)" : "rgba(246,198,75,0.38)"}`,
         background: "rgba(0,0,0,0.55)",
-        boxShadow: visualOn
+        boxShadow: on
           ? isPanic
-            ? "0 0 24px rgba(255,46,77,0.14)"
-            : "0 0 24px rgba(246,198,75,0.12)"
+            ? "0 0 18px rgba(255,46,77,0.14)"
+            : "0 0 18px rgba(246,198,75,0.12)"
           : "none",
       }}
+      aria-label={isPanic ? "Panic Button" : "Free Kick"}
+      title={isPanic ? "Panic Button" : "Free Kick"}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={variant} className="h-full w-full object-contain p-2" draggable={false} />
+      <img src={src} alt={variant} className="h-full w-full object-contain p-1.5" draggable={false} />
     </button>
   );
 }
@@ -604,39 +601,43 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
       <div className="screamr-sparks" />
 
       <div className="relative">
-        {/* ✅ TOP OF CARD LAYOUT (clean + compact) */}
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
+        {/* ✅ FIXED TOP HEADER GRID (stops that ugly wrap + overlap) */}
+        <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
+          <div className="min-w-0">
+            <div className="text-[13px] font-black tracking-[0.12em] text-white/90 whitespace-nowrap">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-            <div className="mt-1 text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
+
+            <div className="mt-1 flex items-center gap-2 text-[12px] text-white/60">
+              <span>
+                Status: <span className="text-white/75 font-semibold">{status}</span>
+              </span>
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
 
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2">
               <ResultPill
                 status={status}
                 selected={selected}
                 correctPick={q.correctPick}
                 outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
               />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
           </div>
 
           <div className="flex flex-col items-end gap-2">
+            {/* timer */}
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* ✅ Smaller tiles in a tight strip */}
+            {/* ✅ small square icons (panic/free kick) */}
             <div className="flex items-center gap-2">
-              <BigFeatureButton
+              <FeatureTile
                 variant="panic"
                 disabled={!panicEnabledHere}
                 activeVisual={panicVisualActive}
                 onClick={panicEnabledHere ? onOpenPanic : undefined}
               />
-              <BigFeatureButton
+              <FeatureTile
                 variant="freekick"
                 disabled={!freeKickEnabledHere}
                 activeVisual={false}
@@ -668,8 +669,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           />
           <div className="relative">
             {isPlayerPick ? (
-              // ✅ Better mobile layout: avatar + question stay in a single row (no weird centering)
-              <div className="grid grid-cols-[112px_1fr] md:grid-cols-[140px_1fr] gap-4 items-start">
+              <div className="grid grid-cols-[104px_1fr] md:grid-cols-[140px_1fr] gap-4 items-start">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
                 <div className="min-w-0">
@@ -818,18 +818,22 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
       <div className="screamr-sparks" />
 
       <div className="relative flex flex-col flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
+        {/* match the same header grid */}
+        <div className="grid grid-cols-[1fr_auto] gap-3 items-start">
+          <div className="min-w-0">
+            <div className="text-[13px] font-black tracking-[0.10em] text-white/90 whitespace-nowrap">
               SPONSOR — {formatQuarterLabel(q.quarter)}
             </div>
-            <div className="mt-1 text-[12px] text-white/60">
-              Status: <span className="text-white/70">{status}</span>
+
+            <div className="mt-1 flex items-center gap-2 text-[12px] text-white/60">
+              <span>
+                Status: <span className="text-white/75 font-semibold">{status}</span>
+              </span>
+              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
 
-            <div className="mt-2 flex items-center gap-2">
+            <div className="mt-2">
               <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
             </div>
           </div>
 
@@ -837,8 +841,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <CountdownChip matchStartMs={matchStartMs} />
 
             <div className="flex items-center gap-2">
-              <BigFeatureButton variant="panic" disabled activeVisual={false} />
-              <BigFeatureButton
+              <FeatureTile variant="panic" disabled activeVisual={false} />
+              <FeatureTile
                 variant="freekick"
                 disabled={!freeKickEnabledHere || freeKickUsedSeason}
                 activeVisual={false}
@@ -1270,7 +1274,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setFreeKickModal(null);
   }
 
-  // ---------- RENDER GUARDS ----------
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -1307,10 +1310,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
 
-  // ✅ FIX: header should be "SYDNEY vs CARLTON" (not just home team)
   const { home, away } = parseTeams(sg.match);
   const matchTitle = `${home.toUpperCase()}${away ? ` vs ${away.toUpperCase()}` : ""}`;
   const venueLine = sg.venue ? sg.venue : "";
@@ -1375,16 +1376,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
 
         .screamr-chip{
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 900;
           letter-spacing: 0.14em;
-          padding: 8px 10px;
+          padding: 7px 10px;
           border-radius: 14px;
           border: 1px solid rgba(255,46,77,0.40);
           background: rgba(0,0,0,0.60);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 160px;
+          min-width: 132px;
           text-align:center;
         }
 
@@ -1571,7 +1572,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         ) : null}
       </div>
 
-      {/* ✅ 3 columns on desktop */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
