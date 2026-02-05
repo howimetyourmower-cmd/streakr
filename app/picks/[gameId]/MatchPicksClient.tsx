@@ -1,24 +1,6 @@
 // /app/picks/[gameId]/MatchPicksClient.tsx
 "use client";
 
-/**
- * WHAT THIS FILE DOES (HIGH LEVEL)
- * - Renders the match picks page for a single game (gameId).
- * - Fetches picks/questions for the round via /api/picks and shows them in cards.
- * - Supports:
- *   - Normal YES/NO picks (persisted to Firestore)
- *   - Panic Button (1 per round, only after lock, voids ONE answered question via /api/panic)
- *   - Free Kick (1 per season, eligibility computed client-side; stored in localStorage; protects streak)
- * - UI:
- *   - Player questions show player avatar left + question right.
- *   - Game pick questions show BOTH team logos side-by-side ON TOP + question below (no overlap).
- *   - Big Panic / Free Kick buttons now live UNDER the countdown timer inside each card (Image 4 vibe).
- *
- * NOTE:
- * - Panic button is server-backed (/api/panic) and also cached in localStorage (beta UX).
- * - Free kick is client-backed (localStorage) by design for beta.
- */
-
 export const dynamic = "force-dynamic";
 
 import Image from "next/image";
@@ -74,7 +56,6 @@ const SEASON = 2026; // localStorage keys only (beta)
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
-  offerNoConsole();
   if (s.startsWith("OR-")) return 0;
   if (s.startsWith("R")) {
     const dash = s.indexOf("-");
@@ -83,15 +64,6 @@ function roundNumberFromGameId(gameId: string): number {
     if (Number.isFinite(n) && n >= 0) return n;
   }
   return 0;
-}
-
-// Defensive: some deployments throw when console is unavailable in certain embedded contexts.
-// This is ultra-safe and no-op in normal browsers.
-function offerNoConsole() {
-  try {
-    // eslint-disable-next-line no-console
-    if (typeof console === "undefined") return;
-  } catch {}
 }
 
 function extractPlayerName(question: string) {
@@ -495,8 +467,12 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
   );
 });
 
-/* BIG Feature buttons (Image 4 vibe) */
-
+/**
+ * BIG Feature Buttons (the “image 4” style)
+ * - Uses your real assets:
+ *   /public/screamr/panic-button.png
+ *   /public/screamr/free-kick.png
+ */
 function BigFeatureButton({
   variant,
   disabled,
@@ -507,65 +483,33 @@ function BigFeatureButton({
   onClick?: () => void;
 }) {
   const isPanic = variant === "panic";
-  // ✅ match your repo path from screenshot: /public/screamr/...
-  const imgPath = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
-
-  const border = isPanic ? "rgba(255,46,77,0.55)" : "rgba(246,198,75,0.55)";
-  const glow = isPanic ? "rgba(255,46,77,0.22)" : "rgba(246,198,75,0.18)";
-  const bg = isPanic
-    ? "linear-gradient(180deg, rgba(255,46,77,0.18), rgba(0,0,0,0.86))"
-    : "linear-gradient(180deg, rgba(246,198,75,0.14), rgba(0,0,0,0.86))";
+  const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
 
   return (
     <button
       type="button"
-      disabled={!!disabled}
       onClick={disabled ? undefined : onClick}
+      disabled={!!disabled}
       className={[
-        "relative w-full rounded-2xl overflow-hidden border",
-        "transition active:scale-[0.99]",
+        "relative overflow-hidden rounded-2xl",
+        "h-[84px] w-[170px] md:h-[92px] md:w-[190px]",
+        "transition-transform active:scale-[0.99]",
         disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
-      style={{
-        borderColor: border,
-        background: bg,
-        boxShadow: disabled ? "none" : `0 0 36px ${glow}`,
-      }}
       aria-label={isPanic ? "Panic Button" : "Free Kick"}
       title={isPanic ? "Panic Button" : "Free Kick"}
+      style={{
+        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
+        background: "rgba(0,0,0,0.55)",
+        boxShadow: disabled
+          ? "none"
+          : isPanic
+          ? "0 0 34px rgba(255,46,77,0.18)"
+          : "0 0 34px rgba(246,198,75,0.14)",
+      }}
     >
-      {/* subtle frame highlight */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          boxShadow:
-            "inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 -20px 26px rgba(0,0,0,0.55), inset 0 18px 22px rgba(255,255,255,0.06)",
-        }}
-      />
-
-      {/* image */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={imgPath}
-        alt={isPanic ? "Panic Button" : "Free Kick"}
-        className="relative z-10 w-full h-[92px] md:h-[100px] object-contain p-2"
-        loading="lazy"
-        decoding="async"
-        draggable={false}
-        onError={(e) => {
-          // If image missing, avoid crash + show fallback text area
-          try {
-            (e.currentTarget as HTMLImageElement).style.display = "none";
-          } catch {}
-        }}
-      />
-
-      {/* fallback label if image fails */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="text-[12px] font-black tracking-[0.20em] text-white/70">
-          {isPanic ? "PANIC" : "FREE KICK"}
-        </div>
-      </div>
+      <img src={src} alt={variant} className="h-full w-full object-contain p-2" draggable={false} />
     </button>
   );
 }
@@ -689,7 +633,16 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             {/* countdown */}
             <CountdownChip matchStartMs={matchStartMs} />
 
-            {/* Clear */}
+            {/* BIG buttons under the countdown (Image 4 layout) */}
+            <div className="flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+              <BigFeatureButton
+                variant="freekick"
+                disabled={!freeKickEnabledHere}
+                onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
+              />
+            </div>
+
             <button
               type="button"
               className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
@@ -703,16 +656,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <span className="text-white/85 font-black">×</span>
             </button>
           </div>
-        </div>
-
-        {/* ✅ BIG buttons under countdown (Image 4 vibe) */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-          <BigFeatureButton
-            variant="freekick"
-            disabled={!freeKickEnabledHere}
-            onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
-          />
         </div>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
@@ -897,6 +840,16 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="flex flex-col items-end gap-2">
             <CountdownChip matchStartMs={matchStartMs} />
 
+            {/* Sponsor: Panic always disabled, Free Kick allowed if eligible */}
+            <div className="flex items-center gap-3">
+              <BigFeatureButton variant="panic" disabled />
+              <BigFeatureButton
+                variant="freekick"
+                disabled={!freeKickEnabledHere || freeKickUsedSeason}
+                onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+              />
+            </div>
+
             <button
               type="button"
               className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
@@ -910,16 +863,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               <span className="text-white/85 font-black">×</span>
             </button>
           </div>
-        </div>
-
-        {/* ✅ BIG Free Kick under countdown; Panic disabled */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <BigFeatureButton variant="panic" disabled />
-          <BigFeatureButton
-            variant="freekick"
-            disabled={!freeKickEnabledHere || freeKickUsedSeason}
-            onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
-          />
         </div>
 
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
@@ -937,10 +880,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div
-                className="text-[22px] font-black tracking-[0.12em] text-white"
-                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
-              >
+              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -1202,7 +1142,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       void fetchMatch("refresh");
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error("[MatchPicksClient] failed to persist pick", e);
     } finally {
       setSaving((prev) => ({ ...prev, [questionId]: false }));
@@ -1231,14 +1170,25 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
+  /**
+   * ✅ IMPORTANT FIX (your request):
+   * If a question status is "pending", that means it is LOCKED (even if matchStartMs logic thinks otherwise).
+   * So PANIC should be enabled on pending questions (as long as the other rules are met).
+   */
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
-    if (!matchIsLocked) return false;
+
+    // Locked signal can come from match timer OR question status.
+    const lockedByStatus = displayStatus === "pending";
+    const lockedForPanic = matchIsLocked || lockedByStatus;
+
+    if (!lockedForPanic) return false;
     if (q.isSponsorQuestion) return false;
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
     if (!(selected === "yes" || selected === "no")) return false;
+
     return true;
   }
 
@@ -1275,7 +1225,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       setPersonalVoids((prev) => ({ ...prev, [questionId]: true }));
       void fetchMatch("refresh");
     } catch (e: unknown) {
-      // eslint-disable-next-line no-console
       console.error("[MatchPicksClient] panic failed", e);
       const msg = e instanceof Error ? e.message : "Panic failed";
       setPanicErr(msg);
