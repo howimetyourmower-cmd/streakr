@@ -373,15 +373,25 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
+/**
+ * FIX: show FULL question always (no clamp, no ellipsis)
+ * - Explicitly override any accidental truncation styles
+ * - Allow wrapping + hyphenation
+ */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
-  // IMPORTANT: no clamping + allow wrapping everywhere (mobile + desktop)
-  // Also: keep min-width behavior sane by relying on parent `min-w-0` wrappers (added below).
   const style: React.CSSProperties = {
     lineHeight: 1.22,
+    display: "block",
+    overflow: "visible",
+    textOverflow: "clip",
+    WebkitLineClamp: "unset" as any,
   };
 
   return (
-    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal" style={style}>
+    <div
+      className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal hyphens-auto"
+      style={style}
+    >
       {text}
     </div>
   );
@@ -670,13 +680,13 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               background: "radial-gradient(760px 260px at 50% 0%, rgba(255,46,77,0.28), rgba(0,0,0,0) 65%)",
             }}
           />
-          <div className="relative min-w-0">
+          <div className="relative min-w-0 overflow-visible">
             {isPlayerPick ? (
-              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center min-w-0">
+              // FIX: items-start (not center) + min-w-0 everywhere so text never gets constrained
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start min-w-0">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
-                {/* IMPORTANT: min-w-0 so the question can wrap inside the grid column */}
-                <div className="min-w-0">
+                <div className="min-w-0 overflow-visible">
                   <QuestionText text={q.question} />
 
                   <div className="mt-4">
@@ -706,14 +716,13 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 </div>
               </div>
             ) : (
-              <div className="min-w-0">
+              <div className="min-w-0 overflow-visible">
                 <div className="flex justify-center">
                   <GamePickLogosRow match={match} />
                 </div>
 
-                {/* IMPORTANT: max width keeps it readable; min-w-0 ensures wrap */}
-                <div className="mt-4 text-center min-w-0">
-                  <div className="mx-auto max-w-[560px] min-w-0">
+                <div className="mt-4 text-center min-w-0 overflow-visible">
+                  <div className="mx-auto max-w-[620px] min-w-0 overflow-visible">
                     <QuestionText text={q.question} />
                   </div>
                   <div className="mt-3 text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK — TEAM VS TEAM</div>
@@ -919,8 +928,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 </div>
               </>
             ) : (
-              <div className="relative flex flex-col items-center justify-center text-center min-w-0" style={{ minHeight: 130 }}>
-                <div className="mx-auto max-w-[560px] min-w-0">
+              // FIX: remove tight centering constraints; allow content to flow + wrap
+              <div className="relative w-full min-w-0 overflow-visible py-1">
+                <div className="mx-auto max-w-[620px] min-w-0 overflow-visible">
                   <QuestionText text={q.question} />
                 </div>
               </div>
