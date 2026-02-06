@@ -392,7 +392,6 @@ const QuestionText = memo(function QuestionText({ text }: { text: string }) {
 /* Avatars / Logos */
 
 const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
-  // stable URLs (no changes on timer rerenders)
   const exact = useRef(`/players/${encodeURIComponent(name)}.jpg`);
   const slug = useRef(`/players/${playerSlug(name)}.jpg`);
   const [src, setSrc] = useState(exact.current);
@@ -463,8 +462,7 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 
 /**
  * BIG Feature Buttons (Panic / Free Kick)
- * - Slightly bigger images
- * - Tighter wrap (less padding + tighter radius)
+ * - Must fit side-by-side (no overlap)
  */
 function BigFeatureButton({
   variant,
@@ -485,8 +483,10 @@ function BigFeatureButton({
       disabled={!!disabled}
       className={[
         "relative overflow-hidden",
-        "rounded-[18px]", // tighter than 2xl
-        "h-[92px] w-[184px] md:h-[100px] md:w-[200px]", // slightly bigger
+        "rounded-[18px]",
+        "h-[82px] md:h-[92px]",
+        "w-full",
+        "flex-1 min-w-0",
         "transition-transform active:scale-[0.99]",
         disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
@@ -503,12 +503,7 @@ function BigFeatureButton({
       }}
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={src}
-        alt={variant}
-        className="h-full w-full object-contain p-[6px]" // tighter wrap, bigger image
-        draggable={false}
-      />
+      <img src={src} alt={variant} className="h-full w-full object-contain p-[6px]" draggable={false} />
     </button>
   );
 }
@@ -589,7 +584,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     onClearPick,
   } = props;
 
-  const isLocked = status !== "open" || isPersonallyVoided;
   const playerName = extractPlayerName(q.question);
   const isPlayerPick = !!playerName;
 
@@ -599,7 +593,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
+  const isLocked = status !== "open" || isPersonallyVoided;
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
+
+  const statusText = String(status || "").toUpperCase();
 
   return (
     <div className="screamr-card p-5">
@@ -609,42 +606,18 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
       <div className="screamr-sparks" />
 
       <div className="relative">
+        {/* === TOP STRIP (matches your screenshot spec) === */}
         <div className="flex items-start justify-between gap-3">
-          <div>
+          {/* Left: Q label */}
+          <div className="min-w-0">
             <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-
-            {/* ✅ moved STATUS out of here */}
-            <div className="mt-2 flex items-center gap-2">
-              <ResultPill
-                status={status}
-                selected={selected}
-                correctPick={q.correctPick}
-                outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
-              />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
-            </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
-            {/* countdown */}
+          {/* Right: countdown + clear */}
+          <div className="flex items-start gap-2 shrink-0">
             <CountdownChip matchStartMs={matchStartMs} />
-
-            {/* ✅ STATUS directly under countdown */}
-            <div className="text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
-
-            {/* ✅ feature buttons moved down a touch */}
-            <div className="mt-2 flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-              <BigFeatureButton
-                variant="freekick"
-                disabled={!freeKickEnabledHere}
-                onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
-              />
-            </div>
 
             <button
               type="button"
@@ -661,6 +634,37 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
         </div>
 
+        {/* Row 2: status under countdown (right aligned), and result pill/saving on left */}
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ResultPill
+              status={status}
+              selected={selected}
+              correctPick={q.correctPick}
+              outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
+            />
+            {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+          </div>
+
+          <div className="text-right">
+            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
+            {!matchIsLocked && status === "open" ? (
+              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Row 3: PANIC + FREE KICK side-by-side (must fit) */}
+        <div className="mt-3 flex items-center gap-3">
+          <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere}
+            onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
+          />
+        </div>
+
+        {/* === CARD BODY === */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.35]"
@@ -758,10 +762,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 Free Kick available (season): you lost this game — use once to protect streak.
               </div>
             ) : null}
-
-            {!matchIsLocked ? (
-              <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div>
-            ) : null}
           </div>
         </div>
       </div>
@@ -813,6 +813,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const yesSelected = selected === "yes";
   const noSelected = selected === "no";
 
+  const statusText = String(status || "").toUpperCase();
+
   return (
     <div className="screamr-card p-5 flex flex-col">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
@@ -821,35 +823,16 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
       <div className="screamr-sparks" />
 
       <div className="relative flex flex-col flex-1">
+        {/* === TOP STRIP (same layout as PickCard) === */}
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
               SPONSOR — {formatQuarterLabel(q.quarter)}
             </div>
-
-            {/* ✅ moved STATUS out of here */}
-            <div className="mt-2 flex items-center gap-2">
-              <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
-            </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex items-start gap-2 shrink-0">
             <CountdownChip matchStartMs={matchStartMs} />
-
-            {/* ✅ STATUS directly under countdown */}
-            <div className="text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
-
-            <div className="mt-2 flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled />
-              <BigFeatureButton
-                variant="freekick"
-                disabled={!freeKickEnabledHere || freeKickUsedSeason}
-                onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
-              />
-            </div>
 
             <button
               type="button"
@@ -866,6 +849,30 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
         </div>
 
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+            {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+          </div>
+
+          <div className="text-right">
+            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
+            {!matchIsLocked && status === "open" ? (
+              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <BigFeatureButton variant="panic" disabled />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere || freeKickUsedSeason}
+            onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+          />
+        </div>
+
+        {/* Sponsor body */}
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.55]"
@@ -999,7 +1006,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
-  const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
+  const personalVoidsKey = useMemo(
+    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
+    [uidForStorage, roundNumber]
+  );
   const freeKickUsedSeasonKey = useMemo(() => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`, [uidForStorage]);
 
   useEffect(() => {
@@ -1175,7 +1185,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   }
 
   /**
-   * ✅ IMPORTANT FIX:
    * pending = locked, so PANIC should be usable on pending (if picked, not sponsor, not used, etc)
    */
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
@@ -1315,7 +1324,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     );
   }
 
-  // ✅ stableGame is non-null from here
   const sg: ApiGame = stableGame;
 
   const matchTitle = `${sg.match.toUpperCase()}`;
@@ -1390,7 +1398,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(0,0,0,0.60);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 160px;
+          min-width: 150px;
           text-align:center;
         }
 
@@ -1565,11 +1573,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
 
         {err ? (
-          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
+            {err}
+          </div>
         ) : null}
       </div>
 
-      {/* ✅ 3 columns on desktop */}
+      {/* Cards grid */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
