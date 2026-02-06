@@ -373,24 +373,17 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-/**
- * ✅ FIX: FULL QUESTION READABILITY
- * - no line clamps
- * - allow wrapping inside grid/flex: min-w-0 + break-words
- * - slightly smaller on mobile to reduce truncation pressure
- */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
+  const style: React.CSSProperties = {
+    lineHeight: 1.22,
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  };
+
   return (
-    <div
-      className="
-        min-w-0
-        text-[16px] md:text-[18px]
-        font-extrabold text-white
-        leading-snug
-        whitespace-normal
-        break-words
-      "
-    >
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words" style={style}>
       {text}
     </div>
   );
@@ -469,6 +462,7 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 
 /**
  * BIG Feature Buttons (Panic / Free Kick)
+ * - Must fit side-by-side (no overlap)
  */
 function BigFeatureButton({
   variant,
@@ -490,7 +484,9 @@ function BigFeatureButton({
       className={[
         "relative overflow-hidden",
         "rounded-[18px]",
-        "h-[92px] w-[184px] md:h-[100px] md:w-[200px]",
+        "h-[82px] md:h-[92px]",
+        "w-full",
+        "flex-1 min-w-0",
         "transition-transform active:scale-[0.99]",
         disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
       ].join(" ")}
@@ -588,7 +584,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     onClearPick,
   } = props;
 
-  const isLocked = status !== "open" || isPersonallyVoided;
   const playerName = extractPlayerName(q.question);
   const isPlayerPick = !!playerName;
 
@@ -598,7 +593,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
+  const isLocked = status !== "open" || isPersonallyVoided;
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
+
+  const statusText = String(status || "").toUpperCase();
 
   return (
     <div className="screamr-card p-5">
@@ -608,38 +606,18 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
       <div className="screamr-sparks" />
 
       <div className="relative">
+        {/* === TOP STRIP (matches your screenshot spec) === */}
         <div className="flex items-start justify-between gap-3">
+          {/* Left: Q label */}
           <div className="min-w-0">
             <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <ResultPill
-                status={status}
-                selected={selected}
-                correctPick={q.correctPick}
-                outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
-              />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
-            </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          {/* Right: countdown + clear */}
+          <div className="flex items-start gap-2 shrink-0">
             <CountdownChip matchStartMs={matchStartMs} />
-
-            <div className="text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
-
-            <div className="mt-2 flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-              <BigFeatureButton
-                variant="freekick"
-                disabled={!freeKickEnabledHere}
-                onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
-              />
-            </div>
 
             <button
               type="button"
@@ -656,6 +634,37 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
         </div>
 
+        {/* Row 2: status under countdown (right aligned), and result pill/saving on left */}
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ResultPill
+              status={status}
+              selected={selected}
+              correctPick={q.correctPick}
+              outcome={isPersonallyVoided ? "void" : q.correctOutcome ?? q.outcome}
+            />
+            {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+          </div>
+
+          <div className="text-right">
+            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
+            {!matchIsLocked && status === "open" ? (
+              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Row 3: PANIC + FREE KICK side-by-side (must fit) */}
+        <div className="mt-3 flex items-center gap-3">
+          <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere}
+            onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
+          />
+        </div>
+
+        {/* === CARD BODY === */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.35]"
@@ -663,13 +672,12 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               background: "radial-gradient(760px 260px at 50% 0%, rgba(255,46,77,0.28), rgba(0,0,0,0) 65%)",
             }}
           />
-          <div className="relative min-w-0">
+          <div className="relative">
             {isPlayerPick ? (
-              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start">
+              <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-center">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
-                {/* ✅ min-w-0 is the key for wrapping inside grids */}
-                <div className="min-w-0">
+                <div>
                   <QuestionText text={q.question} />
 
                   <div className="mt-4">
@@ -699,12 +707,12 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 </div>
               </div>
             ) : (
-              <div className="min-w-0">
+              <div>
                 <div className="flex justify-center">
                   <GamePickLogosRow match={match} />
                 </div>
 
-                <div className="mt-4 text-center min-w-0">
+                <div className="mt-4 text-center">
                   <QuestionText text={q.question} />
                   <div className="mt-3 text-[11px] font-black tracking-[0.20em] text-white/55">GAME PICK — TEAM VS TEAM</div>
                 </div>
@@ -744,7 +752,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             ) : null}
 
             {freeKickUsedSeason ? (
-              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">FREE KICK: USED (SEASON)</div>
+              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">
+                FREE KICK: USED (SEASON)
+              </div>
             ) : null}
 
             {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
@@ -752,8 +762,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 Free Kick available (season): you lost this game — use once to protect streak.
               </div>
             ) : null}
-
-            {!matchIsLocked ? <div className="mt-3 text-center text-[11px] text-white/35">Locks at bounce.</div> : null}
           </div>
         </div>
       </div>
@@ -805,6 +813,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const yesSelected = selected === "yes";
   const noSelected = selected === "no";
 
+  const statusText = String(status || "").toUpperCase();
+
   return (
     <div className="screamr-card p-5 flex flex-col">
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
@@ -812,32 +822,17 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
       </div>
       <div className="screamr-sparks" />
 
-      <div className="relative flex flex-col flex-1 min-w-0">
+      <div className="relative flex flex-col flex-1">
+        {/* === TOP STRIP (same layout as PickCard) === */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">SPONSOR — {formatQuarterLabel(q.quarter)}</div>
-
-            <div className="mt-2 flex items-center gap-2">
-              <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
-              {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
+              SPONSOR — {formatQuarterLabel(q.quarter)}
             </div>
           </div>
 
-          <div className="flex flex-col items-end gap-2">
+          <div className="flex items-start gap-2 shrink-0">
             <CountdownChip matchStartMs={matchStartMs} />
-
-            <div className="text-[12px] text-white/55">
-              Status: <span className="text-white/70">{status}</span>
-            </div>
-
-            <div className="mt-2 flex items-center gap-3">
-              <BigFeatureButton variant="panic" disabled />
-              <BigFeatureButton
-                variant="freekick"
-                disabled={!freeKickEnabledHere || freeKickUsedSeason}
-                onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
-              />
-            </div>
 
             <button
               type="button"
@@ -854,6 +849,30 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
         </div>
 
+        <div className="mt-2 flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
+            {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
+          </div>
+
+          <div className="text-right">
+            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
+            {!matchIsLocked && status === "open" ? (
+              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center gap-3">
+          <BigFeatureButton variant="panic" disabled />
+          <BigFeatureButton
+            variant="freekick"
+            disabled={!freeKickEnabledHere || freeKickUsedSeason}
+            onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+          />
+        </div>
+
+        {/* Sponsor body */}
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.55]"
@@ -869,7 +888,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -877,7 +899,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden min-w-0">
+        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
           <div className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden" style={{ minHeight: 150 }}>
             {!showQuestionText ? (
               <>
@@ -895,8 +917,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 </div>
               </>
             ) : (
-              <div className="relative flex flex-col items-center justify-center text-center min-w-0" style={{ minHeight: 130 }}>
-                <QuestionText text={q.question} />
+              <div className="relative flex flex-col items-center justify-center text-center" style={{ minHeight: 130 }}>
+                <div className="text-[15px] font-extrabold text-white/95">{q.question}</div>
               </div>
             )}
           </div>
@@ -971,6 +993,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
+  // Only needed so the page knows when lock flips from false -> true.
+  // Cards are memoized + do not remount; avatars stop flashing.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -982,7 +1006,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
-  const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
+  const personalVoidsKey = useMemo(
+    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
+    [uidForStorage, roundNumber]
+  );
   const freeKickUsedSeasonKey = useMemo(() => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`, [uidForStorage]);
 
   useEffect(() => {
@@ -1157,6 +1184,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
+  /**
+   * pending = locked, so PANIC should be usable on pending (if picked, not sponsor, not used, etc)
+   */
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
 
@@ -1257,6 +1287,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     setFreeKickModal(null);
   }
 
+  // ---------- RENDER GUARDS ----------
   if (loading && !stableGame) {
     return (
       <div className="min-h-[70vh] text-white px-4 py-8" style={{ background: BRAND_BG }}>
@@ -1367,7 +1398,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           background: rgba(0,0,0,0.60);
           color: rgba(255,255,255,0.92);
           box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 160px;
+          min-width: 150px;
           text-align:center;
         }
 
@@ -1396,6 +1427,101 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           color: rgba(255,255,255,0.98);
         }
       `}</style>
+
+      {/* Panic confirm modal */}
+      {panicModal ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => (panicBusy ? null : setPanicModal(null))} />
+          <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
+            <div className="text-[12px] font-black tracking-[0.24em] text-white/55">PANIC BUTTON</div>
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">This will void this question for this round.</div>
+            <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
+              No point earned, streak won’t break. You only get <span className="text-white font-black">ONE</span> per round.
+              Decision is final.
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
+              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">QUESTION</div>
+              <div className="mt-1 text-[14px] font-extrabold text-white/90">{panicModal.questionText}</div>
+            </div>
+
+            {panicErr ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-2 text-sm text-rose-200/90">
+                {panicErr}
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+                disabled={panicBusy}
+                onClick={() => setPanicModal(null)}
+              >
+                CANCEL
+              </button>
+
+              <button
+                type="button"
+                className="rounded-full border border-rose-400/25 bg-rose-500/15 px-4 py-2 font-extrabold text-rose-100"
+                disabled={panicBusy}
+                onClick={() => void triggerPanic(panicModal.questionId)}
+              >
+                {panicBusy ? "VOIDING…" : "VOID"}
+              </button>
+            </div>
+
+            <div className="mt-3 text-[11px] text-white/40">ARE YOU SURE?</div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Free kick modal */}
+      {freeKickModal ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/75" onClick={() => setFreeKickModal(null)} />
+          <div className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0b0b0e] p-5 shadow-2xl">
+            <div className="text-[12px] font-black tracking-[0.24em] text-white/55">GOLDEN FREE KICK</div>
+            <div className="mt-2 text-[18px] font-black text-white leading-snug">Use your one-time season insurance?</div>
+
+            <div className="mt-3 text-[13px] text-white/75 leading-relaxed">
+              If you lost this game, using Free Kick will protect your streak for this game.
+              <span className="text-white/90 font-black"> You only get ONE for the whole season.</span>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-3">
+              <div className="text-[11px] font-black tracking-[0.20em] text-white/55">GAME</div>
+              <div className="mt-1 text-[14px] font-extrabold text-white/90">{freeKickModal.label}</div>
+            </div>
+
+            {freeKickErr ? (
+              <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-500/10 px-4 py-2 text-sm text-amber-200/90">
+                {freeKickErr}
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-full border border-white/15 bg-white/5 px-4 py-2 font-extrabold text-white/80"
+                onClick={() => setFreeKickModal(null)}
+              >
+                CANCEL
+              </button>
+
+              <button
+                type="button"
+                className="rounded-full border border-amber-400/25 bg-amber-500/15 px-4 py-2 font-extrabold text-amber-100"
+                onClick={() => triggerFreeKickSeasonUse()}
+              >
+                USE FREE KICK
+              </button>
+            </div>
+
+            <div className="mt-3 text-[11px] text-white/40">Decision is final.</div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
@@ -1442,14 +1568,18 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           />
         </div>
 
-        <div className="mt-3 text-[12px] text-white/55">{!matchStartMs ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : "Locks in… see card timers"}</div>
+        <div className="mt-3 text-[12px] text-white/55">
+          {!matchStartMs ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : "Locks in… see card timers"}
+        </div>
 
         {err ? (
-          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
+            {err}
+          </div>
         ) : null}
       </div>
 
-      {/* ✅ 3 columns on desktop */}
+      {/* Cards grid */}
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-5">
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {questions.map((q, idx) => {
