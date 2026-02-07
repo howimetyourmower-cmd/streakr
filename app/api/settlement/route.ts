@@ -29,17 +29,19 @@ type QuestionStatusDoc = {
   questionId: string;
   status?: QuestionStatus;
   outcome?: QuestionOutcome;
-  updatedAt?: any;
+  updatedAt?: unknown;
 };
 
-function normaliseOutcomeValue(val: unknown): QuestionOutcome | undefined {
-  if (typeof val !== "string") return undefined;
-  const s = val.toLowerCase();
-  if (s === "yes") return "yes";
-  if (s === "no") return "no";
-  if (s === "void") return "void";
-  return undefined;
-}
+type OverrideMode = "manual" | "auto";
+
+/**
+ * NOTE:
+ * - "manual" means set by settlement/admin (lock/reopen/final/void)
+ * - "auto" means set by system (Squiggle auto-locker, etc.)
+ *
+ * Manual must always win — so auto processes should never overwrite docs
+ * where overrideMode === "manual".
+ */
 
 // ─────────────────────────────────────────────
 // Recompute streak (IDENTICAL LOGIC to picks)
@@ -74,21 +76,21 @@ async function recomputeUserStreak(uid: string, roundNumber: number) {
   const roundCode = getRoundCode(roundNumber);
 
   const rows = rounds2026.filter(
-    (r: any) => String(r.Round).toUpperCase() === roundCode
+    (r: unknown) => String((r as any).Round).toUpperCase() === roundCode
   );
 
   const games: Record<string, string[]> = {};
 
   for (const r of rows) {
-    const gameId = `${roundCode}-G${r.Game}`;
+    const gameId = `${roundCode}-G${(r as any).Game}`;
     if (!games[gameId]) games[gameId] = [];
 
     games[gameId].push(
       stableQuestionId({
         roundNumber,
         gameId,
-        quarter: Number(r.Quarter),
-        question: r.Question,
+        quarter: Number((r as any).Quarter),
+        question: String((r as any).Question ?? ""),
       })
     );
   }
@@ -212,21 +214,33 @@ export async function POST(req: NextRequest) {
         outcome = "void";
         break;
       default:
-        return NextResponse.json(
-          { error: "Invalid action" },
-          { status: 400 }
-        );
+        return NextResponse.json({ error: "Invalid action" }, { status: 400 });
     }
 
     const ref = db
       .collection("questionStatus")
       .doc(questionStatusDocId(roundNumber, questionId));
 
-    const payload: any = {
+    // Manual actions: always mark overrideMode as "manual"
+    const overrideMode: OverrideMode = "manual";
+
+    const payload: {
+      roundNumber: number;
+      questionId: string;
+      status: QuestionStatus;
+      updatedAt: FirebaseFirestore.FieldValue;
+      overrideMode: OverrideMode;
+      overrideAction: RequestBody["action"];
+      outcome?:
+        | QuestionOutcome
+        | FirebaseFirestore.FieldValue; // delete
+    } = {
       roundNumber,
       questionId,
       status,
       updatedAt: FieldValue.serverTimestamp(),
+      overrideMode,
+      overrideAction: body.action,
     };
 
     if (outcome) payload.outcome = outcome;
@@ -245,18 +259,11 @@ export async function POST(req: NextRequest) {
       if (p.userId) users.add(p.userId);
     });
 
-    await Promise.all(
-      Array.from(users).map((uid) =>
-        recomputeUserStreak(uid, roundNumber)
-      )
-    );
+    await Promise.all(Array.from(users).map((uid) => recomputeUserStreak(uid, roundNumber)));
 
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[settlement] error", e);
-    return NextResponse.json(
-      { error: "Internal error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
