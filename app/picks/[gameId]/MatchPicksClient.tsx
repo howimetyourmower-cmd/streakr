@@ -54,160 +54,6 @@ type PicksApiResponse = {
 const BRAND_BG = "#000000";
 const SEASON = 2026; // localStorage keys only (beta)
 
-/** -----------------------------
- *  Squiggle countdown (client-side)
- *  - Uses Squiggle fixture time for lock/countdown.
- *  - Falls back to our API startTime if Squiggle lookup fails.
- *  - Matches game by team names (home/away) within year+round fixture.
- * ------------------------------*/
-
-type SquiggleTeam = {
-  id: number;
-  name: string;
-  abbrev?: string;
-  logo?: string;
-};
-
-type SquiggleGame = {
-  id: number;
-  year: number;
-  round: number;
-  hteam: number;
-  ateam: number;
-  date: string; // ISO
-  tz?: string; // "+10:00"
-  complete?: number; // 0..100
-  live?: number; // 0/1 (sometimes present)
-  venue?: string;
-};
-
-type SquiggleTeamsResp = { teams?: SquiggleTeam[] };
-type SquiggleGamesResp = { games?: SquiggleGame[] };
-
-function normalizeTeamNameForMatch(name: string) {
-  const n = String(name || "")
-    .toLowerCase()
-    .trim()
-    .replace(/\./g, "")
-    .replace(/\s+/g, " ");
-
-  // normalize common variants
-  if (n.includes("greater western sydney") || n === "gws" || n.includes("giants")) return "gws";
-  if (n.includes("gold coast") || n.includes("suns")) return "goldcoast";
-  if (n.includes("west coast") || n.includes("eagles")) return "westcoast";
-  if (n.includes("western bulldogs") || n.includes("bulldogs") || n.includes("footscray")) return "westernbulldogs";
-  if (n.includes("north melbourne") || n.includes("kangaroos")) return "northmelbourne";
-  if (n.includes("port adelaide") || n.includes("power")) return "portadelaide";
-  if (n.includes("st kilda") || n.includes("saints") || n.replace(/\s/g, "") === "stkilda") return "stkilda";
-  if (n.includes("brisbane")) return "brisbane";
-  if (n.includes("sydney") || n.includes("swans")) return "sydney";
-  if (n.includes("melbourne")) return "melbourne";
-  if (n.includes("adelaide")) return "adelaide";
-  if (n.includes("carlton")) return "carlton";
-  if (n.includes("collingwood")) return "collingwood";
-  if (n.includes("essendon")) return "essendon";
-  if (n.includes("fremantle")) return "fremantle";
-  if (n.includes("geelong")) return "geelong";
-  if (n.includes("hawthorn")) return "hawthorn";
-  if (n.includes("richmond")) return "richmond";
-  return n.replace(/\s/g, "");
-}
-
-function parseISOms(iso: string | undefined | null) {
-  const t = iso ? new Date(iso).getTime() : Number.NaN;
-  return Number.isFinite(t) ? t : null;
-}
-
-function useSquiggleStartMs(opts: { year: number; round: number; match: string | null | undefined }) {
-  const { year, round, match } = opts;
-
-  const [startMs, setStartMs] = useState<number | null>(null);
-  const [isLiveOrComplete, setIsLiveOrComplete] = useState<boolean>(false);
-
-  const matchKey = useMemo(() => {
-    const m = String(match || "").trim();
-    if (!m) return "";
-    return m;
-  }, [match]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function runOnce() {
-      try {
-        if (!matchKey) {
-          if (!cancelled) {
-            setStartMs(null);
-            setIsLiveOrComplete(false);
-          }
-          return;
-        }
-
-        // Fetch teams map
-        const teamsRes = await fetch("https://api.squiggle.com.au/?q=teams;format=json", { cache: "no-store" });
-        const teamsJson = (await teamsRes.json()) as SquiggleTeamsResp;
-        const teams = Array.isArray(teamsJson.teams) ? teamsJson.teams : [];
-
-        const idToName = new Map<number, string>();
-        for (const t of teams) {
-          if (typeof t?.id === "number" && typeof t?.name === "string") idToName.set(t.id, t.name);
-        }
-
-        // Fetch games for that round/year
-        const url = `https://api.squiggle.com.au/?q=games;year=${encodeURIComponent(String(year))};round=${encodeURIComponent(
-          String(round)
-        )};format=json`;
-        const gamesRes = await fetch(url, { cache: "no-store" });
-        const gamesJson = (await gamesRes.json()) as SquiggleGamesResp;
-        const games = Array.isArray(gamesJson.games) ? gamesJson.games : [];
-
-        // Match by team names from our match string
-        const { home, away } = parseTeams(matchKey);
-        const wantHome = normalizeTeamNameForMatch(home);
-        const wantAway = normalizeTeamNameForMatch(away);
-
-        const best = games.find((g) => {
-          const hName = idToName.get(g.hteam) || "";
-          const aName = idToName.get(g.ateam) || "";
-          const gotHome = normalizeTeamNameForMatch(hName);
-          const gotAway = normalizeTeamNameForMatch(aName);
-
-          // Match either orientation (because some sources swap home/away naming)
-          const direct = gotHome === wantHome && gotAway === wantAway;
-          const swapped = gotHome === wantAway && gotAway === wantHome;
-          return direct || swapped;
-        });
-
-        const bestMs = best?.date ? parseISOms(best.date) : null;
-
-        const live = (best?.live ?? 0) === 1;
-        const complete = typeof best?.complete === "number" ? best.complete : 0;
-        const liveOrComplete = live || complete > 0;
-
-        if (!cancelled) {
-          setStartMs(bestMs);
-          setIsLiveOrComplete(liveOrComplete);
-        }
-      } catch {
-        if (!cancelled) {
-          setStartMs(null);
-          setIsLiveOrComplete(false);
-        }
-      }
-    }
-
-    // Run immediately, then refresh occasionally (fixture updates, delays, etc.)
-    void runOnce();
-    const id = window.setInterval(() => void runOnce(), 60_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [year, round, matchKey]);
-
-  return { squiggleStartMs: startMs, squiggleLiveOrComplete: isLiveOrComplete };
-}
-
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
@@ -672,13 +518,7 @@ function BigFeatureButton({
 
 /* Countdown chip */
 
-const CountdownChip = memo(function CountdownChip({
-  matchStartMs,
-  forceLocked,
-}: {
-  matchStartMs: number | null;
-  forceLocked?: boolean;
-}) {
+const CountdownChip = memo(function CountdownChip({ matchStartMs }: { matchStartMs: number | null }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -687,8 +527,6 @@ const CountdownChip = memo(function CountdownChip({
   }, []);
 
   if (!matchStartMs) return <div className="screamr-chip">—</div>;
-
-  if (forceLocked) return <div className="screamr-chip">LOCKED</div>;
 
   const remaining = matchStartMs - nowMs;
   if (remaining <= 0) return <div className="screamr-chip">LOCKED</div>;
@@ -787,7 +625,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           {/* Right: countdown + clear */}
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip matchStartMs={matchStartMs} forceLocked={matchIsLocked} />
+            <CountdownChip matchStartMs={matchStartMs} />
 
             <button
               type="button"
@@ -850,31 +688,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
                 <div className="min-w-0 overflow-visible">
                   <QuestionText text={q.question} />
-
-                  <div className="mt-4">
-                    <div className="text-[12px] font-black tracking-[0.18em] text-white/70">PLAYER INTEL</div>
-                    <div className="text-[11px] font-black tracking-[0.16em] text-white/45">LAST 5 GAMES</div>
-
-                    <div className="mt-2 flex items-end gap-2 h-10">
-                      {[7, 14, 10, 18, 12].map((h, i) => (
-                        <div
-                          key={i}
-                          className="w-4 rounded-sm"
-                          style={{
-                            height: `${h * 1.8}px`,
-                            background: i === 3 ? "rgba(0,229,255,0.85)" : "rgba(0,229,255,0.45)",
-                            boxShadow: "0 0 14px rgba(0,229,255,0.12)",
-                          }}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="mt-2 text-[12px] text-white/70">
-                      Avg: <span className="font-black text-white/85">7.2 Disp</span> /{" "}
-                      <span className="font-black text-white/85">1.5 Goals</span>
-                      <span className="text-white/35"> (beta placeholder)</span>
-                    </div>
-                  </div>
                 </div>
               </div>
             ) : (
@@ -1005,7 +818,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip matchStartMs={matchStartMs} forceLocked={matchIsLocked} />
+            <CountdownChip matchStartMs={matchStartMs} />
 
             <button
               type="button"
@@ -1292,25 +1105,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     }).length;
   }, [questions, personalVoids]);
 
-  // --- Squiggle countdown source ---
-  const { squiggleStartMs, squiggleLiveOrComplete } = useSquiggleStartMs({
-    year: SEASON,
-    round: roundNumber,
-    match: stableGame?.match ?? null,
-  });
-
   const matchStartMs = useMemo(() => {
-    // prefer Squiggle, fallback to our API startTime
-    const localMs = parseISOms(stableGame?.startTime);
-    return squiggleStartMs ?? localMs;
-  }, [squiggleStartMs, stableGame?.startTime]);
+    const iso = stableGame?.startTime;
+    const t = iso ? new Date(iso).getTime() : Number.NaN;
+    return Number.isFinite(t) ? t : null;
+  }, [stableGame?.startTime]);
 
   const matchIsLocked = useMemo(() => {
-    // If squiggle says it’s live/complete, treat as locked.
-    if (squiggleLiveOrComplete) return true;
     if (!matchStartMs) return false;
     return matchStartMs - nowMs <= 0;
-  }, [matchStartMs, nowMs, squiggleLiveOrComplete]);
+  }, [matchStartMs, nowMs]);
 
   const selectedPct = useMemo(() => {
     if (totalQuestions <= 0) return 0;
