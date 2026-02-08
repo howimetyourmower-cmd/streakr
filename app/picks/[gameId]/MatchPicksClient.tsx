@@ -51,6 +51,22 @@ type PicksApiResponse = {
   roundNumber?: number;
 };
 
+type ResolvedGameState = {
+  gameId: string;
+  startTimeUtc: string;
+  nowUtc: string;
+  countdownMs: number;
+  isLocked: boolean;
+  status: "scheduled" | "live" | "final";
+};
+
+type ApiComment = {
+  id: string;
+  body: string;
+  displayName: string | null;
+  createdAt: string | null; // ISO
+};
+
 const BRAND_BG = "#000000";
 const SEASON = 2026; // localStorage keys only (beta)
 
@@ -159,6 +175,12 @@ function msToCountdown(ms: number) {
 
   const pad2 = (n: number) => String(n).padStart(2, "0");
   return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+}
+
+function safeParseUtcToMs(isoUtc: string | undefined | null): number | null {
+  if (!isoUtc) return null;
+  const t = new Date(String(isoUtc)).getTime();
+  return Number.isFinite(t) ? t : null;
 }
 
 /* Teams */
@@ -374,9 +396,7 @@ function ResultPill({
 }
 
 /**
- * FIX: show FULL question always (no clamp, no ellipsis)
- * - Explicitly override any accidental truncation styles
- * - Allow wrapping + hyphenation
+ * show FULL question always
  */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   const style: React.CSSProperties = {
@@ -470,7 +490,6 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 
 /**
  * BIG Feature Buttons (Panic / Free Kick)
- * - Must fit side-by-side (no overlap)
  */
 function BigFeatureButton({
   variant,
@@ -516,21 +535,154 @@ function BigFeatureButton({
   );
 }
 
-/* Countdown chip */
+/* ---------------- COMMENTS UI ---------------- */
 
-const CountdownChip = memo(function CountdownChip({ matchStartMs }: { matchStartMs: number | null }) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+const CommentsPanel = memo(function CommentsPanel({
+  questionId,
+  canWrite,
+}: {
+  questionId: string;
+  canWrite: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [items, setItems] = useState<ApiComment[]>([]);
+  const [text, setText] = useState("");
+  const [posting, setPosting] = useState(false);
+
+  async function load() {
+    setErr(null);
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/comments/${encodeURIComponent(questionId)}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Comments error (${res.status})`);
+      const json = await res.json();
+      const arr = Array.isArray(json?.comments) ? (json.comments as ApiComment[]) : [];
+      setItems(arr);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to load comments";
+      setErr(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function post() {
+    const body = text.trim();
+    if (!body) return;
+
+    setErr(null);
+    setPosting(true);
+    try {
+      const res = await fetch(`/api/comments/${encodeURIComponent(questionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(t || `Failed (${res.status})`);
+      }
+      setText("");
+      // canonical refresh
+      await load();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Failed to post";
+      setErr(msg);
+    } finally {
+      setPosting(false);
+    }
+  }
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+    if (!open) return;
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, questionId]);
 
-  if (!matchStartMs) return <div className="screamr-chip">—</div>;
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between rounded-2xl border border-white/10 bg-black/40 px-4 py-3 hover:bg-black/45 transition"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <div className="text-[11px] font-black tracking-[0.22em] text-white/65">COMMENTS</div>
+        <div className="text-[11px] font-black tracking-[0.16em] text-white/55">
+          {open ? "HIDE" : "SHOW"}
+        </div>
+      </button>
 
-  const remaining = matchStartMs - nowMs;
-  if (remaining <= 0) return <div className="screamr-chip">LOCKED</div>;
-  return <div className="screamr-chip">{msToCountdown(remaining)}</div>;
+      {open ? (
+        <div className="mt-2 rounded-2xl border border-white/10 bg-black/45 p-4">
+          {err ? (
+            <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200/90">
+              {err}
+            </div>
+          ) : null}
+
+          {loading ? (
+            <div className="text-sm text-white/45">Loading…</div>
+          ) : items.length === 0 ? (
+            <div className="text-sm text-white/45">No comments yet.</div>
+          ) : (
+            <div className="max-h-[220px] overflow-y-auto space-y-3 pr-1">
+              {items.map((c) => (
+                <div key={c.id} className="rounded-xl border border-white/10 bg-black/35 px-3 py-2">
+                  <div className="text-[13px] text-white/85 leading-snug whitespace-pre-wrap break-words">{c.body}</div>
+                  <div className="mt-1 text-[11px] text-white/40">
+                    {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {canWrite ? (
+            <div className="mt-4 flex gap-2">
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Add a comment…"
+                className="flex-1 h-10 rounded-xl border border-white/10 bg-black/55 px-3 text-sm text-white/90 outline-none placeholder:text-white/30"
+                disabled={posting}
+              />
+              <button
+                type="button"
+                disabled={posting || !text.trim()}
+                onClick={() => void post()}
+                className={`h-10 rounded-xl px-4 font-black tracking-[0.10em] border ${
+                  posting || !text.trim()
+                    ? "opacity-40 cursor-not-allowed border-white/10 bg-white/5 text-white/60"
+                    : "border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
+                }`}
+              >
+                {posting ? "POSTING…" : "POST"}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 text-[11px] text-white/40">Log in to comment.</div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
+
+/* Countdown chip (deterministic, server-derived) */
+
+const CountdownChip = memo(function CountdownChip({
+  countdownMs,
+  isLocked,
+}: {
+  countdownMs: number | null;
+  isLocked: boolean;
+}) {
+  if (isLocked) return <div className="screamr-chip">LOCKED</div>;
+  if (countdownMs === null) return <div className="screamr-chip">—</div>;
+  if (countdownMs <= 0) return <div className="screamr-chip">LOCKED</div>;
+  return <div className="screamr-chip">{msToCountdown(countdownMs)}</div>;
 });
 
 type PanicModalState =
@@ -555,7 +707,7 @@ type PickCardProps = {
   match: string;
 
   matchIsLocked: boolean;
-  matchStartMs: number | null;
+  countdownMs: number | null;
 
   selected: LocalPick;
   isSaving: boolean;
@@ -564,6 +716,8 @@ type PickCardProps = {
   freeKickUsedSeason: boolean;
 
   panicEnabledHere: boolean;
+
+  canWriteComments: boolean;
 
   onOpenPanic: () => void;
   onOpenFreeKick: () => void;
@@ -580,12 +734,13 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     isPersonallyVoided,
     match,
     matchIsLocked,
-    matchStartMs,
+    countdownMs,
     selected,
     isSaving,
     freeKickEligibleForThisGame,
     freeKickUsedSeason,
     panicEnabledHere,
+    canWriteComments,
     onOpenPanic,
     onOpenFreeKick,
     onSetPick,
@@ -614,18 +769,16 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
       <div className="screamr-sparks" />
 
       <div className="relative">
-        {/* === TOP STRIP (matches your screenshot spec) === */}
+        {/* === TOP STRIP === */}
         <div className="flex items-start justify-between gap-3">
-          {/* Left: Q label */}
           <div className="min-w-0">
             <div className="text-[14px] font-black tracking-[0.12em] text-white/90">
               Q{qNum} — {formatQuarterLabel(q.quarter)}
             </div>
           </div>
 
-          {/* Right: countdown + clear */}
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip matchStartMs={matchStartMs} />
+            <CountdownChip countdownMs={countdownMs} isLocked={matchIsLocked} />
 
             <button
               type="button"
@@ -642,7 +795,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
         </div>
 
-        {/* Row 2: status under countdown (right aligned), and result pill/saving on left */}
         <div className="mt-2 flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <ResultPill
@@ -662,7 +814,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
         </div>
 
-        {/* Row 3: PANIC + FREE KICK side-by-side (must fit) */}
         <div className="mt-3 flex items-center gap-3">
           <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
           <BigFeatureButton
@@ -682,7 +833,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           />
           <div className="relative min-w-0 overflow-visible">
             {isPlayerPick ? (
-              // FIX: items-start (not center) + min-w-0 everywhere so text never gets constrained
               <div className="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-4 items-start min-w-0">
                 <div className="flex justify-center">{playerName ? <PlayerAvatar name={playerName} /> : null}</div>
 
@@ -748,6 +898,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 Free Kick available (season): you lost this game — use once to protect streak.
               </div>
             ) : null}
+
+            {/* Comments (per question) */}
+            <CommentsPanel questionId={q.id} canWrite={canWriteComments} />
           </div>
         </div>
       </div>
@@ -759,7 +912,7 @@ type SponsorCardProps = {
   q: ApiQuestion;
   status: QuestionStatus;
 
-  matchStartMs: number | null;
+  countdownMs: number | null;
   matchIsLocked: boolean;
 
   selected: LocalPick;
@@ -767,6 +920,8 @@ type SponsorCardProps = {
 
   freeKickEnabledHere: boolean;
   freeKickUsedSeason: boolean;
+
+  canWriteComments: boolean;
 
   onOpenFreeKick: () => void;
   onClearPick: () => void;
@@ -778,12 +933,13 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const {
     q,
     status,
-    matchStartMs,
+    countdownMs,
     matchIsLocked,
     selected,
     isSaving,
     freeKickEnabledHere,
     freeKickUsedSeason,
+    canWriteComments,
     onOpenFreeKick,
     onClearPick,
     onSetPickYes,
@@ -809,7 +965,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
       <div className="screamr-sparks" />
 
       <div className="relative flex flex-col flex-1">
-        {/* === TOP STRIP (same layout as PickCard) === */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
@@ -818,7 +973,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip matchStartMs={matchStartMs} />
+            <CountdownChip countdownMs={countdownMs} isLocked={matchIsLocked} />
 
             <button
               type="button"
@@ -858,7 +1013,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           />
         </div>
 
-        {/* Sponsor body */}
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.55]"
@@ -903,7 +1057,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 </div>
               </>
             ) : (
-              // FIX: remove tight centering constraints; allow content to flow + wrap
               <div className="relative w-full min-w-0 overflow-visible py-1">
                 <div className="mx-auto max-w-[620px] min-w-0 overflow-visible">
                   <QuestionText text={q.question} />
@@ -912,7 +1065,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             )}
           </div>
 
-          {!isRevealTime && matchStartMs ? (
+          {!isRevealTime ? (
             <div className="mt-4 text-center">
               <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
                 REVEAL IN: <span className="text-white/90">see timer</span>
@@ -951,6 +1104,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
             Correct pick goes into the draw to win a <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
           </div>
+
+          {/* Comments (per sponsor question too) */}
+          <CommentsPanel questionId={q.id} canWrite={canWriteComments} />
         </div>
 
         <div className="mt-3 text-center text-[11px] text-white/45">* One sponsor question per round. Hidden until lock.</div>
@@ -982,11 +1138,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [freeKickModal, setFreeKickModal] = useState<FreeKickModalState>(null);
   const [freeKickErr, setFreeKickErr] = useState<string | null>(null);
 
-  // Only needed so the page knows when lock flips from false -> true.
-  // Cards are memoized + do not remount; avatars stop flashing.
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  // Deterministic game clock (from /api/games/resolve-state)
+  const [resolved, setResolved] = useState<ResolvedGameState | null>(null);
+  const resolvedRef = useRef<ResolvedGameState | null>(null);
+  const perfAtSyncRef = useRef<number>(0);
+  const serverNowMsAtSyncRef = useRef<number | null>(null);
+  const startMsRef = useRef<number | null>(null);
+
+  // UI tick (keeps countdown smooth between 30s polls, anchored to server now)
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    const id = window.setInterval(() => setTick((n) => (n + 1) % 1_000_000), 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -1044,6 +1206,57 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       localStorage.setItem(personalVoidsKey, JSON.stringify(personalVoids));
     } catch {}
   }, [personalVoids, personalVoidsKey]);
+
+  async function fetchResolvedState() {
+    try {
+      const res = await fetch(`/api/games/resolve-state?gameId=${encodeURIComponent(gameId)}`, { cache: "no-store" });
+      if (!res.ok) return;
+
+      const json = (await res.json()) as ResolvedGameState;
+      if (!json || typeof json !== "object") return;
+      if (String(json.gameId || "") !== String(gameId)) return;
+
+      // anchor to server time deterministically
+      const nowMs = safeParseUtcToMs(json.nowUtc);
+      const startMs = safeParseUtcToMs(json.startTimeUtc);
+
+      resolvedRef.current = json;
+      setResolved(json);
+
+      perfAtSyncRef.current = typeof performance !== "undefined" ? performance.now() : 0;
+      serverNowMsAtSyncRef.current = nowMs;
+      startMsRef.current = startMs;
+    } catch {}
+  }
+
+  useEffect(() => {
+    void fetchResolvedState();
+    const id = window.setInterval(fetchResolvedState, 30_000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
+  function derivedNowMs(): number | null {
+    const base = serverNowMsAtSyncRef.current;
+    if (!base) return null;
+    const elapsed = (typeof performance !== "undefined" ? performance.now() : 0) - perfAtSyncRef.current;
+    return base + Math.max(0, elapsed);
+  }
+
+  const derivedCountdownMs = useMemo(() => {
+    const r = resolved ?? resolvedRef.current;
+    if (!r) return null;
+    if (r.isLocked) return 0;
+
+    const start = startMsRef.current;
+    const now = derivedNowMs();
+    if (!start || !now) return typeof r.countdownMs === "number" ? r.countdownMs : null;
+
+    const remaining = start - now;
+    // never contradict server lock; if server says unlocked, allow 0 to flip visually but lock still uses r.isLocked
+    return Math.max(0, Math.floor(remaining));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolved, /* tick */]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
     if (mode === "initial") setLoading(true);
@@ -1105,16 +1318,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     }).length;
   }, [questions, personalVoids]);
 
-  const matchStartMs = useMemo(() => {
-    const iso = stableGame?.startTime;
-    const t = iso ? new Date(iso).getTime() : Number.NaN;
-    return Number.isFinite(t) ? t : null;
-  }, [stableGame?.startTime]);
-
+  // Server truth for lock (never derived from client time)
   const matchIsLocked = useMemo(() => {
-    if (!matchStartMs) return false;
-    return matchStartMs - nowMs <= 0;
-  }, [matchStartMs, nowMs]);
+    const r = resolved ?? resolvedRef.current;
+    return r?.isLocked ?? false;
+  }, [resolved]);
 
   const selectedPct = useMemo(() => {
     if (totalQuestions <= 0) return 0;
@@ -1154,6 +1362,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   async function setPick(questionId: string, value: PickOutcome, status: QuestionStatus) {
     if (status !== "open") return;
     if (personalVoids[questionId]) return;
+    if (matchIsLocked) return;
 
     setPicks((prev) => {
       const current = prev[questionId] || "none";
@@ -1166,6 +1375,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   async function clearPick(questionId: string, status: QuestionStatus) {
     if (status !== "open") return;
     if (personalVoids[questionId]) return;
+    if (matchIsLocked) return;
 
     setPicks((prev) => {
       void persistPick(questionId, "none");
@@ -1317,6 +1527,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const matchTitle = `${sg.match.toUpperCase()}`;
   const venueLine = sg.venue ? `Venue: ${sg.venue}` : "";
+
+  const canWriteComments = !!user;
 
   return (
     <div
@@ -1560,7 +1772,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
 
         <div className="mt-3 text-[12px] text-white/55">
-          {!matchStartMs ? "Auto-locks at bounce" : matchIsLocked ? "LOCKED" : "Locks in… see card timers"}
+          {matchIsLocked ? "LOCKED" : "Locks in… see card timers"}
         </div>
 
         {err ? (
@@ -1590,12 +1802,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   key={q.id}
                   q={q}
                   status={status}
-                  matchStartMs={matchStartMs}
+                  countdownMs={derivedCountdownMs}
                   matchIsLocked={matchIsLocked}
                   selected={selected}
                   isSaving={isSaving}
                   freeKickEnabledHere={freeKickEligibleForThisGame}
                   freeKickUsedSeason={freeKickUsedSeason}
+                  canWriteComments={canWriteComments}
                   onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
                   onClearPick={() => void clearPick(q.id, status)}
                   onSetPickYes={() => void setPick(q.id, "yes", status)}
@@ -1613,12 +1826,13 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 isPersonallyVoided={isPersonallyVoided}
                 match={sg.match}
                 matchIsLocked={matchIsLocked}
-                matchStartMs={matchStartMs}
+                countdownMs={derivedCountdownMs}
                 selected={selected}
                 isSaving={isSaving}
                 freeKickEligibleForThisGame={freeKickEligibleForThisGame}
                 freeKickUsedSeason={freeKickUsedSeason}
                 panicEnabledHere={panicEnabledHere}
+                canWriteComments={canWriteComments}
                 onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
                 onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
                 onSetPick={(v) => void setPick(q.id, v, status)}
