@@ -784,7 +784,7 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                The only AFL game where perfection wins $1000 each round. One wrong pick and you're gone!!
+                The only AFL game where perfection wins $1000. One wrong pick and you're gone!
               </p>
 
               {/* hero CTAs */}
