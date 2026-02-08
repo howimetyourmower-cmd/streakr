@@ -770,7 +770,7 @@ export default function AflHubPage() {
 
               <h1 className="mt-4 text-[44px] sm:text-[66px] font-extrabold leading-[0.98] tracking-tight">
                 <span className="block">SCREAMR.</span>
-                <span className="block">CALL IT. LOCK IT</span>
+                <span className="block">CALL IT. LOCK IT.</span>
                 <span className="block">BE PERFECT OR BE</span>
                 <span
                   className="block"
@@ -779,12 +779,12 @@ export default function AflHubPage() {
                     textShadow: `0 10px 36px ${rgbaFromHex(COLORS.red, 0.22)}`,
                   }}
                 >
-                  PUNISHED
+                  PUNISHED.
                 </span>
               </h1>
-
+ 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                The only AFL game where perfection wins $1000. One wrong pick and you're gone!
+                The only AFL game where perfection wins $1000 - One wrong pick and you're gone!
               </p>
 
               {/* hero CTAs */}
