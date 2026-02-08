@@ -771,7 +771,7 @@ export default function AflHubPage() {
               <h1 className="mt-4 text-[44px] sm:text-[66px] font-extrabold leading-[0.98] tracking-tight">
                 <span className="block">SCREAMR.</span>
                 <span className="block">CALL IT. LOCK IT</span>
-                <span className="block">BE PERFECT OR BE.</span>
+                <span className="block">BE PERFECT OR BE</span>
                 <span
                   className="block"
                   style={{
@@ -784,7 +784,7 @@ export default function AflHubPage() {
               </h1>
 
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
-                Pick live yes/no AFL outcomes and keep your streak alive. Pick any amount. One wrong pick in a match and your streak is cooked.
+                The only AFL game where perfection wins $1000 each round. One wrong pick and you're gone!!
               </p>
 
               {/* hero CTAs */}
