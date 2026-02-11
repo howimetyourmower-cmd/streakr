@@ -427,7 +427,10 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-[112px] w-[112px]">
-        <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
+        <div
+          className="absolute inset-0 rounded-full blur-[18px] opacity-60"
+          style={{ background: "rgba(255,46,77,0.55)" }}
+        />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -628,28 +631,26 @@ const CommentsPanel = memo(function CommentsPanel({
               {items.map((c) => (
                 <div key={c.id} className="rounded-xl border border-white/10 bg-black/35 px-3 py-2">
                   <div className="text-[13px] text-white/85 leading-snug whitespace-pre-wrap break-words">{c.body}</div>
-                  <div className="mt-1 text-[11px] text-white/40">
-                    {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
-                  </div>
+                  <div className="mt-1 text-[11px] text-white/40">{c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}</div>
                 </div>
               ))}
             </div>
           )}
 
           {canWrite ? (
-            <div className="mt-4 flex gap-2">
+            <div className="mt-4 flex gap-2 items-stretch">
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 placeholder="Add a comment…"
-                className="flex-1 h-10 rounded-xl border border-white/10 bg-black/55 px-3 text-sm text-white/90 outline-none placeholder:text-white/30"
+                className="flex-1 min-w-0 h-10 rounded-xl border border-white/10 bg-black/55 px-3 text-sm text-white/90 outline-none placeholder:text-white/30"
                 disabled={posting}
               />
               <button
                 type="button"
                 disabled={posting || !text.trim()}
                 onClick={() => void post()}
-                className={`h-10 rounded-xl px-4 font-black tracking-[0.10em] border ${
+                className={`h-10 shrink-0 min-w-[92px] whitespace-nowrap rounded-xl px-4 font-black tracking-[0.10em] border ${
                   posting || !text.trim()
                     ? "opacity-40 cursor-not-allowed border-white/10 bg-white/5 text-white/60"
                     : "border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
@@ -805,28 +806,20 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           <div className="text-right">
             <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? (
-              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
-            ) : null}
+            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
         </div>
 
         <div className="mt-3 flex items-center gap-3">
           <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-          <BigFeatureButton
-            variant="freekick"
-            disabled={!freeKickEnabledHere}
-            onClick={freeKickEnabledHere ? onOpenFreeKick : undefined}
-          />
+          <BigFeatureButton variant="freekick" disabled={!freeKickEnabledHere} onClick={freeKickEnabledHere ? onOpenFreeKick : undefined} />
         </div>
 
         {/* === CARD BODY === */}
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/50 p-4 relative overflow-hidden">
           <div
             className="absolute inset-0 opacity-[0.35]"
-            style={{
-              background: "radial-gradient(760px 260px at 50% 0%, rgba(255,46,77,0.28), rgba(0,0,0,0) 65%)",
-            }}
+            style={{ background: "radial-gradient(760px 260px at 50% 0%, rgba(255,46,77,0.28), rgba(0,0,0,0) 65%)" }}
           />
           <div className="relative min-w-0 overflow-visible">
             {isPlayerPick ? (
@@ -856,9 +849,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <button
                 type="button"
                 disabled={isLocked || isSaving}
-                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                } ${yesBtn}`}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${yesBtn}`}
                 onClick={() => onSetPick("yes")}
               >
                 YES
@@ -867,9 +858,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <button
                 type="button"
                 disabled={isLocked || isSaving}
-                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                } ${noBtn}`}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${noBtn}`}
                 onClick={() => onSetPick("no")}
               >
                 NO
@@ -879,21 +868,15 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             <CommunityPulse yes={yes} no={no} />
 
             {isPersonallyVoided ? (
-              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/55">
-                PERSONAL VOID — streak protected
-              </div>
+              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/55">PERSONAL VOID — streak protected</div>
             ) : null}
 
             {freeKickUsedSeason ? (
-              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">
-                FREE KICK: USED (SEASON)
-              </div>
+              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">FREE KICK: USED (SEASON)</div>
             ) : null}
 
             {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
-              <div className="mt-3 text-center text-[11px] text-white/55">
-                Free Kick available (season): you lost this game — use once to protect streak.
-              </div>
+              <div className="mt-3 text-center text-[11px] text-white/55">Free Kick available (season): you lost this game — use once to protect streak.</div>
             ) : null}
 
             <CommentsPanel questionId={q.id} canWrite={canWriteComments} />
@@ -965,9 +948,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
       <div className="relative flex flex-col flex-1">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">
-              SPONSOR — {formatQuarterLabel(q.quarter)}
-            </div>
+            <div className="text-[14px] font-black tracking-[0.10em] text-white/90">SPONSOR — {formatQuarterLabel(q.quarter)}</div>
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
@@ -996,9 +977,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
 
           <div className="text-right">
             <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? (
-              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
-            ) : null}
+            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
         </div>
 
@@ -1012,10 +991,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
         </div>
 
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
-          <div
-            className="absolute inset-0 opacity-[0.55]"
-            style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }}
-          />
+          <div className="absolute inset-0 opacity-[0.55]" style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }} />
           <div className="relative">
             <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
             <div
@@ -1026,10 +1002,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div
-                className="text-[22px] font-black tracking-[0.12em] text-white"
-                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
-              >
+              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -1079,9 +1052,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
+                yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"
+              }`}
               onClick={onSetPickYes}
             >
               BLIND YES
@@ -1090,9 +1063,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
+                noSelected ? "btn-no btn-no--selected" : "btn-no"
+              }`}
               onClick={onSetPickNo}
             >
               BLIND NO
@@ -1155,10 +1128,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
   const picksStorageKey = useMemo(() => `torpie:picks:${uidForStorage}:${gameId}`, [uidForStorage, gameId]);
   const panicUsedKey = useMemo(() => `torpie:panicUsed:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
-  const personalVoidsKey = useMemo(
-    () => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`,
-    [uidForStorage, roundNumber]
-  );
+  const personalVoidsKey = useMemo(() => `torpie:personalVoids:${uidForStorage}:R${roundNumber}`, [uidForStorage, roundNumber]);
   const freeKickUsedSeasonKey = useMemo(() => `torpie:freeKickUsed:${uidForStorage}:S${SEASON}`, [uidForStorage]);
 
   useEffect(() => {
