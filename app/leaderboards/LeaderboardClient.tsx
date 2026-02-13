@@ -381,7 +381,10 @@ export default function LeaderboardsPage() {
       }
 
       // Normal scope values
-      return { apiScope: selectedScope, displayScopeLabel: SCOPE_OPTIONS.find((o) => o.value === selectedScope)?.label ?? "Scope" };
+      return {
+        apiScope: selectedScope,
+        displayScopeLabel: SCOPE_OPTIONS.find((o) => o.value === selectedScope)?.label ?? "Scope",
+      };
     },
     [currentRound?.id, currentRound?.label]
   );
@@ -495,7 +498,46 @@ export default function LeaderboardsPage() {
   const streakBandDescription = describeStreakBand(entries);
 
   const yourStreak = userEntry?.currentStreak ?? 0;
-  const yourDistance = userEntry ? Math.max(0, leaderStreak - yourStreak) : null;
+
+  // ✅ FIX: determine "distance" properly.
+  // - If you're NOT leading: distance = leaderStreak - yourStreak (how far behind #1)
+  // - If you ARE leading:
+  //    - if multiple leaders exist: distance = 0 (tied lead)
+  //    - else distance = leaderStreak - nextBestStreak (your lead margin)
+  const { leadersCount, nextBestStreak, distanceValue, isUserLeader } = useMemo(() => {
+    const maxStreak = leaderStreak ?? 0;
+
+    const leaders = entries.filter((e) => (e.currentStreak ?? 0) === maxStreak);
+    const leadersCount = leaders.length;
+
+    const nextBest = entries.reduce((best, e) => {
+      const s = e.currentStreak ?? 0;
+      if (s < maxStreak && s > best) return s;
+      return best;
+    }, 0);
+
+    const isUserLeader = !!userEntry && (userEntry.currentStreak ?? 0) === maxStreak;
+
+    if (!userEntry) {
+      return { leadersCount, nextBestStreak: nextBest, distanceValue: null as number | null, isUserLeader: false };
+    }
+
+    // Tied for lead => distance 0
+    if (isUserLeader && leadersCount > 1) {
+      return { leadersCount, nextBestStreak: nextBest, distanceValue: 0, isUserLeader: true };
+    }
+
+    // Outright leader => lead margin
+    if (isUserLeader) {
+      const leadGap = Math.max(0, maxStreak - nextBest);
+      return { leadersCount, nextBestStreak: nextBest, distanceValue: leadGap, isUserLeader: true };
+    }
+
+    // Chasing => distance behind #1
+    const behind = Math.max(0, maxStreak - (userEntry.currentStreak ?? 0));
+    return { leadersCount, nextBestStreak: nextBest, distanceValue: behind, isUserLeader: false };
+  }, [entries, leaderStreak, userEntry]);
+
   const userOutsideTop10 = userEntry && top10.every((e) => e.uid !== userEntry.uid);
 
   const renderRankDelta = (delta?: number) => {
@@ -799,7 +841,11 @@ export default function LeaderboardsPage() {
                       </span>
                     </h1>
                     <p className="mt-1 text-sm text-white/70">
-                      Ranked by <span className="font-black" style={{ color: SCREAMR_RED }}>CURRENT STREAK</span>. One wrong pick in a match and you’re cooked.
+                      Ranked by{" "}
+                      <span className="font-black" style={{ color: SCREAMR_RED }}>
+                        CURRENT STREAK
+                      </span>
+                      . One wrong pick in a match and you’re cooked.
                     </p>
                   </div>
 
@@ -814,19 +860,11 @@ export default function LeaderboardsPage() {
                 <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* LEADER SCOREBOARD */}
                   <div className="sm:col-span-2 rounded-3xl border border-white/10 bg-white/5 p-5 relative overflow-hidden">
-                    <div
-                      className="absolute -right-16 -top-16 h-56 w-56 rounded-full blur-3xl opacity-40"
-                      style={{ background: SCREAMR_RED }}
-                    />
-                    <div
-                      className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full blur-3xl opacity-25"
-                      style={{ background: SCREAMR_CYAN }}
-                    />
+                    <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full blur-3xl opacity-40" style={{ background: SCREAMR_RED }} />
+                    <div className="absolute -left-20 -bottom-20 h-64 w-64 rounded-full blur-3xl opacity-25" style={{ background: SCREAMR_CYAN }} />
                     <div className="relative">
                       <div className="flex items-center justify-between gap-3">
-                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
-                          Leader streak
-                        </div>
+                        <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Leader streak</div>
                         <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
                           Updated {lastUpdatedLabel || "—"}
                         </span>
@@ -864,9 +902,7 @@ export default function LeaderboardsPage() {
                   <div className="rounded-3xl border border-white/10 bg-black/70 p-5 relative overflow-hidden">
                     <div className="screamr-scanlines" />
                     <div className="relative">
-                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">
-                        Chase the leader
-                      </div>
+                      <div className="text-[11px] font-black uppercase tracking-wide text-white/60">Chase the leader</div>
 
                       {user ? (
                         userEntry ? (
@@ -880,23 +916,48 @@ export default function LeaderboardsPage() {
                               </div>
                               <div className="text-right">
                                 <div className="text-[11px] text-white/60 font-black uppercase">Distance</div>
-                                <div className="text-4xl font-black">{yourDistance ?? "—"}</div>
+                                <div className="text-4xl font-black">{distanceValue ?? "—"}</div>
                               </div>
                             </div>
 
-                            {yourDistance === 0 ? (
-                              <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
-                                You’re tied for the lead. Don’t blink.
-                              </div>
-                            ) : (
-                              <div className="mt-3 text-[12px] text-white/70">
-                                You need{" "}
-                                <span className="font-black" style={{ color: SCREAMR_RED }}>
-                                  {yourDistance}
-                                </span>{" "}
-                                more to catch the top.
-                              </div>
-                            )}
+                            {/* ✅ FIXED messaging: tie vs lead vs chase */}
+                            {typeof distanceValue === "number" ? (
+                              isUserLeader ? (
+                                leadersCount > 1 ? (
+                                  <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                                    You’re tied for the lead. Don’t blink.
+                                  </div>
+                                ) : distanceValue === 0 ? (
+                                  <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                                    You’re on top. Keep it clean.
+                                  </div>
+                                ) : distanceValue === 1 ? (
+                                  <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                                    You’re leading — but it’s tight.
+                                  </div>
+                                ) : (
+                                  <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                                    You’re out in front by{" "}
+                                    <span className="font-black" style={{ color: SCREAMR_GREEN }}>
+                                      {distanceValue}
+                                    </span>
+                                    . Don’t blink.
+                                  </div>
+                                )
+                              ) : distanceValue === 0 ? (
+                                <div className="mt-3 text-[12px] font-bold" style={{ color: SCREAMR_GREEN }}>
+                                  You’ve caught the top. Don’t blink.
+                                </div>
+                              ) : (
+                                <div className="mt-3 text-[12px] text-white/70">
+                                  You need{" "}
+                                  <span className="font-black" style={{ color: SCREAMR_RED }}>
+                                    {distanceValue}
+                                  </span>{" "}
+                                  more to catch the top.
+                                </div>
+                              )
+                            ) : null}
 
                             <div className="mt-3 text-[12px] text-white/55">
                               Current rank: <span className="font-black text-white">#{userEntry.rank}</span>
@@ -960,9 +1021,7 @@ export default function LeaderboardsPage() {
                           />
                           PODIUM
                         </span>
-                        <span className="text-[12px] font-black text-white/55 hidden sm:inline">
-                          Finalists on stage
-                        </span>
+                        <span className="text-[12px] font-black text-white/55 hidden sm:inline">Finalists on stage</span>
                       </div>
                       <div className="text-[12px] font-black text-white/55">Updated {lastUpdatedLabel || "—"}</div>
                     </div>
@@ -972,9 +1031,7 @@ export default function LeaderboardsPage() {
                         const isYou = user && e.uid === user.uid;
 
                         const isFirst = idx === 0;
-                        const glow = isFirst
-                          ? `0 0 30px rgba(${SCREAMR_RED_RGB},0.20)`
-                          : `0 0 22px rgba(255,255,255,0.06)`;
+                        const glow = isFirst ? `0 0 30px rgba(${SCREAMR_RED_RGB},0.20)` : `0 0 22px rgba(255,255,255,0.06)`;
 
                         const border = isFirst ? `rgba(${SCREAMR_RED_RGB},0.65)` : "rgba(255,255,255,0.12)";
 
@@ -988,7 +1045,10 @@ export default function LeaderboardsPage() {
                               transform: isFirst ? "scale(1.02)" : "none",
                             }}
                           >
-                            <div className="absolute inset-0" style={{ background: "radial-gradient(520px 180px at 50% 0%, rgba(255,46,77,0.12), rgba(0,0,0,0) 70%)" }} />
+                            <div
+                              className="absolute inset-0"
+                              style={{ background: "radial-gradient(520px 180px at 50% 0%, rgba(255,46,77,0.12), rgba(0,0,0,0) 70%)" }}
+                            />
                             <div className="relative flex items-center justify-between gap-3">
                               <div className="flex items-center gap-3 min-w-0">
                                 {renderAvatar(e, 44)}
@@ -1039,17 +1099,12 @@ export default function LeaderboardsPage() {
                   <div className="relative px-4 py-3 border-b border-white/10 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide">
-                        <span
-                          className="h-2 w-2 rounded-full"
-                          style={{ background: SCREAMR_RED, boxShadow: `0 0 14px rgba(${SCREAMR_RED_RGB},0.55)` }}
-                        />
+                        <span className="h-2 w-2 rounded-full" style={{ background: SCREAMR_RED, boxShadow: `0 0 14px rgba(${SCREAMR_RED_RGB},0.55)` }} />
                         TOP 10
                       </span>
                       <span className="text-[12px] font-black text-white/55 hidden sm:inline">Run the board</span>
                     </div>
-                    <div className="text-[12px] font-black text-white/55">
-                      {totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}
-                    </div>
+                    <div className="text-[12px] font-black text-white/55">{totalPlayers > 0 ? `${totalPlayers} on board` : "No players yet"}</div>
                   </div>
 
                   {top10.length === 0 ? (
@@ -1131,10 +1186,7 @@ export default function LeaderboardsPage() {
                     <div className="relative p-4">
                       <div className="flex items-center justify-between gap-3">
                         <span className="screamr-pill inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-wide">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: SCREAMR_GREEN, boxShadow: "0 0 14px rgba(45,255,122,0.40)" }}
-                          />
+                          <span className="h-2 w-2 rounded-full" style={{ background: SCREAMR_GREEN, boxShadow: "0 0 14px rgba(45,255,122,0.40)" }} />
                           YOUR POSITION
                         </span>
                         <Link
