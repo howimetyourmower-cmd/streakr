@@ -662,8 +662,13 @@ const CommentsPanel = memo(function CommentsPanel({
   );
 });
 
-/* Countdown chip (match-wide, status-driven, colored) */
-
+/**
+ * Match-wide chip only:
+ * - before bounce: countdown
+ * - after bounce: LOCKED
+ * - after settlement: FINAL (per-question)
+ * No extra OPEN/LOCKED labels anywhere else.
+ */
 const CountdownChip = memo(function CountdownChip({
   countdownMs,
   matchIsLocked,
@@ -673,7 +678,6 @@ const CountdownChip = memo(function CountdownChip({
   matchIsLocked: boolean;
   status: QuestionStatus;
 }) {
-  // Color variants
   const baseStyle: React.CSSProperties = {
     fontSize: 12,
     fontWeight: 900,
@@ -685,11 +689,10 @@ const CountdownChip = memo(function CountdownChip({
     background: "rgba(0,0,0,0.60)",
   };
 
-  // FINAL / VOID always win
+  // FINAL per-question wins
   if (status === "final") {
     return (
       <div
-        className="screamr-chip"
         style={{
           ...baseStyle,
           border: "1px solid rgba(16,185,129,0.55)",
@@ -702,10 +705,10 @@ const CountdownChip = memo(function CountdownChip({
     );
   }
 
+  // VOID
   if (status === "void") {
     return (
       <div
-        className="screamr-chip"
         style={{
           ...baseStyle,
           border: "1px solid rgba(255,255,255,0.18)",
@@ -718,11 +721,10 @@ const CountdownChip = memo(function CountdownChip({
     );
   }
 
-  // Pending comes from same source as OPEN / FINAL
-  if (status === "pending") {
+  // After bounce: LOCKED for all open questions
+  if (matchIsLocked) {
     return (
       <div
-        className="screamr-chip"
         style={{
           ...baseStyle,
           border: "1px solid rgba(255,46,77,0.45)",
@@ -735,27 +737,10 @@ const CountdownChip = memo(function CountdownChip({
     );
   }
 
-  // status === open → timer until bounce
-  if (matchIsLocked || (typeof countdownMs === "number" && countdownMs <= 0)) {
-    return (
-      <div
-        className="screamr-chip"
-        style={{
-          ...baseStyle,
-          border: "1px solid rgba(255,46,77,0.45)",
-          color: "rgba(255,255,255,0.92)",
-          boxShadow: "0 0 18px rgba(255,46,77,0.18)",
-        }}
-      >
-        LOCKED
-      </div>
-    );
-  }
-
+  // Pre-bounce: show timer
   if (countdownMs === null) {
     return (
       <div
-        className="screamr-chip"
         style={{
           ...baseStyle,
           border: "1px solid rgba(0,229,255,0.40)",
@@ -768,10 +753,8 @@ const CountdownChip = memo(function CountdownChip({
     );
   }
 
-  // OPEN timer (cyan)
   return (
     <div
-      className="screamr-chip"
       style={{
         ...baseStyle,
         border: "1px solid rgba(0,229,255,0.45)",
@@ -855,10 +838,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-  const isLocked = status !== "open" || isPersonallyVoided;
-  const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
+  // NOTE: lock interaction after bounce OR when question is settled/voided/pending
+  const isLockedForInteraction = matchIsLocked || status !== "open" || isPersonallyVoided;
 
-  const statusText = String(status || "").toUpperCase();
+  const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   return (
     <div className="screamr-card p-5">
@@ -882,10 +865,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             <button
               type="button"
               className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                isLocked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                isLockedForInteraction ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
-              disabled={isLocked || isSaving}
+              disabled={isLockedForInteraction || isSaving}
               onClick={onClearPick}
               title="Clear pick"
             >
@@ -905,9 +888,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
           </div>
 
+          {/* removed extra OPEN/LOCKED/FINAL label to avoid duplication */}
           <div className="text-right">
-            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
+            {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
         </div>
 
@@ -949,9 +932,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             <div className="mt-5 grid grid-cols-2 gap-3">
               <button
                 type="button"
-                disabled={isLocked || isSaving}
+                disabled={isLockedForInteraction || isSaving}
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                  isLockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${yesBtn}`}
                 onClick={() => onSetPick("yes")}
               >
@@ -960,9 +943,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
               <button
                 type="button"
-                disabled={isLocked || isSaving}
+                disabled={isLockedForInteraction || isSaving}
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                  isLockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
                 } ${noBtn}`}
                 onClick={() => onSetPick("no")}
               >
@@ -992,7 +975,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   );
 });
 
-// ----- SponsorMysteryCard unchanged (kept as-is) -----
+// ----- SponsorMysteryCard unchanged (kept mostly as-is, but remove duplicate OPEN/FINAL label) -----
 
 type SponsorCardProps = {
   q: ApiQuestion;
@@ -1036,12 +1019,11 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
 
   const isRevealTime = matchIsLocked;
   const showQuestionText = isRevealTime;
-  const locked = status !== "open" || isRevealTime;
+
+  const lockedForInteraction = matchIsLocked || status !== "open";
 
   const yesSelected = selected === "yes";
   const noSelected = selected === "no";
-
-  const statusText = String(status || "").toUpperCase();
 
   return (
     <div className="screamr-card p-5 flex flex-col">
@@ -1062,10 +1044,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               className={`h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center ${
-                locked ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
+                lockedForInteraction ? "opacity-40 cursor-not-allowed" : "hover:bg-white/10"
               }`}
               aria-label="Clear pick"
-              disabled={locked || isSaving}
+              disabled={lockedForInteraction || isSaving}
               onClick={onClearPick}
               title="Clear pick"
             >
@@ -1081,8 +1063,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="text-right">
-            <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
+            {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
         </div>
 
@@ -1144,7 +1125,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           {!isRevealTime ? (
             <div className="mt-4 text-center">
               <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
-                REVEAL IN: <span className="text-white/90">see timer</span>
+                REVEAL AT BOUNCE
               </div>
             </div>
           ) : (
@@ -1156,10 +1137,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
               type="button"
-              disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
-                yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"
-              }`}
+              disabled={lockedForInteraction || isSaving}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                lockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
               onClick={onSetPickYes}
             >
               BLIND YES
@@ -1167,10 +1148,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
 
             <button
               type="button"
-              disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
-                noSelected ? "btn-no btn-no--selected" : "btn-no"
-              }`}
+              disabled={lockedForInteraction || isSaving}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                lockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
               onClick={onSetPickNo}
             >
               BLIND NO
@@ -1220,7 +1201,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const serverNowMsAtSyncRef = useRef<number | null>(null);
   const startMsRef = useRef<number | null>(null);
 
-  // ✅ FIX: store tick so derivedCountdownMs recomputes
+  // tick for 1s countdown updates
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -1315,6 +1296,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return base + Math.max(0, elapsed);
   }
 
+  const matchIsLocked = useMemo(() => {
+    const r = resolved ?? resolvedRef.current;
+    return r?.isLocked ?? false;
+  }, [resolved]);
+
+  // Primary countdown (from resolve-state, server-clock aligned)
   const derivedCountdownMs = useMemo(() => {
     const r = resolved ?? resolvedRef.current;
     if (!r) return null;
@@ -1326,7 +1313,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
     const remaining = start - now;
     return Math.max(0, Math.floor(remaining));
-    // ✅ FIX: tick dependency forces 1s refresh
   }, [resolved, tick]);
 
   async function fetchMatch(mode: "initial" | "refresh" = "refresh") {
@@ -1379,6 +1365,22 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return [...qs].sort((a, b) => a.quarter - b.quarter || a.id.localeCompare(b.id));
   }, [stableGame]);
 
+  // Fallback countdown (if resolve-state fails): local clock vs game.startTime
+  const fallbackCountdownMs = useMemo(() => {
+    if (!stableGame) return null;
+    if (matchIsLocked) return 0;
+    const startMs = safeParseUtcToMs(stableGame.startTime);
+    if (!startMs) return null;
+    return Math.max(0, startMs - Date.now());
+  }, [stableGame, matchIsLocked, tick]);
+
+  const countdownMsToUse = useMemo(() => {
+    // prefer server-aligned timer, fall back to local
+    const v = derivedCountdownMs;
+    if (typeof v === "number") return v;
+    return fallbackCountdownMs;
+  }, [derivedCountdownMs, fallbackCountdownMs]);
+
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
   const totalQuestions = questions.length || 0;
 
@@ -1388,11 +1390,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       return safeStatus(q.status) !== "open";
     }).length;
   }, [questions, personalVoids]);
-
-  const matchIsLocked = useMemo(() => {
-    const r = resolved ?? resolvedRef.current;
-    return r?.isLocked ?? false;
-  }, [resolved]);
 
   const selectedPct = useMemo(() => {
     if (totalQuestions <= 0) return 0;
@@ -1456,8 +1453,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
 
-    const lockedByStatus = displayStatus === "pending";
-    const lockedForPanic = matchIsLocked || lockedByStatus;
+    const lockedForPanic = matchIsLocked || displayStatus === "pending";
 
     if (!lockedForPanic) return false;
     if (q.isSponsorQuestion) return false;
@@ -1655,21 +1651,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           100%{ transform: translate3d(-220px, -220px, 0); }
         }
 
-        /* kept for compatibility (chip is now styled inline per-status) */
-        .screamr-chip{
-          font-size: 12px;
-          font-weight: 900;
-          letter-spacing: 0.14em;
-          padding: 8px 10px;
-          border-radius: 14px;
-          border: 1px solid rgba(255,46,77,0.40);
-          background: rgba(0,0,0,0.60);
-          color: rgba(255,255,255,0.92);
-          box-shadow: 0 0 18px rgba(255,46,77,0.18);
-          min-width: 150px;
-          text-align:center;
-        }
-
         .btn-yes {
           border: 1px solid rgba(0,229,255,0.55);
           background: rgba(0,229,255,0.14);
@@ -1741,7 +1722,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           />
         </div>
 
-        <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "Locks in… see card timers"}</div>
+        <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "Locks at bounce"}</div>
 
         {err ? (
           <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
@@ -1770,7 +1751,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   key={q.id}
                   q={q}
                   status={status}
-                  countdownMs={derivedCountdownMs}
+                  countdownMs={countdownMsToUse}
                   matchIsLocked={matchIsLocked}
                   selected={selected}
                   isSaving={isSaving}
@@ -1794,7 +1775,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 isPersonallyVoided={isPersonallyVoided}
                 match={sg.match}
                 matchIsLocked={matchIsLocked}
-                countdownMs={derivedCountdownMs}
+                countdownMs={countdownMsToUse}
                 selected={selected}
                 isSaving={isSaving}
                 freeKickEligibleForThisGame={freeKickEligibleForThisGame}
@@ -1811,6 +1792,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         </div>
       </div>
 
+      {/* Bottom bar */}
       <div className="fixed left-0 right-0 bottom-0 border-t border-white/10 bg-black/90 backdrop-blur">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between text-sm text-white/70">
           <div className="rounded-full border border-white/15 px-3 py-1">
