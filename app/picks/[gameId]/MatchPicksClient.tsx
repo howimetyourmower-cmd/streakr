@@ -408,10 +408,7 @@ const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   };
 
   return (
-    <div
-      className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal hyphens-auto"
-      style={style}
-    >
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal hyphens-auto" style={style}>
       {text}
     </div>
   );
@@ -427,10 +424,7 @@ const PlayerAvatar = memo(function PlayerAvatar({ name }: { name: string }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative h-[112px] w-[112px]">
-        <div
-          className="absolute inset-0 rounded-full blur-[18px] opacity-60"
-          style={{ background: "rgba(255,46,77,0.55)" }}
-        />
+        <div className="absolute inset-0 rounded-full blur-[18px] opacity-60" style={{ background: "rgba(255,46,77,0.55)" }} />
         <div className="absolute inset-0 rounded-full" style={{ background: "rgba(255,46,77,0.95)" }} />
         <div className="absolute inset-[3px] rounded-full bg-black/55 border border-white/10 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -540,13 +534,7 @@ function BigFeatureButton({
 
 /* ---------------- COMMENTS UI ---------------- */
 
-const CommentsPanel = memo(function CommentsPanel({
-  questionId,
-  canWrite,
-}: {
-  questionId: string;
-  canWrite: boolean;
-}) {
+const CommentsPanel = memo(function CommentsPanel({ questionId, canWrite }: { questionId: string; canWrite: boolean }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -617,9 +605,7 @@ const CommentsPanel = memo(function CommentsPanel({
       {open ? (
         <div className="mt-2 rounded-2xl border border-white/10 bg-black/45 p-4">
           {err ? (
-            <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200/90">
-              {err}
-            </div>
+            <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200/90">{err}</div>
           ) : null}
 
           {loading ? (
@@ -631,7 +617,9 @@ const CommentsPanel = memo(function CommentsPanel({
               {items.map((c) => (
                 <div key={c.id} className="rounded-xl border border-white/10 bg-black/35 px-3 py-2">
                   <div className="text-[13px] text-white/85 leading-snug whitespace-pre-wrap break-words">{c.body}</div>
-                  <div className="mt-1 text-[11px] text-white/40">{c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}</div>
+                  <div className="mt-1 text-[11px] text-white/40">
+                    {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
+                  </div>
                 </div>
               ))}
             </div>
@@ -670,13 +658,7 @@ const CommentsPanel = memo(function CommentsPanel({
 
 /* Countdown chip (deterministic, server-derived) */
 
-const CountdownChip = memo(function CountdownChip({
-  countdownMs,
-  isLocked,
-}: {
-  countdownMs: number | null;
-  isLocked: boolean;
-}) {
+const CountdownChip = memo(function CountdownChip({ countdownMs, isLocked }: { countdownMs: number | null; isLocked: boolean }) {
   if (isLocked) return <div className="screamr-chip">LOCKED</div>;
   if (countdownMs === null) return <div className="screamr-chip">—</div>;
   if (countdownMs <= 0) return <div className="screamr-chip">LOCKED</div>;
@@ -754,7 +736,10 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-  const isLocked = status !== "open" || isPersonallyVoided;
+  // ✅ IMPORTANT: The UI lock state must be driven ONLY by status/voids/match lock — never by question text.
+  // This also ensures the buttons visually lock when the match locks (previously they looked clickable but did nothing).
+  const isLocked = matchIsLocked || status !== "open" || isPersonallyVoided;
+
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   const statusText = String(status || "").toUpperCase();
@@ -806,7 +791,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           <div className="text-right">
             <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
+            {!matchIsLocked && status === "open" ? (
+              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
+            ) : null}
           </div>
         </div>
 
@@ -849,7 +836,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <button
                 type="button"
                 disabled={isLocked || isSaving}
-                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${yesBtn}`}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${yesBtn}`}
                 onClick={() => onSetPick("yes")}
               >
                 YES
@@ -858,7 +847,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <button
                 type="button"
                 disabled={isLocked || isSaving}
-                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${noBtn}`}
+                className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                  isLocked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+                } ${noBtn}`}
                 onClick={() => onSetPick("no")}
               >
                 NO
@@ -991,7 +982,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
         </div>
 
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
-          <div className="absolute inset-0 opacity-[0.55]" style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }} />
+          <div
+            className="absolute inset-0 opacity-[0.55]"
+            style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }}
+          />
           <div className="relative">
             <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
             <div
@@ -1002,7 +996,10 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
+              <div
+                className="text-[22px] font-black tracking-[0.12em] text-white"
+                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
+              >
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -1052,9 +1049,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
-                yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"
-              }`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
               onClick={onSetPickYes}
             >
               BLIND YES
@@ -1063,9 +1060,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
-                noSelected ? "btn-no btn-no--selected" : "btn-no"
-              }`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
+                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
+              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
               onClick={onSetPickNo}
             >
               BLIND NO
@@ -1590,8 +1587,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         }
       `}</style>
 
-      {/* (rest of render unchanged) */}
-
       {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
         <div className="flex items-center justify-between">
@@ -1640,9 +1635,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "Locks in… see card timers"}</div>
 
         {err ? (
-          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
-            {err}
-          </div>
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
         ) : null}
       </div>
 
