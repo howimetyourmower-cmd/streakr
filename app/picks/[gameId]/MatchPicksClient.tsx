@@ -534,7 +534,13 @@ function BigFeatureButton({
 
 /* ---------------- COMMENTS UI ---------------- */
 
-const CommentsPanel = memo(function CommentsPanel({ questionId, canWrite }: { questionId: string; canWrite: boolean }) {
+const CommentsPanel = memo(function CommentsPanel({
+  questionId,
+  canWrite,
+}: {
+  questionId: string;
+  canWrite: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -605,7 +611,9 @@ const CommentsPanel = memo(function CommentsPanel({ questionId, canWrite }: { qu
       {open ? (
         <div className="mt-2 rounded-2xl border border-white/10 bg-black/45 p-4">
           {err ? (
-            <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200/90">{err}</div>
+            <div className="mb-3 rounded-xl border border-rose-400/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200/90">
+              {err}
+            </div>
           ) : null}
 
           {loading ? (
@@ -617,9 +625,7 @@ const CommentsPanel = memo(function CommentsPanel({ questionId, canWrite }: { qu
               {items.map((c) => (
                 <div key={c.id} className="rounded-xl border border-white/10 bg-black/35 px-3 py-2">
                   <div className="text-[13px] text-white/85 leading-snug whitespace-pre-wrap break-words">{c.body}</div>
-                  <div className="mt-1 text-[11px] text-white/40">
-                    {c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}
-                  </div>
+                  <div className="mt-1 text-[11px] text-white/40">{c.createdAt ? new Date(c.createdAt).toLocaleString() : "—"}</div>
                 </div>
               ))}
             </div>
@@ -656,13 +662,126 @@ const CommentsPanel = memo(function CommentsPanel({ questionId, canWrite }: { qu
   );
 });
 
-/* Countdown chip (deterministic, server-derived) */
+/* Countdown chip (match-wide, status-driven, colored) */
 
-const CountdownChip = memo(function CountdownChip({ countdownMs, isLocked }: { countdownMs: number | null; isLocked: boolean }) {
-  if (isLocked) return <div className="screamr-chip">LOCKED</div>;
-  if (countdownMs === null) return <div className="screamr-chip">—</div>;
-  if (countdownMs <= 0) return <div className="screamr-chip">LOCKED</div>;
-  return <div className="screamr-chip">{msToCountdown(countdownMs)}</div>;
+const CountdownChip = memo(function CountdownChip({
+  countdownMs,
+  matchIsLocked,
+  status,
+}: {
+  countdownMs: number | null;
+  matchIsLocked: boolean;
+  status: QuestionStatus;
+}) {
+  // Color variants
+  const baseStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: "0.14em",
+    padding: "8px 10px",
+    borderRadius: 14,
+    minWidth: 150,
+    textAlign: "center",
+    background: "rgba(0,0,0,0.60)",
+  };
+
+  // FINAL / VOID always win
+  if (status === "final") {
+    return (
+      <div
+        className="screamr-chip"
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(16,185,129,0.55)",
+          color: "rgba(209,250,229,0.95)",
+          boxShadow: "0 0 18px rgba(16,185,129,0.18)",
+        }}
+      >
+        FINAL
+      </div>
+    );
+  }
+
+  if (status === "void") {
+    return (
+      <div
+        className="screamr-chip"
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(255,255,255,0.18)",
+          color: "rgba(255,255,255,0.70)",
+          boxShadow: "0 0 16px rgba(255,255,255,0.06)",
+        }}
+      >
+        VOID
+      </div>
+    );
+  }
+
+  // Pending comes from same source as OPEN / FINAL
+  if (status === "pending") {
+    return (
+      <div
+        className="screamr-chip"
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(255,46,77,0.45)",
+          color: "rgba(255,255,255,0.92)",
+          boxShadow: "0 0 18px rgba(255,46,77,0.18)",
+        }}
+      >
+        LOCKED
+      </div>
+    );
+  }
+
+  // status === open → timer until bounce
+  if (matchIsLocked || (typeof countdownMs === "number" && countdownMs <= 0)) {
+    return (
+      <div
+        className="screamr-chip"
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(255,46,77,0.45)",
+          color: "rgba(255,255,255,0.92)",
+          boxShadow: "0 0 18px rgba(255,46,77,0.18)",
+        }}
+      >
+        LOCKED
+      </div>
+    );
+  }
+
+  if (countdownMs === null) {
+    return (
+      <div
+        className="screamr-chip"
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(0,229,255,0.40)",
+          color: "rgba(0,229,255,0.92)",
+          boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+        }}
+      >
+        —
+      </div>
+    );
+  }
+
+  // OPEN timer (cyan)
+  return (
+    <div
+      className="screamr-chip"
+      style={{
+        ...baseStyle,
+        border: "1px solid rgba(0,229,255,0.45)",
+        color: "rgba(0,229,255,0.95)",
+        boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+      }}
+    >
+      {msToCountdown(countdownMs)}
+    </div>
+  );
 });
 
 type PanicModalState =
@@ -736,10 +855,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-  // ✅ IMPORTANT: The UI lock state must be driven ONLY by status/voids/match lock — never by question text.
-  // This also ensures the buttons visually lock when the match locks (previously they looked clickable but did nothing).
-  const isLocked = matchIsLocked || status !== "open" || isPersonallyVoided;
-
+  const isLocked = status !== "open" || isPersonallyVoided;
   const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   const statusText = String(status || "").toUpperCase();
@@ -761,7 +877,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip countdownMs={countdownMs} isLocked={matchIsLocked} />
+            <CountdownChip countdownMs={countdownMs} matchIsLocked={matchIsLocked} status={status} />
 
             <button
               type="button"
@@ -791,9 +907,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           <div className="text-right">
             <div className="text-[12px] font-black tracking-[0.14em] text-white/55 leading-none">{statusText}</div>
-            {!matchIsLocked && status === "open" ? (
-              <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div>
-            ) : null}
+            {!matchIsLocked && status === "open" ? <div className="mt-1 text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
         </div>
 
@@ -943,7 +1057,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip countdownMs={countdownMs} isLocked={matchIsLocked} />
+            <CountdownChip countdownMs={countdownMs} matchIsLocked={matchIsLocked} status={status} />
 
             <button
               type="button"
@@ -982,10 +1096,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
         </div>
 
         <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
-          <div
-            className="absolute inset-0 opacity-[0.55]"
-            style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }}
-          />
+          <div className="absolute inset-0 opacity-[0.55]" style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }} />
           <div className="relative">
             <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
             <div
@@ -996,10 +1107,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
                 background: "rgba(0,0,0,0.35)",
               }}
             >
-              <div
-                className="text-[22px] font-black tracking-[0.12em] text-white"
-                style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}
-              >
+              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
                 MYSTERY GAMBLE
               </div>
             </div>
@@ -1049,9 +1157,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
+                yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"
+              }`}
               onClick={onSetPickYes}
             >
               BLIND YES
@@ -1060,9 +1168,9 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <button
               type="button"
               disabled={locked || isSaving}
-              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
-                locked || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
+              className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${locked || isSaving ? "opacity-50 cursor-not-allowed" : ""} ${
+                noSelected ? "btn-no btn-no--selected" : "btn-no"
+              }`}
               onClick={onSetPickNo}
             >
               BLIND NO
@@ -1547,6 +1655,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           100%{ transform: translate3d(-220px, -220px, 0); }
         }
 
+        /* kept for compatibility (chip is now styled inline per-status) */
         .screamr-chip{
           font-size: 12px;
           font-weight: 900;
@@ -1635,7 +1744,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "Locks in… see card timers"}</div>
 
         {err ? (
-          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">{err}</div>
+          <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
+            {err}
+          </div>
         ) : null}
       </div>
 
