@@ -5,12 +5,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 
 type SquiggleGame = {
-  squiggleId?: number; // depending on your squiggle wrapper
-  id?: number; // some wrappers use id
+  squiggleId?: number;
+  id?: number;
   startTimeUtc: string;
   status: "scheduled" | "live" | "final";
   homeTeam: string;
   awayTeam: string;
+  quarter?: number | string | null;
 };
 
 type QuestionStatusDoc = {
@@ -23,7 +24,7 @@ type LocalGame = {
   id: string;
   match: string;
   venue?: string;
-  startTime: string; // ISO (UTC) from your /api/picks
+  startTime: string;
 };
 
 type PicksApiResponse = {
@@ -37,6 +38,7 @@ type ResolvedGameState = {
   countdownMs: number;
   isLocked: boolean;
   status: "scheduled" | "live" | "final";
+  currentQuarter: number; // 0 pregame, 1-4 live quarters, 5 final
   source: "manual" | "squiggle" | "local";
   debug?: {
     roundNumber: number;
@@ -47,6 +49,8 @@ type ResolvedGameState = {
     squiggleStartTime?: string;
     squiggleHome?: string;
     squiggleAway?: string;
+    squiggleQuarter?: number | null;
+    derivedQuarterMode?: "squiggle" | "timer";
   };
 };
 
@@ -125,6 +129,79 @@ function safeDateMs(iso: string | null | undefined): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+function normalizeQuarter(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const q = Math.floor(n);
+  if (q < 0) return 0;
+  if (q > 5) return 5;
+  return q;
+}
+
+/**
+ * Beta timer-based quarter model.
+ * Good enough to prevent Panic abuse before you wire official live quarter state.
+ *
+ * Timeline from bounce:
+ * - Q1: 0m -> 30m
+ * - Q1 break: 30m -> 36m   (still treat as Q1 for Panic closure after quarter boundary)
+ * - Q2: 36m -> 66m
+ * - Halftime: 66m -> 86m   (treat as Q2)
+ * - Q3: 86m -> 116m
+ * - Q3 break: 116m -> 122m (treat as Q3)
+ * - Q4: 122m -> 152m
+ * - Final after 152m
+ */
+function deriveQuarterFromTimer(startMs: number, nowMs: number): number {
+  const elapsedMs = nowMs - startMs;
+  if (elapsedMs < 0) return 0;
+
+  const minute = 60_000;
+
+  const q1End = 30 * minute;
+  const q1BreakEnd = 36 * minute;
+  const q2End = 66 * minute;
+  const halftimeEnd = 86 * minute;
+  const q3End = 116 * minute;
+  const q3BreakEnd = 122 * minute;
+  const q4End = 152 * minute;
+
+  if (elapsedMs < q1End) return 1;
+  if (elapsedMs < q1BreakEnd) return 1;
+
+  if (elapsedMs < q2End) return 2;
+  if (elapsedMs < halftimeEnd) return 2;
+
+  if (elapsedMs < q3End) return 3;
+  if (elapsedMs < q3BreakEnd) return 3;
+
+  if (elapsedMs < q4End) return 4;
+
+  return 5;
+}
+
+function deriveCurrentQuarter(
+  matched: SquiggleGame | null,
+  localStartMs: number,
+  nowMs: number
+): { currentQuarter: number; mode: "squiggle" | "timer" } {
+  const squiggleQuarter = normalizeQuarter(matched?.quarter);
+
+  if (matched?.status === "scheduled") {
+    return { currentQuarter: 0, mode: squiggleQuarter !== null ? "squiggle" : "timer" };
+  }
+
+  if (matched?.status === "final") {
+    return { currentQuarter: 5, mode: squiggleQuarter !== null ? "squiggle" : "timer" };
+  }
+
+  if (squiggleQuarter !== null && squiggleQuarter >= 1 && squiggleQuarter <= 4) {
+    return { currentQuarter: squiggleQuarter, mode: "squiggle" };
+  }
+
+  return { currentQuarter: deriveQuarterFromTimer(localStartMs, nowMs), mode: "timer" };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -137,7 +214,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "gameId required" }, { status: 400 });
     }
 
-    // Defaults
     const season = seasonParam ? Number(seasonParam) : 2026;
     const roundNumber = roundParam ? Number(roundParam) : roundNumberFromGameId(gameId);
 
@@ -147,7 +223,6 @@ export async function GET(req: NextRequest) {
 
     const now = new Date();
 
-    // 1) Load YOUR local game first (this gives startTime + match)
     const localRoundGames = await fetchLocalRoundGames(req, roundNumber);
     const localGame = localRoundGames.find((g) => String(g.id) === String(gameId));
 
@@ -160,7 +235,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Local game missing/invalid startTime" }, { status: 500 });
     }
 
-    // 2) Fetch Squiggle games for that round and try to match by teams + closest start time
     let matched: SquiggleGame | null = null;
     let matchedBy: "teams+time" | "teamsOnly" | "none" = "none";
 
@@ -174,7 +248,6 @@ export async function GET(req: NextRequest) {
     const teamMatches = squiggleGames.filter((g) => sameTeamsOrderInsensitive(localGame.match, g.homeTeam, g.awayTeam));
 
     if (teamMatches.length > 0) {
-      // pick the closest start time
       const best = teamMatches
         .map((g) => {
           const ms = safeDateMs(g.startTimeUtc);
@@ -183,7 +256,6 @@ export async function GET(req: NextRequest) {
         })
         .sort((a, b) => a.diff - b.diff)[0];
 
-      // accept if within 12 mins; otherwise fallback to teamsOnly
       if (best && Number.isFinite(best.diff) && best.diff <= 12 * 60 * 1000) {
         matched = best.g;
         matchedBy = "teams+time";
@@ -195,7 +267,6 @@ export async function GET(req: NextRequest) {
 
     const startTimeUtc = new Date(localStartMs).toISOString();
 
-    // 3) Read questionStatus docs for this game (manual override)
     const statusSnap = await db
       .collection("questionStatus")
       .where("questionId", ">=", `${gameId}-`)
@@ -212,7 +283,6 @@ export async function GET(req: NextRequest) {
       if (d.status === "locked") anyLocked = true;
     });
 
-    // 4) Determine lock + status
     const nowMs = now.getTime();
     const countdownMs = Math.max(0, localStartMs - nowMs);
 
@@ -224,6 +294,8 @@ export async function GET(req: NextRequest) {
     const status: "scheduled" | "live" | "final" =
       squiggleStatus ?? (nowMs >= localStartMs ? "live" : "scheduled");
 
+    const { currentQuarter, mode } = deriveCurrentQuarter(matched, localStartMs, nowMs);
+
     const resolved: ResolvedGameState = {
       gameId,
       startTimeUtc,
@@ -231,6 +303,7 @@ export async function GET(req: NextRequest) {
       countdownMs,
       isLocked,
       status,
+      currentQuarter,
       source: manualOverride ? "manual" : matched ? "squiggle" : "local",
       debug: {
         roundNumber,
@@ -241,6 +314,8 @@ export async function GET(req: NextRequest) {
         squiggleStartTime: matched?.startTimeUtc,
         squiggleHome: matched?.homeTeam,
         squiggleAway: matched?.awayTeam,
+        squiggleQuarter: normalizeQuarter(matched?.quarter),
+        derivedQuarterMode: mode,
       },
     };
 
