@@ -58,6 +58,7 @@ type ResolvedGameState = {
   countdownMs: number;
   isLocked: boolean;
   status: "scheduled" | "live" | "final";
+  currentQuarter?: number; // 0 pregame, 1-4 live quarters, 5 final (recommended)
 };
 
 type ApiComment = {
@@ -168,6 +169,14 @@ function safeParseUtcToMs(isoUtc: string | undefined | null): number | null {
   if (!isoUtc) return null;
   const t = new Date(String(isoUtc)).getTime();
   return Number.isFinite(t) ? t : null;
+}
+
+function normalizeCurrentQuarter(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  if (n < 0) return 0;
+  if (n > 5) return 5;
+  return Math.floor(n);
 }
 
 /* Teams */
@@ -382,9 +391,6 @@ function ResultPill({
   return <span className={`${base} border-white/15 bg-white/5 text-white/70`}>FINAL</span>;
 }
 
-/**
- * show FULL question always
- */
 const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   const style: React.CSSProperties = {
     lineHeight: 1.22,
@@ -395,10 +401,7 @@ const QuestionText = memo(function QuestionText({ text }: { text: string }) {
   };
 
   return (
-    <div
-      className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal hyphens-auto"
-      style={style}
-    >
+    <div className="text-[17px] md:text-[18px] font-extrabold text-white break-words whitespace-normal hyphens-auto" style={style}>
       {text}
     </div>
   );
@@ -475,12 +478,6 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
   );
 });
 
-/**
- * Match-wide chip only:
- * - pre-bounce: OPEN
- * - post-bounce: LOCKED
- * - per-question FINAL/VOID overrides
- */
 const LockChip = memo(function LockChip({
   matchIsLocked,
   status,
@@ -638,8 +635,6 @@ function ModalShell({
   );
 }
 
-/* ---------------- COMMENTS UI ---------------- */
-
 const CommentsPanel = memo(function CommentsPanel({
   questionId,
   canWrite,
@@ -792,6 +787,7 @@ type PickCardProps = {
   selected: LocalPick;
   isSaving: boolean;
   panicEnabledHere: boolean;
+  panicWindowText: string | null;
   canWriteComments: boolean;
   onOpenPanic: () => void;
   onSetPick: (value: PickOutcome) => void;
@@ -809,6 +805,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     selected,
     isSaving,
     panicEnabledHere,
+    panicWindowText,
     canWriteComments,
     onOpenPanic,
     onSetPick,
@@ -844,9 +841,7 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           <div className="flex items-start gap-2 shrink-0">
             <LockChip matchIsLocked={matchIsLocked} status={status} />
 
-            {matchIsLocked && panicEnabledHere ? (
-              <SmallActionButton label="PANIC" tone="red" onClick={onOpenPanic} />
-            ) : null}
+            {panicEnabledHere ? <SmallActionButton label="PANIC" tone="red" onClick={onOpenPanic} /> : null}
 
             <button
               type="button"
@@ -876,6 +871,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
 
           <div className="text-right">
             {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
+            {matchIsLocked && !panicEnabledHere && panicWindowText ? (
+              <div className="text-[11px] text-white/35 leading-none">{panicWindowText}</div>
+            ) : null}
           </div>
         </div>
 
@@ -1323,6 +1321,16 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return r?.isLocked ?? false;
   }, [countdownMsToUse, resolved]);
 
+  const currentQuarter = useMemo(() => {
+    const fromState = normalizeCurrentQuarter(resolved?.currentQuarter);
+    if (fromState !== null) return fromState;
+
+    const fromRef = normalizeCurrentQuarter(resolvedRef.current?.currentQuarter);
+    if (fromRef !== null) return fromRef;
+
+    return null;
+  }, [resolved]);
+
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
   const totalQuestions = questions.length || 0;
 
@@ -1392,18 +1400,36 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
+  function panicWindowMatchesQuarter(questionQuarter: number, liveQuarter: number | null) {
+    if (liveQuarter === null) return false;
+    if (liveQuarter < 1 || liveQuarter > 4) return false;
+
+    if (questionQuarter === 0) {
+      return liveQuarter >= 1 && liveQuarter <= 3;
+    }
+
+    return liveQuarter === questionQuarter;
+  }
+
+  function getPanicWindowText(questionQuarter: number, liveQuarter: number | null, status: QuestionStatus) {
+    if (status === "final" || status === "void") return null;
+    if (!effectiveMatchIsLocked) return null;
+    if (liveQuarter === null) return "Panic unavailable";
+    if (questionQuarter === 0) {
+      return liveQuarter >= 4 ? "Panic window closed" : null;
+    }
+    return liveQuarter > questionQuarter ? `Panic window closed` : null;
+  }
+
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
-
-    const lockedForPanic = effectiveMatchIsLocked || displayStatus === "pending";
-    if (!lockedForPanic) return false;
-
+    if (!effectiveMatchIsLocked) return false;
+    if (!panicWindowMatchesQuarter(q.quarter, currentQuarter)) return false;
     if (q.isSponsorQuestion) return false;
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
     if (displayStatus === "final" || displayStatus === "void") return false;
     if (!(selected === "yes" || selected === "no")) return false;
-
     return true;
   }
 
@@ -1649,7 +1675,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
         <div className="mt-4 flex items-center justify-between text-[13px] text-white/75">
           <div>
-            Picks selected: <span className="text-white font-black">{selectedCount} / {totalQuestions}</span>
+            Picks selected:{" "}
+            <span className="text-white font-black">
+              {selectedCount} / {totalQuestions}
+            </span>
           </div>
           <div>
             Locks: <span className="text-white font-black">{lockedCount}</span>
@@ -1667,7 +1696,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           />
         </div>
 
-        <div className="mt-3 text-[12px] text-white/55">{effectiveMatchIsLocked ? "LOCKED" : "OPEN — locks at bounce"}</div>
+        <div className="mt-3 text-[12px] text-white/55">
+          {effectiveMatchIsLocked ? "LOCKED" : "OPEN — locks at bounce"}
+          {currentQuarter !== null ? ` • Q${currentQuarter === 5 ? "FINAL" : currentQuarter}` : ""}
+        </div>
 
         {err ? (
           <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
@@ -1688,6 +1720,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isSaving = !!saving[q.id];
 
             const panicEnabledHere = canShowPanic(q, status, selected);
+            const panicWindowText = getPanicWindowText(q.quarter, currentQuarter, status);
 
             if (q.isSponsorQuestion) {
               return (
@@ -1718,6 +1751,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 selected={selected}
                 isSaving={isSaving}
                 panicEnabledHere={panicEnabledHere}
+                panicWindowText={panicWindowText}
                 canWriteComments={!!user}
                 onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
                 onSetPick={(v) => void setPick(q.id, v, status)}
@@ -1795,7 +1829,8 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       <ModalShell open={!!freeKickModal} title="FREE KICK" onClose={() => setFreeKickModal(null)}>
         <div className="text-sm text-white/80 leading-snug">
-          Free Kick is a <span className="text-white font-black">once-per-season</span> save. If you lost this game, using Free Kick protects your streak.
+          Free Kick is a <span className="text-white font-black">once-per-season</span> save.
+          If you lost this game, using Free Kick protects your streak.
         </div>
 
         {freeKickErr ? <div className="mt-3 text-sm text-rose-200/90">{freeKickErr}</div> : null}
