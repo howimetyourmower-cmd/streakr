@@ -164,19 +164,6 @@ function parseTeams(match: string) {
   return { home: m, away: "" };
 }
 
-function msToCountdown(ms: number) {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(totalSec / 86400);
-  const rem = totalSec % 86400;
-
-  const hh = Math.floor(rem / 3600);
-  const mm = Math.floor((rem % 3600) / 60);
-  const ss = rem % 60;
-
-  const pad2 = (n: number) => String(n).padStart(2, "0");
-  return `${d}d ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-}
-
 function safeParseUtcToMs(isoUtc: string | undefined | null): number | null {
   if (!isoUtc) return null;
   const t = new Date(String(isoUtc)).getTime();
@@ -486,49 +473,165 @@ const GamePickLogosRow = memo(function GamePickLogosRow({ match }: { match: stri
 });
 
 /**
- * BIG Feature Buttons (Panic / Free Kick)
+ * Match-wide chip only:
+ * - pre-bounce: OPEN
+ * - post-bounce: LOCKED
+ * - per-question FINAL/VOID overrides
  */
-function BigFeatureButton({
-  variant,
+const LockChip = memo(function LockChip({
+  matchIsLocked,
+  status,
+}: {
+  matchIsLocked: boolean;
+  status: QuestionStatus;
+}) {
+  const baseStyle: React.CSSProperties = {
+    fontSize: 12,
+    fontWeight: 900,
+    letterSpacing: "0.14em",
+    padding: "8px 10px",
+    borderRadius: 14,
+    minWidth: 140,
+    textAlign: "center",
+    background: "rgba(0,0,0,0.60)",
+  };
+
+  if (status === "final") {
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(16,185,129,0.55)",
+          color: "rgba(209,250,229,0.95)",
+          boxShadow: "0 0 18px rgba(16,185,129,0.18)",
+        }}
+      >
+        FINAL
+      </div>
+    );
+  }
+
+  if (status === "void") {
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(255,255,255,0.18)",
+          color: "rgba(255,255,255,0.70)",
+          boxShadow: "0 0 16px rgba(255,255,255,0.06)",
+        }}
+      >
+        VOID
+      </div>
+    );
+  }
+
+  if (matchIsLocked) {
+    return (
+      <div
+        style={{
+          ...baseStyle,
+          border: "1px solid rgba(255,46,77,0.45)",
+          color: "rgba(255,255,255,0.92)",
+          boxShadow: "0 0 18px rgba(255,46,77,0.18)",
+        }}
+      >
+        LOCKED
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        ...baseStyle,
+        border: "1px solid rgba(0,229,255,0.45)",
+        color: "rgba(0,229,255,0.95)",
+        boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+      }}
+    >
+      OPEN
+    </div>
+  );
+});
+
+function SmallActionButton({
+  label,
   disabled,
   onClick,
+  tone,
 }: {
-  variant: "panic" | "freekick";
+  label: string;
   disabled?: boolean;
   onClick?: () => void;
+  tone: "red" | "teal" | "white";
 }) {
-  const isPanic = variant === "panic";
-  const src = isPanic ? "/screamr/panic-button.png" : "/screamr/free-kick.png";
+  const styles =
+    tone === "red"
+      ? {
+          border: "1px solid rgba(255,46,77,0.40)",
+          background: "rgba(255,46,77,0.10)",
+          color: "rgba(255,255,255,0.92)",
+          boxShadow: "0 0 18px rgba(255,46,77,0.14)",
+        }
+      : tone === "teal"
+      ? {
+          border: "1px solid rgba(0,229,255,0.40)",
+          background: "rgba(0,229,255,0.10)",
+          color: "rgba(0,229,255,0.95)",
+          boxShadow: "0 0 18px rgba(0,229,255,0.10)",
+        }
+      : {
+          border: "1px solid rgba(255,255,255,0.14)",
+          background: "rgba(255,255,255,0.05)",
+          color: "rgba(255,255,255,0.85)",
+          boxShadow: "none",
+        };
 
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
       disabled={!!disabled}
-      className={[
-        "relative overflow-hidden",
-        "rounded-[18px]",
-        "h-[82px] md:h-[92px]",
-        "w-full",
-        "flex-1 min-w-0",
-        "transition-transform active:scale-[0.99]",
-        disabled ? "opacity-40 grayscale cursor-not-allowed" : "hover:brightness-110",
-      ].join(" ")}
-      aria-label={isPanic ? "Panic Button" : "Free Kick"}
-      title={isPanic ? "Panic Button" : "Free Kick"}
-      style={{
-        border: `1px solid ${isPanic ? "rgba(255,46,77,0.45)" : "rgba(246,198,75,0.45)"}`,
-        background: "rgba(0,0,0,0.55)",
-        boxShadow: disabled
-          ? "none"
-          : isPanic
-          ? "0 0 34px rgba(255,46,77,0.18)"
-          : "0 0 34px rgba(246,198,75,0.14)",
-      }}
+      onClick={disabled ? undefined : onClick}
+      className={`h-10 px-4 rounded-xl font-black tracking-[0.12em] text-[11px] transition active:scale-[0.99] ${
+        disabled ? "opacity-45 cursor-not-allowed" : "hover:brightness-110"
+      }`}
+      style={styles}
     >
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={variant} className="h-full w-full object-contain p-[6px]" draggable={false} />
+      {label}
     </button>
+  );
+}
+
+function ModalShell({
+  open,
+  title,
+  children,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
+      <div className="absolute inset-0 bg-black/75" onClick={onClose} />
+      <div className="relative w-full max-w-[560px] rounded-3xl border border-white/10 bg-black/90 backdrop-blur p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-[14px] font-black tracking-[0.14em] text-white/90">{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 w-10 rounded-full border border-white/15 bg-white/5 flex items-center justify-center hover:bg-white/10"
+          >
+            <span className="text-white/85 font-black">×</span>
+          </button>
+        </div>
+        <div className="mt-4">{children}</div>
+      </div>
+    </div>
   );
 }
 
@@ -662,111 +765,6 @@ const CommentsPanel = memo(function CommentsPanel({
   );
 });
 
-/**
- * Match-wide chip only:
- * - before bounce: countdown
- * - after bounce: LOCKED
- * - after settlement: FINAL (per-question)
- * No extra OPEN/LOCKED labels anywhere else.
- */
-const CountdownChip = memo(function CountdownChip({
-  countdownMs,
-  matchIsLocked,
-  status,
-}: {
-  countdownMs: number | null;
-  matchIsLocked: boolean;
-  status: QuestionStatus;
-}) {
-  const baseStyle: React.CSSProperties = {
-    fontSize: 12,
-    fontWeight: 900,
-    letterSpacing: "0.14em",
-    padding: "8px 10px",
-    borderRadius: 14,
-    minWidth: 150,
-    textAlign: "center",
-    background: "rgba(0,0,0,0.60)",
-  };
-
-  // FINAL per-question wins
-  if (status === "final") {
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          border: "1px solid rgba(16,185,129,0.55)",
-          color: "rgba(209,250,229,0.95)",
-          boxShadow: "0 0 18px rgba(16,185,129,0.18)",
-        }}
-      >
-        FINAL
-      </div>
-    );
-  }
-
-  // VOID
-  if (status === "void") {
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          border: "1px solid rgba(255,255,255,0.18)",
-          color: "rgba(255,255,255,0.70)",
-          boxShadow: "0 0 16px rgba(255,255,255,0.06)",
-        }}
-      >
-        VOID
-      </div>
-    );
-  }
-
-  // After bounce: LOCKED for all open questions
-  if (matchIsLocked) {
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          border: "1px solid rgba(255,46,77,0.45)",
-          color: "rgba(255,255,255,0.92)",
-          boxShadow: "0 0 18px rgba(255,46,77,0.18)",
-        }}
-      >
-        LOCKED
-      </div>
-    );
-  }
-
-  // Pre-bounce: show timer
-  if (countdownMs === null) {
-    return (
-      <div
-        style={{
-          ...baseStyle,
-          border: "1px solid rgba(0,229,255,0.40)",
-          color: "rgba(0,229,255,0.92)",
-          boxShadow: "0 0 18px rgba(0,229,255,0.14)",
-        }}
-      >
-        —
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        ...baseStyle,
-        border: "1px solid rgba(0,229,255,0.45)",
-        color: "rgba(0,229,255,0.95)",
-        boxShadow: "0 0 18px rgba(0,229,255,0.14)",
-      }}
-    >
-      {msToCountdown(countdownMs)}
-    </div>
-  );
-});
-
 type PanicModalState =
   | null
   | {
@@ -789,20 +787,15 @@ type PickCardProps = {
   match: string;
 
   matchIsLocked: boolean;
-  countdownMs: number | null;
 
   selected: LocalPick;
   isSaving: boolean;
-
-  freeKickEligibleForThisGame: boolean;
-  freeKickUsedSeason: boolean;
 
   panicEnabledHere: boolean;
 
   canWriteComments: boolean;
 
   onOpenPanic: () => void;
-  onOpenFreeKick: () => void;
 
   onSetPick: (value: PickOutcome) => void;
   onClearPick: () => void;
@@ -816,15 +809,11 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
     isPersonallyVoided,
     match,
     matchIsLocked,
-    countdownMs,
     selected,
     isSaving,
-    freeKickEligibleForThisGame,
-    freeKickUsedSeason,
     panicEnabledHere,
     canWriteComments,
     onOpenPanic,
-    onOpenFreeKick,
     onSetPick,
     onClearPick,
   } = props;
@@ -838,10 +827,8 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
   const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
 
-  // NOTE: lock interaction after bounce OR when question is settled/voided/pending
+  // lock interaction after bounce OR when question is settled/voided/pending
   const isLockedForInteraction = matchIsLocked || status !== "open" || isPersonallyVoided;
-
-  const freeKickEnabledHere = freeKickEligibleForThisGame && !freeKickUsedSeason;
 
   return (
     <div className="screamr-card p-5">
@@ -860,7 +847,12 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip countdownMs={countdownMs} matchIsLocked={matchIsLocked} status={status} />
+            <LockChip matchIsLocked={matchIsLocked} status={status} />
+
+            {/* Panic appears ONLY once game locks and ONLY when eligible */}
+            {matchIsLocked && panicEnabledHere ? (
+              <SmallActionButton label="PANIC" tone="red" onClick={onOpenPanic} />
+            ) : null}
 
             <button
               type="button"
@@ -888,15 +880,9 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
             {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
           </div>
 
-          {/* removed extra OPEN/LOCKED/FINAL label to avoid duplication */}
           <div className="text-right">
             {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
           </div>
-        </div>
-
-        <div className="mt-3 flex items-center gap-3">
-          <BigFeatureButton variant="panic" disabled={!panicEnabledHere} onClick={panicEnabledHere ? onOpenPanic : undefined} />
-          <BigFeatureButton variant="freekick" disabled={!freeKickEnabledHere} onClick={freeKickEnabledHere ? onOpenFreeKick : undefined} />
         </div>
 
         {/* === CARD BODY === */}
@@ -959,14 +945,6 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
               <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/55">PERSONAL VOID — streak protected</div>
             ) : null}
 
-            {freeKickUsedSeason ? (
-              <div className="mt-3 text-center text-[11px] font-black tracking-[0.16em] text-white/45">FREE KICK: USED (SEASON)</div>
-            ) : null}
-
-            {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
-              <div className="mt-3 text-center text-[11px] text-white/55">Free Kick available (season): you lost this game — use once to protect streak.</div>
-            ) : null}
-
             <CommentsPanel questionId={q.id} canWrite={canWriteComments} />
           </div>
         </div>
@@ -975,51 +953,36 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   );
 });
 
-// ----- SponsorMysteryCard unchanged (kept mostly as-is, but remove duplicate OPEN/FINAL label) -----
-
 type SponsorCardProps = {
   q: ApiQuestion;
   status: QuestionStatus;
 
-  countdownMs: number | null;
   matchIsLocked: boolean;
 
   selected: LocalPick;
   isSaving: boolean;
 
-  freeKickEnabledHere: boolean;
-  freeKickUsedSeason: boolean;
-
   canWriteComments: boolean;
 
-  onOpenFreeKick: () => void;
   onClearPick: () => void;
   onSetPickYes: () => void;
   onSetPickNo: () => void;
 };
 
-const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardProps) {
-  const {
-    q,
-    status,
-    countdownMs,
-    matchIsLocked,
-    selected,
-    isSaving,
-    freeKickEnabledHere,
-    freeKickUsedSeason,
-    canWriteComments,
-    onOpenFreeKick,
-    onClearPick,
-    onSetPickYes,
-    onSetPickNo,
-  } = props;
+function sponsorImageFor(nameRaw: string | undefined | null) {
+  const n = String(nameRaw || "").toLowerCase();
+  // You can expand this mapping later
+  if (n.includes("rebel")) return "/sponsors/rebel-blind.png";
+  return "/sponsors/rebel-blind.png"; // default for now
+}
 
-  const sponsorName = (q.sponsorName || "SPONSOR").toUpperCase();
+const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardProps) {
+  const { q, status, matchIsLocked, selected, isSaving, canWriteComments, onClearPick, onSetPickYes, onSetPickNo } = props;
+
+  const sponsorName = (q.sponsorName || "REBEL SPORT").toUpperCase();
+  const prizeText = q.sponsorBlurb || "Pick YES or NO for a chance to win a $200 gift card.";
 
   const isRevealTime = matchIsLocked;
-  const showQuestionText = isRevealTime;
-
   const lockedForInteraction = matchIsLocked || status !== "open";
 
   const yesSelected = selected === "yes";
@@ -1039,7 +1002,7 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
           </div>
 
           <div className="flex items-start gap-2 shrink-0">
-            <CountdownChip countdownMs={countdownMs} matchIsLocked={matchIsLocked} status={status} />
+            <LockChip matchIsLocked={matchIsLocked} status={status} />
 
             <button
               type="button"
@@ -1061,44 +1024,61 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             <ResultPill status={status} selected={selected} correctPick={q.correctPick} outcome={q.correctOutcome ?? q.outcome} />
             {isSaving ? <span className="text-[11px] font-black tracking-[0.12em] text-white/35">SAVING…</span> : null}
           </div>
-
           <div className="text-right">
-            {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Locks at bounce</div> : null}
+            {!matchIsLocked && status === "open" ? <div className="text-[11px] text-white/35 leading-none">Reveals at bounce</div> : null}
           </div>
         </div>
 
-        <div className="mt-3 flex items-center gap-3">
-          <BigFeatureButton variant="panic" disabled />
-          <BigFeatureButton
-            variant="freekick"
-            disabled={!freeKickEnabledHere || freeKickUsedSeason}
-            onClick={freeKickEnabledHere && !freeKickUsedSeason ? onOpenFreeKick : undefined}
+        {/* PROMO BLOCK (your Rebel Sport style) */}
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+          <div
+            className="absolute inset-0 opacity-[0.55]"
+            style={{ background: "radial-gradient(640px 240px at 50% 0%, rgba(255,46,77,0.30), rgba(0,0,0,0) 65%)" }}
           />
-        </div>
 
-        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 px-4 py-4 text-center relative overflow-hidden">
-          <div className="absolute inset-0 opacity-[0.55]" style={{ background: "radial-gradient(600px 220px at 50% 0%, rgba(255,46,77,0.35), rgba(0,0,0,0) 65%)" }} />
           <div className="relative">
             <div className="text-[13px] font-black tracking-[0.20em] text-white/85">{sponsorName}</div>
-            <div
-              className="mt-2 inline-block rounded-xl px-4 py-2 border"
-              style={{
-                borderColor: "rgba(255,46,77,0.65)",
-                boxShadow: "0 0 26px rgba(255,46,77,0.20)",
-                background: "rgba(0,0,0,0.35)",
-              }}
-            >
-              <div className="text-[22px] font-black tracking-[0.12em] text-white" style={{ textShadow: "0 0 16px rgba(255,46,77,0.35)" }}>
-                MYSTERY GAMBLE
+
+            <div className="mt-3 rounded-2xl border border-white/10 bg-black/45 overflow-hidden">
+              {/* Image */}
+              <div className="relative w-full aspect-[16/9] bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={sponsorImageFor(q.sponsorName)}
+                  alt={`${sponsorName} blind question`}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  draggable={false}
+                />
+              </div>
+
+              {/* Copy */}
+              <div className="p-4">
+                <div className="text-[12px] font-black tracking-[0.18em] text-white/80">BLIND SPONSOR QUESTION</div>
+                <div className="mt-2 text-sm text-white/80 leading-snug">{prizeText}</div>
+
+                <div className="mt-3 text-[12px] text-white/70 leading-snug">
+                  {isRevealTime ? (
+                    <>
+                      The question is now <span className="text-white/90 font-black">REVEALED</span>. Pick correctly to go into the draw.
+                      Your pick <span className="text-white/90 font-black">increases</span> streak, but{" "}
+                      <span className="text-white/90 font-black">does not kill it</span>.
+                    </>
+                  ) : (
+                    <>
+                      Question shows <span className="text-white/90 font-black">once the game locks</span>. Pick YES/NO now to enter.
+                      If correct, you go into the draw. Pick increases streak but does not kill it.
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-            <div className="mt-2 text-[12px] font-black tracking-[0.18em] text-white/75">THE VAULT IS LOCKED!</div>
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
+        {/* Reveal / question box */}
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/55 p-4 relative overflow-hidden">
           <div className="rounded-2xl border border-white/10 bg-black/45 p-4 text-center relative overflow-hidden" style={{ minHeight: 150 }}>
-            {!showQuestionText ? (
+            {!isRevealTime ? (
               <>
                 <div className="absolute inset-0 backdrop-blur-[2px]" />
                 <div className="relative flex items-center justify-center" style={{ minHeight: 130 }}>
@@ -1122,18 +1102,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             )}
           </div>
 
-          {!isRevealTime ? (
-            <div className="mt-4 text-center">
-              <div className="text-[12px] font-black tracking-[0.22em]" style={{ color: "rgba(255,46,77,0.95)" }}>
-                REVEAL AT BOUNCE
-              </div>
-            </div>
-          ) : (
-            <div className="mt-4 text-center">
-              <div className="text-[12px] font-black tracking-[0.22em] text-white/70">REVEALED</div>
-            </div>
-          )}
-
           <div className="mt-4 grid grid-cols-2 gap-3">
             <button
               type="button"
@@ -1156,10 +1124,6 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
             >
               BLIND NO
             </button>
-          </div>
-
-          <div className="mt-3 text-center text-[12px] text-white/70 font-semibold">
-            Correct pick goes into the draw to win a <span className="text-white/90 font-black">$250 {sponsorName} voucher</span>.
           </div>
 
           <CommentsPanel questionId={q.id} canWrite={canWriteComments} />
@@ -1296,16 +1260,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return base + Math.max(0, elapsed);
   }
 
-  const matchIsLocked = useMemo(() => {
-    const r = resolved ?? resolvedRef.current;
-    return r?.isLocked ?? false;
-  }, [resolved]);
-
   // Primary countdown (from resolve-state, server-clock aligned)
   const derivedCountdownMs = useMemo(() => {
     const r = resolved ?? resolvedRef.current;
     if (!r) return null;
-    if (r.isLocked) return 0;
 
     const start = startMsRef.current;
     const now = derivedNowMs();
@@ -1368,11 +1326,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   // Fallback countdown (if resolve-state fails): local clock vs game.startTime
   const fallbackCountdownMs = useMemo(() => {
     if (!stableGame) return null;
-    if (matchIsLocked) return 0;
     const startMs = safeParseUtcToMs(stableGame.startTime);
     if (!startMs) return null;
     return Math.max(0, startMs - Date.now());
-  }, [stableGame, matchIsLocked, tick]);
+  }, [stableGame, tick]);
 
   const countdownMsToUse = useMemo(() => {
     // prefer server-aligned timer, fall back to local
@@ -1380,6 +1337,17 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (typeof v === "number") return v;
     return fallbackCountdownMs;
   }, [derivedCountdownMs, fallbackCountdownMs]);
+
+  /**
+   * ✅ Effective lock:
+   * If we have a countdown number, trust it.
+   * This prevents "isLocked true too early" from showing LOCKED before bounce.
+   */
+  const matchIsLocked = useMemo(() => {
+    if (typeof countdownMsToUse === "number") return countdownMsToUse <= 0;
+    const r = resolved ?? resolvedRef.current;
+    return r?.isLocked ?? false;
+  }, [countdownMsToUse, resolved]);
 
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
   const totalQuestions = questions.length || 0;
@@ -1453,9 +1421,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
 
+    // panic only after lock OR if backend moved question to pending
     const lockedForPanic = matchIsLocked || displayStatus === "pending";
-
     if (!lockedForPanic) return false;
+
     if (q.isSponsorQuestion) return false;
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
@@ -1679,22 +1648,33 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
 
       {/* Top app bar */}
       <div className="max-w-6xl mx-auto px-4 pt-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div className="text-[28px] md:text-[34px] font-black tracking-wide">{matchTitle}</div>
 
-          <button
-            type="button"
-            className="rounded-xl border px-4 py-2 font-black tracking-[0.10em]"
-            style={{
-              borderColor: "rgba(0,229,255,0.45)",
-              background: "rgba(0,0,0,0.55)",
-              color: "rgba(0,229,255,0.95)",
-              boxShadow: "0 0 18px rgba(0,229,255,0.14)",
-            }}
-            onClick={() => void fetchMatch("refresh")}
-          >
-            REFRESH
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Free Kick: top indicator only */}
+            {freeKickEligibleForThisGame && !freeKickUsedSeason ? (
+              <SmallActionButton
+                label="FREE KICK AVAILABLE"
+                tone="teal"
+                onClick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
+              />
+            ) : null}
+
+            <button
+              type="button"
+              className="rounded-xl border px-4 py-2 font-black tracking-[0.10em]"
+              style={{
+                borderColor: "rgba(0,229,255,0.45)",
+                background: "rgba(0,0,0,0.55)",
+                color: "rgba(0,229,255,0.95)",
+                boxShadow: "0 0 18px rgba(0,229,255,0.14)",
+              }}
+              onClick={() => void fetchMatch("refresh")}
+            >
+              REFRESH
+            </button>
+          </div>
         </div>
 
         {venueLine ? <div className="mt-1 text-[13px] text-white/55">{venueLine}</div> : null}
@@ -1722,7 +1702,7 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
           />
         </div>
 
-        <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "Locks at bounce"}</div>
+        <div className="mt-3 text-[12px] text-white/55">{matchIsLocked ? "LOCKED" : "OPEN — locks at bounce"}</div>
 
         {err ? (
           <div className="mt-3 text-sm text-rose-200/80 bg-rose-500/10 border border-rose-400/20 rounded-2xl px-4 py-2">
@@ -1751,14 +1731,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                   key={q.id}
                   q={q}
                   status={status}
-                  countdownMs={countdownMsToUse}
                   matchIsLocked={matchIsLocked}
                   selected={selected}
                   isSaving={isSaving}
-                  freeKickEnabledHere={freeKickEligibleForThisGame}
-                  freeKickUsedSeason={freeKickUsedSeason}
-                  canWriteComments={canWriteComments}
-                  onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
+                  canWriteComments={!!user}
                   onClearPick={() => void clearPick(q.id, status)}
                   onSetPickYes={() => void setPick(q.id, "yes", status)}
                   onSetPickNo={() => void setPick(q.id, "no", status)}
@@ -1775,15 +1751,11 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
                 isPersonallyVoided={isPersonallyVoided}
                 match={sg.match}
                 matchIsLocked={matchIsLocked}
-                countdownMs={countdownMsToUse}
                 selected={selected}
                 isSaving={isSaving}
-                freeKickEligibleForThisGame={freeKickEligibleForThisGame}
-                freeKickUsedSeason={freeKickUsedSeason}
                 panicEnabledHere={panicEnabledHere}
-                canWriteComments={canWriteComments}
+                canWriteComments={!!user}
                 onOpenPanic={() => setPanicModal({ questionId: q.id, questionText: q.question })}
-                onOpenFreeKick={() => setFreeKickModal({ gameId: sg.id, label: `${sg.match}` })}
                 onSetPick={(v) => void setPick(q.id, v, status)}
                 onClearPick={() => void clearPick(q.id, status)}
               />
@@ -1810,6 +1782,87 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
       </div>
 
       <div className="h-16" />
+
+      {/* PANIC MODAL */}
+      <ModalShell
+        open={!!panicModal}
+        title="PANIC BUTTON"
+        onClose={() => {
+          if (panicBusy) return;
+          setPanicModal(null);
+        }}
+      >
+        <div className="text-sm text-white/80 leading-snug">
+          Panic will <span className="text-white font-black">void</span> this one question and protect your streak.
+        </div>
+
+        {panicModal ? (
+          <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-white/85 text-sm">
+            {panicModal.questionText}
+          </div>
+        ) : null}
+
+        {panicErr ? <div className="mt-3 text-sm text-rose-200/90">{panicErr}</div> : null}
+
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setPanicModal(null)}
+            disabled={panicBusy}
+            className={`flex-1 h-12 rounded-2xl font-black tracking-[0.12em] border ${
+              panicBusy ? "opacity-40 cursor-not-allowed border-white/10 bg-white/5 text-white/60" : "border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+            }`}
+          >
+            CANCEL
+          </button>
+
+          <button
+            type="button"
+            onClick={() => (panicModal ? void triggerPanic(panicModal.questionId) : undefined)}
+            disabled={panicBusy || !panicModal}
+            className={`flex-1 h-12 rounded-2xl font-black tracking-[0.12em] border ${
+              panicBusy
+                ? "opacity-40 cursor-not-allowed border-rose-400/20 bg-rose-500/10 text-rose-200/80"
+                : "border-rose-400/30 bg-rose-500/12 text-rose-200 hover:bg-rose-500/18"
+            }`}
+          >
+            {panicBusy ? "APPLYING…" : "USE PANIC"}
+          </button>
+        </div>
+      </ModalShell>
+
+      {/* FREE KICK MODAL */}
+      <ModalShell open={!!freeKickModal} title="FREE KICK" onClose={() => setFreeKickModal(null)}>
+        <div className="text-sm text-white/80 leading-snug">
+          Free Kick is a <span className="text-white font-black">once-per-season</span> save.
+          If you lost this game, using Free Kick protects your streak.
+        </div>
+
+        {freeKickErr ? <div className="mt-3 text-sm text-rose-200/90">{freeKickErr}</div> : null}
+
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => setFreeKickModal(null)}
+            className="flex-1 h-12 rounded-2xl font-black tracking-[0.12em] border border-white/15 bg-white/5 text-white/85 hover:bg-white/10"
+          >
+            NOT NOW
+          </button>
+
+          <button
+            type="button"
+            onClick={() => triggerFreeKickSeasonUse()}
+            disabled={!freeKickEligibleForThisGame || freeKickUsedSeason}
+            className={`flex-1 h-12 rounded-2xl font-black tracking-[0.12em] border ${
+              !freeKickEligibleForThisGame || freeKickUsedSeason
+                ? "opacity-40 cursor-not-allowed border-white/10 bg-white/5 text-white/60"
+                : "border-[rgba(0,229,255,0.40)] bg-[rgba(0,229,255,0.10)] text-[rgba(0,229,255,0.95)] hover:brightness-110"
+            }`}
+          >
+            USE FREE KICK
+          </button>
+        </div>
+      </ModalShell>
     </div>
   );
 }
