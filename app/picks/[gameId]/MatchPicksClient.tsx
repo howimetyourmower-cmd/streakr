@@ -58,18 +58,21 @@ type ResolvedGameState = {
   countdownMs: number;
   isLocked: boolean;
   status: "scheduled" | "live" | "final";
-  currentQuarter?: number; // 0 pregame, 1-4 live quarters, 5 final (recommended)
+  currentQuarter?: number;
+  currentQuarterElapsedMs?: number;
+  currentQuarterPanicOpen?: boolean;
+  panicCutoffMinute?: number;
 };
 
 type ApiComment = {
   id: string;
   body: string;
   displayName: string | null;
-  createdAt: string | null; // ISO
+  createdAt: string | null;
 };
 
 const BRAND_BG = "#000000";
-const SEASON = 2026; // localStorage keys only (beta)
+const SEASON = 2026;
 
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
@@ -138,10 +141,6 @@ function playerSlug(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "");
 }
 
-/**
- * Firestore may contain "locked"
- * UI treats "locked" as "pending"
- */
 function safeStatus(s: unknown): QuestionStatus {
   const v = String(s || "").toLowerCase().trim();
   if (v === "open") return "open";
@@ -176,6 +175,12 @@ function normalizeCurrentQuarter(value: unknown): number | null {
   if (!Number.isFinite(n)) return null;
   if (n < 0) return 0;
   if (n > 5) return 5;
+  return Math.floor(n);
+}
+
+function normalizeNonNegativeMs(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
   return Math.floor(n);
 }
 
@@ -1331,6 +1336,27 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     return null;
   }, [resolved]);
 
+  const currentQuarterElapsedMs = useMemo(() => {
+    const fromState = normalizeNonNegativeMs(resolved?.currentQuarterElapsedMs);
+    if (fromState !== null) return fromState;
+
+    const fromRef = normalizeNonNegativeMs(resolvedRef.current?.currentQuarterElapsedMs);
+    if (fromRef !== null) return fromRef;
+
+    return null;
+  }, [resolved]);
+
+  const currentQuarterPanicOpen = useMemo(() => {
+    if (typeof resolved?.currentQuarterPanicOpen === "boolean") return resolved.currentQuarterPanicOpen;
+    if (typeof resolvedRef.current?.currentQuarterPanicOpen === "boolean") return resolvedRef.current.currentQuarterPanicOpen;
+    return false;
+  }, [resolved]);
+
+  const panicCutoffMinute = useMemo(() => {
+    const n = Number(resolved?.panicCutoffMinute ?? resolvedRef.current?.panicCutoffMinute ?? 28);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 28;
+  }, [resolved]);
+
   const selectedCount = useMemo(() => Object.values(picks).filter((v) => v === "yes" || v === "no").length, [picks]);
   const totalQuestions = questions.length || 0;
 
@@ -1400,31 +1426,50 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     });
   }
 
-  function panicWindowMatchesQuarter(questionQuarter: number, liveQuarter: number | null) {
+  function panicWindowMatchesQuarter(questionQuarter: number, liveQuarter: number | null, liveQuarterPanicOpen: boolean) {
+    if (!liveQuarterPanicOpen) return false;
     if (liveQuarter === null) return false;
     if (liveQuarter < 1 || liveQuarter > 4) return false;
 
+    // Full-game question: allow through Q1, Q2, and the open window of Q3 only
     if (questionQuarter === 0) {
-      return liveQuarter >= 1 && liveQuarter <= 3;
+      return liveQuarter === 1 || liveQuarter === 2 || liveQuarter === 3;
     }
 
     return liveQuarter === questionQuarter;
   }
 
-  function getPanicWindowText(questionQuarter: number, liveQuarter: number | null, status: QuestionStatus) {
+  function getPanicWindowText(
+    questionQuarter: number,
+    liveQuarter: number | null,
+    liveQuarterPanicOpen: boolean,
+    status: QuestionStatus
+  ) {
     if (status === "final" || status === "void") return null;
     if (!effectiveMatchIsLocked) return null;
     if (liveQuarter === null) return "Panic unavailable";
+
     if (questionQuarter === 0) {
-      return liveQuarter >= 4 ? "Panic window closed" : null;
+      if (liveQuarter >= 4) return `Panic closed after Q3 ${panicCutoffMinute}:00`;
+      if (liveQuarter === 3 && !liveQuarterPanicOpen) return `Panic closed at Q3 ${panicCutoffMinute}:00`;
+      return null;
     }
-    return liveQuarter > questionQuarter ? `Panic window closed` : null;
+
+    if (liveQuarter > questionQuarter) {
+      return `Panic closed at Q${questionQuarter} ${panicCutoffMinute}:00`;
+    }
+
+    if (liveQuarter === questionQuarter && !liveQuarterPanicOpen) {
+      return `Panic closed at Q${questionQuarter} ${panicCutoffMinute}:00`;
+    }
+
+    return null;
   }
 
   function canShowPanic(q: ApiQuestion, displayStatus: QuestionStatus, selected: LocalPick) {
     if (!user) return false;
     if (!effectiveMatchIsLocked) return false;
-    if (!panicWindowMatchesQuarter(q.quarter, currentQuarter)) return false;
+    if (!panicWindowMatchesQuarter(q.quarter, currentQuarter, currentQuarterPanicOpen)) return false;
     if (q.isSponsorQuestion) return false;
     if (panicUsed) return false;
     if (personalVoids[q.id]) return false;
@@ -1449,13 +1494,15 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         },
         body: JSON.stringify({
           roundNumber,
+          gameId,
           questionId,
         }),
       });
 
+      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+
       if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(txt || `Panic failed (${res.status})`);
+        throw new Error(payload?.error || `Panic failed (${res.status})`);
       }
 
       setPanicUsed(true);
@@ -1699,6 +1746,10 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         <div className="mt-3 text-[12px] text-white/55">
           {effectiveMatchIsLocked ? "LOCKED" : "OPEN — locks at bounce"}
           {currentQuarter !== null ? ` • Q${currentQuarter === 5 ? "FINAL" : currentQuarter}` : ""}
+          {currentQuarter !== null && currentQuarter >= 1 && currentQuarter <= 4
+            ? ` • Panic closes ${panicCutoffMinute}:00`
+            : ""}
+          {currentQuarterElapsedMs !== null ? ` • ${(currentQuarterElapsedMs / 60000).toFixed(1)}m` : ""}
         </div>
 
         {err ? (
@@ -1720,7 +1771,12 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
             const isSaving = !!saving[q.id];
 
             const panicEnabledHere = canShowPanic(q, status, selected);
-            const panicWindowText = getPanicWindowText(q.quarter, currentQuarter, status);
+            const panicWindowText = getPanicWindowText(
+              q.quarter,
+              currentQuarter,
+              currentQuarterPanicOpen,
+              status
+            );
 
             if (q.isSponsorQuestion) {
               return (
