@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/admin";
 
+const PANIC_CUTOFF_MINUTE = 28;
+
 type SquiggleGame = {
   squiggleId?: number;
   id?: number;
@@ -39,6 +41,9 @@ type ResolvedGameState = {
   isLocked: boolean;
   status: "scheduled" | "live" | "final";
   currentQuarter: number; // 0 pregame, 1-4 live quarters, 5 final
+  currentQuarterElapsedMs: number;
+  currentQuarterPanicOpen: boolean;
+  panicCutoffMinute: number;
   source: "manual" | "squiggle" | "local";
   debug?: {
     roundNumber: number;
@@ -52,6 +57,12 @@ type ResolvedGameState = {
     squiggleQuarter?: number | null;
     derivedQuarterMode?: "squiggle" | "timer";
   };
+};
+
+type QuarterState = {
+  currentQuarter: number;
+  currentQuarterElapsedMs: number;
+  currentQuarterPanicOpen: boolean;
 };
 
 function roundNumberFromGameId(gameId: string): number {
@@ -139,67 +150,153 @@ function normalizeQuarter(value: unknown): number | null {
 }
 
 /**
- * Beta timer-based quarter model.
- * Good enough to prevent Panic abuse before you wire official live quarter state.
- *
- * Timeline from bounce:
- * - Q1: 0m -> 30m
- * - Q1 break: 30m -> 36m   (still treat as Q1 for Panic closure after quarter boundary)
- * - Q2: 36m -> 66m
- * - Halftime: 66m -> 86m   (treat as Q2)
- * - Q3: 86m -> 116m
- * - Q3 break: 116m -> 122m (treat as Q3)
- * - Q4: 122m -> 152m
- * - Final after 152m
+ * Timer-based beta quarter model used for Panic cutoffs.
+ * This keeps currentQuarter on the quarter that just ended during breaks,
+ * but closes Panic once the cutoff has passed.
  */
-function deriveQuarterFromTimer(startMs: number, nowMs: number): number {
+function deriveQuarterStateFromTimer(startMs: number, nowMs: number): QuarterState {
   const elapsedMs = nowMs - startMs;
-  if (elapsedMs < 0) return 0;
+  if (elapsedMs < 0) {
+    return {
+      currentQuarter: 0,
+      currentQuarterElapsedMs: 0,
+      currentQuarterPanicOpen: false,
+    };
+  }
 
   const minute = 60_000;
+  const panicCutoffMs = PANIC_CUTOFF_MINUTE * minute;
 
-  const q1End = 30 * minute;
-  const q1BreakEnd = 36 * minute;
-  const q2End = 66 * minute;
-  const halftimeEnd = 86 * minute;
-  const q3End = 116 * minute;
-  const q3BreakEnd = 122 * minute;
-  const q4End = 152 * minute;
+  const q1Length = 30 * minute;
+  const q1Break = 6 * minute;
+  const q2Length = 30 * minute;
+  const halftime = 20 * minute;
+  const q3Length = 30 * minute;
+  const q3Break = 6 * minute;
+  const q4Length = 30 * minute;
 
-  if (elapsedMs < q1End) return 1;
-  if (elapsedMs < q1BreakEnd) return 1;
+  const q1Start = 0;
+  const q1End = q1Start + q1Length;
+  const q1BreakEnd = q1End + q1Break;
 
-  if (elapsedMs < q2End) return 2;
-  if (elapsedMs < halftimeEnd) return 2;
+  const q2Start = q1BreakEnd;
+  const q2End = q2Start + q2Length;
+  const halftimeEnd = q2End + halftime;
 
-  if (elapsedMs < q3End) return 3;
-  if (elapsedMs < q3BreakEnd) return 3;
+  const q3Start = halftimeEnd;
+  const q3End = q3Start + q3Length;
+  const q3BreakEnd = q3End + q3Break;
 
-  if (elapsedMs < q4End) return 4;
+  const q4Start = q3BreakEnd;
+  const q4End = q4Start + q4Length;
 
-  return 5;
+  if (elapsedMs < q1End) {
+    return {
+      currentQuarter: 1,
+      currentQuarterElapsedMs: elapsedMs - q1Start,
+      currentQuarterPanicOpen: elapsedMs - q1Start < panicCutoffMs,
+    };
+  }
+
+  if (elapsedMs < q1BreakEnd) {
+    return {
+      currentQuarter: 1,
+      currentQuarterElapsedMs: elapsedMs - q1Start,
+      currentQuarterPanicOpen: false,
+    };
+  }
+
+  if (elapsedMs < q2End) {
+    return {
+      currentQuarter: 2,
+      currentQuarterElapsedMs: elapsedMs - q2Start,
+      currentQuarterPanicOpen: elapsedMs - q2Start < panicCutoffMs,
+    };
+  }
+
+  if (elapsedMs < halftimeEnd) {
+    return {
+      currentQuarter: 2,
+      currentQuarterElapsedMs: elapsedMs - q2Start,
+      currentQuarterPanicOpen: false,
+    };
+  }
+
+  if (elapsedMs < q3End) {
+    return {
+      currentQuarter: 3,
+      currentQuarterElapsedMs: elapsedMs - q3Start,
+      currentQuarterPanicOpen: elapsedMs - q3Start < panicCutoffMs,
+    };
+  }
+
+  if (elapsedMs < q3BreakEnd) {
+    return {
+      currentQuarter: 3,
+      currentQuarterElapsedMs: elapsedMs - q3Start,
+      currentQuarterPanicOpen: false,
+    };
+  }
+
+  if (elapsedMs < q4End) {
+    return {
+      currentQuarter: 4,
+      currentQuarterElapsedMs: elapsedMs - q4Start,
+      currentQuarterPanicOpen: elapsedMs - q4Start < panicCutoffMs,
+    };
+  }
+
+  return {
+    currentQuarter: 5,
+    currentQuarterElapsedMs: 0,
+    currentQuarterPanicOpen: false,
+  };
 }
 
-function deriveCurrentQuarter(
+function deriveCurrentQuarterState(
   matched: SquiggleGame | null,
   localStartMs: number,
   nowMs: number
-): { currentQuarter: number; mode: "squiggle" | "timer" } {
+): { state: QuarterState; mode: "squiggle" | "timer" } {
   const squiggleQuarter = normalizeQuarter(matched?.quarter);
+  const timerState = deriveQuarterStateFromTimer(localStartMs, nowMs);
 
   if (matched?.status === "scheduled") {
-    return { currentQuarter: 0, mode: squiggleQuarter !== null ? "squiggle" : "timer" };
+    return {
+      state: {
+        currentQuarter: 0,
+        currentQuarterElapsedMs: 0,
+        currentQuarterPanicOpen: false,
+      },
+      mode: squiggleQuarter !== null ? "squiggle" : "timer",
+    };
   }
 
   if (matched?.status === "final") {
-    return { currentQuarter: 5, mode: squiggleQuarter !== null ? "squiggle" : "timer" };
+    return {
+      state: {
+        currentQuarter: 5,
+        currentQuarterElapsedMs: 0,
+        currentQuarterPanicOpen: false,
+      },
+      mode: squiggleQuarter !== null ? "squiggle" : "timer",
+    };
   }
 
   if (squiggleQuarter !== null && squiggleQuarter >= 1 && squiggleQuarter <= 4) {
-    return { currentQuarter: squiggleQuarter, mode: "squiggle" };
+    return {
+      state: {
+        currentQuarter: squiggleQuarter,
+        currentQuarterElapsedMs:
+          timerState.currentQuarter === squiggleQuarter ? timerState.currentQuarterElapsedMs : 0,
+        currentQuarterPanicOpen:
+          timerState.currentQuarter === squiggleQuarter ? timerState.currentQuarterPanicOpen : true,
+      },
+      mode: "squiggle",
+    };
   }
 
-  return { currentQuarter: deriveQuarterFromTimer(localStartMs, nowMs), mode: "timer" };
+  return { state: timerState, mode: "timer" };
 }
 
 export async function GET(req: NextRequest) {
@@ -294,7 +391,7 @@ export async function GET(req: NextRequest) {
     const status: "scheduled" | "live" | "final" =
       squiggleStatus ?? (nowMs >= localStartMs ? "live" : "scheduled");
 
-    const { currentQuarter, mode } = deriveCurrentQuarter(matched, localStartMs, nowMs);
+    const { state, mode } = deriveCurrentQuarterState(matched, localStartMs, nowMs);
 
     const resolved: ResolvedGameState = {
       gameId,
@@ -303,7 +400,10 @@ export async function GET(req: NextRequest) {
       countdownMs,
       isLocked,
       status,
-      currentQuarter,
+      currentQuarter: state.currentQuarter,
+      currentQuarterElapsedMs: state.currentQuarterElapsedMs,
+      currentQuarterPanicOpen: state.currentQuarterPanicOpen,
+      panicCutoffMinute: PANIC_CUTOFF_MINUTE,
       source: manualOverride ? "manual" : matched ? "squiggle" : "local",
       debug: {
         roundNumber,
