@@ -257,7 +257,7 @@ const TeamLogo = ({
 type StatChip = { label: string; value: string; sub?: string; tone?: "red" | "cyan" | "white" };
 
 export default function AflHubPage() {
-  const { user } = useAuth();
+  const user = null;
   const router = useRouter();
   const howRef = useRef<HTMLDivElement | null>(null);
 
