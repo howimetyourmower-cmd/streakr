@@ -74,6 +74,69 @@ type ApiComment = {
 const BRAND_BG = "#000000";
 const SEASON = 2026;
 
+const SCREAMR_CARD_STYLE: React.CSSProperties = {
+  background: "rgba(10,10,12,0.92)",
+  boxShadow: "0 26px 90px rgba(0,0,0,0.82), 0 0 0 1px rgba(255,46,77,0.06)",
+};
+
+const SCREAMR_CARD_BORDER_GLOW_STYLE: React.CSSProperties = {
+  borderColor: "rgba(255,46,77,0.45)",
+  boxShadow: "inset 0 0 0 1px rgba(255,46,77,0.18)",
+};
+
+const SCREAMR_CARD_HALO_STYLE: React.CSSProperties = {
+  background: "radial-gradient(680px 280px at 50% 0%, rgba(255,46,77,0.24), rgba(0,0,0,0) 64%)",
+};
+
+const SCREAMR_SPARKS_STYLE: React.CSSProperties = {
+  backgroundImage:
+    "radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px), radial-gradient(circle at 78% 22%, rgba(255,46,77,0.38) 0 2px, transparent 3px), radial-gradient(circle at 55% 62%, rgba(255,255,255,0.22) 0 1px, transparent 2px)",
+  backgroundSize: "220px 220px",
+};
+
+function ScreamrCardEffects() {
+  return (
+    <>
+      <div className="pointer-events-none absolute inset-0 rounded-[28px] border-2 opacity-80" style={SCREAMR_CARD_BORDER_GLOW_STYLE} />
+      <div className="pointer-events-none absolute -inset-[46px]" style={SCREAMR_CARD_HALO_STYLE} />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.22] mix-blend-screen" style={SCREAMR_SPARKS_STYLE} />
+    </>
+  );
+}
+
+function getYesButtonStyle(selected: boolean): React.CSSProperties {
+  return selected
+    ? {
+        border: "1px solid rgba(0,229,255,0.85)",
+        background: "linear-gradient(180deg, rgba(0,229,255,0.98), rgba(0,229,255,0.40))",
+        boxShadow: "0 0 40px rgba(0,229,255,0.26)",
+        color: "rgba(0,0,0,0.92)",
+      }
+    : {
+        border: "1px solid rgba(0,229,255,0.55)",
+        background: "rgba(0,229,255,0.14)",
+        boxShadow: "0 0 28px rgba(0,229,255,0.18)",
+        color: "rgba(255,255,255,0.96)",
+      };
+}
+
+function getNoButtonStyle(selected: boolean): React.CSSProperties {
+  return selected
+    ? {
+        border: "1px solid rgba(255,46,77,0.85)",
+        background: "linear-gradient(180deg, rgba(255,46,77,0.98), rgba(255,46,77,0.35))",
+        boxShadow: "0 0 40px rgba(255,46,77,0.22)",
+        color: "rgba(255,255,255,0.98)",
+      }
+    : {
+        border: "1px solid rgba(255,46,77,0.55)",
+        background: "rgba(255,46,77,0.14)",
+        boxShadow: "0 0 28px rgba(255,46,77,0.16)",
+        color: "rgba(255,255,255,0.96)",
+      };
+}
+
+
 function roundNumberFromGameId(gameId: string): number {
   const s = String(gameId || "").toUpperCase().trim();
   if (s.startsWith("OR-")) return 0;
@@ -823,17 +886,14 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
   const yes = typeof q.yesPercent === "number" ? q.yesPercent : 0;
   const no = typeof q.noPercent === "number" ? q.noPercent : 0;
 
-  const yesBtn = selected === "yes" ? "btn-yes btn-yes--selected" : "btn-yes";
-  const noBtn = selected === "no" ? "btn-no btn-no--selected" : "btn-no";
-
   const isLockedForInteraction = matchIsLocked || status !== "open" || isPersonallyVoided;
 
   return (
-    <div className="screamr-card p-5">
+    <div className="relative overflow-hidden rounded-[28px] border border-white/10 p-5" style={SCREAMR_CARD_STYLE}>
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
-      <div className="screamr-sparks" />
+      <ScreamrCardEffects />
 
       <div className="relative">
         <div className="flex items-start justify-between gap-3">
@@ -917,7 +977,8 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 disabled={isLockedForInteraction || isSaving}
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   isLockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                } ${yesBtn}`}
+                }`}
+                style={getYesButtonStyle(selected === "yes")}
                 onClick={() => onSetPick("yes")}
               >
                 YES
@@ -928,7 +989,8 @@ const PickCard = memo(function PickCard(props: PickCardProps) {
                 disabled={isLockedForInteraction || isSaving}
                 className={`h-16 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                   isLockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
-                } ${noBtn}`}
+                }`}
+                style={getNoButtonStyle(selected === "no")}
                 onClick={() => onSetPick("no")}
               >
                 NO
@@ -980,11 +1042,11 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
   const noSelected = selected === "no";
 
   return (
-    <div className="screamr-card p-5 flex flex-col">
+    <div className="relative flex flex-col overflow-hidden rounded-[28px] border border-white/10 p-5" style={SCREAMR_CARD_STYLE}>
       <div className="pointer-events-none absolute inset-0 opacity-[0.10]">
         <Image src="/afl1.png" alt="" fill className="object-cover object-center" />
       </div>
-      <div className="screamr-sparks" />
+      <ScreamrCardEffects />
 
       <div className="relative flex flex-col flex-1">
         <div className="flex items-start justify-between gap-3">
@@ -1095,7 +1157,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               disabled={lockedForInteraction || isSaving}
               className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                 lockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${yesSelected ? "btn-yes btn-yes--selected" : "btn-yes"}`}
+              }`}
+              style={getYesButtonStyle(yesSelected)}
               onClick={onSetPickYes}
             >
               BLIND YES
@@ -1106,7 +1169,8 @@ const SponsorMysteryCard = memo(function SponsorMysteryCard(props: SponsorCardPr
               disabled={lockedForInteraction || isSaving}
               className={`h-14 rounded-2xl font-black tracking-[0.14em] transition active:scale-[0.99] ${
                 lockedForInteraction || isSaving ? "opacity-50 cursor-not-allowed" : ""
-              } ${noSelected ? "btn-no btn-no--selected" : "btn-no"}`}
+              }`}
+              style={getNoButtonStyle(noSelected)}
               onClick={onSetPickNo}
             >
               BLIND NO
@@ -1152,9 +1216,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const startMsRef = useRef<number | null>(null);
 
   const [tick, setTick] = useState(0);
+  const [clientNowMs, setClientNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    const id = window.setInterval(() => setTick((n) => (n + 1) % 1_000_000), 1000);
+    setClientNowMs(Date.now());
+    const id = window.setInterval(() => {
+      setTick((n) => (n + 1) % 1_000_000);
+      setClientNowMs(Date.now());
+    }, 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -1311,8 +1380,9 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
     if (!stableGame) return null;
     const startMs = safeParseUtcToMs(stableGame.startTime);
     if (!startMs) return null;
-    return Math.max(0, startMs - Date.now());
-  }, [stableGame, tick]);
+    if (clientNowMs === null) return null;
+    return Math.max(0, startMs - clientNowMs);
+  }, [clientNowMs, stableGame]);
 
   const countdownMsToUse = useMemo(() => {
     const v = derivedCountdownMs;
@@ -1613,81 +1683,6 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
         transition: "opacity 120ms ease",
       }}
     >
-      <style>{`
-        .screamr-card{
-          position: relative;
-          border-radius: 28px;
-          overflow: hidden;
-          background: rgba(10,10,12,0.92);
-          border: 1px solid rgba(255,255,255,0.10);
-          box-shadow:
-            0 26px 90px rgba(0,0,0,0.82),
-            0 0 0 1px rgba(255,46,77,0.06);
-        }
-        .screamr-card::before{
-          content:"";
-          position:absolute;
-          inset:0;
-          border-radius: 28px;
-          padding: 2px;
-          background: linear-gradient(180deg, rgba(255,46,77,0.95), rgba(255,46,77,0.10));
-          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-          -webkit-mask-composite: xor;
-          mask-composite: exclude;
-          pointer-events:none;
-          opacity:0.80;
-        }
-        .screamr-card::after{
-          content:"";
-          position:absolute;
-          inset:-46px;
-          background: radial-gradient(680px 280px at 50% 0%, rgba(255,46,77,0.24), rgba(0,0,0,0) 64%);
-          pointer-events:none;
-        }
-
-        .screamr-sparks{
-          position:absolute;
-          inset:0;
-          pointer-events:none;
-          opacity:0.22;
-          mix-blend-mode: screen;
-          background-image:
-            radial-gradient(circle at 12% 78%, rgba(0,229,255,0.35) 0 2px, transparent 3px),
-            radial-gradient(circle at 78% 22%, rgba(255,46,77,0.38) 0 2px, transparent 3px),
-            radial-gradient(circle at 55% 62%, rgba(255,255,255,0.22) 0 1px, transparent 2px);
-          background-size: 220px 220px;
-          animation: sparksMove 6.5s linear infinite;
-        }
-        @keyframes sparksMove{
-          0%{ transform: translate3d(0,0,0); }
-          100%{ transform: translate3d(-220px, -220px, 0); }
-        }
-
-        .btn-yes {
-          border: 1px solid rgba(0,229,255,0.55);
-          background: rgba(0,229,255,0.14);
-          box-shadow: 0 0 28px rgba(0,229,255,0.18);
-          color: rgba(255,255,255,0.96);
-        }
-        .btn-yes--selected {
-          background: linear-gradient(180deg, rgba(0,229,255,0.98), rgba(0,229,255,0.40));
-          border-color: rgba(0,229,255,0.85);
-          box-shadow: 0 0 40px rgba(0,229,255,0.26);
-          color: rgba(0,0,0,0.92);
-        }
-        .btn-no {
-          border: 1px solid rgba(255,46,77,0.55);
-          background: rgba(255,46,77,0.14);
-          box-shadow: 0 0 28px rgba(255,46,77,0.16);
-          color: rgba(255,255,255,0.96);
-        }
-        .btn-no--selected {
-          background: linear-gradient(180deg, rgba(255,46,77,0.98), rgba(255,46,77,0.35));
-          border-color: rgba(255,46,77,0.85);
-          box-shadow: 0 0 40px rgba(255,46,77,0.22);
-          color: rgba(255,255,255,0.98);
-        }
-      `}</style>
 
       <div className="max-w-6xl mx-auto px-4 pt-6">
         <div className="flex items-center justify-between gap-3">
