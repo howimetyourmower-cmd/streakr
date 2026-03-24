@@ -7,7 +7,6 @@ import { useEffect, useMemo, useRef, useState, MouseEvent } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/hooks/useAuth";
 
 type QuestionStatus = "open" | "final" | "pending" | "void";
 
@@ -265,15 +264,21 @@ export default function AflHubPage() {
   const [openQuestions, setOpenQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [nowMs, setNowMs] = useState(0);
 
   const picksHref = "/picks?sport=AFL";
   const encodedReturnTo = encodeURIComponent(picksHref);
 
-  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    setMounted(true);
+    setNowMs(Date.now());
+
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
     return () => window.clearInterval(id);
   }, []);
 
@@ -287,7 +292,6 @@ export default function AflHubPage() {
         if (!res.ok) throw new Error("API error");
 
         const data: PicksApiResponse = await res.json();
-
         const g = Array.isArray(data.games) ? data.games : [];
         setGames(g);
 
@@ -327,7 +331,7 @@ export default function AflHubPage() {
   }, []);
 
   const featuredMatches = useMemo(() => {
-    const now = Date.now();
+    const now = nowMs || 0;
     const sorted = [...games].sort(
       (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
     );
@@ -336,7 +340,7 @@ export default function AflHubPage() {
       (g) => new Date(g.startTime).getTime() >= now - 1000 * 60 * 60
     );
     return (upcoming.length ? upcoming : sorted).slice(0, 3);
-  }, [games]);
+  }, [games, nowMs]);
 
   const nextUp = useMemo(() => {
     const sorted = [...games].sort(
@@ -352,7 +356,6 @@ export default function AflHubPage() {
   }, [nextUp, nowMs]);
 
   const isNextUpLive = nextUpLockMs !== null ? nextUpLockMs <= 0 : false;
-
   const previewQuestions = useMemo(() => openQuestions.slice(0, 6), [openQuestions]);
 
   const goToPicksWithPreviewFocus = (questionId: string, intendedPick: "yes" | "no") => {
@@ -487,6 +490,8 @@ export default function AflHubPage() {
     ];
   }, [games, openQuestions.length, nowMs]);
 
+  if (!mounted) return null;
+
   return (
     <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
       <style>{`
@@ -497,7 +502,6 @@ export default function AflHubPage() {
         }
         @keyframes floaty { 0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)} }
 
-        /* Game-show sparks */
         .screamr-sparks {
           position: absolute;
           inset: 0;
@@ -633,7 +637,6 @@ export default function AflHubPage() {
           100% { transform: translateX(230%) rotate(18deg); opacity: 0.0; }
         }
 
-        /* ✅ Prize ticker marquee */
         .screamr-marquee { overflow: hidden; white-space: nowrap; }
         .screamr-track {
           display: inline-flex;
@@ -651,7 +654,6 @@ export default function AflHubPage() {
         }
       `}</style>
 
-      {/* ======= HERO ======= */}
       <section className="relative overflow-hidden">
         <div className="relative w-full h-[620px] sm:h-[680px]">
           <Image
@@ -662,12 +664,10 @@ export default function AflHubPage() {
             className="object-cover object-center"
           />
 
-          {/* cinematic overlays */}
           <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.42)" }} />
           <div className="absolute inset-0 screamr-spotlights" />
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
-          {/* subtle grain */}
           <div
             className="absolute inset-0 pointer-events-none"
             style={{
@@ -682,7 +682,6 @@ export default function AflHubPage() {
         <div className="absolute inset-0">
           <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 h-full flex items-center">
             <div className="max-w-2xl">
-              {/* marquee */}
               <div
                 className="
                   w-screen
@@ -733,7 +732,6 @@ export default function AflHubPage() {
                 </div>
               </div>
 
-              {/* chips */}
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className="inline-flex items-center gap-2 rounded-full px-3 py-1 border text-[11px] font-black"
@@ -782,12 +780,11 @@ export default function AflHubPage() {
                   PUNISHED.
                 </span>
               </h1>
- 
+
               <p className="mt-4 text-sm sm:text-base text-white/78 max-w-xl leading-relaxed">
                 The only AFL game where perfection wins $1000 - One wrong pick and you're gone!
               </p>
 
-              {/* hero CTAs */}
               <div className="mt-6 flex flex-col sm:flex-row gap-3">
                 <Link
                   href={picksHref}
@@ -812,7 +809,6 @@ export default function AflHubPage() {
                 </button>
               </div>
 
-              {/* stats strip */}
               <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {stats.map((s) => {
                   const tone =
@@ -837,7 +833,6 @@ export default function AflHubPage() {
               </div>
             </div>
 
-            {/* ===== Right Side: GAME SHOW "NEXT UP" BOARD ===== */}
             <div className="hidden lg:flex flex-1 justify-end">
               <div
                 className="rounded-3xl overflow-hidden"
@@ -943,17 +938,14 @@ export default function AflHubPage() {
                 </div>
               </div>
             </div>
-            {/* ===== end Right Side ===== */}
           </div>
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-b from-transparent to-[#0A0A0F]" />
       </section>
 
-      {/* ======= CONTENT ======= */}
       <section className="overflow-x-hidden" style={{ background: "#0A0A0F" }}>
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          {/* HOW IT WORKS */}
           <div ref={howRef} className="mb-10">
             <div className="text-[12px] font-black text-white/75 mb-4">HOW IT WORKS</div>
 
@@ -988,7 +980,6 @@ export default function AflHubPage() {
             </div>
           </div>
 
-          {/* NEXT FEATURED MATCHES — game-show cards */}
           <div className="mb-10">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div className="text-[12px] font-black text-white/75">NEXT FEATURED MATCHES</div>
@@ -1104,7 +1095,6 @@ export default function AflHubPage() {
             )}
           </div>
 
-          {/* PICKS AVAILABLE RIGHT NOW */}
           <div className="mb-2">
             <div className="flex items-end justify-between gap-3 mb-4">
               <div>
@@ -1164,9 +1154,7 @@ export default function AflHubPage() {
                         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                           <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/55 mb-2">
-                              <span
-                                className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]"
-                              >
+                              <span className="screamr-gameLabel inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em]">
                                 <TinyBolt live />
                                 Q{q.quarter}
                               </span>
@@ -1224,7 +1212,6 @@ export default function AflHubPage() {
             ) : null}
           </div>
 
-          {/* FOOTER */}
           <footer className="mt-12 border-t pt-6" style={{ borderColor: COLORS.border }}>
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-[11px] sm:text-xs text-white/45">
               <p>SCREAMR is a free game of skill. No gambling. 18+ only. Prizes subject to terms and conditions.</p>
@@ -1244,7 +1231,6 @@ export default function AflHubPage() {
         </div>
       </section>
 
-      {/* ========= AUTH MODAL ========= */}
       {showAuthModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm rounded-3xl border p-6" style={darkCardStyle}>
