@@ -70,7 +70,9 @@ const MATCH_HQ = {
 
 const HOW_TO_PLAY_PICKS_KEY = "Screamr_seen_how_to_play_picks_v3";
 
-function formatAedt(dateIso: string): string {
+function formatAedt(dateIso: string, mounted: boolean): string {
+  if (!mounted) return "—";
+
   try {
     const d = new Date(dateIso);
     return d.toLocaleString("en-AU", {
@@ -80,10 +82,9 @@ function formatAedt(dateIso: string): string {
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
-      timeZoneName: "short",
     });
   } catch {
-    return dateIso;
+    return "—";
   }
 }
 
@@ -430,8 +431,14 @@ export default function PicksClient() {
   } | null>(null);
 
   const [howOpen, setHowOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(0);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
@@ -531,10 +538,12 @@ export default function PicksClient() {
   }, [stableGames]);
 
   const nextUp = useMemo(() => {
+    if (!mounted) return sortedGames[0] || null;
+
     const upcoming = sortedGames.filter((g) => new Date(g.startTime).getTime() > nowMs);
     if (upcoming.length) return upcoming[0];
     return sortedGames[0] || null;
-  }, [sortedGames, nowMs]);
+  }, [sortedGames, nowMs, mounted]);
 
   const lastNextUpRef = useRef<ApiGame | null>(null);
   const [nextUpStable, setNextUpStable] = useState<ApiGame | null>(null);
@@ -646,7 +655,7 @@ export default function PicksClient() {
 
     const href = `/picks/${g.id}`;
     const label = isNextUpLive ? "GO PICK (LIVE)" : "GO PICK";
-    const lockText = nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${msToCountdown(nextUpLockMs)}`;
+    const lockText = nextUpLockMs === null ? "" : isNextUpLive ? "Locked" : `Locks in ${mounted ? msToCountdown(nextUpLockMs) : "--:--:--"}`;
 
     const chaseText =
       stableLeaderScore === null ? "Leader loading…" : distanceToLeader === 0 ? "Equal lead" : `Need ${distanceToLeader}`;
@@ -925,7 +934,7 @@ export default function PicksClient() {
                           <div className="min-w-0">
                             <div className="text-[13px] font-black text-white truncate">{r.match}</div>
                             <div className="text-[11px] text-white/60 font-semibold truncate">
-                              {formatAedt(r.startTime)} • {r.venue}
+                              {formatAedt(r.startTime, mounted)} • {r.venue}
                             </div>
                           </div>
                           <span className="shrink-0 inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black border" style={{ borderColor: pillState.border, background: pillState.bg, color: COLORS.text }}>
@@ -965,7 +974,7 @@ export default function PicksClient() {
               <div key={r.gameId} className="rounded-2xl border p-3" style={{ borderColor: COLORS.border, background: "rgba(0,0,0,0.18)" }}>
                 <div className="text-[13px] font-black text-white">{r.match}</div>
                 <div className="text-[11px] text-white/60 font-semibold">
-                  {formatAedt(r.startTime)} • {r.venue}
+                  {formatAedt(r.startTime, mounted)} • {r.venue}
                 </div>
                 <div className="mt-2 text-[12px] text-white/80 font-semibold">
                   Picks {r.picks} • ✅ {r.correct} • ❌ {r.wrong} • Streak {r.streakAfter === null ? "—" : r.streakAfter}
@@ -988,7 +997,7 @@ export default function PicksClient() {
 
     const picksCount = (g.questions || []).filter((q) => q.userPick === "yes" || q.userPick === "no").length || 0;
 
-    const isLocked = lockMs <= 0;
+    const isLocked = mounted ? lockMs <= 0 : false;
     const href = `/picks/${g.id}`;
 
     return (
@@ -1024,7 +1033,7 @@ export default function PicksClient() {
                   </span>
 
                   <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
-                    {isLocked ? "LOCKED" : `LOCKS IN ${msToCountdown(lockMs)}`}
+                    {isLocked ? "LOCKED" : `LOCKS IN ${mounted ? msToCountdown(lockMs) : "--:--:--"}`}
                   </span>
                 </div>
 
@@ -1174,7 +1183,7 @@ export default function PicksClient() {
                         </span>
 
                         <span className="screamr-pill inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black">
-                          {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / LOCKED" : `LOCKS IN ${msToCountdown(nextUpLockMs)}`}
+                          {nextUpLockMs === null ? "" : nextUpLockMs <= 0 ? "LIVE / LOCKED" : `LOCKS IN ${mounted ? msToCountdown(nextUpLockMs) : "--:--:--"}`}
                         </span>
                       </div>
 
@@ -1196,7 +1205,7 @@ export default function PicksClient() {
                           {nextUpStable.match}
                         </div>
                         <div className="mt-2 text-[12px] font-semibold" style={{ color: "rgba(255,255,255,0.78)", textShadow: "0 2px 10px rgba(0,0,0,0.60)" }}>
-                          {formatAedt(nextUpStable.startTime)} • {nextUpStable.venue}
+                          {formatAedt(nextUpStable.startTime, mounted)} • {nextUpStable.venue}
                         </div>
                       </div>
 
