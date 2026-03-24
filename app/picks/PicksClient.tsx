@@ -286,21 +286,23 @@ const TeamLogo = React.memo(function TeamLogoInner({
     <div className="relative p-[3px]" style={tile} title={teamName}>
       <div className="absolute inset-0" style={outer} />
       <div className="absolute inset-[4px]" style={inner}>
-        <div className="absolute inset-0 p-2">
-          <Image
-            src={src}
-            alt={`${teamName} logo`}
-            fill
-            sizes={`${size}px`}
-            style={{ objectFit: "contain" }}
-            onError={() => {
-              setIdx((p) => {
-                if (p + 1 < candidates.length) return p + 1;
-                setDead(true);
-                return p;
-              });
-            }}
-          />
+        <div className="absolute inset-[12px]">
+          <div className="relative h-full w-full">
+            <Image
+              src={src}
+              alt={`${teamName} logo`}
+              fill
+              sizes={`${size}px`}
+              style={{ objectFit: "contain" }}
+              onError={() => {
+                setIdx((p) => {
+                  if (p + 1 < candidates.length) return p + 1;
+                  setDead(true);
+                  return p;
+                });
+              }}
+            />
+          </div>
         </div>
       </div>
     </div>
