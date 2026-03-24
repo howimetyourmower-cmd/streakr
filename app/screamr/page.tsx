@@ -507,37 +507,7 @@ export default function ScreamrPreviewPage() {
 
   return (
     <main className="min-h-screen text-white overflow-x-hidden" style={{ backgroundColor: COLORS.bg }}>
-      <style>{`
-        @keyframes screamrPing {
-          0% { transform: scale(1); opacity: .55; }
-          80% { transform: scale(1.7); opacity: 0; }
-          100% { transform: scale(1.7); opacity: 0; }
-        }
-        @keyframes floaty {
-          0% { transform: translateY(0px); }
-          50% { transform: translateY(-6px); }
-          100% { transform: translateY(0px); }
-        }
-
-        /* ✅ Prize ticker marquee */
-        .screamr-marquee {
-          overflow: hidden;
-          white-space: nowrap;
-        }
-        .screamr-track {
-          display: inline-flex;
-          align-items: center;
-          width: max-content;
-          animation: screamrScroll 16s linear infinite;
-        }
-        @keyframes screamrScroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .screamr-track { animation: none; }
-        }
-      `}</style>
+      
 
       {/* ======= HERO ======= */}
       <section className="relative overflow-hidden">
