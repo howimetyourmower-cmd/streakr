@@ -1,4 +1,4 @@
-// /app/screamr/preview/page.tsx
+/ /app/screamr/preview/page.tsx
 import Image from "next/image";
 import Link from "next/link";
 
@@ -767,12 +767,7 @@ export default function ScreamrPreviewPage() {
       </section>
 
       {/* Local animation keyframes (no Tailwind config required) */}
-      <style>{`
-        @keyframes marquee {
-          0% { transform: translateX(0%); }
-          100% { transform: translateX(-50%); }
-        }
-      `}</style>
+      
     </main>
   );
 }
