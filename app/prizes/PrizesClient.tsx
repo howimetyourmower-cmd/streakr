@@ -58,30 +58,7 @@ export default function PrizesClient() {
 
   return (
     <div className="min-h-screen text-white" style={{ background: BRAND_BG }}>
-      <style>{`
-        /* ✅ Full-width marquee used on prizes page */
-        .screamr-marquee {
-          overflow: hidden;
-          white-space: nowrap;
-        }
-        .screamr-track {
-          display: inline-flex;
-          align-items: center;
-          width: max-content;
-          will-change: transform;
-          animation: screamrScroll 80s linear infinite;
-        }
-        @keyframes screamrScroll {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-50%); }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .screamr-track { animation: none; }
-        }
-        @media (max-width: 640px) {
-          .screamr-track { animation-duration: 110s; }
-        }
-      `}</style>
+      
 
       {/* top sponsor strip */}
       <div className="h-10 border-b border-white/10 flex items-center justify-between px-4">
