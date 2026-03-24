@@ -2,11 +2,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebaseClient";
 
-// Shape of what components get when they call useAuth()
 type UseAuthReturn = {
   user: User | null;
   loading: boolean;
@@ -15,11 +14,15 @@ type UseAuthReturn = {
 
 export function useAuth(): UseAuthReturn {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (cancelled) return;
+
       if (!firebaseUser) {
         setUser(null);
         setIsAdmin(false);
@@ -29,22 +32,30 @@ export function useAuth(): UseAuthReturn {
 
       setUser(firebaseUser);
 
-      // 🔥 Admin check: look for a doc in `admins` collection with this UID
       try {
         const adminDocRef = doc(db, "admins", firebaseUser.uid);
         const adminSnap = await getDoc(adminDocRef);
 
-        // If the doc exists -> user is admin
-        setIsAdmin(adminSnap.exists());
-      } catch (err) {
-        console.error("Error checking admin status", err);
-        setIsAdmin(false);
-      }
+        if (!cancelled) {
+          setIsAdmin(adminSnap.exists());
+        }
+      } catch (error) {
+        console.error("Error checking admin status", error);
 
-      setLoading(false);
+        if (!cancelled) {
+          setIsAdmin(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   return { user, loading, isAdmin };
