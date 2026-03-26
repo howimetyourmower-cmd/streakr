@@ -1219,11 +1219,14 @@ export default function MatchPicksClient({ gameId }: { gameId: string }) {
   const [clientNowMs, setClientNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    setClientNowMs(Date.now());
-    const id = window.setInterval(() => {
+    const updateClock = () => {
+      const now = Date.now();
+      setClientNowMs(now);
       setTick((n) => (n + 1) % 1_000_000);
-      setClientNowMs(Date.now());
-    }, 1000);
+    };
+
+    updateClock();
+    const id = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(id);
   }, []);
 
