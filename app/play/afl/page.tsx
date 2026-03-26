@@ -143,6 +143,11 @@ function formatStartLine(iso: string): string {
   return `${weekday}, ${day} ${month} • ${hour}:${minute}${dayPeriod} ${tzName}`.trim();
 }
 
+function getStartLineText(hydrated: boolean, iso: string): string {
+  if (!hydrated) return "—";
+  return formatStartLine(iso) || "—";
+}
+
 function msToCountdown(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const d = Math.floor(total / 86400);
@@ -843,7 +848,7 @@ export default function AflHubPage() {
                                 {nextUp.match}
                               </div>
                               <div className="mt-2 text-[12px] font-semibold text-white/70">
-                                {formatStartLine(nextUp.startTime)} • {nextUp.venue}
+                                {getStartLineText(hydrated, nextUp.startTime)} • {nextUp.venue}
                               </div>
                             </div>
 
@@ -1029,7 +1034,7 @@ export default function AflHubPage() {
                                   {g.venue}
                                 </div>
                                 <div className="mt-1 text-[11px] font-semibold text-white/55">
-                                  {formatStartLine(g.startTime)}
+                                  {getStartLineText(hydrated, g.startTime)}
                                 </div>
                               </div>
 
@@ -1147,7 +1152,7 @@ export default function AflHubPage() {
 
                               <span className="text-white/35">•</span>
                               <span className="font-semibold text-white/70">
-                                {formatStartLine(q.startTime)}
+                                {getStartLineText(hydrated, q.startTime)}
                               </span>
                               <span className="text-white/35">•</span>
                               <span className="text-white/70">{q.venue}</span>
