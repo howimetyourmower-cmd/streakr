@@ -200,7 +200,6 @@ function MarkBg({ opacity = 0.5 }: { opacity?: number }) {
         }}
         priority={false}
       />
-      {/* readability overlay (light, so your photo still shows) */}
       <div
         className="absolute inset-0"
         style={{
@@ -208,7 +207,6 @@ function MarkBg({ opacity = 0.5 }: { opacity?: number }) {
             "linear-gradient(180deg, rgba(0,0,0,0.20) 0%, rgba(0,0,0,0.56) 55%, rgba(0,0,0,0.78) 100%)",
         }}
       />
-      {/* subtle vignette */}
       <div
         className="absolute inset-0"
         style={{
@@ -246,7 +244,7 @@ const TeamLogo = React.memo(function TeamLogoInner({
   const candidates = slug ? logoCandidates(slug) : [];
   const src = slug ? candidates[Math.min(idx, candidates.length - 1)] : "";
 
-  const rOuter = Math.round(size * 0.26); // squircle-ish rounding
+  const rOuter = Math.round(size * 0.26);
   const rInner = Math.max(10, rOuter - 6);
 
   const tile: React.CSSProperties = {
@@ -410,7 +408,6 @@ type GameStatusRow = {
 export default function PicksClient() {
   const { user } = useAuth();
 
-  // ✅ separate first load vs refresh — never blank the page on refresh.
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [err, setErr] = useState("");
@@ -421,7 +418,6 @@ export default function PicksClient() {
   const [leaderScore, setLeaderScore] = useState<number | null>(null);
   const [leaderName, setLeaderName] = useState<string | null>(null);
 
-  // ✅ Stable refs so UI never “loses” blocks during refresh
   const lastGoodRef = useRef<{
     roundNumber: number | null;
     games: ApiGame[];
@@ -432,15 +428,15 @@ export default function PicksClient() {
 
   const [howOpen, setHowOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-
   const [nowMs, setNowMs] = useState(0);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
 
-  useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    const tick = () => setNowMs(Date.now());
+    tick();
+
+    const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -516,13 +512,11 @@ export default function PicksClient() {
     loadPicks("initial");
   }, [loadPicks]);
 
-  // silent refresh (NO visible "REFRESHING..." text anywhere)
   useEffect(() => {
     const id = window.setInterval(() => loadPicks("refresh"), 15000);
     return () => window.clearInterval(id);
   }, [loadPicks]);
 
-  // ✅ always use stable data for rendering
   const stable = lastGoodRef.current;
   const stableGames = stable?.games ?? games;
   const stableRoundNumber = stable?.roundNumber ?? roundNumber;
@@ -1012,10 +1006,7 @@ export default function PicksClient() {
             }}
           >
             <div className="relative p-4 overflow-hidden" style={{ minHeight: 198 }}>
-              {/* ✅ Your image background (VISIBLE) */}
               <MarkBg opacity={0.5} />
-
-              {/* ✅ subtle FX above the photo */}
               <div className="screamr-sparks" style={{ zIndex: 1 }} />
               <div className="absolute inset-0 screamr-spotlights" style={{ zIndex: 1 }} />
 
@@ -1108,9 +1099,6 @@ export default function PicksClient() {
         transition: "opacity 120ms ease",
       }}
     >
-      {/* 🎪 GAME SHOW STYLE */}
-      
-
       <HowToPlayModal open={howOpen} onClose={closeHow} />
       <StickyChaseBar />
 
@@ -1125,8 +1113,6 @@ export default function PicksClient() {
                   {roundLabel}
                 </span>
               ) : null}
-
-              {/* ✅ removed the visible "REFRESHING..." text completely */}
             </div>
 
             <div className="mt-1 text-[13px] text-white/65 font-semibold">Pick any amount. Survive the streak.</div>
@@ -1162,10 +1148,7 @@ export default function PicksClient() {
                   }}
                 >
                   <div className="relative p-5 sm:p-6 overflow-hidden" style={{ minHeight: 175 }}>
-                    {/* ✅ Your image background (VISIBLE) */}
                     <MarkBg opacity={0.5} />
-
-                    {/* ✅ subtle FX above the photo */}
                     <div className="screamr-sparks" style={{ zIndex: 1 }} />
                     <div className="absolute inset-0 screamr-spotlights" style={{ zIndex: 1 }} />
 
